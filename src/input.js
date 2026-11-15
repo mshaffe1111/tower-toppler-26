@@ -137,6 +137,7 @@ export class InputController {
       };
       this._dpadEl.addEventListener('pointerup', onDpadUp);
       this._dpadEl.addEventListener('pointercancel', onDpadUp);
+      this._dpadEl.addEventListener('lostpointercapture', onDpadUp);
     }
 
     const bindAction = (id, action) => {
@@ -157,7 +158,14 @@ export class InputController {
       el.addEventListener('pointerdown', onDown);
       el.addEventListener('pointerup', onUp);
       el.addEventListener('pointercancel', onUp);
+      el.addEventListener('lostpointercapture', onUp);
     };
+
+    const touchBar = document.getElementById('touch-controls');
+    if (touchBar) {
+      touchBar.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+      touchBar.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
 
     bindAction('btn-jump', 'jump');
     bindAction('btn-fire', 'fire');

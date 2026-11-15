@@ -1,4 +1,9 @@
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js';
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { COLS } from './levels.js';
 
 const TWO_PI = Math.PI * 2;
@@ -38,16 +43,23 @@ function createBrickTextures(pal) {
   bumpCanvas.height = size;
   const bCtx = bumpCanvas.getContext('2d');
 
+  const roughCanvas = document.createElement('canvas');
+  roughCanvas.width = size;
+  roughCanvas.height = size;
+  const rCtx = roughCanvas.getContext('2d');
+
   const emCanvas = document.createElement('canvas');
   emCanvas.width = size;
   emCanvas.height = size;
   const eCtx = emCanvas.getContext('2d');
 
-  // Mortar base
+  // Deep recessed mortar
   ctx.fillStyle = pal.mortar;
   ctx.fillRect(0, 0, size, size);
-  bCtx.fillStyle = '#202020';
+  bCtx.fillStyle = '#141414';
   bCtx.fillRect(0, 0, size, size);
+  rCtx.fillStyle = '#e0e0e0';
+  rCtx.fillRect(0, 0, size, size);
   eCtx.fillStyle = '#000000';
   eCtx.fillRect(0, 0, size, size);
 
@@ -59,33 +71,41 @@ function createBrickTextures(pal) {
   for (let r = 0; r < rows; r++) {
     const offset = (r % 2) * (bw * 0.5);
     for (let c = -1; c <= cols; c++) {
-      const x = c * bw + offset + 2;
-      const y = r * bh + 2;
-      const w = bw - 4;
-      const h = bh - 4;
+      const x = c * bw + offset + 2.5;
+      const y = r * bh + 2.5;
+      const w = bw - 5;
+      const h = bh - 5;
 
       const base = (c + r) % 2 === 0 ? pal.brickA : pal.brickB;
       ctx.fillStyle = base;
       ctx.fillRect(x, y, w, h);
 
-      // Bevel highlights & shadows
-      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      // High-contrast bevels & sci-fi panel seam
+      ctx.fillStyle = 'rgba(255,255,255,0.26)';
       ctx.fillRect(x, y, w, 3);
-      ctx.fillRect(x, y, 2, h);
-      ctx.fillStyle = 'rgba(0,0,0,0.32)';
+      ctx.fillRect(x, y, 2.5, h);
+      ctx.fillStyle = 'rgba(0,0,0,0.42)';
       ctx.fillRect(x, y + h - 3, w, 3);
-      ctx.fillRect(x + w - 2, y, 2, h);
+      ctx.fillRect(x + w - 2.5, y, 2.5, h);
 
-      // Bump face
-      bCtx.fillStyle = '#d8d8d8';
+      // Corner rivets
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.fillRect(x + 4, y + 4, 2, 2);
+      ctx.fillRect(x + w - 6, y + 4, 2, 2);
+
+      // Bump & roughness variation
+      bCtx.fillStyle = '#dcdcdc';
       bCtx.fillRect(x, y, w, h);
       bCtx.fillStyle = '#ffffff';
-      bCtx.fillRect(x + 2, y + 2, w - 4, 3);
+      bCtx.fillRect(x + 2, y + 2, w - 4, 4);
 
-      // Subtle sci-fi seam/glow accent on some bricks
+      rCtx.fillStyle = (c + r) % 2 === 0 ? '#888888' : '#686868';
+      rCtx.fillRect(x, y, w, h);
+
+      // Glowing sci-fi runic seam accents
       if ((c + r * 3) % 5 === 0) {
         eCtx.fillStyle = pal.glow;
-        eCtx.fillRect(x + w * 0.2, y + h * 0.45, w * 0.6, 2);
+        eCtx.fillRect(x + w * 0.18, y + h * 0.45, w * 0.64, 2.5);
       }
     }
   }
@@ -99,11 +119,15 @@ function createBrickTextures(pal) {
   bumpMap.wrapS = THREE.RepeatWrapping;
   bumpMap.wrapT = THREE.RepeatWrapping;
 
+  const roughnessMap = new THREE.CanvasTexture(roughCanvas);
+  roughnessMap.wrapS = THREE.RepeatWrapping;
+  roughnessMap.wrapT = THREE.RepeatWrapping;
+
   const emissiveMap = new THREE.CanvasTexture(emCanvas);
   emissiveMap.wrapS = THREE.RepeatWrapping;
   emissiveMap.wrapT = THREE.RepeatWrapping;
 
-  return { map, bumpMap, emissiveMap };
+  return { map, bumpMap, roughnessMap, emissiveMap };
 }
 
 function createConveyorTexture(dir = 1) {
@@ -111,7 +135,7 @@ function createConveyorTexture(dir = 1) {
   canvas.width = 128;
   canvas.height = 64;
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#7e22ce';
+  ctx.fillStyle = '#6b21a8';
   ctx.fillRect(0, 0, 128, 64);
 
   ctx.strokeStyle = '#f5d0fe';
@@ -141,7 +165,7 @@ function createPopupTexture(text, color) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.lineWidth = 7;
-  ctx.strokeStyle = 'rgba(2, 6, 23, 0.92)';
+  ctx.strokeStyle = 'rgba(2, 6, 23, 0.94)';
   ctx.strokeText(text, 128, 32);
   ctx.fillStyle = color || '#fde047';
   ctx.fillText(text, 128, 32);
@@ -162,33 +186,88 @@ export class GameRenderer {
       powerPreference: 'high-performance',
     });
     this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
-    this.webgl.toneMappingExposure = 1.35;
+    this.webgl.toneMappingExposure = 1.25;
     this.webgl.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
+    this._initEnvironment();
     this._initTowerScene();
     this._initSubScene();
+    this._initPostProcessing();
+  }
+
+  _initEnvironment() {
+    this.envTex = null;
+    try {
+      const pmrem = new THREE.PMREMGenerator(this.webgl);
+      const roomEnv = new RoomEnvironment();
+      this.envTex = pmrem.fromScene(roomEnv, 0.04).texture;
+      roomEnv.dispose();
+      pmrem.dispose();
+    } catch {
+      this.envTex = null;
+    }
+  }
+
+  _initPostProcessing() {
+    this.composer = null;
+    this.renderPass = null;
+    this.bloomPass = null;
+    try {
+      this.composer = new EffectComposer(this.webgl);
+      this.renderPass = new RenderPass(this.towerScene, this.towerCam);
+      this.bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(this.width, this.height),
+        0.42,
+        0.35,
+        0.78
+      );
+      const outputPass = new OutputPass();
+      this.composer.addPass(this.renderPass);
+      this.composer.addPass(this.bloomPass);
+      this.composer.addPass(outputPass);
+    } catch {
+      this.composer = null;
+    }
+  }
+
+  _renderWithComposer(scene, camera) {
+    if (this.composer && this.renderPass) {
+      try {
+        this.renderPass.scene = scene;
+        this.renderPass.camera = camera;
+        this.composer.render();
+        return;
+      } catch {
+        this.composer = null;
+      }
+    }
+    this.webgl.render(scene, camera);
   }
 
   _initTowerScene() {
     this.towerScene = new THREE.Scene();
     this.towerScene.background = new THREE.Color('#030816');
     this.towerScene.fog = new THREE.Fog('#071329', 22, 65);
+    if (this.envTex) {
+      this.towerScene.environment = this.envTex;
+      this.towerScene.environmentIntensity = 0.65;
+    }
 
     this.towerCam = new THREE.PerspectiveCamera(46, 360 / 540, 0.1, 140);
 
     // 3-point + hemisphere + front fill + dynamic hero lighting
-    const hemi = new THREE.HemisphereLight('#7dd3fc', '#082f49', 1.25);
+    const hemi = new THREE.HemisphereLight('#7dd3fc', '#082f49', 1.15);
     this.towerScene.add(hemi);
 
-    const keyLight = new THREE.DirectionalLight('#e0f2fe', 1.85);
+    const keyLight = new THREE.DirectionalLight('#e0f2fe', 1.75);
     keyLight.position.set(7, 14, 12);
     this.towerScene.add(keyLight);
 
-    const fillLight = new THREE.DirectionalLight('#ffffff', 0.9);
+    const fillLight = new THREE.DirectionalLight('#ffffff', 0.85);
     fillLight.position.set(0, 4, 12);
     this.towerScene.add(fillLight);
 
-    const rimLight = new THREE.DirectionalLight('#38bdf8', 1.25);
+    const rimLight = new THREE.DirectionalLight('#38bdf8', 1.3);
     rimLight.position.set(-9, 6, -6);
     this.towerScene.add(rimLight);
 
@@ -196,7 +275,7 @@ export class GameRenderer {
     this.towerScene.add(this.heroLight);
 
     // 3D Starfield
-    const starCount = 380;
+    const starCount = 420;
     const starPos = new Float32Array(starCount * 3);
     const starCol = new Float32Array(starCount * 3);
     const c1 = new THREE.Color('#e0f2fe');
@@ -233,13 +312,13 @@ export class GameRenderer {
       new THREE.MeshStandardMaterial({
         color: '#38bdf8',
         emissive: '#0284c7',
-        emissiveIntensity: 0.55,
-        roughness: 0.4,
+        emissiveIntensity: 0.6,
+        roughness: 0.35,
       })
     );
     const ringMesh = new THREE.Mesh(
       new THREE.TorusGeometry(3.4, 0.16, 8, 48),
-      new THREE.MeshBasicMaterial({ color: '#bae6fd', transparent: true, opacity: 0.45 })
+      new THREE.MeshBasicMaterial({ color: '#bae6fd', transparent: true, opacity: 0.5 })
     );
     ringMesh.rotation.x = Math.PI * 0.38;
     ringMesh.rotation.y = 0.3;
@@ -247,8 +326,8 @@ export class GameRenderer {
     this.planetGroup = planetGroup;
     this.towerScene.add(planetGroup);
 
-    // Animated 3D Toxic Ocean Plane
-    const seaGeo = new THREE.PlaneGeometry(46, 26, 36, 18);
+    // Multi-Octave Animated 3D Toxic Ocean Plane + Tower Foam Collar
+    const seaGeo = new THREE.PlaneGeometry(50, 28, 44, 22);
     seaGeo.rotateX(-Math.PI / 2);
     this.seaBaseY = new Float32Array(seaGeo.attributes.position.count);
     for (let i = 0; i < this.seaBaseY.length; i++) {
@@ -259,14 +338,22 @@ export class GameRenderer {
       new THREE.MeshStandardMaterial({
         color: '#0891b2',
         emissive: '#06b6d4',
-        emissiveIntensity: 0.38,
-        roughness: 0.18,
-        metalness: 0.55,
+        emissiveIntensity: 0.42,
+        roughness: 0.14,
+        metalness: 0.65,
         flatShading: true,
       })
     );
     this.seaMesh.position.set(0, -0.55, -2);
     this.towerScene.add(this.seaMesh);
+
+    this.foamRing = new THREE.Mesh(
+      new THREE.TorusGeometry(TOWER_RADIUS + 0.25, 0.12, 10, 48),
+      new THREE.MeshBasicMaterial({ color: '#67e8f9', transparent: true, opacity: 0.75 })
+    );
+    this.foamRing.rotation.x = Math.PI / 2;
+    this.foamRing.position.set(0, -0.46, 0);
+    this.towerScene.add(this.foamRing);
 
     // Tower cache & dynamic pools
     this.towerCache = new Map();
@@ -277,6 +364,10 @@ export class GameRenderer {
     this.pogoGroup = this._buildPogoMesh();
     this.towerScene.add(this.pogoGroup);
 
+    // 3D Landing Target / Shadow Ring projected beneath Pogo
+    this.landingRingGroup = this._buildLandingRing();
+    this.towerScene.add(this.landingRingGroup);
+
     this.enemyPool = [];
     this.snowballPool = [];
     this.particlePool = [];
@@ -285,83 +376,144 @@ export class GameRenderer {
     this.towerScene.add(this.debrisPool.group);
 
     this.sharedParticleGeo = new THREE.BoxGeometry(0.14, 0.14, 0.14);
-    this.sharedSnowballGeo = new THREE.SphereGeometry(0.16, 12, 12);
+    this.sharedSnowballGeo = new THREE.IcosahedronGeometry(0.16, 1);
     this.sharedSnowballMat = new THREE.MeshStandardMaterial({
       color: '#ffffff',
       emissive: '#7dd3fc',
-      emissiveIntensity: 1.4,
+      emissiveIntensity: 1.5,
       roughness: 0.1,
     });
+  }
+
+  _buildLandingRing() {
+    const g = new THREE.Group();
+    const shadow = new THREE.Mesh(
+      new THREE.CircleGeometry(0.26, 20),
+      new THREE.MeshBasicMaterial({ color: '#020617', transparent: true, opacity: 0.55, depthWrite: false })
+    );
+    shadow.rotation.x = -Math.PI / 2;
+
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.28, 0.36, 24),
+      new THREE.MeshBasicMaterial({
+        color: '#38bdf8',
+        transparent: true,
+        opacity: 0.85,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.005;
+
+    g.add(shadow, ring);
+    g.userData = { shadow, ring };
+    return g;
   }
 
   _buildPogoMesh() {
     const g = new THREE.Group();
 
-    // Body
     const bodyMat = new THREE.MeshStandardMaterial({
       color: '#4ade80',
       emissive: '#16a34a',
-      emissiveIntensity: 0.48,
+      emissiveIntensity: 0.42,
       roughness: 0.22,
-      metalness: 0.15,
+      metalness: 0.18,
     });
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.34, 20, 16), bodyMat);
-    body.scale.set(1.05, 0.96, 1.0);
-    body.position.y = 0.42;
+
+    // Sculpted LatheGeometry torso (pear-shaped athletic frog hero)
+    const lathePts = [
+      new THREE.Vector2(0.01, 0.12),
+      new THREE.Vector2(0.24, 0.16),
+      new THREE.Vector2(0.35, 0.34),
+      new THREE.Vector2(0.32, 0.54),
+      new THREE.Vector2(0.23, 0.68),
+      new THREE.Vector2(0.01, 0.72),
+    ];
+    const body = new THREE.Mesh(new THREE.LatheGeometry(lathePts, 20), bodyMat);
     g.add(body);
 
-    // Signature Pogo Ears / Antennae
-    const stalkGeo = new THREE.CylinderGeometry(0.03, 0.04, 0.24, 8);
-    const tipGeo = new THREE.SphereGeometry(0.075, 10, 10);
+    // Sculpted Belly Armor Plate
+    const belly = new THREE.Mesh(
+      new THREE.SphereGeometry(0.23, 16, 12),
+      new THREE.MeshStandardMaterial({ color: '#dcfce7', roughness: 0.3, metalness: 0.1 })
+    );
+    belly.scale.set(0.7, 1.05, 0.92);
+    belly.position.set(0.17, 0.36, 0);
+    g.add(belly);
+
+    // Backpack Cryo-Tank with glowing cyan energy core
+    const tank = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.11, 0.11, 0.32, 12),
+      new THREE.MeshStandardMaterial({ color: '#475569', metalness: 0.8, roughness: 0.2 })
+    );
+    tank.position.set(-0.28, 0.42, 0);
+    const tankCore = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.06, 0.22, 10),
+      new THREE.MeshBasicMaterial({ color: '#38bdf8' })
+    );
+    tankCore.position.set(-0.34, 0.42, 0);
+    g.add(tank, tankCore);
+
+    // Spring Antennae + glowing orbs
+    const stalkGeo = new THREE.CylinderGeometry(0.025, 0.035, 0.24, 8);
     const tipMat = new THREE.MeshStandardMaterial({
       color: '#bef264',
       emissive: '#4ade80',
-      emissiveIntensity: 0.7,
-      roughness: 0.2,
+      emissiveIntensity: 0.9,
+      roughness: 0.15,
     });
     for (const zSide of [-0.14, 0.14]) {
       const stalk = new THREE.Mesh(stalkGeo, bodyMat);
-      stalk.position.set(-0.04, 0.76, zSide);
+      stalk.position.set(-0.04, 0.78, zSide);
       stalk.rotation.x = zSide * 1.4;
-      const tip = new THREE.Mesh(tipGeo, tipMat);
-      tip.position.set(-0.04, 0.89, zSide * 1.3);
+      const tip = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 10), tipMat);
+      tip.position.set(-0.04, 0.91, zSide * 1.3);
       g.add(stalk, tip);
     }
 
-    // Belly
-    const belly = new THREE.Mesh(
-      new THREE.SphereGeometry(0.22, 16, 12),
-      new THREE.MeshStandardMaterial({ color: '#bbf7d0', roughness: 0.4 })
-    );
-    belly.position.set(0.12, 0.36, 0);
-    g.add(belly);
-
-    // Feet
-    const footGeo = new THREE.BoxGeometry(0.18, 0.14, 0.16);
-    const footMat = new THREE.MeshStandardMaterial({ color: '#15803d', roughness: 0.4 });
-    const footL = new THREE.Mesh(footGeo, footMat);
-    footL.position.set(0, 0.07, -0.14);
-    const footR = new THREE.Mesh(footGeo, footMat);
-    footR.position.set(0, 0.07, 0.14);
+    // Articulated Legs & Boots
+    const bootMat = new THREE.MeshStandardMaterial({ color: '#0f766e', metalness: 0.45, roughness: 0.3 });
+    const makeLeg = (zOff) => {
+      const lg = new THREE.Group();
+      lg.position.set(0, 0.16, zOff);
+      const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.12, 8), bodyMat);
+      shin.position.y = -0.05;
+      const boot = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.1, 0.15), bootMat);
+      boot.position.set(0.04, -0.11, 0);
+      lg.add(shin, boot);
+      return lg;
+    };
+    const footL = makeLeg(-0.14);
+    const footR = makeLeg(0.14);
     g.add(footL, footR);
     g.userData.footL = footL;
     g.userData.footR = footR;
 
-    // Expressive 3D Eyes
+    // Detailed 3D Eyes (sclera, iris, pupil, eyelid)
     const eyeGroup = new THREE.Group();
-    eyeGroup.position.set(0.16, 0.62, 0);
-    const scleraGeo = new THREE.SphereGeometry(0.11, 14, 12);
-    const scleraMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.15 });
-    const pupilGeo = new THREE.SphereGeometry(0.055, 10, 10);
+    eyeGroup.position.set(0.18, 0.6, 0);
+    const scleraMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.1 });
+    const irisMat = new THREE.MeshStandardMaterial({ color: '#0ea5e9', emissive: '#0284c7', emissiveIntensity: 0.4 });
     const pupilMat = new THREE.MeshBasicMaterial({ color: '#090d16' });
+    const lidMat = new THREE.MeshStandardMaterial({ color: '#22c55e', roughness: 0.3 });
 
     const makeEye = (zOff) => {
       const eg = new THREE.Group();
       eg.position.z = zOff;
-      const sc = new THREE.Mesh(scleraGeo, scleraMat);
-      const pu = new THREE.Mesh(pupilGeo, pupilMat);
-      pu.position.set(0.075, 0, 0);
-      eg.add(sc, pu);
+      const sc = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 12), scleraMat);
+      const ir = new THREE.Mesh(new THREE.SphereGeometry(0.072, 10, 10), irisMat);
+      ir.position.set(0.058, 0, 0);
+      const pu = new THREE.Mesh(new THREE.SphereGeometry(0.042, 8, 8), pupilMat);
+      pu.position.set(0.088, 0, 0);
+      const lid = new THREE.Mesh(
+        new THREE.SphereGeometry(0.118, 12, 8, 0, TWO_PI, 0, Math.PI * 0.55),
+        lidMat
+      );
+      lid.scale.y = 0.05;
+      eg.add(sc, ir, pu, lid);
+      eg.userData.lid = lid;
       return eg;
     };
     const eyeL = makeEye(-0.11);
@@ -371,29 +523,25 @@ export class GameRenderer {
     g.userData.eyeL = eyeL;
     g.userData.eyeR = eyeR;
 
-    // Snowball Cannon Snout + Blaster Ring + Muzzle Glow
-    const snout = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.095, 0.12, 0.3, 12),
-      new THREE.MeshStandardMaterial({ color: '#94a3b8', metalness: 0.75, roughness: 0.2 })
+    // 2-Tone Cryo-Blaster
+    const barrel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.085, 0.11, 0.32, 12),
+      new THREE.MeshStandardMaterial({ color: '#334155', metalness: 0.85, roughness: 0.2 })
     );
-    snout.rotation.z = -Math.PI / 2;
-    snout.position.set(0.35, 0.42, 0);
-    g.add(snout);
-
-    const blasterRing = new THREE.Mesh(
-      new THREE.TorusGeometry(0.105, 0.024, 8, 16),
-      new THREE.MeshBasicMaterial({ color: '#38bdf8' })
+    barrel.rotation.z = -Math.PI / 2;
+    barrel.position.set(0.35, 0.42, 0);
+    const cryoChamber = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.095, 0.095, 0.12, 12),
+      new THREE.MeshStandardMaterial({ color: '#38bdf8', emissive: '#0ea5e9', emissiveIntensity: 1.2 })
     );
-    blasterRing.rotation.y = Math.PI / 2;
-    blasterRing.position.set(0.45, 0.42, 0);
-    g.add(blasterRing);
-
+    cryoChamber.rotation.z = -Math.PI / 2;
+    cryoChamber.position.set(0.33, 0.42, 0);
     const muzzle = new THREE.Mesh(
-      new THREE.SphereGeometry(0.11, 10, 10),
+      new THREE.SphereGeometry(0.1, 10, 10),
       new THREE.MeshBasicMaterial({ color: '#e0f2fe' })
     );
-    muzzle.position.set(0.51, 0.42, 0);
-    g.add(muzzle);
+    muzzle.position.set(0.53, 0.42, 0);
+    g.add(barrel, cryoChamber, muzzle);
     g.userData.muzzle = muzzle;
 
     return g;
@@ -404,14 +552,14 @@ export class GameRenderer {
     group.visible = false;
     const chunks = [];
     const geo = new THREE.BoxGeometry(0.28, 0.22, 0.24);
-    const mat = new THREE.MeshStandardMaterial({ color: '#60a5fa', roughness: 0.5 });
+    const mat = new THREE.MeshStandardMaterial({ color: '#60a5fa', roughness: 0.45, metalness: 0.2 });
     for (let i = 0; i < 28; i++) {
       const m = new THREE.Mesh(geo, mat);
       m.userData = {
         rx: ((i % 9) - 4) * 0.72,
         rz: ((i % 5) - 2) * 0.65,
         speed: 0.7 + (i % 5) * 0.25,
-        rot: ((i % 2 === 0 ? 1 : -1) * (2.5 + (i % 4))),
+        rot: (i % 2 === 0 ? 1 : -1) * (2.5 + (i % 4)),
       };
       group.add(m);
       chunks.push(m);
@@ -428,233 +576,370 @@ export class GameRenderer {
     const group = new THREE.Group();
     const totalH = tower.floors * FLOOR_HEIGHT;
 
-    // 1. Main 3D Cylindrical Tower Body
+    // 1. Main 3D Cylindrical Tower Body with PBR maps
     const tex = createBrickTextures(pal);
     tex.map.repeat.set(1, tower.floors / 8);
     tex.bumpMap.repeat.set(1, tower.floors / 8);
+    tex.roughnessMap.repeat.set(1, tower.floors / 8);
     tex.emissiveMap.repeat.set(1, tower.floors / 8);
 
-    const cylGeo = new THREE.CylinderGeometry(TOWER_RADIUS, TOWER_RADIUS, totalH, 48, 1, false);
     const cylMat = new THREE.MeshStandardMaterial({
       map: tex.map,
       bumpMap: tex.bumpMap,
-      bumpScale: 0.08,
+      bumpScale: 0.14,
+      roughnessMap: tex.roughnessMap,
       emissive: pal.glow,
       emissiveMap: tex.emissiveMap,
-      emissiveIntensity: 0.65,
+      emissiveIntensity: 0.75,
       roughness: 0.55,
-      metalness: 0.22,
+      metalness: 0.25,
     });
-    const cylMesh = new THREE.Mesh(cylGeo, cylMat);
+    const cylMesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(TOWER_RADIUS, TOWER_RADIUS, totalH, 48, 1, false),
+      cylMat
+    );
     cylMesh.position.y = totalH * 0.5;
     group.add(cylMesh);
 
-    // 2. Battlement / Crown at Top
-    const crown = new THREE.Mesh(
-      new THREE.CylinderGeometry(TOWER_RADIUS + 0.14, TOWER_RADIUS + 0.08, 0.35, 32),
-      new THREE.MeshStandardMaterial({
-        color: pal.ledge,
-        emissive: pal.glow,
-        emissiveIntensity: 0.35,
-        metalness: 0.5,
-        roughness: 0.3,
-      })
-    );
-    crown.position.y = totalH + 0.17;
-    group.add(crown);
-
-    // 3. 4 Glowing Vertical Energy Conduits
-    const conduitGeo = new THREE.CylinderGeometry(0.055, 0.055, totalH, 8);
-    const conduitMat = new THREE.MeshStandardMaterial({
+    // 2. Real 3D Cornice Rings every 2 floors + Glowing Neon Energy Collar Rings
+    const trimMat = new THREE.MeshStandardMaterial({
+      color: pal.brickB,
+      metalness: 0.55,
+      roughness: 0.3,
+    });
+    const collarMat = new THREE.MeshStandardMaterial({
       color: '#ffffff',
       emissive: pal.glow,
-      emissiveIntensity: 1.8,
-      roughness: 0.1,
+      emissiveIntensity: 1.5,
+      roughness: 0.15,
     });
-    for (let k = 0; k < 4; k++) {
-      const phi = k * 4 * COL_ANGLE;
-      const cm = new THREE.Mesh(conduitGeo, conduitMat);
-      cm.position.set(
+    const corniceGeo = new THREE.TorusGeometry(TOWER_RADIUS + 0.04, 0.055, 8, 48);
+    const collarGeo = new THREE.TorusGeometry(TOWER_RADIUS + 0.07, 0.032, 8, 48);
+
+    for (let f = 2; f < tower.floors; f += 2) {
+      const ring = new THREE.Mesh(corniceGeo, trimMat);
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = f * FLOOR_HEIGHT - 0.04;
+      group.add(ring);
+
+      if (f % 6 === 0) {
+        const collar = new THREE.Mesh(collarGeo, collarMat);
+        collar.rotation.x = Math.PI / 2;
+        collar.position.y = f * FLOOR_HEIGHT - 0.04;
+        group.add(collar);
+      }
+    }
+
+    // 3. 8 Vertical 3D Buttress Ribs/Pilasters + 4 Glowing Neon Energy Conduits
+    const ribGeo = new THREE.BoxGeometry(0.16, totalH, 0.14);
+    const conduitGeo = new THREE.CylinderGeometry(0.045, 0.045, totalH, 8);
+    for (let k = 0; k < 8; k++) {
+      const phi = k * 2 * COL_ANGLE;
+      const rib = new THREE.Mesh(ribGeo, trimMat);
+      rib.position.set(
         (TOWER_RADIUS + 0.03) * Math.sin(phi),
         totalH * 0.5,
         (TOWER_RADIUS + 0.03) * Math.cos(phi)
       );
-      group.add(cm);
+      rib.rotation.y = phi;
+      group.add(rib);
+
+      if (k % 2 === 0) {
+        const cm = new THREE.Mesh(conduitGeo, collarMat);
+        cm.position.set(
+          (TOWER_RADIUS + 0.1) * Math.sin(phi),
+          totalH * 0.5,
+          (TOWER_RADIUS + 0.1) * Math.cos(phi)
+        );
+        group.add(cm);
+      }
     }
 
-    // 4. 3D Doors & Portals
+    // 4. Detailed 3D Crenellated Battlements + Beacon Spires at Crown
+    const crownBase = new THREE.Mesh(
+      new THREE.CylinderGeometry(TOWER_RADIUS + 0.18, TOWER_RADIUS + 0.1, 0.34, 32),
+      new THREE.MeshStandardMaterial({
+        color: pal.ledge,
+        emissive: pal.glow,
+        emissiveIntensity: 0.4,
+        metalness: 0.55,
+        roughness: 0.25,
+      })
+    );
+    crownBase.position.y = totalH + 0.16;
+    group.add(crownBase);
+
+    const merlonGeo = new THREE.BoxGeometry(0.45, 0.32, 0.24);
+    for (let m = 0; m < COLS; m += 2) {
+      const phi = m * COL_ANGLE;
+      const merlon = new THREE.Mesh(merlonGeo, trimMat);
+      merlon.position.set(
+        (TOWER_RADIUS + 0.06) * Math.sin(phi),
+        totalH + 0.46,
+        (TOWER_RADIUS + 0.06) * Math.cos(phi)
+      );
+      merlon.rotation.y = phi;
+      group.add(merlon);
+    }
+
+    const spireGeo = new THREE.ConeGeometry(0.11, 0.65, 8);
+    for (let s = 0; s < 4; s++) {
+      const phi = s * 4 * COL_ANGLE;
+      const spire = new THREE.Mesh(spireGeo, collarMat);
+      spire.position.set(
+        (TOWER_RADIUS + 0.08) * Math.sin(phi),
+        totalH + 0.72,
+        (TOWER_RADIUS + 0.08) * Math.cos(phi)
+      );
+      group.add(spire);
+    }
+
+    // 5. Recessed 3D Stone/Tech Archways with Glowing Portal Energy on Doors/Exit
     for (const door of tower.doors) {
       const phi = (door.col + 0.5) * COL_ANGLE;
       const dg = new THREE.Group();
       dg.position.set(
-        (TOWER_RADIUS + 0.02) * Math.sin(phi),
+        (TOWER_RADIUS + 0.03) * Math.sin(phi),
         door.floor * FLOOR_HEIGHT + 0.42,
-        (TOWER_RADIUS + 0.02) * Math.cos(phi)
+        (TOWER_RADIUS + 0.03) * Math.cos(phi)
       );
       dg.rotation.y = phi;
 
+      const pillarGeo = new THREE.BoxGeometry(0.12, 0.78, 0.18);
+      const pillarMat = new THREE.MeshStandardMaterial({ color: '#334155', metalness: 0.6, roughness: 0.3 });
+      const pL = new THREE.Mesh(pillarGeo, pillarMat);
+      pL.position.set(-0.32, -0.02, 0.04);
+      const pR = new THREE.Mesh(pillarGeo, pillarMat);
+      pR.position.set(0.32, -0.02, 0.04);
+
       const inner = new THREE.Mesh(
-        new THREE.BoxGeometry(0.56, 0.82, 0.12),
-        new THREE.MeshBasicMaterial({ color: door.isExit ? '#422006' : '#02040a' })
+        new THREE.BoxGeometry(0.54, 0.8, 0.1),
+        new THREE.MeshBasicMaterial({ color: door.isExit ? '#713f12' : '#020617' })
       );
-      const frame = new THREE.Mesh(
-        new THREE.TorusGeometry(0.36, 0.05, 8, 20, Math.PI),
+      const portalEnergy = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.46, 0.72),
+        new THREE.MeshBasicMaterial({
+          color: door.isExit ? '#fde047' : pal.glow,
+          transparent: true,
+          opacity: door.isExit ? 0.65 : 0.35,
+          side: THREE.DoubleSide,
+        })
+      );
+      portalEnergy.position.z = 0.06;
+
+      const arch = new THREE.Mesh(
+        new THREE.TorusGeometry(0.34, 0.06, 8, 20, Math.PI),
         new THREE.MeshStandardMaterial({
           color: door.isExit ? '#fde047' : pal.glow,
           emissive: door.isExit ? '#f59e0b' : pal.glow,
-          emissiveIntensity: 1.5,
+          emissiveIntensity: 1.8,
         })
       );
-      frame.position.y = 0.1;
-      dg.add(inner, frame);
+      arch.position.set(0, 0.12, 0.05);
+      dg.add(pL, pR, inner, portalEnergy, arch);
       group.add(dg);
     }
 
-    // 5. 3D Elevator Shaft Rails & Lift Pods
+    // 6. 3D Elevator Shaft Dual Rails & Hovering Lift Pods
     const elevatorPods = [];
     for (const el of tower.elevators) {
       const phi = (el.col + 0.5) * COL_ANGLE;
-      const r = TOWER_RADIUS + 0.28;
-      const railH = (el.maxFloor - el.minFloor) * FLOOR_HEIGHT + 0.6;
-      const rail = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.035, 0.035, railH, 8),
-        new THREE.MeshStandardMaterial({ color: '#94a3b8', metalness: 0.7, roughness: 0.25 })
-      );
-      rail.position.set(
-        r * Math.sin(phi),
-        ((el.minFloor + el.maxFloor) * 0.5) * FLOOR_HEIGHT,
-        r * Math.cos(phi)
-      );
-      group.add(rail);
+      const r = TOWER_RADIUS + 0.3;
+      const railH = (el.maxFloor - el.minFloor) * FLOOR_HEIGHT + 0.65;
+      for (const offset of [-0.26, 0.26]) {
+        const rail = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.03, 0.03, railH, 8),
+          new THREE.MeshStandardMaterial({ color: '#94a3b8', metalness: 0.75, roughness: 0.2 })
+        );
+        const tangentX = Math.cos(phi) * offset;
+        const tangentZ = -Math.sin(phi) * offset;
+        rail.position.set(
+          r * Math.sin(phi) + tangentX,
+          (el.minFloor + el.maxFloor) * 0.5 * FLOOR_HEIGHT,
+          r * Math.cos(phi) + tangentZ
+        );
+        group.add(rail);
+      }
 
-      const pod = new THREE.Mesh(
-        new THREE.BoxGeometry(0.88, 0.18, 0.62),
+      const pod = new THREE.Group();
+      const deck = new THREE.Mesh(
+        new THREE.BoxGeometry(0.92, 0.16, 0.66),
         new THREE.MeshStandardMaterial({
           color: '#38bdf8',
           emissive: '#0284c7',
-          emissiveIntensity: 0.8,
-          metalness: 0.5,
+          emissiveIntensity: 0.9,
+          metalness: 0.6,
           roughness: 0.2,
         })
       );
+      const trim = new THREE.Mesh(
+        new THREE.BoxGeometry(0.96, 0.05, 0.7),
+        new THREE.MeshBasicMaterial({ color: '#e0f2fe' })
+      );
+      trim.position.y = 0.08;
+      pod.add(deck, trim);
       pod.position.set(r * Math.sin(phi), el.startFloor * FLOOR_HEIGHT - 0.1, r * Math.cos(phi));
       pod.rotation.y = phi;
       group.add(pod);
       elevatorPods.push(pod);
     }
 
-    // 6. 3D Extruded Two-Tone Ledges & Boxes
+    // 7. 3D Cantilever Ledges (Support Bracket + Beveled Deck + Glowing Top Rail)
     const ledgeWidth = TOWER_RADIUS * COL_ANGLE * 1.12;
-    const ledgeGeo = new THREE.BoxGeometry(ledgeWidth, 0.22, 0.68);
-    const topCapGeo = new THREE.BoxGeometry(ledgeWidth * 1.02, 0.065, 0.72);
-    const boxGeo = new THREE.BoxGeometry(ledgeWidth * 0.88, 0.54, 0.58);
+    const ledgeGeo = new THREE.BoxGeometry(ledgeWidth, 0.18, 0.66);
+    const topRailGeo = new THREE.BoxGeometry(ledgeWidth * 1.03, 0.06, 0.7);
+    const bracketGeo = new THREE.BoxGeometry(ledgeWidth * 0.35, 0.22, 0.42);
+    const boxGeo = new THREE.BoxGeometry(ledgeWidth * 0.86, 0.54, 0.58);
 
     const solidMat = new THREE.MeshStandardMaterial({
       color: pal.ledge,
       emissive: pal.glow,
       emissiveIntensity: 0.28,
-      roughness: 0.32,
-      metalness: 0.35,
+      roughness: 0.3,
+      metalness: 0.45,
     });
     const solidTopMat = new THREE.MeshStandardMaterial({
       color: pal.ledgeTop,
       emissive: pal.ledgeTop,
-      emissiveIntensity: 0.35,
-      roughness: 0.2,
+      emissiveIntensity: 0.55,
+      roughness: 0.15,
+    });
+    const bracketMat = new THREE.MeshStandardMaterial({
+      color: '#334155',
+      metalness: 0.7,
+      roughness: 0.35,
     });
     const iceMat = new THREE.MeshStandardMaterial({
       color: '#7dd3fc',
       emissive: '#0284c7',
-      emissiveIntensity: 0.45,
-      roughness: 0.08,
-      metalness: 0.2,
+      emissiveIntensity: 0.5,
+      roughness: 0.06,
+      metalness: 0.25,
       transparent: true,
-      opacity: 0.88,
+      opacity: 0.85,
     });
     const iceTopMat = new THREE.MeshStandardMaterial({
       color: '#f0f9ff',
       emissive: '#bae6fd',
-      emissiveIntensity: 0.5,
-      roughness: 0.1,
+      emissiveIntensity: 0.65,
+      roughness: 0.08,
     });
     const convMatR = new THREE.MeshStandardMaterial({
       map: this.conveyorTexR,
       emissive: '#a855f7',
-      emissiveIntensity: 0.35,
+      emissiveIntensity: 0.4,
       roughness: 0.35,
     });
     const convMatL = new THREE.MeshStandardMaterial({
       map: this.conveyorTexL,
       emissive: '#a855f7',
-      emissiveIntensity: 0.35,
+      emissiveIntensity: 0.4,
       roughness: 0.35,
     });
     const convTopMat = new THREE.MeshStandardMaterial({
       color: '#f5d0fe',
       emissive: '#d946ef',
-      emissiveIntensity: 0.4,
-      roughness: 0.25,
+      emissiveIntensity: 0.55,
+      roughness: 0.2,
     });
     const crumbleTopMat = new THREE.MeshStandardMaterial({
       color: '#fde047',
       emissive: '#f59e0b',
-      emissiveIntensity: 0.4,
-      roughness: 0.4,
+      emissiveIntensity: 0.6,
+      roughness: 0.35,
     });
+
+    const crystalGeo = new THREE.ConeGeometry(0.08, 0.28, 5);
+    const rollerGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.68, 8);
+    const segGeo = new THREE.BoxGeometry(ledgeWidth * 0.3, 0.18, 0.64);
+    const conveyorRollers = [];
 
     const ledgeMeshes = [];
     for (const l of tower.ledges) {
       const phi = (l.col + 0.5) * COL_ANGLE;
       const r = TOWER_RADIUS + 0.34;
-      let mat = solidMat;
-      let topMat = solidTopMat;
-      let geo = ledgeGeo;
-      let y = l.floor * FLOOR_HEIGHT - 0.11;
+      const y = l.type === 'box' ? l.floor * FLOOR_HEIGHT + 0.27 : l.floor * FLOOR_HEIGHT - 0.11;
 
-      if (l.type === 'ice') {
-        mat = iceMat;
-        topMat = iceTopMat;
-      } else if (l.type === 'conveyorR') {
-        mat = convMatR;
-        topMat = convTopMat;
-      } else if (l.type === 'conveyorL') {
-        mat = convMatL;
-        topMat = convTopMat;
-      } else if (l.type === 'crumble') {
-        topMat = crumbleTopMat;
-        mat = new THREE.MeshStandardMaterial({
-          color: '#f59e0b',
-          emissive: '#b45309',
-          emissiveIntensity: 0.3,
-          roughness: 0.65,
-        });
-      } else if (l.type === 'box') {
-        geo = boxGeo;
-        topMat = null;
-        y = l.floor * FLOOR_HEIGHT + 0.27;
-        mat = new THREE.MeshStandardMaterial({
+      const node = new THREE.Group();
+      node.position.set(r * Math.sin(phi), y, r * Math.cos(phi));
+      node.rotation.y = phi;
+
+      if (l.type === 'box') {
+        const boxMat = new THREE.MeshStandardMaterial({
           color: '#facc15',
           emissive: '#ea580c',
-          emissiveIntensity: 0.55,
-          roughness: 0.3,
-          metalness: 0.4,
+          emissiveIntensity: 0.65,
+          roughness: 0.28,
+          metalness: 0.45,
         });
+        const crate = new THREE.Mesh(boxGeo, boxMat);
+        const core = new THREE.Mesh(
+          new THREE.BoxGeometry(ledgeWidth * 0.5, 0.28, 0.62),
+          new THREE.MeshBasicMaterial({ color: '#fef08a' })
+        );
+        node.add(crate, core);
+        node.userData = { baseY: y, type: l.type, mainMat: boxMat };
+      } else if (l.type === 'crumble') {
+        // 3 fractured stone segments with glowing amber fault core
+        const cMat = new THREE.MeshStandardMaterial({
+          color: '#f59e0b',
+          emissive: '#b45309',
+          emissiveIntensity: 0.4,
+          roughness: 0.6,
+        });
+        for (const sx of [-0.32, 0, 0.32]) {
+          const seg = new THREE.Mesh(segGeo, cMat);
+          seg.position.x = sx * ledgeWidth;
+          node.add(seg);
+        }
+        const cap = new THREE.Mesh(topRailGeo, crumbleTopMat);
+        cap.position.y = 0.09;
+        node.add(cap);
+        node.userData = { baseY: y, type: l.type, mainMat: cMat };
+      } else if (l.type === 'ice') {
+        const slab = new THREE.Mesh(ledgeGeo, iceMat);
+        const cap = new THREE.Mesh(topRailGeo, iceTopMat);
+        cap.position.y = 0.09;
+        node.add(slab, cap);
+        for (const cx of [-0.3, 0.08, 0.34]) {
+          const shard = new THREE.Mesh(crystalGeo, iceTopMat);
+          shard.position.set(cx * ledgeWidth, -0.14, 0.2);
+          shard.rotation.z = Math.PI + cx * 0.4;
+          node.add(shard);
+        }
+        node.userData = { baseY: y, type: l.type };
+      } else if (l.type === 'conveyorR' || l.type === 'conveyorL') {
+        const cMat = l.type === 'conveyorR' ? convMatR : convMatL;
+        const deck = new THREE.Mesh(ledgeGeo, cMat);
+        const cap = new THREE.Mesh(topRailGeo, convTopMat);
+        cap.position.y = 0.09;
+        node.add(deck, cap);
+        const dir = l.type === 'conveyorR' ? 1 : -1;
+        for (const rx of [-0.32, 0, 0.32]) {
+          const rol = new THREE.Mesh(rollerGeo, bracketMat);
+          rol.rotation.x = Math.PI / 2;
+          rol.position.set(rx * ledgeWidth, -0.02, 0.02);
+          node.add(rol);
+          conveyorRollers.push({ mesh: rol, dir });
+        }
+        node.userData = { baseY: y, type: l.type };
+      } else {
+        // Solid cantilever ledge with underside support bracket
+        const deck = new THREE.Mesh(ledgeGeo, solidMat);
+        const cap = new THREE.Mesh(topRailGeo, solidTopMat);
+        cap.position.y = 0.09;
+        const bracket = new THREE.Mesh(bracketGeo, bracketMat);
+        bracket.position.set(0, -0.17, -0.14);
+        bracket.rotation.x = 0.45;
+        node.add(deck, cap, bracket);
+        node.userData = { baseY: y, type: l.type };
       }
 
-      const mesh = new THREE.Mesh(geo, mat);
-      if (topMat) {
-        const cap = new THREE.Mesh(topCapGeo, topMat);
-        cap.position.y = 0.09;
-        mesh.add(cap);
-      }
-      mesh.position.set(r * Math.sin(phi), y, r * Math.cos(phi));
-      mesh.rotation.y = phi;
-      mesh.userData = { baseX: mesh.position.x, baseY: y, type: l.type };
-      group.add(mesh);
-      ledgeMeshes.push(mesh);
+      group.add(node);
+      ledgeMeshes.push(node);
     }
 
-    const cached = { group, ledgeMeshes, elevatorPods, cylMat };
+    const cached = { group, ledgeMeshes, elevatorPods, conveyorRollers, cylMat };
     this.towerCache.set(tower.id, cached);
     return cached;
   }
@@ -663,7 +948,7 @@ export class GameRenderer {
     const g = new THREE.Group();
     if (type === 'molecule') {
       const core = new THREE.Mesh(
-        new THREE.SphereGeometry(0.12, 12, 12),
+        new THREE.IcosahedronGeometry(0.14, 0),
         new THREE.MeshBasicMaterial({ color: '#ffffff' })
       );
       g.add(core);
@@ -675,72 +960,97 @@ export class GameRenderer {
           new THREE.MeshStandardMaterial({
             color: colors[i],
             emissive: colors[i],
-            emissiveIntensity: 0.85,
-            roughness: 0.2,
+            emissiveIntensity: 1.0,
+            roughness: 0.15,
           })
         );
         g.add(a);
         atoms.push(a);
       }
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(0.32, 0.02, 6, 24),
-        new THREE.MeshBasicMaterial({ color: '#67e8f9', transparent: true, opacity: 0.65 })
+      const ring1 = new THREE.Mesh(
+        new THREE.TorusGeometry(0.32, 0.022, 6, 24),
+        new THREE.MeshBasicMaterial({ color: '#67e8f9', transparent: true, opacity: 0.75 })
       );
-      ring.rotation.x = Math.PI * 0.35;
-      g.add(ring);
+      ring1.rotation.x = Math.PI * 0.35;
+      const ring2 = new THREE.Mesh(
+        new THREE.TorusGeometry(0.32, 0.022, 6, 24),
+        new THREE.MeshBasicMaterial({ color: '#f472b6', transparent: true, opacity: 0.7 })
+      );
+      ring2.rotation.y = Math.PI * 0.35;
+      g.add(ring1, ring2);
       g.userData.atoms = atoms;
-      g.userData.ring = ring;
+      g.userData.ring1 = ring1;
+      g.userData.ring2 = ring2;
     } else if (type === 'roller') {
       const ball = new THREE.Mesh(
         new THREE.SphereGeometry(0.26, 16, 14),
         new THREE.MeshStandardMaterial({
           color: '#f97316',
           emissive: '#9a3412',
-          emissiveIntensity: 0.4,
-          metalness: 0.75,
-          roughness: 0.25,
+          emissiveIntensity: 0.45,
+          metalness: 0.8,
+          roughness: 0.2,
         })
       );
       const band = new THREE.Mesh(
-        new THREE.TorusGeometry(0.26, 0.035, 8, 20),
+        new THREE.TorusGeometry(0.26, 0.038, 8, 20),
         new THREE.MeshBasicMaterial({ color: '#fef08a' })
       );
+      const boltGeo = new THREE.SphereGeometry(0.05, 8, 8);
+      const boltMat = new THREE.MeshStandardMaterial({ color: '#cbd5e1', metalness: 0.9, roughness: 0.2 });
+      for (const side of [-0.25, 0.25]) {
+        const b = new THREE.Mesh(boltGeo, boltMat);
+        b.position.z = side;
+        ball.add(b);
+      }
       ball.add(band);
       g.add(ball);
       g.userData.ball = ball;
     } else if (type === 'bouncer') {
+      const spring = new THREE.Mesh(
+        new THREE.TorusGeometry(0.14, 0.035, 8, 16),
+        new THREE.MeshStandardMaterial({ color: '#fde047', metalness: 0.7, roughness: 0.25 })
+      );
+      spring.rotation.x = Math.PI / 2;
+      spring.position.y = -0.2;
       const body = new THREE.Mesh(
         new THREE.SphereGeometry(0.25, 16, 14),
         new THREE.MeshStandardMaterial({
           color: '#ef4444',
           emissive: '#991b1b',
-          emissiveIntensity: 0.45,
-          roughness: 0.25,
+          emissiveIntensity: 0.55,
+          roughness: 0.2,
         })
       );
-      g.add(body);
+      g.add(spring, body);
     } else {
       // 'eye'
-      const sclera = new THREE.Mesh(
-        new THREE.SphereGeometry(0.26, 16, 14),
-        new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.15 })
+      const housing = new THREE.Mesh(
+        new THREE.TorusGeometry(0.25, 0.035, 8, 20),
+        new THREE.MeshStandardMaterial({ color: '#475569', metalness: 0.8, roughness: 0.2 })
       );
-      sclera.scale.set(1.15, 0.85, 0.85);
+      const sclera = new THREE.Mesh(
+        new THREE.SphereGeometry(0.25, 16, 14),
+        new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.12 })
+      );
+      sclera.scale.set(1.12, 0.88, 0.85);
       const iris = new THREE.Mesh(
         new THREE.SphereGeometry(0.13, 12, 12),
         new THREE.MeshStandardMaterial({
           color: '#ec4899',
           emissive: '#db2777',
-          emissiveIntensity: 0.8,
+          emissiveIntensity: 1.0,
         })
       );
-      iris.position.z = 0.16;
+      iris.position.z = 0.15;
       const pupil = new THREE.Mesh(
         new THREE.SphereGeometry(0.06, 8, 8),
         new THREE.MeshBasicMaterial({ color: '#090d16' })
       );
-      pupil.position.z = 0.25;
-      g.add(sclera, iris, pupil);
+      pupil.position.z = 0.24;
+      g.add(housing, sclera, iris, pupil);
+      g.userData.iris = iris;
+      g.userData.pupil = pupil;
     }
     return g;
   }
@@ -748,13 +1058,17 @@ export class GameRenderer {
   _initSubScene() {
     this.subScene = new THREE.Scene();
     this.subScene.background = new THREE.Color('#02182b');
-    this.subScene.fog = new THREE.FogExp2('#03243f', 0.045);
+    this.subScene.fog = new THREE.FogExp2('#03243f', 0.042);
+    if (this.envTex) {
+      this.subScene.environment = this.envTex;
+      this.subScene.environmentIntensity = 0.75;
+    }
 
     this.subCam = new THREE.PerspectiveCamera(46, 360 / 540, 0.1, 80);
     this.subCam.position.set(0, 0, 12);
 
-    this.subScene.add(new THREE.HemisphereLight('#7dd3fc', '#02101e', 1.1));
-    const subKey = new THREE.DirectionalLight('#bae6fd', 1.4);
+    this.subScene.add(new THREE.HemisphereLight('#7dd3fc', '#02101e', 1.25));
+    const subKey = new THREE.DirectionalLight('#bae6fd', 1.6);
     subKey.position.set(4, 10, 8);
     this.subScene.add(subKey);
 
@@ -765,7 +1079,7 @@ export class GameRenderer {
       const mat = new THREE.MeshBasicMaterial({
         color: '#38bdf8',
         transparent: true,
-        opacity: 0.08,
+        opacity: 0.09,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         side: THREE.DoubleSide,
@@ -777,7 +1091,7 @@ export class GameRenderer {
       this.lightShafts.push(m);
     }
 
-    // Seabed
+    // Seabed + Glowing Alien Coral Clusters
     const bedGeo = new THREE.PlaneGeometry(24, 12, 24, 8);
     bedGeo.rotateX(-Math.PI / 2);
     const pos = bedGeo.attributes.position;
@@ -792,53 +1106,94 @@ export class GameRenderer {
     bed.position.set(0, -4.4, -2);
     this.subScene.add(bed);
 
-    // MK.7 Mini-Submarine
+    const coralColors = ['#ec4899', '#22d3ee', '#a855f7', '#fbbf24'];
+    for (let c = 0; c < 10; c++) {
+      const coral = new THREE.Mesh(
+        new THREE.ConeGeometry(0.18 + (c % 3) * 0.08, 0.7 + (c % 4) * 0.25, 6),
+        new THREE.MeshStandardMaterial({
+          color: coralColors[c % coralColors.length],
+          emissive: coralColors[c % coralColors.length],
+          emissiveIntensity: 0.5,
+          roughness: 0.4,
+        })
+      );
+      coral.position.set(-7 + c * 1.55, -4.1, -1.5 - (c % 3) * 0.9);
+      this.subScene.add(coral);
+    }
+
+    // Sculpted LatheGeometry MK.7 Mini-Submarine
     const subG = new THREE.Group();
+    const hullPts = [
+      new THREE.Vector2(0.01, -0.78),
+      new THREE.Vector2(0.24, -0.62),
+      new THREE.Vector2(0.38, -0.2),
+      new THREE.Vector2(0.38, 0.28),
+      new THREE.Vector2(0.24, 0.65),
+      new THREE.Vector2(0.01, 0.78),
+    ];
+    const hullGeo = new THREE.LatheGeometry(hullPts, 20);
+    hullGeo.rotateZ(-Math.PI / 2);
     const hull = new THREE.Mesh(
-      new THREE.SphereGeometry(0.45, 20, 16),
-      new THREE.MeshStandardMaterial({ color: '#e2e8f0', metalness: 0.6, roughness: 0.25 })
+      hullGeo,
+      new THREE.MeshStandardMaterial({ color: '#e2e8f0', metalness: 0.72, roughness: 0.2 })
     );
-    hull.scale.set(1.55, 0.82, 0.82);
+
     const stripe = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.39, 0.39, 0.1, 18),
-      new THREE.MeshStandardMaterial({ color: '#38bdf8', emissive: '#0284c7', emissiveIntensity: 0.9 })
+      new THREE.CylinderGeometry(0.395, 0.395, 0.14, 18),
+      new THREE.MeshStandardMaterial({ color: '#38bdf8', emissive: '#0284c7', emissiveIntensity: 1.1 })
     );
     stripe.rotation.z = Math.PI / 2;
+
     const dome = new THREE.Mesh(
       new THREE.SphereGeometry(0.28, 16, 12, 0, TWO_PI, 0, Math.PI * 0.5),
       new THREE.MeshStandardMaterial({
-        color: '#38bdf8',
+        color: '#7dd3fc',
         transparent: true,
-        opacity: 0.7,
-        roughness: 0.1,
+        opacity: 0.65,
+        roughness: 0.05,
+        metalness: 0.1,
       })
     );
-    dome.position.set(0.18, 0.22, 0);
+    dome.position.set(0.16, 0.26, 0);
+
     const pogoHead = new THREE.Mesh(
       new THREE.SphereGeometry(0.14, 12, 12),
-      new THREE.MeshStandardMaterial({ color: '#4ade80', roughness: 0.3 })
+      new THREE.MeshStandardMaterial({ color: '#4ade80', emissive: '#16a34a', emissiveIntensity: 0.35 })
     );
-    pogoHead.position.set(0.18, 0.28, 0);
-    const prop = new THREE.Mesh(
-      new THREE.BoxGeometry(0.08, 0.45, 0.12),
-      new THREE.MeshStandardMaterial({ color: '#fbbf24', metalness: 0.5, roughness: 0.3 })
-    );
-    prop.position.set(-0.76, 0, 0);
+    pogoHead.position.set(0.16, 0.31, 0);
+
+    // Side hydroplanes & tail fin
+    const finMat = new THREE.MeshStandardMaterial({ color: '#0284c7', metalness: 0.6, roughness: 0.3 });
+    const tailFin = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.42, 0.06), finMat);
+    tailFin.position.set(-0.62, 0.18, 0);
+
+    const propGroup = new THREE.Group();
+    propGroup.position.set(-0.82, 0, 0);
+    const bladeMat = new THREE.MeshStandardMaterial({ color: '#fbbf24', metalness: 0.7, roughness: 0.25 });
+    for (let b = 0; b < 3; b++) {
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.28, 0.09), bladeMat);
+      blade.rotation.x = (b * TWO_PI) / 3;
+      blade.position.y = Math.cos(blade.rotation.x) * 0.12;
+      blade.position.z = Math.sin(blade.rotation.x) * 0.12;
+      propGroup.add(blade);
+    }
+
     const cone = new THREE.Mesh(
-      new THREE.ConeGeometry(0.75, 2.6, 16, 1, true),
+      new THREE.ConeGeometry(0.75, 2.8, 16, 1, true),
       new THREE.MeshBasicMaterial({
         color: '#fde047',
         transparent: true,
-        opacity: 0.16,
+        opacity: 0.18,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         side: THREE.DoubleSide,
       })
     );
     cone.rotation.z = Math.PI / 2;
-    cone.position.set(1.9, 0, 0);
-    subG.add(hull, stripe, dome, pogoHead, prop, cone);
-    subG.userData.prop = prop;
+    cone.position.set(2.05, 0, 0);
+
+    subG.add(hull, stripe, dome, pogoHead, tailFin, propGroup, cone);
+    subG.userData.prop = propGroup;
     this.subGroup = subG;
     this.subScene.add(subG);
 
@@ -861,8 +1216,17 @@ export class GameRenderer {
   resize(w, h, dpr = 1) {
     this.width = w;
     this.height = h;
-    this.webgl.setPixelRatio(Math.min(dpr, 2));
+    const clampedDpr = Math.min(dpr, 2);
+    this.webgl.setPixelRatio(clampedDpr);
     this.webgl.setSize(w, h, false);
+
+    if (this.composer) {
+      this.composer.setPixelRatio(clampedDpr);
+      this.composer.setSize(w, h);
+    }
+    if (this.bloomPass) {
+      this.bloomPass.resolution.set(w, h);
+    }
 
     const aspect = Math.max(0.4, w / Math.max(1, h));
     this.towerCam.aspect = aspect;
@@ -877,8 +1241,8 @@ export class GameRenderer {
     const halfH = Math.tan(THREE.MathUtils.degToRad(cam.fov * 0.5)) * dist;
     const halfW = halfH * cam.aspect;
     return {
-      x: ((x / this.width) - 0.5) * 2 * halfW + cam.position.x,
-      y: (0.5 - (y / this.height)) * 2 * halfH + cam.position.y,
+      x: (x / this.width - 0.5) * 2 * halfW + cam.position.x,
+      y: (0.5 - y / this.height) * 2 * halfH + cam.position.y,
     };
   }
 
@@ -952,9 +1316,12 @@ export class GameRenderer {
       this.debrisPool.group.visible = false;
     }
 
-    // Animate conveyor textures
+    // Animate conveyor textures & physical rollers
     this.conveyorTexR.offset.x = -(time * 1.4) % 1;
     this.conveyorTexL.offset.x = (time * 1.4) % 1;
+    for (const r of cached.conveyorRollers) {
+      r.mesh.rotation.y = time * 6 * r.dir;
+    }
 
     // Update ledges (gone, crumble shake, box pulse)
     for (let i = 0; i < state.ledges.length; i++) {
@@ -964,13 +1331,13 @@ export class GameRenderer {
       mesh.visible = !l.gone;
       if (!mesh.visible) continue;
 
-      if (l.type === 'crumble') {
-        mesh.material.color.set(l.crumbling ? '#ef4444' : '#f59e0b');
-        mesh.material.emissive.set(l.crumbling ? '#dc2626' : '#b45309');
+      if (l.type === 'crumble' && mesh.userData.mainMat) {
+        mesh.userData.mainMat.color.set(l.crumbling ? '#ef4444' : '#f59e0b');
+        mesh.userData.mainMat.emissive.set(l.crumbling ? '#dc2626' : '#b45309');
         mesh.position.y = mesh.userData.baseY + (l.shake ? Math.sin(time * 55) * 0.05 : 0);
-      } else if (l.type === 'box') {
+      } else if (l.type === 'box' && mesh.userData.mainMat) {
         const flash = Math.sin(time * 10) > 0;
-        mesh.material.color.set(flash ? '#facc15' : '#f97316');
+        mesh.userData.mainMat.color.set(flash ? '#facc15' : '#f97316');
       }
     }
 
@@ -981,9 +1348,10 @@ export class GameRenderer {
       if (pod) pod.position.y = el.floor * FLOOR_HEIGHT - 0.1;
     }
 
-    // Update Pogo 3D Hero
+    // Update Pogo 3D Hero + Landing Ring
     const pogoVisible = !player.hidden && !topple.active;
     this.pogoGroup.visible = pogoVisible;
+    this.landingRingGroup.visible = pogoVisible;
     if (pogoVisible) {
       const pTheta = wrapAngle((player.col - camCol) * COL_ANGLE);
       const pr = TOWER_RADIUS + 0.38;
@@ -993,7 +1361,7 @@ export class GameRenderer {
 
       const moving = player.onGround && Math.abs(player.vx) > 0.2;
       const bob = moving ? Math.abs(Math.sin(time * 18)) * 0.08 : 0;
-      const stride = moving ? Math.sin(time * 18) * 0.12 : 0;
+      const stride = moving ? Math.sin(time * 18) * 0.14 : 0;
 
       this.pogoGroup.position.set(px, py + bob, pz);
       this.pogoGroup.rotation.y = pTheta + (player.facing < 0 ? Math.PI : 0);
@@ -1004,14 +1372,24 @@ export class GameRenderer {
       this.pogoGroup.userData.footL.position.x = stride;
       this.pogoGroup.userData.footR.position.x = -stride;
 
-      const blinking = ((time * 0.75) % 4.4) > 4.22;
-      const eyeScaleY = blinking ? 0.1 : 1;
-      this.pogoGroup.userData.eyeL.scale.y = eyeScaleY;
-      this.pogoGroup.userData.eyeR.scale.y = eyeScaleY;
+      const blinking = (time * 0.75) % 4.4 > 4.22;
+      const lidScaleY = blinking ? 1.0 : 0.05;
+      this.pogoGroup.userData.eyeL.userData.lid.scale.y = lidScaleY;
+      this.pogoGroup.userData.eyeR.userData.lid.scale.y = lidScaleY;
 
-      this.pogoGroup.userData.muzzle.scale.setScalar(player.fireCooldown > 0.1 ? 1.5 : 0.75);
+      this.pogoGroup.userData.muzzle.scale.setScalar(player.fireCooldown > 0.1 ? 1.6 : 0.75);
       this.heroLight.position.set(px, py + 0.8, pz + 0.8);
       this.heroLight.color.set(pal.glow);
+
+      // Landing Target / Shadow Ring at player.landingFloor
+      const lf = player.landingFloor != null ? player.landingFloor : -0.55;
+      const dist = Math.max(0, player.floor - lf);
+      this.landingRingGroup.position.set(px, lf * FLOOR_HEIGHT + 0.03, pz);
+      const ringScale = Math.max(0.55, 1.15 - dist * 0.12);
+      this.landingRingGroup.scale.setScalar(ringScale);
+      const overSea = lf <= -0.5;
+      this.landingRingGroup.userData.ring.material.color.set(overSea ? '#f43f5e' : '#38bdf8');
+      this.landingRingGroup.userData.ring.material.opacity = Math.max(0.25, 0.9 - dist * 0.16);
     }
 
     // Update Enemies
@@ -1046,12 +1424,17 @@ export class GameRenderer {
           const ang = rot + (idx * TWO_PI) / 3;
           a.position.set(Math.cos(ang) * 0.2, Math.sin(ang) * 0.2, 0);
         });
-        slot.mesh.userData.ring.rotation.z = time * 2.5;
+        slot.mesh.userData.ring1.rotation.z = time * 2.5;
+        slot.mesh.userData.ring2.rotation.x = -time * 2.1;
       } else if (en.type === 'roller' && slot.mesh.userData.ball) {
-        slot.mesh.userData.ball.rotation.z -= 0.12 * (en.dir || 1);
+        slot.mesh.userData.ball.rotation.z -= 0.14 * (en.dir || 1);
       } else if (en.type === 'bouncer') {
         const hop = Math.sin(time * 9 + (en.phase || 0));
         slot.mesh.scale.set(1 - hop * 0.14, 1 + hop * 0.14, 1 - hop * 0.14);
+      } else if (en.type === 'eye' && slot.mesh.userData.iris) {
+        const lookX = (en.dir || 1) * 0.06;
+        slot.mesh.userData.iris.position.x = lookX;
+        slot.mesh.userData.pupil.position.x = lookX * 1.3;
       }
     }
 
@@ -1072,17 +1455,23 @@ export class GameRenderer {
       const st = wrapAngle((sb.col - camCol) * COL_ANGLE);
       const sr = TOWER_RADIUS + 0.38;
       m.position.set(sr * Math.sin(st), sb.floor * FLOOR_HEIGHT + 0.28, sr * Math.cos(st));
+      m.rotation.set(time * 6, time * 8, 0);
     }
 
-    // Animate 3D Toxic Ocean waves
+    // Multi-octave Animated 3D Toxic Ocean waves + Foam Ring
     const seaPos = this.seaMesh.geometry.attributes.position;
     for (let i = 0; i < seaPos.count; i++) {
       const x = seaPos.getX(i);
       const z = seaPos.getZ(i);
-      seaPos.setY(i, this.seaBaseY[i] + Math.sin(x * 0.65 + time * 3.8) * 0.14 + Math.cos(z * 0.8 + time * 2.9) * 0.08);
+      const wave =
+        Math.sin(x * 0.65 + time * 3.8) * 0.14 +
+        Math.cos(z * 0.8 + time * 2.9) * 0.08 +
+        Math.sin((x + z) * 1.4 - time * 5.2) * 0.04;
+      seaPos.setY(i, this.seaBaseY[i] + wave);
     }
     seaPos.needsUpdate = true;
     this.seaMesh.geometry.computeVertexNormals();
+    this.foamRing.scale.setScalar(1 + Math.sin(time * 4) * 0.025);
 
     // Parallax stars & planet
     this.starPoints.rotation.y = -camCol * COL_ANGLE * 0.15;
@@ -1092,7 +1481,7 @@ export class GameRenderer {
     this._syncParticles(this.particlePool, this.towerScene, particles, this.towerCam, TOWER_RADIUS + 0.6);
     this._syncPopups(state.popups || [], camCol, this.towerScene, this.towerCam, true);
 
-    this.webgl.render(this.towerScene, this.towerCam);
+    this._renderWithComposer(this.towerScene, this.towerCam);
   }
 
   _syncPopups(popups, camCol, scene, cam, isTower) {
@@ -1156,30 +1545,42 @@ export class GameRenderer {
     this.subGroup.rotation.z = Math.sin(time * 4) * 0.04;
     this.subGroup.userData.prop.rotation.x = time * 28;
 
-    // Fish
+    // Articulated 3D Alien Fish
     while (this.subFishPool.length < sub.fish.length) {
       const fg = new THREE.Group();
-      const body = new THREE.Mesh(
-        new THREE.SphereGeometry(0.28, 14, 12),
-        new THREE.MeshStandardMaterial({ color: '#f472b6', emissive: '#db2777', emissiveIntensity: 0.5 })
-      );
-      body.scale.set(1.4, 0.85, 0.65);
+      const bodyMat = new THREE.MeshStandardMaterial({ color: '#f472b6', emissive: '#db2777', emissiveIntensity: 0.55 });
+      const body = new THREE.Mesh(new THREE.SphereGeometry(0.28, 14, 12), bodyMat);
+      body.scale.set(1.45, 0.85, 0.65);
+
+      const dorsal = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.24, 6), bodyMat);
+      dorsal.position.set(0.05, 0.24, 0);
+      dorsal.rotation.z = 0.35;
+
       const tail = new THREE.Mesh(
-        new THREE.ConeGeometry(0.2, 0.35, 8),
-        new THREE.MeshStandardMaterial({ color: '#f472b6', emissive: '#db2777', emissiveIntensity: 0.4 })
+        new THREE.ConeGeometry(0.22, 0.38, 8),
+        new THREE.MeshStandardMaterial({ color: '#f472b6', emissive: '#db2777', emissiveIntensity: 0.45 })
       );
       tail.rotation.z = -Math.PI / 2;
-      tail.position.set(0.42, 0, 0);
+      tail.position.set(0.45, 0, 0);
+
+      const eye = new THREE.Mesh(
+        new THREE.SphereGeometry(0.06, 8, 8),
+        new THREE.MeshBasicMaterial({ color: '#ffffff' })
+      );
+      eye.position.set(-0.22, 0.06, 0.14);
+
       const bubble = new THREE.Mesh(
-        new THREE.SphereGeometry(0.54, 16, 14),
+        new THREE.SphereGeometry(0.55, 16, 14),
         new THREE.MeshStandardMaterial({
           color: '#a5f3fc',
+          emissive: '#38bdf8',
+          emissiveIntensity: 0.3,
           transparent: true,
-          opacity: 0.32,
+          opacity: 0.34,
           roughness: 0.05,
         })
       );
-      fg.add(body, tail, bubble);
+      fg.add(body, dorsal, tail, eye, bubble);
       fg.userData = { body, tail, bubble };
       this.subScene.add(fg);
       this.subFishPool.push(fg);
@@ -1208,9 +1609,9 @@ export class GameRenderer {
         new THREE.MeshStandardMaterial({
           color: '#e0f2fe',
           emissive: '#38bdf8',
-          emissiveIntensity: 0.5,
+          emissiveIntensity: 0.65,
           transparent: true,
-          opacity: 0.65,
+          opacity: 0.7,
         })
       );
       this.subScene.add(b);
@@ -1248,6 +1649,6 @@ export class GameRenderer {
     this._syncParticles(this.subParticlePool, this.subScene, particles, this.subCam, 0.5);
     this._syncPopups(state.popups || [], 0, this.subScene, this.subCam, false);
 
-    this.webgl.render(this.subScene, this.subCam);
+    this._renderWithComposer(this.subScene, this.subCam);
   }
 }

@@ -17,6 +17,22 @@ class SoundEngine {
     this._grooveTimer = null;
     this._grooveStep = 0;
     this._nextNoteTime = 0;
+    this._bindAutoUnlock();
+  }
+
+  _bindAutoUnlock() {
+    if (typeof window === 'undefined') return;
+    const onFirstGesture = () => {
+      this.unlock();
+      if (this.ctx && this.ctx.state === 'running') {
+        window.removeEventListener('pointerdown', onFirstGesture, true);
+        window.removeEventListener('touchstart', onFirstGesture, true);
+        window.removeEventListener('keydown', onFirstGesture, true);
+      }
+    };
+    window.addEventListener('pointerdown', onFirstGesture, { capture: true, passive: true });
+    window.addEventListener('touchstart', onFirstGesture, { capture: true, passive: true });
+    window.addEventListener('keydown', onFirstGesture, { capture: true, passive: true });
   }
 
   unlock() {
@@ -25,7 +41,7 @@ class SoundEngine {
       if (AudioCtx) {
         this.ctx = new AudioCtx();
 
-        // Master limiter for studio headroom & zero clipping
+        // Master limiter + gentle mobile-speaker highshelf de-harshing
         this.limiter = this.ctx.createDynamicsCompressor();
         this.limiter.threshold.value = -12;
         this.limiter.knee.value = 14;
@@ -33,9 +49,15 @@ class SoundEngine {
         this.limiter.attack.value = 0.004;
         this.limiter.release.value = 0.16;
 
+        const speakerTone = this.ctx.createBiquadFilter();
+        speakerTone.type = 'highshelf';
+        speakerTone.frequency.value = 3400;
+        speakerTone.gain.value = -4;
+
         this.masterGain = this.ctx.createGain();
         this.masterGain.gain.value = this.muted ? 0 : 0.92;
-        this.masterGain.connect(this.limiter);
+        this.masterGain.connect(speakerTone);
+        speakerTone.connect(this.limiter);
         this.limiter.connect(this.ctx.destination);
 
         // Pre-allocate shared 1.5s white noise buffer (zero per-hit allocation)
@@ -51,7 +73,7 @@ class SoundEngine {
         this.reverb.buffer = this._createReverbImpulse(0.55, 3.2);
         const reverbFilter = this.ctx.createBiquadFilter();
         reverbFilter.type = 'lowpass';
-        reverbFilter.frequency.value = 3000;
+        reverbFilter.frequency.value = 2200;
         this.reverb.connect(reverbFilter);
         reverbFilter.connect(this.masterGain);
 
@@ -311,22 +333,28 @@ class SoundEngine {
         this._padChord(chords[bar], when, 2.1, 0.026, 680);
       }
 
-      // Soft electronic kick on beats 1 & 3 (steps 0, 4)
+      // Tight electronic kick on beats 1 & 3 (steps 0, 4)
       if (beatStep === 0 || beatStep === 4) {
-        this._tone(108, 42, 0.14, 'sine', 0.1, when, 250, true, false, true);
+        this._tone(115, 44, 0.11, 'sine', 0.11, when, 240, true, false, true);
+      }
+
+      // Crisp, warm electronic snare/rim on beats 2 & 4 (steps 2, 6)
+      if (beatStep === 2 || beatStep === 6) {
+        this._tone(195, 125, 0.05, 'sine', 0.032, when, 500, true, false, true);
+        this._noise(0.045, 0.022, 1900, 1200, 'bandpass', 1.2, when, true, true);
       }
 
       // Soft brushed hi-hat on off-beats (steps 1, 3, 5, 7)
       if (beatStep % 2 === 1) {
-        this._noise(0.032, 0.016, 6800, 5200, 'highpass', 0.8, when, true, true);
+        this._noise(0.026, 0.013, 5000, 3800, 'bandpass', 0.8, when, true, true);
       }
 
-      // Warm sidechained bass on 8th-note groove
+      // Punchy sidechained bass on 8th-note groove
       if (beatStep === 0 || beatStep === 2 || beatStep === 3 || beatStep === 4 || beatStep === 6 || beatStep === 7) {
         const root = barBassRoots[bar];
         const freq = beatStep === 7 ? root * 1.5 : root;
-        const duckTime = (beatStep === 0 || beatStep === 4) ? when + 0.028 : when;
-        this._tone(freq, freq, 0.21, 'triangle', 0.065, duckTime, 340, true, false, true);
+        const duckTime = (beatStep === 0 || beatStep === 4) ? when + 0.026 : when;
+        this._tone(freq, freq, 0.17, 'triangle', 0.07, duckTime, 360, true, false, true);
       }
 
       // Sparse dreamy soft FM bell motif
@@ -384,9 +412,9 @@ class SoundEngine {
   }
 
   snowball() {
-    const f = this._vary(1320, 0.05);
-    this._fmTone(f, 2.0, f * 0.5, 0.09, 0.085, 0);
-    this._noise(0.075, 0.05, 3200, 950, 'bandpass', 1.6);
+    const f = this._vary(1220, 0.05);
+    this._fmTone(f, 2.0, f * 0.42, 0.09, 0.085, 0);
+    this._noise(0.07, 0.045, 2400, 850, 'bandpass', 1.4);
   }
 
   bubble() {

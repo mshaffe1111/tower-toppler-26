@@ -58,6 +58,7 @@ export class TowerTopplerGame {
       coyoteTimer: 0,
       jumpBufferTimer: 0,
       knockbackTimer: 0,
+      landingFloor: 0,
     };
 
     this.camCol = 0;
@@ -146,8 +147,10 @@ export class TowerTopplerGame {
       coyoteTimer: 0,
       jumpBufferTimer: 0,
       knockbackTimer: 0,
+      landingFloor: t.spawn.floor,
     };
 
+    this.player.landingFloor = this._computeLandingFloor(this.player.col, this.player.floor);
     this.camCol = this.player.col;
     this.camFloor = Math.max(2, this.player.floor + 1.5);
     this.cb.onBanner?.(`TOWER ${t.id}`, t.name);
@@ -439,7 +442,7 @@ export class TowerTopplerGame {
       : 0;
 
     // Horizontal movement
-    const moveSpeed = 4.3;
+    const moveSpeed = 4.4;
     let targetVx = 0;
     if (inp.left) {
       targetVx = -moveSpeed;
@@ -490,9 +493,9 @@ export class TowerTopplerGame {
       }
     }
 
-    // Coyote time (0.11s) & Jump buffering (0.12s)
+    // Coyote time (0.12s) & Jump buffering (0.12s)
     if (p.onGround) {
-      p.coyoteTimer = 0.11;
+      p.coyoteTimer = 0.12;
     } else {
       p.coyoteTimer = Math.max(0, p.coyoteTimer - dt);
     }
@@ -505,7 +508,7 @@ export class TowerTopplerGame {
 
     // Jump
     if (p.jumpBufferTimer > 0 && (p.onGround || p.coyoteTimer > 0)) {
-      p.vy = 7.5;
+      p.vy = 7.6;
       p.onGround = false;
       p.onElevator = null;
       p.coyoteTimer = 0;
@@ -513,6 +516,11 @@ export class TowerTopplerGame {
       p.squashX = 0.76;
       p.squashY = 1.28;
       sound.jump();
+    }
+
+    // Variable jump cut for crisp short hops vs full jumps
+    if (!inp.jump && !p.onGround && !p.onElevator && p.vy > 3.2) {
+      p.vy *= Math.pow(0.85, dt * 60);
     }
 
     // Fire Snowball (or recall nearby elevator!)
@@ -543,6 +551,15 @@ export class TowerTopplerGame {
         p.onElevator = null;
         p.onGround = false;
       } else {
+        if (inp.up) {
+          el.recallTarget = null;
+          el.dir = 1;
+          el.floor = Math.min(el.maxFloor, el.floor + el.speed * 0.45 * dt);
+        } else if (inp.down) {
+          el.recallTarget = null;
+          el.dir = -1;
+          el.floor = Math.max(el.minFloor, el.floor - el.speed * 0.45 * dt);
+        }
         p.floor = el.floor;
         p.vy = 0;
         p.onGround = true;
@@ -597,6 +614,34 @@ export class TowerTopplerGame {
               }
               break;
             }
+          }
+        }
+      }
+
+      // Forgiving ledge-edge mantle (snap onto ledge top if within 0.18 floor below while moving toward it)
+      if (!p.onGround && p.vy <= 1.6 && Math.abs(p.vx) > 0.3) {
+        const mantleLedge = this.ledges.find((l) => {
+          if (l.gone || l.type === 'box') return false;
+          const floorGap = l.floor - p.floor;
+          if (floorGap <= 0 || floorGap > 0.18) return false;
+          const dc = colDist(p.col, l.col + 0.5);
+          return Math.abs(dc) < 0.72 && Math.sign(p.vx) === Math.sign(dc);
+        });
+        if (mantleLedge) {
+          p.floor = mantleLedge.floor;
+          p.vy = 0;
+          p.onGround = true;
+          p.squashX = 1.14;
+          p.squashY = 0.88;
+          sound.stepUp();
+          if (mantleLedge.type === 'solid' || mantleLedge.type === 'ice') {
+            p.safeCol = mantleLedge.col + 0.5;
+            p.safeFloor = mantleLedge.floor;
+          }
+          if (mantleLedge.type === 'crumble' && !mantleLedge.crumbling) {
+            mantleLedge.crumbling = true;
+            mantleLedge.shake = true;
+            mantleLedge.crumbleTimer = 0.48;
           }
         }
       }
@@ -730,8 +775,24 @@ export class TowerTopplerGame {
       }
     }
 
+    p.landingFloor = this._computeLandingFloor(p.col, p.floor);
     this._updateCamera(dt);
     this._syncHud();
+  }
+
+  _computeLandingFloor(col, floor) {
+    let best = -0.55;
+    for (const l of this.ledges) {
+      if (!l.gone && l.type !== 'box' && l.floor <= floor + 0.12 && Math.abs(colDist(col, l.col + 0.5)) < 0.66) {
+        if (l.floor > best) best = l.floor;
+      }
+    }
+    for (const el of this.elevators) {
+      if (el.floor <= floor + 0.15 && Math.abs(colDist(col, el.col + 0.5)) < 0.64) {
+        if (el.floor > best) best = el.floor;
+      }
+    }
+    return best;
   }
 
   _findLedgeAt(col, floor) {
@@ -784,6 +845,7 @@ export class TowerTopplerGame {
     this.player.coyoteTimer = 0;
     this.player.jumpBufferTimer = 0;
     this.player.knockbackTimer = 0;
+    this.player.landingFloor = this._computeLandingFloor(this.player.col, this.player.floor);
     this._syncHud();
   }
 
