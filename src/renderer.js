@@ -58,8 +58,8 @@ function createBrickTextures(pal) {
   eCtx.fillStyle = '#000000';
   eCtx.fillRect(0, 0, size, size);
 
-  const cols = COLS;
-  const rows = 8;
+  const cols = 32;
+  const rows = 16;
   const bw = size / cols;
   const bh = size / rows;
 
@@ -284,23 +284,23 @@ export class GameRenderer {
     this.seaMesh = new THREE.Mesh(
       seaGeo,
       new THREE.MeshStandardMaterial({
-        color: '#0891b2',
-        emissive: '#06b6d4',
-        emissiveIntensity: 0.42,
-        roughness: 0.14,
-        metalness: 0.65,
+        color: '#0369a1',
+        emissive: '#0284c7',
+        emissiveIntensity: 0.08,
+        roughness: 0.25,
+        metalness: 0.5,
         flatShading: true,
       })
     );
-    this.seaMesh.position.set(0, -0.55, -2);
+    this.seaMesh.position.set(0, -0.68, -2);
     this.towerScene.add(this.seaMesh);
 
     this.foamRing = new THREE.Mesh(
-      new THREE.TorusGeometry(TOWER_RADIUS + 0.25, 0.12, 10, 48),
-      new THREE.MeshBasicMaterial({ color: '#67e8f9', transparent: true, opacity: 0.75 })
+      new THREE.TorusGeometry(TOWER_RADIUS + 0.22, 0.08, 10, 48),
+      new THREE.MeshBasicMaterial({ color: '#38bdf8', transparent: true, opacity: 0.45 })
     );
     this.foamRing.rotation.x = Math.PI / 2;
-    this.foamRing.position.set(0, -0.46, 0);
+    this.foamRing.position.set(0, -0.56, 0);
     this.towerScene.add(this.foamRing);
 
     // Tower cache & dynamic pools
@@ -564,21 +564,21 @@ export class GameRenderer {
 
     // 1. Main 3D Cylindrical Tower Body with PBR maps
     const tex = createBrickTextures(pal);
-    tex.map.repeat.set(1, tower.floors / 8);
-    tex.bumpMap.repeat.set(1, tower.floors / 8);
-    tex.roughnessMap.repeat.set(1, tower.floors / 8);
-    tex.emissiveMap.repeat.set(1, tower.floors / 8);
+    tex.map.repeat.set(1, tower.floors / 4);
+    tex.bumpMap.repeat.set(1, tower.floors / 4);
+    tex.roughnessMap.repeat.set(1, tower.floors / 4);
+    tex.emissiveMap.repeat.set(1, tower.floors / 4);
 
     const cylMat = new THREE.MeshStandardMaterial({
       map: tex.map,
       bumpMap: tex.bumpMap,
-      bumpScale: 0.14,
+      bumpScale: 0.12,
       roughnessMap: tex.roughnessMap,
       emissive: pal.glow,
       emissiveMap: tex.emissiveMap,
-      emissiveIntensity: 0.22,
-      roughness: 0.62,
-      metalness: 0.2,
+      emissiveIntensity: 0.12,
+      roughness: 0.68,
+      metalness: 0.18,
     });
     const cylMesh = new THREE.Mesh(
       new THREE.CylinderGeometry(TOWER_RADIUS, TOWER_RADIUS, totalH, 48, 1, false),
@@ -587,58 +587,39 @@ export class GameRenderer {
     cylMesh.position.y = totalH * 0.5;
     group.add(cylMesh);
 
-    // 2. Real 3D Cornice Rings every 2 floors + Glowing Neon Energy Collar Rings
+    // 2. Real 3D Cornice Rings every 2 floors
     const trimMat = new THREE.MeshStandardMaterial({
       color: pal.brickB,
-      metalness: 0.45,
-      roughness: 0.38,
+      metalness: 0.35,
+      roughness: 0.48,
     });
     const collarMat = new THREE.MeshStandardMaterial({
       color: pal.ledge,
       emissive: pal.glow,
-      emissiveIntensity: 0.55,
-      roughness: 0.25,
+      emissiveIntensity: 0.25,
+      roughness: 0.35,
     });
-    const corniceGeo = new THREE.TorusGeometry(TOWER_RADIUS + 0.04, 0.055, 8, 48);
-    const collarGeo = new THREE.TorusGeometry(TOWER_RADIUS + 0.07, 0.032, 8, 48);
+    const corniceGeo = new THREE.TorusGeometry(TOWER_RADIUS + 0.035, 0.045, 8, 48);
 
     for (let f = 2; f < tower.floors; f += 2) {
       const ring = new THREE.Mesh(corniceGeo, trimMat);
       ring.rotation.x = Math.PI / 2;
       ring.position.y = f * FLOOR_HEIGHT - 0.04;
       group.add(ring);
-
-      if (f % 6 === 0) {
-        const collar = new THREE.Mesh(collarGeo, collarMat);
-        collar.rotation.x = Math.PI / 2;
-        collar.position.y = f * FLOOR_HEIGHT - 0.04;
-        group.add(collar);
-      }
     }
 
-    // 3. 8 Vertical 3D Buttress Ribs/Pilasters + 4 Glowing Neon Energy Conduits
-    const ribGeo = new THREE.BoxGeometry(0.16, totalH, 0.14);
-    const conduitGeo = new THREE.CylinderGeometry(0.045, 0.045, totalH, 8);
+    // 3. Subtle Vertical Pilaster Ribs (no blinding vertical neon bars)
+    const ribGeo = new THREE.BoxGeometry(0.12, totalH, 0.08);
     for (let k = 0; k < 8; k++) {
-      const phi = k * 2 * COL_ANGLE;
+      const phi = (k * 2 + 0.5) * COL_ANGLE;
       const rib = new THREE.Mesh(ribGeo, trimMat);
       rib.position.set(
-        (TOWER_RADIUS + 0.03) * Math.sin(phi),
+        (TOWER_RADIUS + 0.02) * Math.sin(phi),
         totalH * 0.5,
-        (TOWER_RADIUS + 0.03) * Math.cos(phi)
+        (TOWER_RADIUS + 0.02) * Math.cos(phi)
       );
       rib.rotation.y = phi;
       group.add(rib);
-
-      if (k % 2 === 0) {
-        const cm = new THREE.Mesh(conduitGeo, collarMat);
-        cm.position.set(
-          (TOWER_RADIUS + 0.1) * Math.sin(phi),
-          totalH * 0.5,
-          (TOWER_RADIUS + 0.1) * Math.cos(phi)
-        );
-        group.add(cm);
-      }
     }
 
     // 4. Detailed 3D Crenellated Battlements + Beacon Spires at Crown
@@ -1322,12 +1303,12 @@ export class GameRenderer {
     const { tower, player, camCol, camFloor, time, particles, snowballs, topple } = state;
     const pal = tower.palette;
     const aspect = this.towerCam.aspect;
-    const camZ = aspect < 0.78 ? Math.min(11.2, 9.0 * (0.78 / Math.max(0.45, aspect))) : 9.0;
-    const camY = camFloor * FLOOR_HEIGHT + 0.65;
+    const camZ = aspect < 0.78 ? Math.min(12.4, 10.2 * (0.78 / Math.max(0.45, aspect))) : 10.2;
+    const camY = (player.floor * 0.4 + camFloor * 0.6) * FLOOR_HEIGHT + 0.15;
     const shake = getShakeOffset(state.shake, time);
 
     this.towerCam.position.set(shake.x, camY + shake.y, camZ);
-    this.towerCam.lookAt(shake.x, camY - 0.35 + shake.y, 0);
+    this.towerCam.lookAt(shake.x, camY - 0.25 + shake.y, 0);
 
     // Dynamic Per-Tower Biome Sky, Fog, Planet & Ocean Tinting
     this._tempColor.set(pal.mortar);
@@ -1447,7 +1428,9 @@ export class GameRenderer {
       const stride = moving ? Math.sin(time * 18) * 0.14 : 0;
 
       this.pogoGroup.position.set(px, py + bob, pz);
-      this.pogoGroup.rotation.y = pTheta + (player.facing < 0 ? Math.PI : 0);
+      // Angle Pogo 3/4 toward the camera (+Z) so both big eyes, belly & blaster are clearly visible!
+      const faceYaw = player.facing < 0 ? Math.PI - 0.42 : 0.42;
+      this.pogoGroup.rotation.y = pTheta + faceYaw;
       const sx = player.squashX || 1;
       const sy = player.squashY || 1;
       this.pogoGroup.scale.set(sx, sy, sx);

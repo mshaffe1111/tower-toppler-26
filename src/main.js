@@ -1,7 +1,7 @@
-import { sound } from './audio.js';
-import { InputController } from './input.js';
-import { GameRenderer } from './renderer.js';
-import { TowerTopplerGame } from './game.js';
+import { sound } from './audio.js?v=6';
+import { InputController } from './input.js?v=6';
+import { GameRenderer } from './renderer.js?v=6';
+import { TowerTopplerGame } from './game.js?v=6';
 
 const canvas = document.getElementById('game-canvas');
 const stageWrap = document.getElementById('stage-wrap');
