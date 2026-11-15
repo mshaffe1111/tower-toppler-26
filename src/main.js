@@ -1,0 +1,163 @@
+import { sound } from './audio.js';
+import { InputController } from './input.js';
+import { GameRenderer } from './renderer.js';
+import { TowerTopplerGame } from './game.js';
+
+const canvas = document.getElementById('game-canvas');
+const stageWrap = document.getElementById('stage-wrap');
+
+const scoreEl = document.getElementById('score-display');
+const hiScoreEl = document.getElementById('hi-score-display');
+const livesEl = document.getElementById('lives-display');
+const timerEl = document.getElementById('timer-display');
+const dirArrowEl = document.getElementById('dir-arrow');
+const towerBadgeEl = document.getElementById('tower-badge');
+
+const bannerEl = document.getElementById('stage-banner');
+const bannerSubEl = document.getElementById('banner-sub');
+const bannerTitleEl = document.getElementById('banner-title');
+
+const overlayTitle = document.getElementById('overlay-title');
+const overlayPause = document.getElementById('overlay-pause');
+const overlayGameOver = document.getElementById('overlay-gameover');
+const pauseTowerName = document.getElementById('pause-tower-name');
+
+const goBadge = document.getElementById('go-badge');
+const goTitle = document.getElementById('go-title');
+const goScore = document.getElementById('go-score');
+const goHi = document.getElementById('go-hi');
+
+const btnStart = document.getElementById('btn-start');
+const startTowerSelect = document.getElementById('start-tower');
+const btnResume = document.getElementById('btn-resume');
+const btnRestart = document.getElementById('btn-restart');
+const btnPlayAgain = document.getElementById('btn-play-again');
+const btnSound = document.getElementById('btn-sound');
+const btnPause = document.getElementById('btn-pause');
+
+const input = new InputController();
+const renderer = new GameRenderer(canvas);
+
+let bannerTimeout = null;
+function showBanner(sub, title) {
+  bannerSubEl.textContent = sub;
+  bannerTitleEl.textContent = title;
+  bannerEl.classList.remove('hidden');
+  clearTimeout(bannerTimeout);
+  bannerTimeout = setTimeout(() => {
+    bannerEl.classList.add('hidden');
+  }, 2200);
+}
+
+function formatScore(n) {
+  return String(Math.max(0, Math.floor(n))).padStart(8, '0');
+}
+
+function formatTimer(sec) {
+  const s = Math.max(0, sec);
+  const whole = Math.floor(s);
+  const tenths = Math.floor((s - whole) * 10);
+  return `${String(whole).padStart(3, '0')}:${tenths}`;
+}
+
+const game = new TowerTopplerGame(renderer, input, {
+  onHud(hud) {
+    scoreEl.textContent = formatScore(hud.score);
+    hiScoreEl.textContent = formatScore(hud.hiScore);
+    timerEl.textContent = formatTimer(hud.timer);
+    timerEl.classList.toggle('urgent', hud.timer <= 15 && hud.mode === 'tower');
+    towerBadgeEl.textContent = hud.mode === 'submarine' ? 'SUB' : `T${hud.towerId}`;
+    dirArrowEl.textContent = hud.dirHint;
+
+    // Render life pips
+    if (livesEl.childElementCount !== hud.lives) {
+      livesEl.innerHTML = '';
+      for (let i = 0; i < hud.lives; i++) {
+        const pip = document.createElement('span');
+        pip.className = 'life-pip';
+        livesEl.appendChild(pip);
+      }
+    }
+  },
+  onBanner: showBanner,
+  onGameOver(victory, score, hiScore) {
+    goBadge.textContent = victory ? 'PLANET NEBULUS SAVED!' : 'MISSION ENDED';
+    goTitle.textContent = victory ? 'ALL TOWERS TOPPLED!' : 'GAME OVER';
+    goScore.textContent = score.toLocaleString();
+    goHi.textContent = hiScore.toLocaleString();
+    overlayGameOver.classList.remove('hidden');
+  },
+});
+
+// Load Tower 1 behind title screen for live background preview
+game.loadTower(0);
+
+function handleResize() {
+  const rect = stageWrap.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  renderer.resize(rect.width, rect.height, dpr);
+}
+window.addEventListener('resize', handleResize);
+handleResize();
+
+// Buttons
+btnStart.addEventListener('click', () => {
+  sound.unlock();
+  overlayTitle.classList.add('hidden');
+  const idx = Number(startTowerSelect.value) || 0;
+  game.startNewGame(idx);
+});
+
+btnSound.addEventListener('click', () => {
+  sound.unlock();
+  const muted = sound.toggleMute();
+  btnSound.textContent = muted ? '🔇' : '🔊';
+});
+
+btnPause.addEventListener('click', () => {
+  if (game.mode === 'title' || game.mode === 'gameover' || game.mode === 'victory') return;
+  const paused = game.togglePause();
+  if (paused) {
+    pauseTowerName.textContent = `Tower ${game.tower.id}: ${game.tower.name}`;
+    overlayPause.classList.remove('hidden');
+  } else {
+    overlayPause.classList.add('hidden');
+  }
+});
+
+btnResume.addEventListener('click', () => {
+  overlayPause.classList.add('hidden');
+  game.togglePause();
+});
+
+btnRestart.addEventListener('click', () => {
+  overlayPause.classList.add('hidden');
+  overlayTitle.classList.remove('hidden');
+  game.mode = 'title';
+  game.loadTower(0);
+});
+
+btnPlayAgain.addEventListener('click', () => {
+  overlayGameOver.classList.add('hidden');
+  const idx = Number(startTowerSelect.value) || 0;
+  game.startNewGame(idx);
+});
+
+// Main 60fps loop
+let lastTs = performance.now();
+function loop(ts) {
+  const dt = (ts - lastTs) / 1000;
+  lastTs = ts;
+
+  if (game.mode === 'title') {
+    // Gently rotate preview tower on title screen
+    game.time += Math.min(0.05, dt);
+    game.camCol = (game.camCol + dt * 0.6) % 16;
+  } else {
+    game.update(dt);
+  }
+
+  game.render();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);

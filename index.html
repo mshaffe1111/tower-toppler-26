@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#050814" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Tower Toppler '26 — Atari 7800 Reimagined</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Top Atari 7800 Inspired HUD -->
+    <header id="hud" aria-label="Game Status">
+      <div class="hud-left">
+        <div class="hud-label">PLAYER ONE</div>
+        <div id="score-display" class="hud-score">00000000</div>
+        <div id="lives-display" class="hud-lives" aria-label="Lives"></div>
+      </div>
+
+      <div class="hud-center">
+        <div class="hud-tower-row">
+          <span id="dir-arrow" class="dir-arrow" title="Exit direction">▲</span>
+          <span id="tower-badge" class="tower-badge">T1</span>
+        </div>
+        <div id="timer-display" class="hud-timer">090:0</div>
+      </div>
+
+      <div class="hud-right">
+        <div class="hud-label">HIGH SCORE</div>
+        <div id="hi-score-display" class="hud-score">00000000</div>
+        <div class="hud-actions">
+          <button id="btn-sound" class="hud-icon-btn" type="button" aria-label="Toggle Sound">🔊</button>
+          <button id="btn-pause" class="hud-icon-btn" type="button" aria-label="Pause Game">⏸</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main 60fps Cylindrical Tower / Submarine Canvas -->
+    <main id="stage-wrap">
+      <canvas id="game-canvas"></canvas>
+
+      <!-- Floating Toast for Tower Name / Bonus -->
+      <div id="stage-banner" class="stage-banner hidden">
+        <div id="banner-sub" class="banner-sub">TOWER 1</div>
+        <div id="banner-title" class="banner-title">THE TOWER OF EYES</div>
+      </div>
+
+      <!-- Title / Start Overlay -->
+      <div id="overlay-title" class="overlay">
+        <div class="modal-card">
+          <div class="retro-pill">ATARI 7800 CLASSIC • 2026 EDITION</div>
+          <h1 class="game-title">
+            <span class="title-top">TOWER</span>
+            <span class="title-bot">TOPPLER <span class="title-yr">'26</span></span>
+          </h1>
+          <p class="game-tagline">
+            Scale 8 rotating 3D towers on planet Nebulus, dodge mutant molecules, fire your snowball gun, and pilot the MK.7 Mini-Submarine!
+          </p>
+
+          <div class="controls-preview">
+            <div class="ctrl-item"><span>🕹️</span> D-Pad: Walk / Doors / Lifts</div>
+            <div class="ctrl-item"><span>⬆️</span> JUMP: Hop Gaps &amp; Ledges</div>
+            <div class="ctrl-item"><span>❄️</span> FIRE: Snowball / Call Lift</div>
+          </div>
+
+          <button id="btn-start" class="btn-primary" type="button">LAUNCH MISSION</button>
+
+          <div class="tower-select-row">
+            <label for="start-tower">Start Tower:</label>
+            <select id="start-tower">
+              <option value="0">1. The Tower of Eyes</option>
+              <option value="1">2. The Realm of Robots</option>
+              <option value="2">3. Trap of Tricks</option>
+              <option value="3">4. Slippery Slide</option>
+              <option value="4">5. Broken Path</option>
+              <option value="5">6. Swimmer's Delight</option>
+              <option value="6">7. Nasty One</option>
+              <option value="7">8. Edge of Doom</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pause Overlay -->
+      <div id="overlay-pause" class="overlay hidden">
+        <div class="modal-card">
+          <h2 class="modal-heading">PAUSED</h2>
+          <p id="pause-tower-name" class="modal-sub">Tower 1: The Tower of Eyes</p>
+          <button id="btn-resume" class="btn-primary" type="button">RESUME</button>
+          <button id="btn-restart" class="btn-secondary" type="button">RESTART MISSION</button>
+        </div>
+      </div>
+
+      <!-- Game Over / Victory Overlay -->
+      <div id="overlay-gameover" class="overlay hidden">
+        <div class="modal-card">
+          <div id="go-badge" class="retro-pill">MISSION ENDED</div>
+          <h2 id="go-title" class="modal-heading">GAME OVER</h2>
+          <div class="final-stats">
+            <div class="stat-box">
+              <span class="stat-lbl">FINAL SCORE</span>
+              <span id="go-score" class="stat-val">0</span>
+            </div>
+            <div class="stat-box">
+              <span class="stat-lbl">HIGH SCORE</span>
+              <span id="go-hi" class="stat-val">0</span>
+            </div>
+          </div>
+          <button id="btn-play-again" class="btn-primary" type="button">PLAY AGAIN</button>
+        </div>
+      </div>
+    </main>
+
+    <!-- Mobile-Only Ergonomic Touch Controls -->
+    <footer id="touch-controls" aria-label="Touch Controls">
+      <div class="touch-left">
+        <div id="dpad" class="dpad" role="group" aria-label="Directional Pad">
+          <button class="dpad-btn dpad-up" data-dir="up" type="button" aria-label="Up">▲</button>
+          <button class="dpad-btn dpad-left" data-dir="left" type="button" aria-label="Left">◀</button>
+          <div class="dpad-center"></div>
+          <button class="dpad-btn dpad-right" data-dir="right" type="button" aria-label="Right">▶</button>
+          <button class="dpad-btn dpad-down" data-dir="down" type="button" aria-label="Down">▼</button>
+        </div>
+      </div>
+
+      <div class="touch-right">
+        <button id="btn-fire" class="action-btn action-fire" type="button" aria-label="Fire Snowball">
+          <span class="action-icon">❄️</span>
+          <span class="action-lbl">FIRE</span>
+        </button>
+        <button id="btn-jump" class="action-btn action-jump" type="button" aria-label="Jump">
+          <span class="action-icon">▲</span>
+          <span class="action-lbl">JUMP</span>
+        </button>
+      </div>
+    </footer>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
