@@ -106,7 +106,7 @@ function createBrickTextures(pal) {
   return { map, bumpMap, emissiveMap };
 }
 
-function createConveyorTexture() {
+function createConveyorTexture(dir = 1) {
   const canvas = document.createElement('canvas');
   canvas.width = 128;
   canvas.height = 64;
@@ -120,9 +120,9 @@ function createConveyorTexture() {
   ctx.lineJoin = 'round';
   for (let x = 16; x < 128; x += 32) {
     ctx.beginPath();
-    ctx.moveTo(x - 8, 16);
-    ctx.lineTo(x + 8, 32);
-    ctx.lineTo(x - 8, 48);
+    ctx.moveTo(x - 8 * dir, 16);
+    ctx.lineTo(x + 8 * dir, 32);
+    ctx.lineTo(x - 8 * dir, 48);
     ctx.stroke();
   }
   const tex = new THREE.CanvasTexture(canvas);
@@ -162,7 +162,7 @@ export class GameRenderer {
       powerPreference: 'high-performance',
     });
     this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
-    this.webgl.toneMappingExposure = 1.15;
+    this.webgl.toneMappingExposure = 1.35;
     this.webgl.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
     this._initTowerScene();
@@ -172,17 +172,21 @@ export class GameRenderer {
   _initTowerScene() {
     this.towerScene = new THREE.Scene();
     this.towerScene.background = new THREE.Color('#030816');
-    this.towerScene.fog = new THREE.FogExp2('#050d21', 0.022);
+    this.towerScene.fog = new THREE.Fog('#071329', 22, 65);
 
     this.towerCam = new THREE.PerspectiveCamera(46, 360 / 540, 0.1, 140);
 
-    // 3-point + hemisphere + dynamic hero lighting
-    const hemi = new THREE.HemisphereLight('#7dd3fc', '#082f49', 0.85);
+    // 3-point + hemisphere + front fill + dynamic hero lighting
+    const hemi = new THREE.HemisphereLight('#7dd3fc', '#082f49', 1.25);
     this.towerScene.add(hemi);
 
     const keyLight = new THREE.DirectionalLight('#e0f2fe', 1.85);
     keyLight.position.set(7, 14, 12);
     this.towerScene.add(keyLight);
+
+    const fillLight = new THREE.DirectionalLight('#ffffff', 0.9);
+    fillLight.position.set(0, 4, 12);
+    this.towerScene.add(fillLight);
 
     const rimLight = new THREE.DirectionalLight('#38bdf8', 1.25);
     rimLight.position.set(-9, 6, -6);
@@ -267,7 +271,8 @@ export class GameRenderer {
     // Tower cache & dynamic pools
     this.towerCache = new Map();
     this.currentTowerGroup = null;
-    this.conveyorTex = createConveyorTexture();
+    this.conveyorTexR = createConveyorTexture(1);
+    this.conveyorTexL = createConveyorTexture(-1);
 
     this.pogoGroup = this._buildPogoMesh();
     this.towerScene.add(this.pogoGroup);
@@ -294,16 +299,34 @@ export class GameRenderer {
 
     // Body
     const bodyMat = new THREE.MeshStandardMaterial({
-      color: '#22c55e',
-      emissive: '#14532d',
-      emissiveIntensity: 0.25,
-      roughness: 0.25,
+      color: '#4ade80',
+      emissive: '#16a34a',
+      emissiveIntensity: 0.48,
+      roughness: 0.22,
       metalness: 0.15,
     });
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.32, 20, 16), bodyMat);
-    body.scale.set(1.05, 0.95, 1.0);
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.34, 20, 16), bodyMat);
+    body.scale.set(1.05, 0.96, 1.0);
     body.position.y = 0.42;
     g.add(body);
+
+    // Signature Pogo Ears / Antennae
+    const stalkGeo = new THREE.CylinderGeometry(0.03, 0.04, 0.24, 8);
+    const tipGeo = new THREE.SphereGeometry(0.075, 10, 10);
+    const tipMat = new THREE.MeshStandardMaterial({
+      color: '#bef264',
+      emissive: '#4ade80',
+      emissiveIntensity: 0.7,
+      roughness: 0.2,
+    });
+    for (const zSide of [-0.14, 0.14]) {
+      const stalk = new THREE.Mesh(stalkGeo, bodyMat);
+      stalk.position.set(-0.04, 0.76, zSide);
+      stalk.rotation.x = zSide * 1.4;
+      const tip = new THREE.Mesh(tipGeo, tipMat);
+      tip.position.set(-0.04, 0.89, zSide * 1.3);
+      g.add(stalk, tip);
+    }
 
     // Belly
     const belly = new THREE.Mesh(
@@ -348,20 +371,28 @@ export class GameRenderer {
     g.userData.eyeL = eyeL;
     g.userData.eyeR = eyeR;
 
-    // Snowball Cannon Snout + Muzzle Glow
+    // Snowball Cannon Snout + Blaster Ring + Muzzle Glow
     const snout = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.08, 0.1, 0.26, 12),
-      new THREE.MeshStandardMaterial({ color: '#16a34a', metalness: 0.4, roughness: 0.3 })
+      new THREE.CylinderGeometry(0.095, 0.12, 0.3, 12),
+      new THREE.MeshStandardMaterial({ color: '#94a3b8', metalness: 0.75, roughness: 0.2 })
     );
     snout.rotation.z = -Math.PI / 2;
-    snout.position.set(0.32, 0.42, 0);
+    snout.position.set(0.35, 0.42, 0);
     g.add(snout);
 
-    const muzzle = new THREE.Mesh(
-      new THREE.SphereGeometry(0.09, 10, 10),
-      new THREE.MeshBasicMaterial({ color: '#7dd3fc' })
+    const blasterRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.105, 0.024, 8, 16),
+      new THREE.MeshBasicMaterial({ color: '#38bdf8' })
     );
-    muzzle.position.set(0.46, 0.42, 0);
+    blasterRing.rotation.y = Math.PI / 2;
+    blasterRing.position.set(0.45, 0.42, 0);
+    g.add(blasterRing);
+
+    const muzzle = new THREE.Mesh(
+      new THREE.SphereGeometry(0.11, 10, 10),
+      new THREE.MeshBasicMaterial({ color: '#e0f2fe' })
+    );
+    muzzle.position.set(0.51, 0.42, 0);
     g.add(muzzle);
     g.userData.muzzle = muzzle;
 
@@ -512,32 +543,63 @@ export class GameRenderer {
       elevatorPods.push(pod);
     }
 
-    // 6. 3D Extruded Ledges & Boxes
+    // 6. 3D Extruded Two-Tone Ledges & Boxes
     const ledgeWidth = TOWER_RADIUS * COL_ANGLE * 1.12;
     const ledgeGeo = new THREE.BoxGeometry(ledgeWidth, 0.22, 0.68);
+    const topCapGeo = new THREE.BoxGeometry(ledgeWidth * 1.02, 0.065, 0.72);
     const boxGeo = new THREE.BoxGeometry(ledgeWidth * 0.88, 0.54, 0.58);
 
     const solidMat = new THREE.MeshStandardMaterial({
       color: pal.ledge,
       emissive: pal.glow,
-      emissiveIntensity: 0.22,
+      emissiveIntensity: 0.28,
       roughness: 0.32,
       metalness: 0.35,
     });
+    const solidTopMat = new THREE.MeshStandardMaterial({
+      color: pal.ledgeTop,
+      emissive: pal.ledgeTop,
+      emissiveIntensity: 0.35,
+      roughness: 0.2,
+    });
     const iceMat = new THREE.MeshStandardMaterial({
-      color: '#bae6fd',
+      color: '#7dd3fc',
       emissive: '#0284c7',
       emissiveIntensity: 0.45,
       roughness: 0.08,
       metalness: 0.2,
       transparent: true,
-      opacity: 0.86,
+      opacity: 0.88,
     });
-    const convMat = new THREE.MeshStandardMaterial({
-      map: this.conveyorTex,
+    const iceTopMat = new THREE.MeshStandardMaterial({
+      color: '#f0f9ff',
+      emissive: '#bae6fd',
+      emissiveIntensity: 0.5,
+      roughness: 0.1,
+    });
+    const convMatR = new THREE.MeshStandardMaterial({
+      map: this.conveyorTexR,
       emissive: '#a855f7',
       emissiveIntensity: 0.35,
       roughness: 0.35,
+    });
+    const convMatL = new THREE.MeshStandardMaterial({
+      map: this.conveyorTexL,
+      emissive: '#a855f7',
+      emissiveIntensity: 0.35,
+      roughness: 0.35,
+    });
+    const convTopMat = new THREE.MeshStandardMaterial({
+      color: '#f5d0fe',
+      emissive: '#d946ef',
+      emissiveIntensity: 0.4,
+      roughness: 0.25,
+    });
+    const crumbleTopMat = new THREE.MeshStandardMaterial({
+      color: '#fde047',
+      emissive: '#f59e0b',
+      emissiveIntensity: 0.4,
+      roughness: 0.4,
     });
 
     const ledgeMeshes = [];
@@ -545,14 +607,21 @@ export class GameRenderer {
       const phi = (l.col + 0.5) * COL_ANGLE;
       const r = TOWER_RADIUS + 0.34;
       let mat = solidMat;
+      let topMat = solidTopMat;
       let geo = ledgeGeo;
       let y = l.floor * FLOOR_HEIGHT - 0.11;
 
       if (l.type === 'ice') {
         mat = iceMat;
-      } else if (l.type === 'conveyorR' || l.type === 'conveyorL') {
-        mat = convMat;
+        topMat = iceTopMat;
+      } else if (l.type === 'conveyorR') {
+        mat = convMatR;
+        topMat = convTopMat;
+      } else if (l.type === 'conveyorL') {
+        mat = convMatL;
+        topMat = convTopMat;
       } else if (l.type === 'crumble') {
+        topMat = crumbleTopMat;
         mat = new THREE.MeshStandardMaterial({
           color: '#f59e0b',
           emissive: '#b45309',
@@ -561,6 +630,7 @@ export class GameRenderer {
         });
       } else if (l.type === 'box') {
         geo = boxGeo;
+        topMat = null;
         y = l.floor * FLOOR_HEIGHT + 0.27;
         mat = new THREE.MeshStandardMaterial({
           color: '#facc15',
@@ -572,6 +642,11 @@ export class GameRenderer {
       }
 
       const mesh = new THREE.Mesh(geo, mat);
+      if (topMat) {
+        const cap = new THREE.Mesh(topCapGeo, topMat);
+        cap.position.y = 0.09;
+        mesh.add(cap);
+      }
       mesh.position.set(r * Math.sin(phi), y, r * Math.cos(phi));
       mesh.rotation.y = phi;
       mesh.userData = { baseX: mesh.position.x, baseY: y, type: l.type };
@@ -837,7 +912,7 @@ export class GameRenderer {
     const { tower, player, camCol, camFloor, time, particles, snowballs, topple } = state;
     const pal = tower.palette;
     const aspect = this.towerCam.aspect;
-    const camZ = aspect < 0.78 ? 11.4 * (0.78 / Math.max(0.45, aspect)) : 11.4;
+    const camZ = aspect < 0.78 ? Math.min(11.2, 9.0 * (0.78 / Math.max(0.45, aspect))) : 9.0;
     const camY = camFloor * FLOOR_HEIGHT + 0.65;
     const shake = getShakeOffset(state.shake, time);
 
@@ -877,8 +952,9 @@ export class GameRenderer {
       this.debrisPool.group.visible = false;
     }
 
-    // Animate conveyor texture
-    this.conveyorTex.offset.x = -(time * 1.4) % 1;
+    // Animate conveyor textures
+    this.conveyorTexR.offset.x = -(time * 1.4) % 1;
+    this.conveyorTexL.offset.x = (time * 1.4) % 1;
 
     // Update ledges (gone, crumble shake, box pulse)
     for (let i = 0; i < state.ledges.length; i++) {

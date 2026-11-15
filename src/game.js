@@ -57,6 +57,7 @@ export class TowerTopplerGame {
       squashY: 1,
       coyoteTimer: 0,
       jumpBufferTimer: 0,
+      knockbackTimer: 0,
     };
 
     this.camCol = 0;
@@ -144,6 +145,7 @@ export class TowerTopplerGame {
       squashY: 1,
       coyoteTimer: 0,
       jumpBufferTimer: 0,
+      knockbackTimer: 0,
     };
 
     this.camCol = this.player.col;
@@ -353,6 +355,7 @@ export class TowerTopplerGame {
 
     if (p.invuln > 0) p.invuln = Math.max(0, p.invuln - dt);
     if (p.fireCooldown > 0) p.fireCooldown = Math.max(0, p.fireCooldown - dt);
+    if (p.knockbackTimer > 0) p.knockbackTimer = Math.max(0, p.knockbackTimer - dt);
 
     // Spring squash & stretch back to 1.0
     const springRate = Math.min(1, dt * 14);
@@ -436,7 +439,7 @@ export class TowerTopplerGame {
       : 0;
 
     // Horizontal movement
-    const moveSpeed = 3.9;
+    const moveSpeed = 4.3;
     let targetVx = 0;
     if (inp.left) {
       targetVx = -moveSpeed;
@@ -446,10 +449,12 @@ export class TowerTopplerGame {
       p.facing = 1;
     }
 
-    if (isIce && p.onGround) {
-      p.vx = p.vx * 0.94 + targetVx * 0.08;
-    } else {
-      p.vx = targetVx + convPush;
+    if ((p.knockbackTimer || 0) <= 0) {
+      if (isIce && p.onGround) {
+        p.vx = p.vx * 0.94 + targetVx * 0.08;
+      } else {
+        p.vx = targetVx + convPush;
+      }
     }
 
     const nextCol = wrapCol(p.col + p.vx * dt);
@@ -464,9 +469,9 @@ export class TowerTopplerGame {
     }
 
     // Door / Exit interaction with UP
-    if (this.input.consumeJustPressed('up') && p.onGround) {
+    if (this.input.consumeJustPressed('up') && (p.onGround || p.coyoteTimer > 0)) {
       const door = this.tower.doors.find(
-        (d) => Math.abs(d.floor - p.floor) < 0.5 && Math.abs(colDist(p.col, d.col + 0.5)) < 0.55
+        (d) => Math.abs(d.floor - p.floor) < 0.5 && Math.abs(colDist(p.col, d.col + 0.5)) < 0.72
       );
       if (door) {
         if (door.isExit) {
@@ -500,7 +505,7 @@ export class TowerTopplerGame {
 
     // Jump
     if (p.jumpBufferTimer > 0 && (p.onGround || p.coyoteTimer > 0)) {
-      p.vy = 6.7;
+      p.vy = 7.5;
       p.onGround = false;
       p.onElevator = null;
       p.coyoteTimer = 0;
@@ -546,7 +551,7 @@ export class TowerTopplerGame {
 
     if (!p.onElevator) {
       const prevFloor = p.floor;
-      p.vy -= 17.5 * dt;
+      p.vy -= 16.5 * dt;
       p.floor += p.vy * dt;
       p.onGround = false;
 
@@ -577,8 +582,8 @@ export class TowerTopplerGame {
           for (const el of this.elevators) {
             if (
               Math.abs(colDist(p.col, el.col + 0.5)) < 0.62 &&
-              prevFloor >= el.floor - 0.25 &&
-              p.floor <= el.floor + 0.15
+              prevFloor >= el.floor - 0.45 &&
+              p.floor <= el.floor + 0.35
             ) {
               p.floor = el.floor;
               p.vy = 0;
@@ -718,6 +723,7 @@ export class TowerTopplerGame {
         p.onGround = false;
         p.onElevator = null;
         p.coyoteTimer = 0;
+        p.knockbackTimer = 0.18;
         p.squashX = 1.25;
         p.squashY = 0.78;
         p.vx = (colDist(en.col, p.col) >= 0 ? 1 : -1) * 3.5;
@@ -730,7 +736,7 @@ export class TowerTopplerGame {
 
   _findLedgeAt(col, floor) {
     return this.ledges.find(
-      (l) => !l.gone && l.type !== 'box' && Math.abs(l.floor - floor) < 0.12 && Math.abs(colDist(col, l.col + 0.5)) < 0.56
+      (l) => !l.gone && l.type !== 'box' && Math.abs(l.floor - floor) < 0.12 && Math.abs(colDist(col, l.col + 0.5)) < 0.66
     );
   }
 
@@ -741,7 +747,7 @@ export class TowerTopplerGame {
         l.type !== 'box' &&
         prevFloor >= l.floor - 0.15 &&
         nextFloor <= l.floor + 0.05 &&
-        Math.abs(colDist(col, l.col + 0.5)) < 0.56
+        Math.abs(colDist(col, l.col + 0.5)) < 0.66
     );
   }
 
@@ -777,6 +783,7 @@ export class TowerTopplerGame {
     this.player.squashY = 1;
     this.player.coyoteTimer = 0;
     this.player.jumpBufferTimer = 0;
+    this.player.knockbackTimer = 0;
     this._syncHud();
   }
 
