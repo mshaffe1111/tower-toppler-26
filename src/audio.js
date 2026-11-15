@@ -14,6 +14,7 @@ class SoundEngine {
     this.muted = false;
     this.musicEnabled = true;
     this.musicActive = false;
+    this.towerId = 1;
     this._grooveTimer = null;
     this._grooveStep = 0;
     this._nextNoteTime = 0;
@@ -159,6 +160,10 @@ class SoundEngine {
     } else {
       this._stopGroove();
     }
+  }
+
+  setTowerTheme(towerId = 1) {
+    this.towerId = Math.max(1, Math.min(8, Number(towerId) || 1));
   }
 
   _vary(freq, pct = 0.035) {
@@ -322,15 +327,20 @@ class SoundEngine {
 
     const stepDur = 60 / 112 / 2; // ~0.2678s per 8th note
     this._nextNoteTime = this.ctx.currentTime + 0.04;
+    const towerSemitones = [0, 2, -2, 3, -3, 5, -1, 4];
 
     const scheduleStep = (stepIdx, when) => {
       const step = stepIdx % 32;
       const bar = Math.floor(step / 8);
       const beatStep = step % 8;
+      const tIdx = ((this.towerId || 1) - 1) % 8;
+      const transpose = Math.pow(2, towerSemitones[tIdx] / 12);
+      const padCutoff = 640 + (tIdx % 4) * 55;
 
-      // Warm detuned pad chord at start of each bar
+      // Warm detuned pad chord at start of each bar (transposed per tower)
       if (beatStep === 0) {
-        this._padChord(chords[bar], when, 2.1, 0.026, 680);
+        const transposedChord = chords[bar].map((f) => f * transpose);
+        this._padChord(transposedChord, when, 2.1, 0.026, padCutoff);
       }
 
       // Tight electronic kick on beats 1 & 3 (steps 0, 4)
@@ -349,18 +359,20 @@ class SoundEngine {
         this._noise(0.026, 0.013, 5000, 3800, 'bandpass', 0.8, when, true, true);
       }
 
-      // Punchy sidechained bass on 8th-note groove
+      // Punchy sidechained bass on 8th-note groove (transposed per tower)
       if (beatStep === 0 || beatStep === 2 || beatStep === 3 || beatStep === 4 || beatStep === 6 || beatStep === 7) {
-        const root = barBassRoots[bar];
+        const root = barBassRoots[bar] * transpose;
         const freq = beatStep === 7 ? root * 1.5 : root;
         const duckTime = (beatStep === 0 || beatStep === 4) ? when + 0.026 : when;
         this._tone(freq, freq, 0.17, 'triangle', 0.07, duckTime, 360, true, false, true);
       }
 
-      // Sparse dreamy soft FM bell motif
-      if (beatStep === 1 || beatStep === 5) {
+      // Per-tower arpeggio & dreamy soft FM bell motif
+      const isArpBeat = beatStep === 1 || beatStep === 5 || (tIdx % 2 === 1 && beatStep === 3);
+      if (isArpBeat) {
         const pool = arpNotes[bar];
-        const note = pool[(step + bar) % pool.length];
+        const noteIdx = (step + bar + tIdx) % pool.length;
+        const note = pool[noteIdx] * transpose;
         this._fmTone(note, 2, note * 0.18, 0.28, 0.02, when, true, true);
       }
     };

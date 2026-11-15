@@ -257,6 +257,7 @@ export class GameRenderer {
 
     // 3-point + hemisphere + front fill + dynamic hero lighting
     const hemi = new THREE.HemisphereLight('#7dd3fc', '#082f49', 1.15);
+    this.hemiLight = hemi;
     this.towerScene.add(hemi);
 
     const keyLight = new THREE.DirectionalLight('#e0f2fe', 1.75);
@@ -269,6 +270,7 @@ export class GameRenderer {
 
     const rimLight = new THREE.DirectionalLight('#38bdf8', 1.3);
     rimLight.position.set(-9, 6, -6);
+    this.rimLight = rimLight;
     this.towerScene.add(rimLight);
 
     this.heroLight = new THREE.PointLight('#67e8f9', 1.6, 8);
@@ -324,6 +326,8 @@ export class GameRenderer {
     ringMesh.rotation.y = 0.3;
     planetGroup.add(planetMesh, ringMesh);
     this.planetGroup = planetGroup;
+    this.planetMesh = planetMesh;
+    this.planetRing = ringMesh;
     this.towerScene.add(planetGroup);
 
     // Multi-Octave Animated 3D Toxic Ocean Plane + Tower Foam Collar
@@ -364,9 +368,17 @@ export class GameRenderer {
     this.pogoGroup = this._buildPogoMesh();
     this.towerScene.add(this.pogoGroup);
 
+    // 3D Tunnel Portal Vortex when Pogo traverses a tunnel
+    this.tunnelVortexGroup = this._buildTunnelVortex();
+    this.towerScene.add(this.tunnelVortexGroup);
+
     // 3D Landing Target / Shadow Ring projected beneath Pogo
     this.landingRingGroup = this._buildLandingRing();
     this.towerScene.add(this.landingRingGroup);
+
+    this._skyBaseColor = new THREE.Color('#020512');
+    this._fogBaseColor = new THREE.Color('#061024');
+    this._tempColor = new THREE.Color();
 
     this.enemyPool = [];
     this.snowballPool = [];
@@ -408,6 +420,31 @@ export class GameRenderer {
 
     g.add(shadow, ring);
     g.userData = { shadow, ring };
+    return g;
+  }
+
+  _buildTunnelVortex() {
+    const g = new THREE.Group();
+    g.visible = false;
+    const outerRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.42, 0.045, 8, 24),
+      new THREE.MeshBasicMaterial({ color: '#38bdf8', transparent: true, opacity: 0.9 })
+    );
+    const innerRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.26, 0.035, 8, 20),
+      new THREE.MeshBasicMaterial({ color: '#fde047', transparent: true, opacity: 0.85 })
+    );
+    const core = new THREE.Mesh(
+      new THREE.CircleGeometry(0.22, 20),
+      new THREE.MeshBasicMaterial({
+        color: '#a5f3fc',
+        transparent: true,
+        opacity: 0.55,
+        side: THREE.DoubleSide,
+      })
+    );
+    g.add(outerRing, innerRing, core);
+    g.userData = { outerRing, innerRing, core };
     return g;
   }
 
@@ -541,8 +578,13 @@ export class GameRenderer {
       new THREE.MeshBasicMaterial({ color: '#e0f2fe' })
     );
     muzzle.position.set(0.53, 0.42, 0);
-    g.add(barrel, cryoChamber, muzzle);
+    const muzzleLight = new THREE.PointLight('#67e8f9', 0, 4.2);
+    muzzleLight.position.set(0.6, 0.42, 0);
+    g.add(barrel, cryoChamber, muzzle, muzzleLight);
+    g.userData.barrel = barrel;
+    g.userData.cryoChamber = cryoChamber;
     g.userData.muzzle = muzzle;
+    g.userData.muzzleLight = muzzleLight;
 
     return g;
   }
@@ -694,7 +736,10 @@ export class GameRenderer {
       group.add(spire);
     }
 
-    // 5. Recessed 3D Stone/Tech Archways with Glowing Portal Energy on Doors/Exit
+    // 5. Recessed 3D Stone/Tech Archways + 3D Holographic Beacons on Doors & Exit
+    const doorMarkers = [];
+    const exitRings = [];
+    const markerGeo = new THREE.OctahedronGeometry(0.14, 0);
     for (const door of tower.doors) {
       const phi = (door.col + 0.5) * COL_ANGLE;
       const dg = new THREE.Group();
@@ -727,21 +772,60 @@ export class GameRenderer {
       );
       portalEnergy.position.z = 0.06;
 
+      const archMat = new THREE.MeshStandardMaterial({
+        color: door.isExit ? '#fde047' : pal.glow,
+        emissive: door.isExit ? '#f59e0b' : pal.glow,
+        emissiveIntensity: 1.8,
+      });
       const arch = new THREE.Mesh(
         new THREE.TorusGeometry(0.34, 0.06, 8, 20, Math.PI),
-        new THREE.MeshStandardMaterial({
-          color: door.isExit ? '#fde047' : pal.glow,
-          emissive: door.isExit ? '#f59e0b' : pal.glow,
-          emissiveIntensity: 1.8,
-        })
+        archMat
       );
       arch.position.set(0, 0.12, 0.05);
-      dg.add(pL, pR, inner, portalEnergy, arch);
+
+      // Floating 3D Holographic Diamond/Chevron Marker above every door
+      const marker = new THREE.Mesh(markerGeo, archMat);
+      marker.position.set(0, 0.78, 0.16);
+      dg.add(pL, pR, inner, portalEnergy, arch, marker);
+      doorMarkers.push({ mesh: marker, baseY: 0.78 });
+
+      // Tall Golden 3D Light-Pillar Beacon + Spinning Crown Ring above Exit Door
+      if (door.isExit) {
+        const beam = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.26, 0.38, 4.2, 16, 1, true),
+          new THREE.MeshBasicMaterial({
+            color: '#fde047',
+            transparent: true,
+            opacity: 0.24,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+          })
+        );
+        beam.position.set(0, 2.2, 0.1);
+        const crownRing = new THREE.Mesh(
+          new THREE.TorusGeometry(0.46, 0.045, 8, 24),
+          archMat
+        );
+        crownRing.rotation.x = Math.PI / 2;
+        crownRing.position.set(0, 1.05, 0.14);
+        dg.add(beam, crownRing);
+        exitRings.push(crownRing);
+      }
+
       group.add(dg);
     }
 
-    // 6. 3D Elevator Shaft Dual Rails & Hovering Lift Pods
+    // 6. 3D Elevator Shaft Dual Rails, Hovering Lift Pods & Thruster Cones
     const elevatorPods = [];
+    const elevatorThrusters = [];
+    const thrusterGeo = new THREE.ConeGeometry(0.14, 0.32, 10);
+    const thrusterMat = new THREE.MeshBasicMaterial({
+      color: '#67e8f9',
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending,
+    });
     for (const el of tower.elevators) {
       const phi = (el.col + 0.5) * COL_ANGLE;
       const r = TOWER_RADIUS + 0.3;
@@ -778,6 +862,15 @@ export class GameRenderer {
       );
       trim.position.y = 0.08;
       pod.add(deck, trim);
+
+      for (const tx of [-0.26, 0.26]) {
+        const th = new THREE.Mesh(thrusterGeo, thrusterMat);
+        th.rotation.x = Math.PI;
+        th.position.set(tx, -0.22, 0);
+        pod.add(th);
+        elevatorThrusters.push(th);
+      }
+
       pod.position.set(r * Math.sin(phi), el.startFloor * FLOOR_HEIGHT - 0.1, r * Math.cos(phi));
       pod.rotation.y = phi;
       group.add(pod);
@@ -939,7 +1032,16 @@ export class GameRenderer {
       ledgeMeshes.push(node);
     }
 
-    const cached = { group, ledgeMeshes, elevatorPods, conveyorRollers, cylMat };
+    const cached = {
+      group,
+      ledgeMeshes,
+      elevatorPods,
+      elevatorThrusters,
+      doorMarkers,
+      exitRings,
+      conveyorRollers,
+      cylMat,
+    };
     this.towerCache.set(tower.id, cached);
     return cached;
   }
@@ -1283,6 +1385,19 @@ export class GameRenderer {
     this.towerCam.position.set(shake.x, camY + shake.y, camZ);
     this.towerCam.lookAt(shake.x, camY - 0.35 + shake.y, 0);
 
+    // Dynamic Per-Tower Biome Sky, Fog, Planet & Ocean Tinting
+    this._tempColor.set(pal.mortar);
+    this.towerScene.background.copy(this._skyBaseColor).lerp(this._tempColor, 0.38);
+    this._tempColor.set(pal.brickA);
+    this.towerScene.fog.color.copy(this._fogBaseColor).lerp(this._tempColor, 0.28);
+    this.hemiLight.color.set(pal.ledgeTop || pal.ledge);
+    this.rimLight.color.set(pal.glow);
+    this.planetMesh.material.color.set(pal.ledge);
+    this.planetMesh.material.emissive.set(pal.glow);
+    this.seaMesh.material.emissive.set(pal.glow);
+    this.seaMesh.material.emissiveIntensity = 0.32 + Math.sin(time * 2.4) * 0.1;
+    this.foamRing.material.color.set(pal.ledgeTop || pal.glow);
+
     // Swap cached tower group if tower changed
     const cached = this._getOrBuildTowerGroup(tower);
     if (this.currentTowerGroup !== cached.group) {
@@ -1341,24 +1456,48 @@ export class GameRenderer {
       }
     }
 
-    // Update elevator pods
+    // Update elevator pods, thruster cones & holographic door/exit beacons
     for (let i = 0; i < state.elevators.length; i++) {
       const el = state.elevators[i];
       const pod = cached.elevatorPods[i];
       if (pod) pod.position.y = el.floor * FLOOR_HEIGHT - 0.1;
     }
+    const thrustPulse = 0.75 + 0.35 * Math.sin(time * 24);
+    for (const th of cached.elevatorThrusters) {
+      th.scale.set(1, thrustPulse, 1);
+    }
+    for (let i = 0; i < cached.doorMarkers.length; i++) {
+      const dm = cached.doorMarkers[i];
+      dm.mesh.position.y = dm.baseY + Math.sin(time * 4 + i) * 0.08;
+      dm.mesh.rotation.y = time * 2.4 + i;
+    }
+    for (const er of cached.exitRings) {
+      er.rotation.z = time * 3.2;
+      er.scale.setScalar(1 + Math.sin(time * 5) * 0.08);
+    }
 
-    // Update Pogo 3D Hero + Landing Ring
+    // Update Pogo 3D Hero + Muzzle Flash + Tunnel Vortex + Landing Ring
+    const pTheta = wrapAngle((player.col - camCol) * COL_ANGLE);
+    const pr = TOWER_RADIUS + 0.38;
+    const px = pr * Math.sin(pTheta);
+    const pz = pr * Math.cos(pTheta);
+    const py = player.floor * FLOOR_HEIGHT + (topple.active ? tg.position.y : 0);
+
+    const inTunnel = Boolean(player.hidden && player.tunnelTimer > 0 && !topple.active);
+    this.tunnelVortexGroup.visible = inTunnel;
+    if (inTunnel) {
+      this.tunnelVortexGroup.position.set(px, py + 0.42, pz);
+      this.tunnelVortexGroup.rotation.y = pTheta;
+      this.tunnelVortexGroup.userData.outerRing.rotation.z = time * 8;
+      this.tunnelVortexGroup.userData.innerRing.rotation.z = -time * 11;
+      const vScale = 0.85 + 0.25 * Math.sin(time * 18);
+      this.tunnelVortexGroup.scale.setScalar(vScale);
+    }
+
     const pogoVisible = !player.hidden && !topple.active;
     this.pogoGroup.visible = pogoVisible;
     this.landingRingGroup.visible = pogoVisible;
     if (pogoVisible) {
-      const pTheta = wrapAngle((player.col - camCol) * COL_ANGLE);
-      const pr = TOWER_RADIUS + 0.38;
-      const px = pr * Math.sin(pTheta);
-      const pz = pr * Math.cos(pTheta);
-      const py = player.floor * FLOOR_HEIGHT + (topple.active ? tg.position.y : 0);
-
       const moving = player.onGround && Math.abs(player.vx) > 0.2;
       const bob = moving ? Math.abs(Math.sin(time * 18)) * 0.08 : 0;
       const stride = moving ? Math.sin(time * 18) * 0.14 : 0;
@@ -1377,7 +1516,13 @@ export class GameRenderer {
       this.pogoGroup.userData.eyeL.userData.lid.scale.y = lidScaleY;
       this.pogoGroup.userData.eyeR.userData.lid.scale.y = lidScaleY;
 
-      this.pogoGroup.userData.muzzle.scale.setScalar(player.fireCooldown > 0.1 ? 1.6 : 0.75);
+      const mf = Math.max(0, player.muzzleFlash != null ? player.muzzleFlash : player.fireCooldown > 0.1 ? 0.1 : 0);
+      const flashRatio = Math.min(1, mf / 0.14);
+      this.pogoGroup.userData.barrel.position.x = 0.35 - flashRatio * 0.08;
+      this.pogoGroup.userData.cryoChamber.position.x = 0.33 - flashRatio * 0.08;
+      this.pogoGroup.userData.muzzle.scale.setScalar(0.75 + flashRatio * 1.35);
+      this.pogoGroup.userData.muzzleLight.intensity = flashRatio * 2.6;
+
       this.heroLight.position.set(px, py + 0.8, pz + 0.8);
       this.heroLight.color.set(pal.glow);
 

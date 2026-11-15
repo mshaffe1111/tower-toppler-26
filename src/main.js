@@ -33,7 +33,13 @@ const btnResume = document.getElementById('btn-resume');
 const btnRestart = document.getElementById('btn-restart');
 const btnPlayAgain = document.getElementById('btn-play-again');
 const btnSound = document.getElementById('btn-sound');
+const btnMusic = document.getElementById('btn-music');
 const btnPause = document.getElementById('btn-pause');
+
+const altMeterEl = document.getElementById('altitude-meter');
+const altFillEl = document.getElementById('alt-fill');
+const altPipEl = document.getElementById('alt-pip');
+const actionPromptEl = document.getElementById('action-prompt');
 
 const input = new InputController();
 const renderer = new GameRenderer(canvas);
@@ -79,10 +85,27 @@ const game = new TowerTopplerGame(renderer, input, {
         livesEl.appendChild(pip);
       }
     }
+
+    // Tower Altitude Meter & Contextual Action Prompt
+    const pct = Math.max(0, Math.min(100, hud.altitudePct ?? 0));
+    if (altFillEl) altFillEl.style.height = `${pct}%`;
+    if (altPipEl) altPipEl.style.bottom = `${pct}%`;
+    if (altMeterEl) {
+      altMeterEl.classList.toggle('hidden', hud.mode === 'submarine');
+    }
+    if (actionPromptEl) {
+      if (hud.actionPrompt && hud.mode === 'tower') {
+        actionPromptEl.textContent = hud.actionPrompt;
+        actionPromptEl.classList.remove('hidden');
+      } else {
+        actionPromptEl.classList.add('hidden');
+      }
+    }
   },
   onBanner: showBanner,
   onGameOver(victory, score, hiScore) {
     sound.setMusicActive(false);
+    if (actionPromptEl) actionPromptEl.classList.add('hidden');
     goBadge.textContent = victory ? 'PLANET NEBULUS SAVED!' : 'MISSION ENDED';
     goTitle.textContent = victory ? 'ALL TOWERS TOPPLED!' : 'GAME OVER';
     goScore.textContent = score.toLocaleString();
@@ -116,11 +139,18 @@ btnSound.addEventListener('click', () => {
   btnSound.textContent = muted ? '🔇' : '🔊';
 });
 
+btnMusic?.addEventListener('click', () => {
+  sound.unlock();
+  const enabled = sound.toggleMusic();
+  btnMusic.textContent = enabled ? '🎵' : '🔕';
+});
+
 btnPause.addEventListener('click', () => {
   if (game.mode === 'title' || game.mode === 'gameover' || game.mode === 'victory') return;
   const paused = game.togglePause();
   sound.setMusicActive(!paused && (game.mode === 'tower' || game.mode === 'submarine'));
   if (paused) {
+    if (actionPromptEl) actionPromptEl.classList.add('hidden');
     pauseTowerName.textContent = `Tower ${game.tower.id}: ${game.tower.name}`;
     overlayPause.classList.remove('hidden');
   } else {
@@ -138,6 +168,7 @@ btnResume.addEventListener('click', () => {
 btnRestart.addEventListener('click', () => {
   overlayPause.classList.add('hidden');
   overlayTitle.classList.remove('hidden');
+  if (actionPromptEl) actionPromptEl.classList.add('hidden');
   game.mode = 'title';
   sound.setMusicActive(false);
   game.loadTower(0);
@@ -153,7 +184,8 @@ btnPlayAgain.addEventListener('click', () => {
 window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyM' && !e.repeat) {
     sound.unlock();
-    sound.toggleMusic();
+    const enabled = sound.toggleMusic();
+    if (btnMusic) btnMusic.textContent = enabled ? '🎵' : '🔕';
   }
 });
 

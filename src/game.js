@@ -37,6 +37,8 @@ export class TowerTopplerGame {
     this.elevators = [];
     this.enemies = [];
     this.shake = 0;
+    this.comboCount = 0;
+    this.comboTimer = 0;
 
     this.player = {
       col: 0,
@@ -53,6 +55,8 @@ export class TowerTopplerGame {
       safeCol: 0,
       safeFloor: 0,
       fireCooldown: 0,
+      muzzleFlash: 0,
+      stepUpCooldown: 0,
       squashX: 1,
       squashY: 1,
       coyoteTimer: 0,
@@ -100,7 +104,10 @@ export class TowerTopplerGame {
     this.popups = [];
     this.snowballs = [];
     this.shake = 0;
+    this.comboCount = 0;
+    this.comboTimer = 0;
     this.topple = { active: false, progress: 0, duration: 2.6 };
+    sound.setTowerTheme?.(t.id);
 
     // Clone mutable ledges, elevators, enemies
     this.ledges = t.ledges.map((l) => ({
@@ -142,6 +149,8 @@ export class TowerTopplerGame {
       safeCol: t.spawn.col + 0.5,
       safeFloor: t.spawn.floor,
       fireCooldown: 0,
+      muzzleFlash: 0,
+      stepUpCooldown: 0,
       squashX: 1,
       squashY: 1,
       coyoteTimer: 0,
@@ -174,6 +183,8 @@ export class TowerTopplerGame {
     this.particles = [];
     this.popups = [];
     this.shake = 0;
+    this.comboCount = 0;
+    this.comboTimer = 0;
     this.cb.onBanner?.('BONUS STAGE', 'MK.7 MINI-SUBMARINE');
     this._syncHud();
   }
@@ -211,6 +222,20 @@ export class TowerTopplerGame {
 
   addShake(amount) {
     this.shake = Math.min(18, Math.max(this.shake, amount));
+  }
+
+  _scoreComboHit(basePts, popupPos, baseColor) {
+    this.comboCount = Math.min(4, (this.comboCount || 0) + 1);
+    this.comboTimer = 3.2;
+    const mult = this.comboCount;
+    const pts = basePts * mult;
+    this.addScore(pts);
+    const label = mult > 1 ? `+${pts} (${mult}x!)` : `+${pts}`;
+    this.addPopup({
+      ...popupPos,
+      text: label,
+      color: mult > 1 ? '#f472b6' : baseColor,
+    });
   }
 
   addPopup({ col = null, floor = null, x = null, y = null, text, color = '#ffffff', maxLife = 0.95 }) {
@@ -263,12 +288,37 @@ export class TowerTopplerGame {
 
   _syncHud() {
     const exitDoor = this.tower?.doors.find((d) => d.isExit);
+    const exitFloor = exitDoor ? exitDoor.floor : Math.max(1, (this.tower?.floors || 16) - 2);
+    const p = this.player;
+    const altitudePct = Math.max(0, Math.min(100, Math.round((p.floor / Math.max(1, exitFloor)) * 100)));
+
     let dirHint = '▲';
-    if (exitDoor && this.mode === 'tower') {
-      const d = colDist(this.player.col, exitDoor.col + 0.5);
-      if (Math.abs(d) < 0.7) dirHint = '▲';
-      else dirHint = d > 0 ? '▶' : '◀';
+    let actionPrompt = null;
+    if (this.mode === 'tower' && this.tower) {
+      if (exitDoor) {
+        const d = colDist(p.col, exitDoor.col + 0.5);
+        if (Math.abs(d) < 0.7) dirHint = '▲';
+        else dirHint = d > 0 ? '▶' : '◀';
+      }
+      if (!p.hidden) {
+        const nearDoor =
+          (p.onGround || p.coyoteTimer > 0) &&
+          this.tower.doors.find(
+            (d) => Math.abs(d.floor - p.floor) < 0.5 && Math.abs(colDist(p.col, d.col + 0.5)) < 0.72
+          );
+        if (nearDoor) {
+          actionPrompt = nearDoor.isExit ? '▲ EXIT TOWER!' : '▲ ENTER PORTAL';
+        } else if (p.onElevator) {
+          actionPrompt = '▲▼ RIDE LIFT';
+        } else {
+          const nearEl = this.elevators.find((el) => Math.abs(colDist(p.col, el.col + 0.5)) < 1.15);
+          if (nearEl && Math.abs(nearEl.floor - p.floor) > 0.35) {
+            actionPrompt = '❄️ CALL LIFT';
+          }
+        }
+      }
     }
+
     this.cb.onHud?.({
       score: this.score,
       hiScore: this.hiScore,
@@ -277,6 +327,8 @@ export class TowerTopplerGame {
       towerId: this.tower ? this.tower.id : 1,
       dirHint,
       mode: this.mode,
+      altitudePct,
+      actionPrompt,
     });
   }
 
@@ -307,6 +359,12 @@ export class TowerTopplerGame {
     if (this.shake > 0) {
       this.shake *= Math.exp(-9 * clampedDt);
       if (this.shake < 0.15) this.shake = 0;
+    }
+
+    // Decay combo timer
+    if (this.comboTimer > 0) {
+      this.comboTimer = Math.max(0, this.comboTimer - clampedDt);
+      if (this.comboTimer <= 0) this.comboCount = 0;
     }
 
     // Update floating score/status popups
@@ -359,6 +417,8 @@ export class TowerTopplerGame {
     if (p.invuln > 0) p.invuln = Math.max(0, p.invuln - dt);
     if (p.fireCooldown > 0) p.fireCooldown = Math.max(0, p.fireCooldown - dt);
     if (p.knockbackTimer > 0) p.knockbackTimer = Math.max(0, p.knockbackTimer - dt);
+    if (p.muzzleFlash > 0) p.muzzleFlash = Math.max(0, p.muzzleFlash - dt);
+    if (p.stepUpCooldown > 0) p.stepUpCooldown = Math.max(0, p.stepUpCooldown - dt);
 
     // Spring squash & stretch back to 1.0
     const springRate = Math.min(1, dt * 14);
@@ -518,6 +578,31 @@ export class TowerTopplerGame {
       sound.jump();
     }
 
+    // Classic Atari 7800 Auto-Step-Up (+1 floor when walking into an adjacent ledge)
+    if (p.onGround && Math.abs(targetVx) > 0 && (p.stepUpCooldown || 0) <= 0) {
+      const stepFloor = Math.round(p.floor) + 1;
+      const blockedOverhead = this.ledges.some(
+        (b) => !b.gone && Math.abs(b.floor - stepFloor) < 0.25 && Math.abs(colDist(p.col, b.col + 0.5)) < 0.35
+      );
+      if (!blockedOverhead) {
+        const stepLedge = this.ledges.find((l) => {
+          if (l.gone || l.type === 'box' || Math.abs(l.floor - stepFloor) > 0.2) return false;
+          const dc = colDist(p.col, l.col + 0.5);
+          return Math.sign(dc) === p.facing && Math.abs(dc) > 0.14 && Math.abs(dc) <= 0.62;
+        });
+        if (stepLedge) {
+          p.vy = 5.8;
+          p.onGround = false;
+          p.onElevator = null;
+          p.coyoteTimer = 0;
+          p.stepUpCooldown = 0.22;
+          p.squashX = 0.82;
+          p.squashY = 1.2;
+          sound.stepUp();
+        }
+      }
+    }
+
     // Variable jump cut for crisp short hops vs full jumps
     if (!inp.jump && !p.onGround && !p.onElevator && p.vy > 3.2) {
       p.vy *= Math.pow(0.85, dt * 60);
@@ -526,6 +611,7 @@ export class TowerTopplerGame {
     // Fire Snowball (or recall nearby elevator!)
     if (this.input.consumeJustPressed('fire') && p.fireCooldown <= 0) {
       p.fireCooldown = 0.25;
+      p.muzzleFlash = 0.14;
       // Recall elevator if standing near a shaft
       const nearEl = this.elevators.find((el) => Math.abs(colDist(p.col, el.col + 0.5)) < 1.15);
       if (nearEl && Math.abs(nearEl.floor - p.floor) > 0.35) {
@@ -694,9 +780,8 @@ export class TowerTopplerGame {
       if (box) {
         box.gone = true;
         box.respawnTimer = 999;
-        this.addScore(50);
+        this._scoreComboHit(50, { col: box.col + 0.5, floor: box.floor + 0.5 }, '#fde047');
         this.addShake(3.5);
-        this.addPopup({ col: box.col + 0.5, floor: box.floor + 0.5, text: '+50', color: '#fde047' });
         const pos = this._colFloorToScreen(box.col + 0.5, box.floor + 0.3, 12);
         if (pos) this._spawnParticles(pos.x, pos.y, '#bae6fd', 8, 95);
         sound.hitEnemy();
@@ -713,16 +798,14 @@ export class TowerTopplerGame {
           const pos = this._colFloorToScreen(en.col, en.floor + 0.3, 14);
           if (en.type === 'roller') {
             en.dead = true;
-            this.addScore(100);
+            this._scoreComboHit(100, { col: en.col, floor: en.floor + 0.5 }, '#38bdf8');
             this.addShake(4.0);
-            this.addPopup({ col: en.col, floor: en.floor + 0.5, text: '+100', color: '#38bdf8' });
             if (pos) this._spawnParticles(pos.x, pos.y, '#67e8f9', 10, 110);
             sound.hitEnemy();
           } else if (en.type === 'bouncer') {
             en.stunTimer = 3.0;
-            this.addScore(50);
+            this._scoreComboHit(50, { col: en.col, floor: en.floor + 0.5 }, '#a7f3d0');
             this.addShake(2.2);
-            this.addPopup({ col: en.col, floor: en.floor + 0.5, text: '+50', color: '#a7f3d0' });
             if (pos) this._spawnParticles(pos.x, pos.y, '#a7f3d0', 7, 80);
             sound.stunEnemy();
           } else {
@@ -845,6 +928,10 @@ export class TowerTopplerGame {
     this.player.coyoteTimer = 0;
     this.player.jumpBufferTimer = 0;
     this.player.knockbackTimer = 0;
+    this.player.muzzleFlash = 0;
+    this.player.stepUpCooldown = 0;
+    this.comboCount = 0;
+    this.comboTimer = 0;
     this.player.landingFloor = this._computeLandingFloor(this.player.col, this.player.floor);
     this._syncHud();
   }
@@ -955,8 +1042,7 @@ export class TowerTopplerGame {
         f.y -= 18 * dt;
         if (Math.hypot(s.x - f.x, s.y - f.y) < 32) {
           f.caught = true;
-          this.addScore(250);
-          this.addPopup({ x: f.x, y: f.y - 12, text: '+250', color: '#4ade80' });
+          this._scoreComboHit(250, { x: f.x, y: f.y - 12 }, '#4ade80');
           sound.catchFish();
           this._spawnParticles(f.x, f.y, '#a5f3fc', 10, 90);
           s.fish.splice(i, 1);
