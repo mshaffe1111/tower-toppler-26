@@ -68,6 +68,7 @@ const game = new TowerTopplerGame(renderer, input, {
     timerEl.classList.toggle('urgent', hud.timer <= 15 && hud.mode === 'tower');
     towerBadgeEl.textContent = hud.mode === 'submarine' ? 'SUB' : `T${hud.towerId}`;
     dirArrowEl.textContent = hud.dirHint;
+    sound.setMusicActive(hud.mode === 'tower' || hud.mode === 'submarine');
 
     // Render life pips
     if (livesEl.childElementCount !== hud.lives) {
@@ -81,6 +82,7 @@ const game = new TowerTopplerGame(renderer, input, {
   },
   onBanner: showBanner,
   onGameOver(victory, score, hiScore) {
+    sound.setMusicActive(false);
     goBadge.textContent = victory ? 'PLANET NEBULUS SAVED!' : 'MISSION ENDED';
     goTitle.textContent = victory ? 'ALL TOWERS TOPPLED!' : 'GAME OVER';
     goScore.textContent = score.toLocaleString();
@@ -117,6 +119,7 @@ btnSound.addEventListener('click', () => {
 btnPause.addEventListener('click', () => {
   if (game.mode === 'title' || game.mode === 'gameover' || game.mode === 'victory') return;
   const paused = game.togglePause();
+  sound.setMusicActive(!paused && (game.mode === 'tower' || game.mode === 'submarine'));
   if (paused) {
     pauseTowerName.textContent = `Tower ${game.tower.id}: ${game.tower.name}`;
     overlayPause.classList.remove('hidden');
@@ -126,21 +129,32 @@ btnPause.addEventListener('click', () => {
 });
 
 btnResume.addEventListener('click', () => {
+  sound.unlock();
   overlayPause.classList.add('hidden');
   game.togglePause();
+  sound.setMusicActive(game.mode === 'tower' || game.mode === 'submarine');
 });
 
 btnRestart.addEventListener('click', () => {
   overlayPause.classList.add('hidden');
   overlayTitle.classList.remove('hidden');
   game.mode = 'title';
+  sound.setMusicActive(false);
   game.loadTower(0);
 });
 
 btnPlayAgain.addEventListener('click', () => {
+  sound.unlock();
   overlayGameOver.classList.add('hidden');
   const idx = Number(startTowerSelect.value) || 0;
   game.startNewGame(idx);
+});
+
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyM' && !e.repeat) {
+    sound.unlock();
+    sound.toggleMusic();
+  }
 });
 
 // Main 60fps loop

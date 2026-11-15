@@ -7,11 +7,14 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Tower Toppler '26 — Atari 7800 Reimagined</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div id="app">
-    <!-- Top Atari 7800 Inspired HUD -->
+    <!-- Top Glassmorphic Arcade HUD -->
     <header id="hud" aria-label="Game Status">
       <div class="hud-left">
         <div class="hud-label">PLAYER ONE</div>
@@ -24,7 +27,9 @@
           <span id="dir-arrow" class="dir-arrow" title="Exit direction">▲</span>
           <span id="tower-badge" class="tower-badge">T1</span>
         </div>
-        <div id="timer-display" class="hud-timer">090:0</div>
+        <div class="timer-shell">
+          <div id="timer-display" class="hud-timer">090:0</div>
+        </div>
       </div>
 
       <div class="hud-right">
@@ -47,9 +52,9 @@
         <div id="banner-title" class="banner-title">THE TOWER OF EYES</div>
       </div>
 
-      <!-- Title / Start Overlay -->
-      <div id="overlay-title" class="overlay">
-        <div class="modal-card">
+      <!-- Hero Title / Start Overlay -->
+      <div id="overlay-title" class="overlay overlay-hero">
+        <div class="modal-card modal-hero">
           <div class="retro-pill">ATARI 7800 CLASSIC • 2026 EDITION</div>
           <h1 class="game-title">
             <span class="title-top">TOWER</span>
@@ -60,15 +65,18 @@
           </p>
 
           <div class="controls-preview">
-            <div class="ctrl-item"><span>🕹️</span> D-Pad: Walk / Doors / Lifts</div>
-            <div class="ctrl-item"><span>⬆️</span> JUMP: Hop Gaps &amp; Ledges</div>
-            <div class="ctrl-item"><span>❄️</span> FIRE: Snowball / Call Lift</div>
+            <div class="ctrl-item"><span class="ctrl-badge">🕹️</span> <strong>D-Pad</strong> Walk, Doors &amp; Lifts</div>
+            <div class="ctrl-item"><span class="ctrl-badge">▲</span> <strong>JUMP</strong> Hop Gaps &amp; Ledges</div>
+            <div class="ctrl-item"><span class="ctrl-badge">❄️</span> <strong>FIRE</strong> Snowball &amp; Call Lift</div>
           </div>
 
-          <button id="btn-start" class="btn-primary" type="button">LAUNCH MISSION</button>
+          <button id="btn-start" class="btn-primary btn-launch" type="button">
+            <span class="btn-glow"></span>
+            <span class="btn-text">LAUNCH MISSION</span>
+          </button>
 
           <div class="tower-select-row">
-            <label for="start-tower">Start Tower:</label>
+            <label for="start-tower">DROP ZONE</label>
             <select id="start-tower">
               <option value="0">1. The Tower of Eyes</option>
               <option value="1">2. The Realm of Robots</option>
@@ -86,6 +94,7 @@
       <!-- Pause Overlay -->
       <div id="overlay-pause" class="overlay hidden">
         <div class="modal-card">
+          <div class="retro-pill">SYSTEM STANDBY</div>
           <h2 class="modal-heading">PAUSED</h2>
           <p id="pause-tower-name" class="modal-sub">Tower 1: The Tower of Eyes</p>
           <button id="btn-resume" class="btn-primary" type="button">RESUME</button>
@@ -113,13 +122,14 @@
       </div>
     </main>
 
-    <!-- Mobile-Only Ergonomic Touch Controls -->
+    <!-- Pro Mobile Touch Controls -->
     <footer id="touch-controls" aria-label="Touch Controls">
       <div class="touch-left">
         <div id="dpad" class="dpad" role="group" aria-label="Directional Pad">
+          <div class="dpad-ring" aria-hidden="true"></div>
           <button class="dpad-btn dpad-up" data-dir="up" type="button" aria-label="Up">▲</button>
           <button class="dpad-btn dpad-left" data-dir="left" type="button" aria-label="Left">◀</button>
-          <div class="dpad-center"></div>
+          <div class="dpad-center" aria-hidden="true"></div>
           <button class="dpad-btn dpad-right" data-dir="right" type="button" aria-label="Right">▶</button>
           <button class="dpad-btn dpad-down" data-dir="down" type="button" aria-label="Down">▼</button>
         </div>

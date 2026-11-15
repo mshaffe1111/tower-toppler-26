@@ -1,4 +1,4 @@
-// Multi-Touch Mobile Input Controller + Keyboard Fallback
+// Multi-Touch Mobile Input Controller + Slide-Tracking D-Pad + Keyboard Fallback
 export class InputController {
   constructor() {
     this.state = {
@@ -15,7 +15,9 @@ export class InputController {
       jump: false,
       fire: false,
     };
-    this._activePointers = new Map(); // pointerId -> actionName
+    this._activePointers = new Map(); // pointerId -> { type: 'dpad'|'action', action, el }
+    this._dpadEl = null;
+    this._dpadBtns = new Map();
     this._bindTouch();
     this._bindKeyboard();
   }
@@ -29,6 +31,7 @@ export class InputController {
   }
 
   _setAction(action, pressed, el = null) {
+    if (!action) return;
     const prev = this.state[action];
     this.state[action] = pressed;
     if (pressed && !prev) {
@@ -55,39 +58,93 @@ export class InputController {
     this.justPressed.fire = false;
   }
 
+  _resolveDpadDir(clientX, clientY) {
+    if (!this._dpadEl) return null;
+    const rect = this._dpadEl.getBoundingClientRect();
+    const cx = rect.left + rect.width * 0.5;
+    const cy = rect.top + rect.height * 0.5;
+    const dx = clientX - cx;
+    const dy = clientY - cy;
+    const deadzone = Math.min(rect.width, rect.height) * 0.11;
+    if (dx * dx + dy * dy < deadzone * deadzone) {
+      return null;
+    }
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      return dx < 0 ? 'left' : 'right';
+    }
+    return dy < 0 ? 'up' : 'down';
+  }
+
+  _updateDpadPointer(pointerId, clientX, clientY) {
+    const entry = this._activePointers.get(pointerId);
+    if (!entry || entry.type !== 'dpad') return;
+    const nextDir = this._resolveDpadDir(clientX, clientY);
+    if (nextDir === entry.action) return;
+
+    if (entry.action) {
+      this._setAction(entry.action, false, this._dpadBtns.get(entry.action) || null);
+    }
+    entry.action = nextDir;
+    entry.el = nextDir ? (this._dpadBtns.get(nextDir) || null) : null;
+    if (nextDir) {
+      this._setAction(nextDir, true, entry.el);
+    }
+  }
+
+  _releasePointer(pointerId) {
+    const entry = this._activePointers.get(pointerId);
+    if (!entry) return;
+    this._activePointers.delete(pointerId);
+    if (entry.action) {
+      this._setAction(entry.action, false, entry.el);
+    }
+  }
+
   _bindTouch() {
-    const dpadBtns = document.querySelectorAll('.dpad-btn');
-    dpadBtns.forEach((btn) => {
+    this._dpadEl = document.getElementById('dpad');
+    document.querySelectorAll('.dpad-btn').forEach((btn) => {
       const dir = btn.dataset.dir;
-      const onDown = (e) => {
-        e.preventDefault();
-        this._activePointers.set(e.pointerId, { action: dir, el: btn });
-        this._setAction(dir, true, btn);
-        if (btn.setPointerCapture) {
-          try { btn.setPointerCapture(e.pointerId); } catch (_) {}
-        }
-      };
-      const onUp = (e) => {
-        e.preventDefault();
-        const entry = this._activePointers.get(e.pointerId);
-        if (entry) {
-          this._activePointers.delete(e.pointerId);
-          this._setAction(entry.action, false, entry.el);
-        } else {
-          this._setAction(dir, false, btn);
-        }
-      };
-      btn.addEventListener('pointerdown', onDown);
-      btn.addEventListener('pointerup', onUp);
-      btn.addEventListener('pointercancel', onUp);
+      if (dir) {
+        this._dpadBtns.set(dir, btn);
+      }
     });
+
+    if (this._dpadEl) {
+      this._dpadEl.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        const dirBtn = e.target.closest('.dpad-btn');
+        const initialDir = (dirBtn && dirBtn.dataset.dir) || this._resolveDpadDir(e.clientX, e.clientY);
+        const el = initialDir ? (this._dpadBtns.get(initialDir) || null) : null;
+        this._activePointers.set(e.pointerId, { type: 'dpad', action: initialDir, el });
+        if (initialDir) {
+          this._setAction(initialDir, true, el);
+        }
+        if (this._dpadEl.setPointerCapture) {
+          try { this._dpadEl.setPointerCapture(e.pointerId); } catch (_) {}
+        }
+      });
+
+      this._dpadEl.addEventListener('pointermove', (e) => {
+        if (!this._activePointers.has(e.pointerId)) return;
+        e.preventDefault();
+        this._updateDpadPointer(e.pointerId, e.clientX, e.clientY);
+      });
+
+      const onDpadUp = (e) => {
+        if (!this._activePointers.has(e.pointerId)) return;
+        e.preventDefault();
+        this._releasePointer(e.pointerId);
+      };
+      this._dpadEl.addEventListener('pointerup', onDpadUp);
+      this._dpadEl.addEventListener('pointercancel', onDpadUp);
+    }
 
     const bindAction = (id, action) => {
       const el = document.getElementById(id);
       if (!el) return;
       const onDown = (e) => {
         e.preventDefault();
-        this._activePointers.set(e.pointerId, { action, el });
+        this._activePointers.set(e.pointerId, { type: 'action', action, el });
         this._setAction(action, true, el);
         if (el.setPointerCapture) {
           try { el.setPointerCapture(e.pointerId); } catch (_) {}
@@ -95,13 +152,7 @@ export class InputController {
       };
       const onUp = (e) => {
         e.preventDefault();
-        const entry = this._activePointers.get(e.pointerId);
-        if (entry) {
-          this._activePointers.delete(e.pointerId);
-          this._setAction(entry.action, false, entry.el);
-        } else {
-          this._setAction(action, false, el);
-        }
+        this._releasePointer(e.pointerId);
       };
       el.addEventListener('pointerdown', onDown);
       el.addEventListener('pointerup', onUp);

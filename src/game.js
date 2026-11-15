@@ -31,10 +31,12 @@ export class TowerTopplerGame {
     this.timer = 90;
 
     this.particles = [];
+    this.popups = [];
     this.snowballs = [];
     this.ledges = [];
     this.elevators = [];
     this.enemies = [];
+    this.shake = 0;
 
     this.player = {
       col: 0,
@@ -51,6 +53,10 @@ export class TowerTopplerGame {
       safeCol: 0,
       safeFloor: 0,
       fireCooldown: 0,
+      squashX: 1,
+      squashY: 1,
+      coyoteTimer: 0,
+      jumpBufferTimer: 0,
     };
 
     this.camCol = 0;
@@ -89,7 +95,9 @@ export class TowerTopplerGame {
     this.tower = t;
     this.timer = t.timeLimit;
     this.particles = [];
+    this.popups = [];
     this.snowballs = [];
+    this.shake = 0;
     this.topple = { active: false, progress: 0, duration: 2.6 };
 
     // Clone mutable ledges, elevators, enemies
@@ -132,6 +140,10 @@ export class TowerTopplerGame {
       safeCol: t.spawn.col + 0.5,
       safeFloor: t.spawn.floor,
       fireCooldown: 0,
+      squashX: 1,
+      squashY: 1,
+      coyoteTimer: 0,
+      jumpBufferTimer: 0,
     };
 
     this.camCol = this.player.col;
@@ -155,6 +167,8 @@ export class TowerTopplerGame {
       fireCooldown: 0,
     };
     this.particles = [];
+    this.popups = [];
+    this.shake = 0;
     this.cb.onBanner?.('BONUS STAGE', 'MK.7 MINI-SUBMARINE');
     this._syncHud();
   }
@@ -181,8 +195,65 @@ export class TowerTopplerGame {
       this.lives = Math.min(6, this.lives + 1);
       this.nextExtraLife += 5000;
       sound.extraLife();
+      if (this.mode === 'submarine') {
+        this.addPopup({ x: this.sub.x, y: this.sub.y - 26, text: 'EXTRA LIFE!', color: '#f472b6', maxLife: 1.35 });
+      } else {
+        this.addPopup({ col: this.player.col, floor: this.player.floor + 1.1, text: 'EXTRA LIFE!', color: '#f472b6', maxLife: 1.35 });
+      }
     }
     this._syncHud();
+  }
+
+  addShake(amount) {
+    this.shake = Math.min(18, Math.max(this.shake, amount));
+  }
+
+  addPopup({ col = null, floor = null, x = null, y = null, text, color = '#ffffff', maxLife = 0.95 }) {
+    this.popups.push({
+      col,
+      floor,
+      x,
+      y,
+      text,
+      color,
+      life: maxLife,
+      maxLife,
+    });
+  }
+
+  _colFloorToScreen(col, floor, radiusOffset = 14) {
+    const width = this.renderer.width;
+    const height = this.renderer.height;
+    const centerX = width * 0.5;
+    const radius = Math.min(width * 0.33, 132) + radiusOffset;
+    const floorPx = 42;
+    const playerScreenY = height * 0.56;
+    const a = colDist(this.camCol, col) * ((Math.PI * 2) / COLS);
+    if (Math.abs(a) > Math.PI * 0.58) return null;
+    return {
+      x: centerX + radius * Math.sin(a),
+      y: playerScreenY - (floor - this.camFloor) * floorPx,
+    };
+  }
+
+  _spawnSplashDroplets(x, y) {
+    const colors = ['#67e8f9', '#22d3ee', '#a5f3fc', '#e0f2fe'];
+    for (let i = 0; i < 24; i++) {
+      const spread = (Math.random() - 0.5) * 260;
+      const upSpeed = -(130 + Math.random() * 190);
+      const life = 0.42 + Math.random() * 0.38;
+      this.particles.push({
+        x: x + (Math.random() - 0.5) * 26,
+        y: y + (Math.random() - 0.5) * 8,
+        vx: spread,
+        vy: upSpeed,
+        gravity: 380,
+        size: 3 + Math.random() * 4.5,
+        color: colors[i % colors.length],
+        life,
+        maxLife: life,
+      });
+    }
   }
 
   _syncHud() {
@@ -204,19 +275,21 @@ export class TowerTopplerGame {
     });
   }
 
-  _spawnParticles(x, y, color, count = 10, speed = 90) {
+  _spawnParticles(x, y, color, count = 10, speed = 90, gravity = 180) {
     for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2;
       const s = (0.3 + Math.random() * 0.7) * speed;
+      const life = 0.4 + Math.random() * 0.35;
       this.particles.push({
         x,
         y,
         vx: Math.cos(a) * s,
         vy: Math.sin(a) * s - 25,
+        gravity,
         size: 3 + Math.random() * 4,
         color,
-        life: 0.4 + Math.random() * 0.35,
-        maxLife: 0.75,
+        life,
+        maxLife: life,
       });
     }
   }
@@ -225,12 +298,33 @@ export class TowerTopplerGame {
     const clampedDt = Math.min(0.05, dt);
     this.time += clampedDt;
 
+    // Decay screen shake
+    if (this.shake > 0) {
+      this.shake *= Math.exp(-9 * clampedDt);
+      if (this.shake < 0.15) this.shake = 0;
+    }
+
+    // Update floating score/status popups
+    for (let i = this.popups.length - 1; i >= 0; i--) {
+      const pop = this.popups[i];
+      pop.life -= clampedDt;
+      if (pop.floor !== null && pop.floor !== undefined) {
+        pop.floor += clampedDt * 0.85;
+      }
+      if (pop.y !== null && pop.y !== undefined) {
+        pop.y -= clampedDt * 34;
+      }
+      if (pop.life <= 0) {
+        this.popups.splice(i, 1);
+      }
+    }
+
     // Update particles in all active modes
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
       p.x += p.vx * clampedDt;
       p.y += p.vy * clampedDt;
-      p.vy += 180 * clampedDt;
+      p.vy += (p.gravity ?? 180) * clampedDt;
       p.life -= clampedDt;
       if (p.life <= 0) this.particles.splice(i, 1);
     }
@@ -259,6 +353,11 @@ export class TowerTopplerGame {
 
     if (p.invuln > 0) p.invuln = Math.max(0, p.invuln - dt);
     if (p.fireCooldown > 0) p.fireCooldown = Math.max(0, p.fireCooldown - dt);
+
+    // Spring squash & stretch back to 1.0
+    const springRate = Math.min(1, dt * 14);
+    p.squashX += (1 - p.squashX) * springRate;
+    p.squashY += (1 - p.squashY) * springRate;
 
     // Tunnel transition
     if (p.hidden) {
@@ -289,7 +388,11 @@ export class TowerTopplerGame {
           l.shake = false;
           l.respawnTimer = 4.0;
           sound.crumble();
-          this._spawnParticles(this.renderer.width * 0.5, this.renderer.height * 0.56 + 6, '#f59e0b', 8, 70);
+          this.addShake(4.5);
+          const pos = this._colFloorToScreen(l.col + 0.5, l.floor, 10);
+          if (pos) {
+            this._spawnParticles(pos.x, pos.y, '#f59e0b', 10, 85);
+          }
         }
       } else if (l.gone) {
         l.respawnTimer -= dt;
@@ -382,11 +485,28 @@ export class TowerTopplerGame {
       }
     }
 
+    // Coyote time (0.11s) & Jump buffering (0.12s)
+    if (p.onGround) {
+      p.coyoteTimer = 0.11;
+    } else {
+      p.coyoteTimer = Math.max(0, p.coyoteTimer - dt);
+    }
+
+    if (this.input.consumeJustPressed('jump')) {
+      p.jumpBufferTimer = 0.12;
+    } else {
+      p.jumpBufferTimer = Math.max(0, p.jumpBufferTimer - dt);
+    }
+
     // Jump
-    if (this.input.consumeJustPressed('jump') && p.onGround) {
+    if (p.jumpBufferTimer > 0 && (p.onGround || p.coyoteTimer > 0)) {
       p.vy = 6.7;
       p.onGround = false;
       p.onElevator = null;
+      p.coyoteTimer = 0;
+      p.jumpBufferTimer = 0;
+      p.squashX = 0.76;
+      p.squashY = 1.28;
       sound.jump();
     }
 
@@ -410,6 +530,8 @@ export class TowerTopplerGame {
     }
 
     // Vertical physics & gravity
+    const wasOnGround = p.onGround;
+    const prevVy = p.vy;
     if (p.onElevator) {
       const el = p.onElevator;
       if (Math.abs(colDist(p.col, el.col + 0.5)) > 0.65) {
@@ -435,6 +557,12 @@ export class TowerTopplerGame {
           p.floor = landed.floor;
           p.vy = 0;
           p.onGround = true;
+          if (!wasOnGround && prevVy < -1.2) {
+            const impact = Math.min(1, Math.abs(prevVy) / 10);
+            p.squashX = 1 + 0.28 * Math.max(0.45, impact);
+            p.squashY = 1 - 0.24 * Math.max(0.45, impact);
+            if (Math.abs(prevVy) > 3.2) sound.land(impact);
+          }
           if (landed.type === 'solid' || landed.type === 'ice') {
             p.safeCol = landed.col + 0.5;
             p.safeFloor = landed.floor;
@@ -456,6 +584,12 @@ export class TowerTopplerGame {
               p.vy = 0;
               p.onGround = true;
               p.onElevator = el;
+              if (!wasOnGround && prevVy < -1.2) {
+                const impact = Math.min(1, Math.abs(prevVy) / 10);
+                p.squashX = 1 + 0.28 * Math.max(0.45, impact);
+                p.squashY = 1 - 0.24 * Math.max(0.45, impact);
+                if (Math.abs(prevVy) > 3.2) sound.land(impact);
+              }
               break;
             }
           }
@@ -466,7 +600,8 @@ export class TowerTopplerGame {
     // Fell into Toxic Sea!
     if (p.floor < -0.55) {
       sound.splash();
-      this._spawnParticles(this.renderer.width * 0.5, this.renderer.height * 0.78, '#67e8f9', 18, 130);
+      this.addShake(10);
+      this._spawnSplashDroplets(this.renderer.width * 0.5, this.renderer.height * 0.78);
       this._loseLife('SPLASH!');
       return;
     }
@@ -481,6 +616,27 @@ export class TowerTopplerGame {
         continue;
       }
 
+      // Icy snowball trail particles
+      sb.trailTimer = (sb.trailTimer || 0) - dt;
+      if (sb.trailTimer <= 0) {
+        sb.trailTimer = 0.028;
+        const pos = this._colFloorToScreen(sb.col, sb.floor, 14);
+        if (pos) {
+          const life = 0.22 + Math.random() * 0.14;
+          this.particles.push({
+            x: pos.x + (Math.random() - 0.5) * 4,
+            y: pos.y + (Math.random() - 0.5) * 4,
+            vx: -sb.dir * (18 + Math.random() * 20),
+            vy: (Math.random() - 0.5) * 18,
+            gravity: 28,
+            size: 2.5 + Math.random() * 2,
+            color: Math.random() < 0.5 ? '#e0f2fe' : '#67e8f9',
+            life,
+            maxLife: life,
+          });
+        }
+      }
+
       // Check box hit
       const box = this.ledges.find(
         (l) => !l.gone && l.type === 'box' && Math.abs(l.floor - sb.floor) < 0.7 && Math.abs(colDist(sb.col, l.col + 0.5)) < 0.5
@@ -489,6 +645,10 @@ export class TowerTopplerGame {
         box.gone = true;
         box.respawnTimer = 999;
         this.addScore(50);
+        this.addShake(3.5);
+        this.addPopup({ col: box.col + 0.5, floor: box.floor + 0.5, text: '+50', color: '#fde047' });
+        const pos = this._colFloorToScreen(box.col + 0.5, box.floor + 0.3, 12);
+        if (pos) this._spawnParticles(pos.x, pos.y, '#bae6fd', 8, 95);
         sound.hitEnemy();
         this.snowballs.splice(i, 1);
         continue;
@@ -500,16 +660,25 @@ export class TowerTopplerGame {
         if (en.dead) continue;
         if (Math.abs(en.floor - sb.floor) < 0.65 && Math.abs(colDist(sb.col, en.col)) < 0.55) {
           hit = true;
+          const pos = this._colFloorToScreen(en.col, en.floor + 0.3, 14);
           if (en.type === 'roller') {
             en.dead = true;
             this.addScore(100);
+            this.addShake(4.0);
+            this.addPopup({ col: en.col, floor: en.floor + 0.5, text: '+100', color: '#38bdf8' });
+            if (pos) this._spawnParticles(pos.x, pos.y, '#67e8f9', 10, 110);
             sound.hitEnemy();
           } else if (en.type === 'bouncer') {
             en.stunTimer = 3.0;
             this.addScore(50);
+            this.addShake(2.2);
+            this.addPopup({ col: en.col, floor: en.floor + 0.5, text: '+50', color: '#a7f3d0' });
+            if (pos) this._spawnParticles(pos.x, pos.y, '#a7f3d0', 7, 80);
             sound.stunEnemy();
           } else {
             // Indestructible molecule / eye
+            this.addShake(1.5);
+            if (pos) this._spawnParticles(pos.x, pos.y, '#e0f2fe', 5, 65);
             sound.stunEnemy();
           }
           break;
@@ -542,11 +711,15 @@ export class TowerTopplerGame {
         Math.abs(colDist(en.col, p.col)) < 0.52
       ) {
         sound.hurt();
+        this.addShake(9);
         this.input.haptic(40);
         p.invuln = 1.6;
         p.vy = 4.2;
         p.onGround = false;
         p.onElevator = null;
+        p.coyoteTimer = 0;
+        p.squashX = 1.25;
+        p.squashY = 0.78;
         p.vx = (colDist(en.col, p.col) >= 0 ? 1 : -1) * 3.5;
       }
     }
@@ -600,6 +773,10 @@ export class TowerTopplerGame {
     this.player.onGround = true;
     this.player.onElevator = null;
     this.player.invuln = 1.8;
+    this.player.squashX = 1;
+    this.player.squashY = 1;
+    this.player.coyoteTimer = 0;
+    this.player.jumpBufferTimer = 0;
     this._syncHud();
   }
 
@@ -608,6 +785,8 @@ export class TowerTopplerGame {
     this.topple = { active: true, progress: 0, duration: 2.6 };
     const timeBonus = Math.ceil(this.timer) * 10;
     this.addScore(500 + timeBonus);
+    this.addShake(12);
+    this.addPopup({ col: this.player.col, floor: this.player.floor + 1.2, text: `+${500 + timeBonus}`, color: '#fbbf24', maxLife: 1.3 });
     sound.towerTopple();
     this.input.haptic([30, 40, 60]);
     this.cb.onBanner?.('TOWER TOPPLED!', `+${500 + timeBonus} BONUS`);
@@ -615,6 +794,7 @@ export class TowerTopplerGame {
 
   _updateTopple(dt) {
     this.topple.progress += dt / this.topple.duration;
+    this.shake = Math.max(this.shake, 5 * (1 - this.topple.progress));
     if (Math.random() < 0.45) {
       this._spawnParticles(
         this.renderer.width * (0.3 + Math.random() * 0.4),
@@ -707,6 +887,7 @@ export class TowerTopplerGame {
         if (Math.hypot(s.x - f.x, s.y - f.y) < 32) {
           f.caught = true;
           this.addScore(250);
+          this.addPopup({ x: f.x, y: f.y - 12, text: '+250', color: '#4ade80' });
           sound.catchFish();
           this._spawnParticles(f.x, f.y, '#a5f3fc', 10, 90);
           s.fish.splice(i, 1);
