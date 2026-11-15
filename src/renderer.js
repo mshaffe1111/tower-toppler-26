@@ -1,9 +1,4 @@
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { COLS } from './levels.js';
 
 const TWO_PI = Math.PI * 2;
@@ -186,94 +181,43 @@ export class GameRenderer {
       powerPreference: 'high-performance',
     });
     this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
-    this.webgl.toneMappingExposure = 1.25;
+    this.webgl.toneMappingExposure = 0.92;
     this.webgl.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
-    this._initEnvironment();
     this._initTowerScene();
     this._initSubScene();
-    this._initPostProcessing();
-  }
-
-  _initEnvironment() {
-    this.envTex = null;
-    try {
-      const pmrem = new THREE.PMREMGenerator(this.webgl);
-      const roomEnv = new RoomEnvironment();
-      this.envTex = pmrem.fromScene(roomEnv, 0.04).texture;
-      roomEnv.dispose();
-      pmrem.dispose();
-    } catch {
-      this.envTex = null;
-    }
-  }
-
-  _initPostProcessing() {
-    this.composer = null;
-    this.renderPass = null;
-    this.bloomPass = null;
-    try {
-      this.composer = new EffectComposer(this.webgl);
-      this.renderPass = new RenderPass(this.towerScene, this.towerCam);
-      this.bloomPass = new UnrealBloomPass(
-        new THREE.Vector2(this.width, this.height),
-        0.42,
-        0.35,
-        0.78
-      );
-      const outputPass = new OutputPass();
-      this.composer.addPass(this.renderPass);
-      this.composer.addPass(this.bloomPass);
-      this.composer.addPass(outputPass);
-    } catch {
-      this.composer = null;
-    }
   }
 
   _renderWithComposer(scene, camera) {
-    if (this.composer && this.renderPass) {
-      try {
-        this.renderPass.scene = scene;
-        this.renderPass.camera = camera;
-        this.composer.render();
-        return;
-      } catch {
-        this.composer = null;
-      }
-    }
     this.webgl.render(scene, camera);
   }
 
   _initTowerScene() {
     this.towerScene = new THREE.Scene();
     this.towerScene.background = new THREE.Color('#030816');
-    this.towerScene.fog = new THREE.Fog('#071329', 22, 65);
-    if (this.envTex) {
-      this.towerScene.environment = this.envTex;
-      this.towerScene.environmentIntensity = 0.65;
-    }
+    this.towerScene.fog = new THREE.Fog('#050d1f', 20, 58);
 
     this.towerCam = new THREE.PerspectiveCamera(46, 360 / 540, 0.1, 140);
 
-    // 3-point + hemisphere + front fill + dynamic hero lighting
-    const hemi = new THREE.HemisphereLight('#7dd3fc', '#082f49', 1.15);
+    // Balanced high-contrast 3-point lighting (no washed-out white fill/bloom)
+    const hemi = new THREE.HemisphereLight('#38bdf8', '#020617', 0.5);
     this.hemiLight = hemi;
     this.towerScene.add(hemi);
 
-    const keyLight = new THREE.DirectionalLight('#e0f2fe', 1.75);
-    keyLight.position.set(7, 14, 12);
+    const keyLight = new THREE.DirectionalLight('#f8fafc', 1.15);
+    keyLight.position.set(8, 14, 10);
     this.towerScene.add(keyLight);
 
-    const fillLight = new THREE.DirectionalLight('#ffffff', 0.85);
-    fillLight.position.set(0, 4, 12);
+    const fillLight = new THREE.DirectionalLight('#1e3a8a', 0.28);
+    fillLight.position.set(-6, 3, 10);
     this.towerScene.add(fillLight);
 
-    const rimLight = new THREE.DirectionalLight('#38bdf8', 1.3);
+    const rimLight = new THREE.DirectionalLight('#38bdf8', 0.75);
     rimLight.position.set(-9, 6, -6);
     this.rimLight = rimLight;
     this.towerScene.add(rimLight);
 
-    this.heroLight = new THREE.PointLight('#67e8f9', 1.6, 8);
+    this.heroLight = new THREE.PointLight('#38bdf8', 0.65, 6);
     this.towerScene.add(this.heroLight);
 
     // 3D Starfield
@@ -454,9 +398,9 @@ export class GameRenderer {
     const bodyMat = new THREE.MeshStandardMaterial({
       color: '#4ade80',
       emissive: '#16a34a',
-      emissiveIntensity: 0.42,
-      roughness: 0.22,
-      metalness: 0.18,
+      emissiveIntensity: 0.14,
+      roughness: 0.35,
+      metalness: 0.15,
     });
 
     // Sculpted LatheGeometry torso (pear-shaped athletic frog hero)
@@ -632,9 +576,9 @@ export class GameRenderer {
       roughnessMap: tex.roughnessMap,
       emissive: pal.glow,
       emissiveMap: tex.emissiveMap,
-      emissiveIntensity: 0.75,
-      roughness: 0.55,
-      metalness: 0.25,
+      emissiveIntensity: 0.22,
+      roughness: 0.62,
+      metalness: 0.2,
     });
     const cylMesh = new THREE.Mesh(
       new THREE.CylinderGeometry(TOWER_RADIUS, TOWER_RADIUS, totalH, 48, 1, false),
@@ -646,14 +590,14 @@ export class GameRenderer {
     // 2. Real 3D Cornice Rings every 2 floors + Glowing Neon Energy Collar Rings
     const trimMat = new THREE.MeshStandardMaterial({
       color: pal.brickB,
-      metalness: 0.55,
-      roughness: 0.3,
+      metalness: 0.45,
+      roughness: 0.38,
     });
     const collarMat = new THREE.MeshStandardMaterial({
-      color: '#ffffff',
+      color: pal.ledge,
       emissive: pal.glow,
-      emissiveIntensity: 1.5,
-      roughness: 0.15,
+      emissiveIntensity: 0.55,
+      roughness: 0.25,
     });
     const corniceGeo = new THREE.TorusGeometry(TOWER_RADIUS + 0.04, 0.055, 8, 48);
     const collarGeo = new THREE.TorusGeometry(TOWER_RADIUS + 0.07, 0.032, 8, 48);
@@ -887,59 +831,59 @@ export class GameRenderer {
     const solidMat = new THREE.MeshStandardMaterial({
       color: pal.ledge,
       emissive: pal.glow,
-      emissiveIntensity: 0.28,
-      roughness: 0.3,
-      metalness: 0.45,
+      emissiveIntensity: 0.12,
+      roughness: 0.42,
+      metalness: 0.35,
     });
     const solidTopMat = new THREE.MeshStandardMaterial({
       color: pal.ledgeTop,
-      emissive: pal.ledgeTop,
-      emissiveIntensity: 0.55,
-      roughness: 0.15,
+      emissive: pal.glow,
+      emissiveIntensity: 0.22,
+      roughness: 0.28,
     });
     const bracketMat = new THREE.MeshStandardMaterial({
       color: '#334155',
-      metalness: 0.7,
-      roughness: 0.35,
+      metalness: 0.6,
+      roughness: 0.4,
     });
     const iceMat = new THREE.MeshStandardMaterial({
-      color: '#7dd3fc',
+      color: '#38bdf8',
       emissive: '#0284c7',
-      emissiveIntensity: 0.5,
-      roughness: 0.06,
-      metalness: 0.25,
+      emissiveIntensity: 0.2,
+      roughness: 0.15,
+      metalness: 0.2,
       transparent: true,
       opacity: 0.85,
     });
     const iceTopMat = new THREE.MeshStandardMaterial({
-      color: '#f0f9ff',
-      emissive: '#bae6fd',
-      emissiveIntensity: 0.65,
-      roughness: 0.08,
+      color: '#bae6fd',
+      emissive: '#38bdf8',
+      emissiveIntensity: 0.25,
+      roughness: 0.2,
     });
     const convMatR = new THREE.MeshStandardMaterial({
       map: this.conveyorTexR,
       emissive: '#a855f7',
-      emissiveIntensity: 0.4,
-      roughness: 0.35,
+      emissiveIntensity: 0.2,
+      roughness: 0.4,
     });
     const convMatL = new THREE.MeshStandardMaterial({
       map: this.conveyorTexL,
       emissive: '#a855f7',
-      emissiveIntensity: 0.4,
-      roughness: 0.35,
+      emissiveIntensity: 0.2,
+      roughness: 0.4,
     });
     const convTopMat = new THREE.MeshStandardMaterial({
-      color: '#f5d0fe',
-      emissive: '#d946ef',
-      emissiveIntensity: 0.55,
-      roughness: 0.2,
+      color: '#e879f9',
+      emissive: '#a855f7',
+      emissiveIntensity: 0.25,
+      roughness: 0.3,
     });
     const crumbleTopMat = new THREE.MeshStandardMaterial({
-      color: '#fde047',
-      emissive: '#f59e0b',
-      emissiveIntensity: 0.6,
-      roughness: 0.35,
+      color: '#fbbf24',
+      emissive: '#d97706',
+      emissiveIntensity: 0.25,
+      roughness: 0.4,
     });
 
     const crystalGeo = new THREE.ConeGeometry(0.08, 0.28, 5);
@@ -1169,8 +1113,8 @@ export class GameRenderer {
     this.subCam = new THREE.PerspectiveCamera(46, 360 / 540, 0.1, 80);
     this.subCam.position.set(0, 0, 12);
 
-    this.subScene.add(new THREE.HemisphereLight('#7dd3fc', '#02101e', 1.25));
-    const subKey = new THREE.DirectionalLight('#bae6fd', 1.6);
+    this.subScene.add(new THREE.HemisphereLight('#38bdf8', '#02101e', 0.65));
+    const subKey = new THREE.DirectionalLight('#bae6fd', 1.05);
     subKey.position.set(4, 10, 8);
     this.subScene.add(subKey);
 
@@ -1390,13 +1334,13 @@ export class GameRenderer {
     this.towerScene.background.copy(this._skyBaseColor).lerp(this._tempColor, 0.38);
     this._tempColor.set(pal.brickA);
     this.towerScene.fog.color.copy(this._fogBaseColor).lerp(this._tempColor, 0.28);
-    this.hemiLight.color.set(pal.ledgeTop || pal.ledge);
+    this.hemiLight.color.set(pal.ledge);
     this.rimLight.color.set(pal.glow);
     this.planetMesh.material.color.set(pal.ledge);
     this.planetMesh.material.emissive.set(pal.glow);
     this.seaMesh.material.emissive.set(pal.glow);
-    this.seaMesh.material.emissiveIntensity = 0.32 + Math.sin(time * 2.4) * 0.1;
-    this.foamRing.material.color.set(pal.ledgeTop || pal.glow);
+    this.seaMesh.material.emissiveIntensity = 0.12 + Math.sin(time * 2.4) * 0.04;
+    this.foamRing.material.color.set(pal.glow);
 
     // Swap cached tower group if tower changed
     const cached = this._getOrBuildTowerGroup(tower);
