@@ -124,15 +124,20 @@ Pogo stays fixed on screen, so the scroll is his motion.
   Sideways steps are about 1/6 of a column; vertical steps are half a brick row.
 - **Stair step:** one column wide by one brick row high. Climbing pauses sideways motion for a
   few frames at each step.
-- **Walking:** about 2.0 of the 7800's columns per second, or 7.1 brick rows per second. Ours
-  is 2.8 of our narrower columns per second, about 7.8 rows per second.
-- **Jump:** the tower turns about 8.5 brick rows per second sideways during a jump, which is
-  about 3.0 of our columns per second. With our arc (1.15 steps high, 0.66 s in the air) that
-  gives a 2-column hop, matching the design brief.
+- **Walking:** about 2.0 columns per second, a lap in about 8 s. Both games have 16 columns a
+  lap, so the Original mode uses 2.0 columns per second (the Reboot keeps 2.8).
+- **Jump:** UNVERIFIED. Neither clip has a clean, full jump. The one candidate is a partial
+  hop, about 0.6 columns sideways. The Original mode uses 2.6 columns per second sideways
+  (about a 1.75-column hop), a placeholder chosen to keep every generated level climbable.
+  docs/RESEARCH.md will replace it with a sourced value.
 
 ### What the Original mode does now
-- **Jump:** a committed arc. Its sideways speed is fixed at takeoff (3.0 columns/s when
-  walking, straight up from standing), it can't be steered in mid-air, and its height is fixed.
+- **Jump:** a committed arc. Its sideways speed is fixed at takeoff (2.6 columns/s when
+  walking, UNVERIFIED; straight up from standing), it can't be steered in mid-air, and its
+  height is fixed.
+- **Walking:** 2.0 columns/s (measured).
+- **Snowballs:** about 6 columns of range, then they vanish (from the design brief). They
+  never come back round to hit you.
 - **Falls:** walking off a ledge, or being knocked off by an enemy, drops you straight down.
 - **Snowballs:** only thrown standing still. There is no charged shot and no ground-pound.
 - **Points:**
