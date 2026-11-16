@@ -397,7 +397,8 @@
     margin: 0;
   }
 
-  .modal-hero .btn-launch {
+  .modal-hero .btn-launch,
+  .modal-hero .campaign-row {
     grid-area: launch;
   }
 

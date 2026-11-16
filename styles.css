@@ -1727,3 +1727,33 @@ body.editing-controls .action-prompt { display: none !important; }
 
 /* Clock switched off in Options > Gameplay */
 .timer-shell.clock-off { display: none; }
+
+/* ORIGINAL / REBOOT campaign choice on the title */
+.campaign-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.btn-campaign {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 8px 10px;
+  border-radius: 14px;
+  color: #fff;
+  cursor: pointer;
+  touch-action: manipulation;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  transition: transform 0.08s ease, filter 0.1s ease;
+}
+.btn-campaign:active { transform: scale(0.97); filter: brightness(1.1); }
+.btn-campaign-orig {
+  border: 1px solid rgba(254, 215, 170, 0.8);
+  background: linear-gradient(135deg, #f97316 0%, #dc2626 60%, #991b1b 100%);
+  box-shadow: 0 8px 24px rgba(220, 38, 38, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+.btn-campaign-reboot {
+  border: 1px solid rgba(130, 245, 255, 0.7);
+  background: linear-gradient(135deg, #00e5ff 0%, #008cff 50%, #3a5bff 100%);
+  box-shadow: 0 8px 24px rgba(0, 180, 255, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+.camp-name { font-family: var(--font-display); font-size: 15px; font-weight: 900; letter-spacing: 0.14em; }
+.camp-sub { font-size: 12px; font-weight: 700; opacity: 0.92; white-space: nowrap; }
+.btn-continue:not(.hidden) + .campaign-row { margin-top: 8px; }

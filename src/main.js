@@ -84,6 +84,7 @@ const game = new TowerTopplerGame(renderer, input, {
     scoreEl.textContent = formatScore(hud.score);
     hiScoreEl.textContent = formatScore(hud.hiScore);
     timerEl.textContent = formatTimer(hud.timer);
+    appEl.classList.toggle('classic-rules', Boolean(settings.classic) || game.original);
     timerEl.parentElement?.classList.toggle('clock-off', settings.clock === false);
     timerEl.classList.toggle('urgent', hud.timer <= 15 && hud.mode === 'tower');
     towerBadgeEl.textContent = hud.mode === 'submarine' ? 'SUB' : hud.towerLabel;
@@ -360,7 +361,10 @@ function refreshMenu() {
   const canContinue = saved && (saved.mode === 'campaign' ? saved.towerIndex < game.campaignTowers.length : Boolean(procgen));
   contBtn.classList.toggle('hidden', !canContinue);
   if (canContinue) {
-    const where = saved.mode === 'campaign' ? `Tower ${saved.towerIndex + 1} · ${titleCase(saved.towerName || game.campaignTowers[saved.towerIndex]?.name || '')}` : `Endless · tower ${saved.towerIndex + 1}`;
+    const where =
+      saved.mode === 'campaign'
+        ? `${saved.variant === 'original' ? 'Original' : 'Reboot'} · T${saved.towerIndex + 1} ${titleCase(saved.towerName || game.campaignTowers[saved.towerIndex]?.name || '')}`
+        : `Endless · tower ${saved.towerIndex + 1}`;
     const lives = '♥'.repeat(Math.min(6, saved.lives || 1));
     $('continue-sub').textContent = `${where} · ${(saved.score || 0).toLocaleString()} pts · ${lives}`;
   }
@@ -417,10 +421,11 @@ function startRun(cfg) {
       return cache.get(i);
     };
   }
-  game.startNewGame({ mode: cfg.mode, startTower: cfg.startTower || 0, provider, runSeed: cfg.runSeed ?? null, resume: cfg.resume || null });
+  game.startNewGame({ mode: cfg.mode, startTower: cfg.startTower || 0, provider, runSeed: cfg.runSeed ?? null, resume: cfg.resume || null, variant: cfg.variant || 'reboot' });
 }
 
-$('btn-start').addEventListener('click', () => startRun({ mode: 'campaign', startTower: Number($('start-tower').value) || 0 }));
+$('btn-start').addEventListener('click', () => startRun({ mode: 'campaign', variant: 'reboot', startTower: Number($('start-tower').value) || 0 }));
+$('btn-original').addEventListener('click', () => startRun({ mode: 'campaign', variant: 'original', startTower: Number($('start-tower').value) || 0 }));
 $('btn-daily').addEventListener('click', () => procgen && startRun({ mode: 'daily' }));
 $('btn-continue-run').addEventListener('click', () => {
   const saved = progress.savedRun;
@@ -428,7 +433,7 @@ $('btn-continue-run').addEventListener('click', () => {
   if (saved.mode === 'endless' && !procgen) return;
   // A run continues with the mirror setting it was started with
   if (Boolean(settings.mirror) !== Boolean(saved.mirror)) setSetting('mirror', Boolean(saved.mirror));
-  startRun({ mode: saved.mode, startTower: saved.towerIndex, runSeed: saved.runSeed, resume: saved });
+  startRun({ mode: saved.mode, variant: saved.variant || 'reboot', startTower: saved.towerIndex, runSeed: saved.runSeed, resume: saved });
 });
 $('btn-endless').addEventListener('click', () => procgen && startRun({ mode: 'endless' }));
 

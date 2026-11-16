@@ -99,3 +99,20 @@ the Atari 7800 version, plus original Amiga/ST/C64/7800/DOS screenshots (see "Lo
 - **Crown:** crenellated battlements.
 - **Background:** black starry sky; sunset gradient bands (red, orange, yellow) at the horizon;
   mountain silhouettes; a deep-blue-to-cyan sea reflecting the tower.
+
+### Measured proportions (C64 screenshot + NES "Castelian" full tower maps, measured with PIL)
+Sources: vgmaps.com NES atlas (`Castelian-*.png`), retrogarden.co.uk C64 review screenshot.
+- **Bricks:** 5 brick rows per floor, with the ledge taking the place of one row. Alternate rows
+  offset. About 8–9 bricks visible across the face, foreshortened toward the edges; centre brick
+  aspect about 3.5:1. Thin black mortar.
+- **Ledges:** about one brick row thick (about 15% of the floor height), segmented, sticking out
+  clearly past the tower silhouette.
+- **Doors:** black rectangles about 2 bricks wide by one floor high; front and back are linked.
+- **Tower top:** crenellated battlements.
+- **Sky and sea:** black sky with sparse single-pixel stars. On the NES, the sea is a dithered
+  gradient from the tower's dark colour to white.
+- **Relative tower heights (NES maps):** Eyes 826, Trap 826, Swimmers 954, Slippery 962,
+  Robots 1002, Nasty 1090, Broken Path 1218, Edge of Doom 1218 px.
+- **Tower colours vary by version:** NES T1 purple, T2 blue, T3 red, T4 violet, T5 magenta,
+  T6 olive, T7 green, T8 sea green; C64 T1 blue, T2 red; Amiga screenshots show red and green.
+  The constant is **one strong colour per tower**.

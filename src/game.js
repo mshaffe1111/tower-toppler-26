@@ -1,5 +1,6 @@
 import { COLS, createTowers } from './levels.js';
 import { sound } from './audio.js';
+import { makeOriginalTower } from './original.js';
 import { settings, towerKey, awardMedals, getGhost, saveGhostIfBest, progress, saveProgress } from './settings.js';
 
 function wrapCol(c) {
@@ -115,8 +116,13 @@ export class TowerTopplerGame {
     return this.exitDoor ? this.exitDoor.floor : Math.max(1, (this.tower?.floors || 16) - 2);
   }
 
+  // ORIGINAL (1987) campaign: the classic towers, rules and enemies (see original.js)
+  get original() {
+    return this.runMode === 'campaign' && this.variant === 'original';
+  }
+
   get classic() {
-    return Boolean(settings.classic);
+    return Boolean(settings.classic) || this.original;
   }
 
   _freshPlayer(spawn) {
@@ -184,8 +190,9 @@ export class TowerTopplerGame {
 
   // mode: 'campaign' | 'daily' | 'endless'; provider(index) -> tower | null
   // resume: a saved run ({score, lives, nextExtraLife, toppled, healing}) to continue from
-  startNewGame({ mode = 'campaign', startTower = 0, provider = null, runSeed = null, resume = null } = {}) {
+  startNewGame({ mode = 'campaign', startTower = 0, provider = null, runSeed = null, resume = null, variant = 'reboot' } = {}) {
     this.runMode = mode;
+    this.variant = mode === 'campaign' ? variant : 'reboot';
     this.runSeed = runSeed;
     this.towerProvider = provider || ((i) => this.campaignTowers[i] || null);
     this.score = 0;
@@ -213,6 +220,7 @@ export class TowerTopplerGame {
     if (this.runMode !== 'campaign' && this.runMode !== 'endless') return;
     progress.savedRun = {
       mode: this.runMode,
+      variant: this.variant || 'reboot',
       towerIndex: this.towerIndex,
       towerName: this.tower?.name || '',
       score: this.score,
@@ -244,7 +252,7 @@ export class TowerTopplerGame {
       enemies: raw.enemies.map((e) => ({ ...e })),
       spawn: { ...raw.spawn },
       mechanic: raw.mechanic || 'none',
-      cacheKey: `${raw.id}|${raw.seed ?? ''}|${settings.mirror ? 'm' : ''}`,
+      cacheKey: `${raw.id}|${raw.seed ?? ''}|${settings.mirror ? 'm' : ''}|${raw.original ? 'o' : ''}`,
     };
     if (settings.mirror) {
       const mc = (c) => COLS - 1 - c;
@@ -266,8 +274,9 @@ export class TowerTopplerGame {
   }
 
   loadTower(idx) {
-    const raw = this.towerProvider(idx);
+    let raw = this.towerProvider(idx);
     if (!raw) return false;
+    if (this.original) raw = makeOriginalTower(raw);
     const t = this._prepareTower(raw);
     this.tower = t;
     this.towers = this.runMode === 'campaign' ? this.campaignTowers : [t];
@@ -341,14 +350,16 @@ export class TowerTopplerGame {
 
     // Secret star-fish: vault towers keep them inside the vaults; otherwise 3 on quiet ledges
     this.secrets = [];
-    if (t.mechanic === 'vault') {
+    if (this.original) {
+      // the 1987 game had no hidden star-fish
+    } else if (t.mechanic === 'vault') {
       for (const d of t.doors) if (d.vault) d.used = false;
     } else if (t.secrets && t.secrets.length) {
       this.secrets = t.secrets.map((s) => ({ col: s.col + 0.5, floor: s.floor, got: false }));
     } else {
       this.secrets = this._autoSecrets(rand);
     }
-    this._populateExtras(rand);
+    if (!this.original) this._populateExtras(rand);
     this.secretsTotal = t.mechanic === 'vault' ? t.doors.filter((d) => d.vault).length : this.secrets.length;
     this.secretsGot = 0;
 
@@ -379,13 +390,13 @@ export class TowerTopplerGame {
     this.camFloor = Math.max(2, this.player.floor + 1.0);
 
     // Ghost of your best run on this tower
-    this.key = towerKey(this.runMode, t, settings.mirror);
+    this.key = towerKey(this.original ? 'original' : this.runMode, t, settings.mirror);
     this.ghostData = settings.ghosts ? getGhost(this.key) : null;
     this.ghostRec = [];
     this.ghostRecT = 0;
     this.ghost = null;
 
-    const sub = this.runMode === 'campaign' ? `TOWER ${t.id}` : this.runMode === 'daily' ? 'DAILY TOWER' : `ENDLESS · TOWER ${this.towerIndex + 1}`;
+    const sub = this.runMode === 'campaign' ? `${this.original ? 'ORIGINAL · ' : ''}TOWER ${t.id}` : this.runMode === 'daily' ? 'DAILY TOWER' : `ENDLESS · TOWER ${this.towerIndex + 1}`;
     this.cb.onBanner?.(sub, t.name);
     this.cb.onTowerStart?.(t);
     this._syncHud();
@@ -925,10 +936,22 @@ export class TowerTopplerGame {
       }
     }
 
-    // Shootable blocks stop you walking through them
-    const blockingBox = this.ledges.find(
-      (l) => this._isSolid(l) && l.type === 'box' && Math.abs(l.floor - p.floor) < 0.6 && Math.abs(colDist(nextCol, l.col + 0.5)) < 0.52
-    );
+    // Shootable blocks stop you walking through them (and in the Original, so does a stunned
+    // sliding cannonball: stunning it only buys time, you still can't get past)
+    const blockingBox =
+      this.ledges.find(
+        (l) => this._isSolid(l) && l.type === 'box' && Math.abs(l.floor - p.floor) < 0.6 && Math.abs(colDist(nextCol, l.col + 0.5)) < 0.52
+      ) ||
+      (this.original &&
+        this.enemies.find(
+          (en) =>
+            !en.dead &&
+            en.type === 'roller' &&
+            en.stunTimer > 0 &&
+            Math.abs(en.floor - p.floor) < 0.6 &&
+            Math.abs(colDist(nextCol, en.col)) < 0.62 &&
+            Math.abs(colDist(nextCol, en.col)) < Math.abs(colDist(p.col, en.col))
+        ));
     if (!blockingBox) p.col = nextCol;
     else p.vx = 0;
 
@@ -962,6 +985,15 @@ export class TowerTopplerGame {
             sound.door();
             sound.secret?.();
             this.cb.onBanner?.('SECRET VAULT!', `★ ${this.secretsGot}/${this.secretsTotal} · +500 · +10s`);
+            return;
+          }
+        } else if (door.decoy) {
+          // Edge of Doom's summit: a wrong door slams and throws you back down
+          if (upTapped) {
+            p.doorLock = true;
+            sound.door();
+            this.addPopup({ col: p.col, floor: p.floor + 1.2, text: 'WRONG DOOR!', color: '#f87171' });
+            this._knockDown(Math.random() < 0.5 ? 1 : -1);
             return;
           }
         } else if (door.targetId) {
@@ -1211,8 +1243,9 @@ export class TowerTopplerGame {
     if (this.towerTime > 9) this._hint('peek', 'Drag anywhere on the screen to look around the tower and plan your route.');
     const near = this.enemies.find((e) => !e.dead && Math.abs(e.floor - p.floor) < 0.8 && Math.abs(colDist(e.col, p.col)) < 3.5);
     if (near) {
-      this._hint('fire', 'Tap FIRE to throw a snowball. Bouncers & molecules pop; rollers just freeze.');
-      if (near.type === 'eye' || near.type === 'roller' || near.type === 'chaser') this._hint('charge', 'Hold FIRE to pack a mega-snowball — it freezes anything into an ice block you can stand on!');
+      if (this.original) this._hint('fire-orig', 'FIRE throws a snowball. Bouncing cannonballs pop and flashing blocks break. Sliding cannonballs are only stunned; eyes, molecules and robots can\'t be hurt: time your way past.');
+      else this._hint('fire', 'Tap FIRE to throw a snowball. Bouncers & molecules pop; rollers just freeze.');
+      if (!this.original && (near.type === 'eye' || near.type === 'roller' || near.type === 'chaser')) this._hint('charge', 'Hold FIRE to pack a mega-snowball — it freezes anything into an ice block you can stand on!');
     }
     if (!p.onGround && p.floor - p.landingFloor > 1.6 && this.towerTime > 4) this._hint('pound', 'In mid-air, push ▼ to ground-pound: it stuns enemies and smashes blocks.');
     if (this.hitsTaken > 0 && !this.classic) this._hint('rewind', 'Knocked down? Hold ⏪ REWIND to turn back time a few seconds.');
@@ -1298,7 +1331,7 @@ export class TowerTopplerGame {
     }
     if (inp.fire) {
       p.chargeHeld += dt;
-      if (p.chargeHeld > 0.28) {
+      if (p.chargeHeld > 0.28 && !this.original) {
         const prev = p.charge;
         p.charge = Math.min(1, (p.chargeHeld - 0.28) / 0.8);
         sound.chargeLevel?.(p.charge);
@@ -1411,13 +1444,21 @@ export class TowerTopplerGame {
 
       // Enemies. Normal: bouncing balls & molecules pop, rollers freeze, eyes shrug it off.
       // Charged: pierces and freezes anything solid (frozen enemies become ice platforms!).
+      // ORIGINAL rules: only bouncing cannonballs pop; sliding cannonballs are stunned; eyes,
+      // molecules and robots can't be hurt at all.
       let consumed = false;
       for (const en of this.enemies) {
         if (en.dead || sb.hit.has(en)) continue;
         if (Math.abs(en.floor - sb.floor) < 0.65 + sb.power * 0.25 && Math.abs(colDist(sb.col, en.col)) < 0.55 + sb.power * 0.2) {
           sb.hit.add(en);
           en.hitFlash = 0.18;
-          if (!sb.power && (en.type === 'spiker' || en.type === 'chaser')) {
+          const immune = en.type === 'robot' || (this.original && (en.type === 'eye' || en.type === 'molecule'));
+          if (immune) {
+            // the snowball just bursts against it
+            this._burstAt(en.col, en.floor + 0.3, '#e0f2fe', 6, 65);
+            sound.stunEnemy();
+            this.addPopup({ col: en.col, floor: en.floor + 0.9, text: 'IMMUNE', color: '#94a3b8' });
+          } else if (!sb.power && (en.type === 'spiker' || en.type === 'chaser')) {
             en.hp -= 1;
             if (en.type === 'chaser') en.stunTimer = Math.max(en.stunTimer, 0.6);
             if (en.hp <= 0) this._popEnemy(en);
@@ -1435,7 +1476,7 @@ export class TowerTopplerGame {
             sound.freeze?.();
           } else if (en.type === 'roller') {
             en.stunTimer = this._freezeTime(3.2);
-            this._scoreComboHit(25, { col: en.col, floor: en.floor + 0.5 }, '#a5f3fc');
+            if (!this.original) this._scoreComboHit(25, { col: en.col, floor: en.floor + 0.5 }, '#a5f3fc');
             this.addShake(2.0);
             this._burstAt(en.col, en.floor + 0.3, '#a5f3fc', 9, 80);
             (sound.freeze || sound.stunEnemy).call(sound);
@@ -1485,7 +1526,7 @@ export class TowerTopplerGame {
     if (this.flyerTimer <= 0) {
       const lvl = this.runMode === 'campaign' ? this.towerIndex : this.towerIndex + 2;
       this.flyerTimer = Math.max(4.5, 9 - lvl * 0.55) + Math.random() * 3;
-      if (p.floor > 0.5 || lvl > 0) this._spawnFlyer();
+      if ((p.floor > 0.5 || lvl > 0) && !this.original) this._spawnFlyer();
     }
     const hz = this._hazardFloor();
 
@@ -1514,7 +1555,7 @@ export class TowerTopplerGame {
         // Hovers up and down over its step, guarding the staircase
         en.floor = en.baseFloor + 0.25 + (Math.sin(this.time * 1.5 + en.phase) * 0.5 + 0.5) * (en.range || 1.2);
         en.col = en.col + Math.sin(this.time * 2.3 + en.phase) * 0.002;
-      } else if (en.type === 'roller' || en.type === 'bouncer' || en.type === 'chaser') {
+      } else if (en.type === 'roller' || en.type === 'bouncer' || en.type === 'chaser' || en.type === 'robot') {
         const floorLvl = Math.round(en.baseFloor);
         // Robo-eye: spots Pogo on its floor and charges
         let spd = en.speed;
@@ -1588,6 +1629,7 @@ export class TowerTopplerGame {
 
   // Ice-block platforms made from frozen enemies
   _findIceLanding(col, prevFloor, nextFloor) {
+    if (this.original) return null; // standing on frozen enemies is a Reboot trick
     for (const en of this.enemies) {
       if (en.dead || !(en.stunTimer > 0.05) || en.fireball) continue;
       const top = en.floor + ICE_TOP;

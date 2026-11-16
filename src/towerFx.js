@@ -3,6 +3,7 @@
 // secret star-fish, the guardian eye & its fireballs, the ghost of your best run, pound rings).
 import * as THREE from 'three';
 import { COLS } from './levels.js';
+import { createGuardianModel, animateGuardian } from './enemyModels.js';
 
 const TWO_PI = Math.PI * 2;
 const COL_ANGLE = TWO_PI / COLS;
@@ -57,7 +58,6 @@ export class TowerFx {
     this._buildPoundRing();
     this._buildBoss();
 
-    this.fireballMats = null;
     this.propsGroup = null;
     this.propsFor = null;
     this.ghost = null;
@@ -244,75 +244,12 @@ export class TowerFx {
 
   // ---------------- Guardian ----------------
   _buildBoss() {
-    const g = new THREE.Group();
-    const scleraMat = new THREE.MeshStandardMaterial({ color: '#fdf2f8', roughness: 0.15, emissive: '#3b0a1f', emissiveIntensity: 0.3 });
-    const sclera = new THREE.Mesh(new THREE.SphereGeometry(0.8, 40, 28), scleraMat);
-    const irisMat = new THREE.MeshStandardMaterial({ color: '#f43f5e', emissive: '#e11d48', emissiveIntensity: 1.6 });
-    const iris = new THREE.Mesh(new THREE.SphereGeometry(0.42, 28, 20), irisMat);
-    iris.position.z = 0.48;
-    iris.scale.z = 0.55;
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.19, 20, 14), new THREE.MeshBasicMaterial({ color: '#05060c' }));
-    pupil.position.z = 0.72;
-    pupil.scale.set(0.55, 1.1, 0.5);
-    const lidMat = new THREE.MeshStandardMaterial({ color: '#4a044e', roughness: 0.5, metalness: 0.3, emissive: '#701a75', emissiveIntensity: 0.3 });
-    const lidTop = new THREE.Mesh(new THREE.SphereGeometry(0.83, 36, 18, 0, TWO_PI, 0, Math.PI / 2), lidMat);
-    const lidBot = new THREE.Mesh(new THREE.SphereGeometry(0.83, 36, 18, 0, TWO_PI, 0, Math.PI / 2), lidMat);
-    // Spiked crown ring
-    const spikes = new THREE.Group();
-    const spikeGeo = new THREE.ConeGeometry(0.09, 0.42, 6);
-    const spikeMat = new THREE.MeshStandardMaterial({ color: '#1e1b4b', metalness: 0.7, roughness: 0.3, emissive: '#f472b6', emissiveIntensity: 0.25 });
-    for (let i = 0; i < 12; i++) {
-      const s = new THREE.Mesh(spikeGeo, spikeMat);
-      const a = (i / 12) * TWO_PI;
-      s.position.set(Math.cos(a) * 0.86, Math.sin(a) * 0.86, -0.1);
-      s.rotation.z = a - Math.PI / 2;
-      spikes.add(s);
-    }
-    const halo = new THREE.Sprite(
-      new THREE.SpriteMaterial({ map: this.softDotTex, color: '#f43f5e', transparent: true, opacity: 0.6, depthWrite: false, blending: THREE.AdditiveBlending })
-    );
-    halo.scale.setScalar(4);
-    // HP pips
-    const pips = new THREE.Group();
-    const pipGeo = new THREE.SphereGeometry(0.07, 8, 6);
-    for (let i = 0; i < 8; i++) {
-      const pip = new THREE.Mesh(pipGeo, new THREE.MeshBasicMaterial({ color: '#fde047' }));
-      pip.position.set((i - 3.5) * 0.2, 1.25, 0.2);
-      pips.add(pip);
-    }
-    g.add(halo, sclera, iris, pupil, lidTop, lidBot, spikes, pips);
-    g.userData = { iris, pupil, lidTop, lidBot, spikes, halo, pips, irisMat, scleraMat };
+    const g = createGuardianModel({ chromeEnv: this.renderer?.chromeEnv || null, softDotTex: this.softDotTex });
     g.visible = false;
-    this.bossMesh = g;
     this.scene.add(g);
+    this.bossMesh = g;
   }
 
-  createFireballMesh() {
-    const g = new THREE.Group();
-    const core = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.2, 2),
-      new THREE.MeshStandardMaterial({ color: '#fff7ed', emissive: '#fb923c', emissiveIntensity: 2.4 })
-    );
-    g.add(core);
-    const halo = new THREE.Sprite(
-      new THREE.SpriteMaterial({ map: this.softDotTex, color: '#f97316', transparent: true, opacity: 0.85, depthWrite: false, blending: THREE.AdditiveBlending })
-    );
-    halo.scale.setScalar(1.3);
-    g.add(halo);
-    const trail = [];
-    for (let i = 0; i < 4; i++) {
-      const t = new THREE.Sprite(
-        new THREE.SpriteMaterial({ map: this.softDotTex, color: i < 2 ? '#fdba74' : '#ef4444', transparent: true, opacity: 0.6 - i * 0.12, depthWrite: false, blending: THREE.AdditiveBlending })
-      );
-      t.scale.setScalar(0.7 - i * 0.12);
-      g.add(t);
-      trail.push(t);
-    }
-    g.userData = { core, halo, trail, isFireball: true };
-    return g;
-  }
-
-  // ---------------- Per-tower props (live inside the rotating tower group) ----------------
   syncProps(towerGroup, state, TOWER_RADIUS, FLOOR_HEIGHT) {
     if (this.propsFor === state.checkpoints && this.propsGroup && this.propsGroup.parent === towerGroup) return;
     if (this.propsGroup) this.propsGroup.parent?.remove(this.propsGroup);
@@ -554,40 +491,18 @@ export class TowerFx {
       this.poundRing.material.opacity = 0.9 * (1 - k);
     }
 
-    // Guardian eye
+    // Guardian eye (model + animation in enemyModels.js; we only place it)
     const b = state.boss;
     const bm = this.bossMesh;
-    bm.visible = Boolean(b && (!b.dead || b.deathT < 1.2));
-    if (bm.visible) {
-      const ud = bm.userData;
+    if (b) {
       const th = wrapAngle((b.col - camCol) * COL_ANGLE);
       const r = TOWER_RADIUS + 1.35;
       bm.position.set(r * Math.sin(th), b.floor * FLOOR_HEIGHT + 0.5 + (tg ? tg.position.y : 0), r * Math.cos(th));
       bm.rotation.y = th;
-      const asleep = !b.awake;
-      const openAmt = b.dead ? 1 : asleep ? 0 : b.open ? 1 : 0;
-      ud.open = (ud.open ?? 0) + (openAmt - (ud.open ?? 0)) * Math.min(1, dt * 8);
-      const o = ud.open;
-      ud.lidTop.rotation.x = -Math.PI / 2 - o * 0.95;
-      ud.lidBot.rotation.x = Math.PI / 2 + o * 0.95;
-      const p = state.player;
-      const look = Math.max(-1, Math.min(1, wrapAngle((p.col - b.col) * COL_ANGLE) * 2));
-      const lookY = Math.max(-1, Math.min(1, (p.floor - b.floor) * 0.4));
-      ud.iris.position.set(look * 0.18, lookY * 0.16, 0.48);
-      ud.pupil.position.set(look * 0.24, lookY * 0.2, 0.72);
-      ud.spikes.rotation.z = time * (b.open ? 1.4 : 0.4);
-      ud.irisMat.emissiveIntensity = 1.2 + Math.sin(time * 10) * 0.4 + (b.hitFlash > 0 ? 3 : 0);
-      ud.scleraMat.emissive.set(b.hitFlash > 0 ? '#ffffff' : '#3b0a1f');
-      ud.halo.material.opacity = asleep ? 0.15 : 0.45 + Math.sin(time * 4) * 0.15;
-      ud.pips.children.forEach((pip, i) => (pip.visible = b.awake && !b.dead && i < b.hp));
-      if (b.dead) {
-        const k = Math.min(1, b.deathT / 1.2);
-        bm.scale.setScalar(Math.max(0.01, (1 + k * 0.6) * (1 - k)));
-        bm.rotation.z = k * 6;
-      } else {
-        bm.scale.setScalar(asleep ? 0.85 : 1 + (b.hitFlash > 0 ? 0.08 : 0));
-        bm.rotation.z = 0;
-      }
+      bm.visible = true;
+      animateGuardian(bm, b, { time, dt, player: { col: state.player.col, floor: state.player.floor }, COLS });
+    } else {
+      bm.visible = false;
     }
 
     // Ghost of your best run

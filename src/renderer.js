@@ -8,6 +8,7 @@ import { createTowerStoneMaterial, createLedgeStoneMaterial, setWaterlineY } fro
 import { PostFX } from './postfx.js';
 import { settings, currentSkin } from './settings.js';
 import { COLS } from './levels.js';
+import { createEnemyModel, animateEnemy, warmEnemyModelsAsync } from './enemyModels.js';
 
 const TWO_PI = Math.PI * 2;
 // Low sun behind and slightly left of the tower (rim light, water glitter path, sky disc)
@@ -263,6 +264,10 @@ export class GameRenderer {
     this._initSubScene();
 
     this.fx = new TowerFx(this.towerScene, this, this.softDotTex);
+    // Build every enemy model in idle frames up front, so a tower never hitches on first sight
+    try {
+      warmEnemyModelsAsync({ chromeEnv: this.chromeEnv, softDotTex: this.softDotTex });
+    } catch (_) {}
     this.postfx = new PostFX(this.webgl, { onTierChange: (tier) => this._applyQuality(tier) });
     this.postfx.attach(this.towerScene, this.towerCam);
     this.postfx.setMode(settings.quality || 'auto');
@@ -719,283 +724,12 @@ export class GameRenderer {
     return cached;
   }
 
+  // Enemies come from src/enemyModels.js (sculpted, outlined, rim-lit, with their own idle /
+  // freeze / hit / death animation). The Original's robots use the chrome robot model.
   _createEnemyMesh(type) {
-    if (type === 'fireball') {
-      const fb = this.fx.createFireballMesh();
-      fb.userData.body = fb.userData.core;
-      fb.userData.shell = new THREE.Object3D();
-      return fb;
-    }
-    const g = this._createEnemyMeshInner(type);
+    const model = type === 'robot' ? 'chaser' : type;
+    const g = createEnemyModel(model, { chromeEnv: this.chromeEnv, softDotTex: this.softDotTex });
     g.scale.setScalar(1.2); // read clearly at phone size
-    g.traverse((o) => {
-      if (o.isMesh && !(o.material && o.material.transparent)) o.castShadow = true;
-    });
-    return g;
-  }
-
-  _createEnemyMeshInner(type) {
-    const g = new THREE.Group();
-    const body = new THREE.Group(); // animated part (pops / squashes) — keeps halos & shells separate
-    g.add(body);
-    g.userData.body = body;
-    const halo = (color, size) => {
-      const sp = new THREE.Sprite(
-        new THREE.SpriteMaterial({
-          map: this.softDotTex,
-          color,
-          transparent: true,
-          opacity: 0.55,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-        })
-      );
-      sp.scale.setScalar(size);
-      g.add(sp);
-      g.userData.halo = sp;
-      return sp;
-    };
-    const cartoonEyes = (parent, z, y, spread, size, angry = true) => {
-      const white = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.2 });
-      const black = new THREE.MeshBasicMaterial({ color: '#0b1020' });
-      for (const side of [-1, 1]) {
-        const e = new THREE.Mesh(new THREE.SphereGeometry(size, 12, 10), white);
-        e.position.set(side * spread, y, z);
-        e.scale.z = 0.6;
-        const pu = new THREE.Mesh(new THREE.SphereGeometry(size * 0.5, 10, 8), black);
-        pu.position.set(side * spread * 0.9, y - size * 0.1, z + size * 0.5);
-        parent.add(e, pu);
-        if (angry) {
-          const brow = new THREE.Mesh(new THREE.BoxGeometry(size * 2.1, size * 0.45, size * 0.5), black);
-          brow.position.set(side * spread, y + size * 1.05, z + size * 0.25);
-          brow.rotation.z = side * -0.45;
-          parent.add(brow);
-        }
-      }
-    };
-
-    if (type === 'molecule') {
-      // Flying molecule: glowing nucleus orbited by three charged atoms (shootable)
-      const core = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(0.13, 1),
-        new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#fbcfe8', emissiveIntensity: 1.4, roughness: 0.2 })
-      );
-      body.add(core);
-      const colors = ['#ff2a85', '#fbbf24', '#00f0ff'];
-      const atoms = [];
-      const bondMat = new THREE.MeshBasicMaterial({ color: '#f5d0fe', transparent: true, opacity: 0.6 });
-      for (let i = 0; i < 3; i++) {
-        const a = new THREE.Mesh(
-          new THREE.SphereGeometry(0.115, 14, 12),
-          new THREE.MeshStandardMaterial({ color: colors[i], emissive: colors[i], emissiveIntensity: 0.9, roughness: 0.15 })
-        );
-        const bond = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.2, 6), bondMat);
-        body.add(a, bond);
-        atoms.push({ a, bond });
-      }
-      const ring1 = new THREE.Mesh(
-        new THREE.TorusGeometry(0.34, 0.016, 6, 32),
-        new THREE.MeshBasicMaterial({ color: '#67e8f9', transparent: true, opacity: 0.7 })
-      );
-      ring1.rotation.x = Math.PI * 0.35;
-      const ring2 = new THREE.Mesh(
-        new THREE.TorusGeometry(0.34, 0.016, 6, 32),
-        new THREE.MeshBasicMaterial({ color: '#f472b6', transparent: true, opacity: 0.65 })
-      );
-      ring2.rotation.y = Math.PI * 0.35;
-      body.add(ring1, ring2);
-      g.userData.atoms = atoms;
-      g.userData.ring1 = ring1;
-      g.userData.ring2 = ring2;
-      halo('#f472b6', 1.25);
-    } else if (type === 'roller') {
-      // Silver rolling ball: chrome shell, glowing equator band, visor eye. Snowballs only freeze it.
-      const ball = new THREE.Mesh(
-        new THREE.SphereGeometry(0.27, 24, 18),
-        new THREE.MeshStandardMaterial({
-          color: '#e2e8f0',
-          metalness: 0.95,
-          roughness: 0.16,
-          envMap: this.chromeEnv || null,
-          envMapIntensity: 1.1,
-        })
-      );
-      const band = new THREE.Mesh(
-        new THREE.TorusGeometry(0.272, 0.03, 8, 32),
-        new THREE.MeshStandardMaterial({ color: '#22d3ee', emissive: '#06b6d4', emissiveIntensity: 1.6 })
-      );
-      const band2 = band.clone();
-      band2.rotation.y = Math.PI / 2;
-      ball.add(band, band2);
-      body.add(ball);
-      // Visor stays upright (not rolling) so it reads as "looking" where it goes
-      const visor = new THREE.Mesh(
-        new THREE.BoxGeometry(0.3, 0.07, 0.1),
-        new THREE.MeshStandardMaterial({ color: '#ef4444', emissive: '#ef4444', emissiveIntensity: 2.2 })
-      );
-      visor.position.set(0, 0.06, 0.25);
-      body.add(visor);
-      g.userData.ball = ball;
-      g.userData.visor = visor;
-      halo('#22d3ee', 0.95);
-    } else if (type === 'bouncer') {
-      // Bouncing ball: glossy rubber with an angry face; squashes on each bounce. Shootable.
-      const rubber = new THREE.Mesh(
-        new THREE.SphereGeometry(0.26, 24, 18),
-        new THREE.MeshPhysicalMaterial({
-          color: '#ef4444',
-          emissive: '#7f1d1d',
-          emissiveIntensity: 0.35,
-          roughness: 0.25,
-          clearcoat: 1.0,
-          clearcoatRoughness: 0.15,
-        })
-      );
-      const stripe = new THREE.Mesh(
-        new THREE.TorusGeometry(0.262, 0.035, 8, 32),
-        new THREE.MeshStandardMaterial({ color: '#fde047', emissive: '#f59e0b', emissiveIntensity: 0.6 })
-      );
-      stripe.rotation.x = Math.PI / 2;
-      const face = new THREE.Group();
-      cartoonEyes(face, 0.2, 0.06, 0.09, 0.065, true);
-      body.add(rubber, stripe, face);
-      halo('#f87171', 0.95);
-    } else if (type === 'spiker') {
-      // Spiky fuzzball: hovering guardian of staircases (two hits to pop)
-      const hues = ['#facc15', '#38bdf8', '#4ade80', '#22d3ee', '#f472b6'];
-      const col = hues[Math.floor(Math.random() * hues.length)];
-      const coreMat = new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.35, roughness: 0.55 });
-      const core = new THREE.Mesh(new THREE.IcosahedronGeometry(0.17, 2), coreMat);
-      body.add(core);
-      const spikeGeo = new THREE.ConeGeometry(0.035, 0.2, 5);
-      spikeGeo.translate(0, 0.17, 0);
-      const dirs = new THREE.IcosahedronGeometry(1, 1).attributes.position;
-      const spikes = new THREE.InstancedMesh(spikeGeo, coreMat, 42);
-      const seen = new Set();
-      const m4 = new THREE.Matrix4();
-      const q = new THREE.Quaternion();
-      const up = new THREE.Vector3(0, 1, 0);
-      const v = new THREE.Vector3();
-      let n = 0;
-      for (let i = 0; i < dirs.count && n < 42; i++) {
-        v.fromBufferAttribute(dirs, i).normalize();
-        const key = `${v.x.toFixed(2)},${v.y.toFixed(2)},${v.z.toFixed(2)}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        q.setFromUnitVectors(up, v);
-        m4.compose(new THREE.Vector3(), q, new THREE.Vector3(1, 0.8 + Math.random() * 0.5, 1));
-        spikes.setMatrixAt(n++, m4);
-      }
-      spikes.count = n;
-      body.add(spikes);
-      const face = new THREE.Group();
-      cartoonEyes(face, 0.15, 0.03, 0.065, 0.05, true);
-      body.add(face);
-      g.userData.spikes = spikes;
-      g.userData.coreMat = coreMat;
-      halo(col, 1.0);
-    } else if (type === 'chaser') {
-      // Chrome robo-eye: patrols, then charges when it spots Pogo (three hits to scrap)
-      const shell = new THREE.Mesh(
-        new THREE.SphereGeometry(0.25, 28, 20),
-        new THREE.MeshStandardMaterial({ color: '#cbd5e1', metalness: 0.95, roughness: 0.18, envMap: this.chromeEnv || null })
-      );
-      const lensRing = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.025, 8, 24), new THREE.MeshStandardMaterial({ color: '#1e293b', metalness: 0.8, roughness: 0.3 }));
-      lensRing.position.z = 0.22;
-      const lensMat = new THREE.MeshStandardMaterial({ color: '#22d3ee', emissive: '#06b6d4', emissiveIntensity: 1.8 });
-      const lens = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 12), lensMat);
-      lens.position.z = 0.2;
-      lens.scale.z = 0.5;
-      const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.18, 6), lensRing.material);
-      antenna.position.y = 0.3;
-      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), lensMat);
-      bulb.position.y = 0.4;
-      const legs = [];
-      for (const side of [-1, 1]) {
-        const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.035, 0.1, 3, 6), lensRing.material);
-        leg.position.set(side * 0.12, -0.27, 0);
-        body.add(leg);
-        legs.push(leg);
-      }
-      body.add(shell, lensRing, lens, antenna, bulb);
-      const alert = new THREE.Sprite(new THREE.SpriteMaterial({ map: this._alertTex(), transparent: true, depthWrite: false }));
-      alert.scale.set(0.35, 0.35, 1);
-      alert.position.y = 0.72;
-      g.add(alert);
-      g.userData.lensMat = lensMat;
-      g.userData.legs = legs;
-      g.userData.alert = alert;
-      halo('#22d3ee', 0.9);
-    } else {
-      // Floating eye: invulnerable. Sclera, glowing iris, blinking lids and little bat wings.
-      const sclera = new THREE.Mesh(
-        new THREE.SphereGeometry(0.25, 20, 16),
-        new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.12 })
-      );
-      const veinMat = new THREE.MeshBasicMaterial({ color: '#fb7185' });
-      for (let i = 0; i < 4; i++) {
-        const vein = new THREE.Mesh(new THREE.TorusGeometry(0.252, 0.006, 4, 16, 0.7), veinMat);
-        vein.rotation.set(Math.random() * 3, Math.random() * 3, 0);
-        sclera.add(vein);
-      }
-      const iris = new THREE.Mesh(
-        new THREE.SphereGeometry(0.13, 16, 12),
-        new THREE.MeshStandardMaterial({ color: '#ec4899', emissive: '#db2777', emissiveIntensity: 1.3 })
-      );
-      iris.position.z = 0.16;
-      iris.scale.z = 0.5;
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), new THREE.MeshBasicMaterial({ color: '#090d16' }));
-      pupil.position.z = 0.23;
-      const lidMat = new THREE.MeshStandardMaterial({ color: '#7c3aed', roughness: 0.4 });
-      const lidTop = new THREE.Mesh(new THREE.SphereGeometry(0.262, 20, 10, 0, TWO_PI, 0, Math.PI / 2), lidMat);
-      const lidBot = new THREE.Mesh(new THREE.SphereGeometry(0.262, 20, 10, 0, TWO_PI, 0, Math.PI / 2), lidMat);
-      lidBot.rotation.x = Math.PI;
-      const wingMat = new THREE.MeshStandardMaterial({ color: '#4c1d95', emissive: '#6d28d9', emissiveIntensity: 0.4, side: THREE.DoubleSide });
-      const wingShape = new THREE.Shape();
-      wingShape.moveTo(0, 0);
-      wingShape.lineTo(0.32, 0.18);
-      wingShape.lineTo(0.28, 0.02);
-      wingShape.lineTo(0.38, -0.06);
-      wingShape.lineTo(0.22, -0.08);
-      wingShape.lineTo(0.12, -0.14);
-      wingShape.closePath();
-      const wingGeo = new THREE.ShapeGeometry(wingShape);
-      const wings = [];
-      for (const side of [-1, 1]) {
-        const w = new THREE.Mesh(wingGeo, wingMat);
-        w.position.set(side * 0.2, 0.04, -0.05);
-        w.scale.x = side;
-        body.add(w);
-        wings.push(w);
-      }
-      body.add(sclera, iris, pupil, lidTop, lidBot);
-      g.userData.iris = iris;
-      g.userData.pupil = pupil;
-      g.userData.lidTop = lidTop;
-      g.userData.lidBot = lidBot;
-      g.userData.wings = wings;
-      halo('#c084fc', 1.1);
-    }
-
-    // Ice shell shown while stunned/frozen by a snowball
-    // Ice block shown while frozen: flat-topped so it reads as a platform you can stand on
-    const shell = new THREE.Mesh(
-      new THREE.BoxGeometry(0.66, 0.61, 0.62, 1, 1, 1),
-      new THREE.MeshStandardMaterial({
-        color: '#bae6fd',
-        emissive: '#38bdf8',
-        emissiveIntensity: 0.35,
-        roughness: 0.05,
-        metalness: 0.1,
-        transparent: true,
-        opacity: 0.55,
-        flatShading: true,
-        depthWrite: false,
-      })
-    );
-    shell.visible = false;
-    g.add(shell);
-    g.userData.shell = shell;
     return g;
   }
 
@@ -1486,7 +1220,7 @@ export class GameRenderer {
       this._applySkin(this.pogoGroup, currentSkin());
       this.pogoGroup.position.set(px, py + (player.hang ? 0.05 : 0), pz);
       this.pogoGroup.rotation.set(player.hang ? -0.25 : 0, pTheta, 0);
-      this.pogoGroup.scale.setScalar(1.25);
+      this.pogoGroup.scale.setScalar(1.1); // the plumper body is wider: keep him about one ledge wide, like the original
 
       // Nearest threat drives Pogo's eyes and nerves
       let dangerDir = null;
@@ -1569,100 +1303,14 @@ export class GameRenderer {
         slot.groundOffset = undefined;
         this.towerScene.add(slot.mesh);
       }
-      const ud = slot.mesh.userData;
-      const body = ud.body;
       slot.mesh.visible = true;
       const eTheta = wrapAngle((en.col - camCol) * COL_ANGLE);
       const er = TOWER_RADIUS + 0.4;
       // Ground enemies sit exactly on the ledge surface (measured from the model's own bounds)
       if (slot.groundOffset === undefined) slot.groundOffset = this._enemyGroundOffset(slot.mesh, en.type);
       slot.mesh.position.set(er * Math.sin(eTheta), en.floor * FLOOR_HEIGHT + slot.groundOffset, er * Math.cos(eTheta));
-      slot.mesh.rotation.set(0, eTheta + (en.dir < 0 ? -0.5 : 0.5), 0);
-
-      // Death pop: swell then vanish
-      if (en.dead) {
-        const k = 1 - en.deathTimer / 0.5;
-        const sc = (1 + k * 0.9) * Math.max(0, 1 - k * 1.4);
-        body.scale.setScalar(Math.max(0.001, sc));
-        body.rotation.y += 0.4;
-        if (ud.halo) ud.halo.material.opacity = 0.9 * (1 - k);
-        ud.shell.visible = false;
-        continue;
-      }
-
-      const frozen = en.stunTimer > 0;
-      ud.shell.visible = frozen;
-      if (frozen) {
-        const crack = en.stunTimer < 1 ? Math.sin(time * 40) * 0.04 : 0;
-        ud.shell.rotation.set(0, crack * 3, 0);
-        ud.shell.scale.setScalar(1 + crack);
-      }
-      const flashK = en.hitFlash > 0 ? 1.25 : 1;
-      body.scale.setScalar(flashK);
-      if (ud.halo) {
-        ud.halo.material.opacity = frozen ? 0.15 : 0.45 + Math.sin(time * 6 + i) * 0.12;
-      }
-
-      if (en.type === 'molecule' && ud.atoms) {
-        const rot = frozen ? 0 : time * 4.2 * (en.dir || 1);
-        ud.atoms.forEach(({ a, bond }, idx) => {
-          const ang = rot + (idx * TWO_PI) / 3;
-          const x = Math.cos(ang) * 0.22;
-          const y = Math.sin(ang) * 0.22;
-          a.position.set(x, y, 0);
-          bond.position.set(x * 0.5, y * 0.5, 0);
-          bond.rotation.z = ang + Math.PI / 2;
-        });
-        if (!frozen) {
-          ud.ring1.rotation.z = time * 2.5;
-          ud.ring2.rotation.x = -time * 2.1;
-        }
-      } else if (en.type === 'roller' && ud.ball) {
-        if (!frozen) ud.ball.rotation.x += 0.12 * en.speed;
-        slot.mesh.rotation.y = eTheta + (en.dir < 0 ? -Math.PI / 2 : Math.PI / 2) * 0.85;
-        ud.visor.material.emissiveIntensity = frozen ? 0.2 : 1.8 + Math.sin(time * 12) * 0.6;
-      } else if (en.type === 'bouncer') {
-        // Squash on ground contact, stretch at speed
-        const h = en.floor - Math.round(en.baseFloor);
-        const squash = frozen ? 0 : Math.max(0, 0.18 - h) / 0.18;
-        body.scale.set(flashK * (1 + squash * 0.3), flashK * (1 - squash * 0.32 + (h > 0.4 ? 0.06 : 0)), flashK * (1 + squash * 0.3));
-        body.position.y = -squash * 0.07;
-      } else if (en.type === 'spiker' && ud.spikes) {
-        const pulse = frozen ? 1 : 1 + Math.sin(time * 8 + i) * 0.08;
-        ud.spikes.scale.setScalar(pulse);
-        if (!frozen) body.rotation.y = time * 1.2 + i;
-        ud.coreMat.emissiveIntensity = en.hp < 2 ? 0.9 + Math.sin(time * 20) * 0.4 : 0.35;
-        slot.mesh.rotation.y = eTheta;
-      } else if (en.type === 'chaser' && ud.lensMat) {
-        const a = en.alert || 0;
-        ud.lensMat.color.set(a > 0.3 ? '#ef4444' : '#22d3ee');
-        ud.lensMat.emissive.set(a > 0.3 ? '#dc2626' : '#06b6d4');
-        ud.alert.visible = a > 0.3 && !frozen;
-        ud.alert.position.y = 0.72 + Math.sin(time * 12) * 0.03;
-        const step = frozen ? 0 : Math.sin(time * (8 + a * 10) + i);
-        ud.legs[0].position.y = -0.27 + Math.max(0, step) * 0.05;
-        ud.legs[1].position.y = -0.27 + Math.max(0, -step) * 0.05;
-        body.position.y = Math.abs(step) * 0.03;
-        slot.mesh.rotation.y = eTheta + (en.dir < 0 ? -Math.PI / 2 : Math.PI / 2) * 0.8;
-      } else if (ud.isFireball) {
-        ud.core.rotation.set(time * 7, time * 5, 0);
-        ud.halo.material.opacity = 0.7 + Math.sin(time * 30 + i) * 0.2;
-        ud.trail.forEach((t, k) => t.position.set(-(en.dir || 1) * (k + 1) * 0.16, Math.sin(time * 20 + k) * 0.03, 0));
-        slot.mesh.rotation.y = eTheta;
-      } else if (en.type === 'eye' && ud.iris) {
-        // Iris tracks Pogo
-        const look = Math.max(-1, Math.min(1, wrapAngle((player.col - en.col) * COL_ANGLE) * 2));
-        const lookY = Math.max(-1, Math.min(1, (player.floor - en.floor) * 0.8));
-        ud.iris.position.set(look * 0.07, lookY * 0.06, 0.16);
-        ud.pupil.position.set(look * 0.09, lookY * 0.08, 0.23);
-        const blink = (time * 0.6 + i * 0.37) % 3.2 > 3.05 ? 1 : 0;
-        ud.lidTop.rotation.x = -Math.PI * 0.5 + blink * 0.6 - 0.35;
-        ud.lidBot.rotation.x = Math.PI + Math.PI * 0.5 - blink * 0.6 + 0.35;
-        const flap = Math.sin(time * 16 + i) * 0.6;
-        ud.wings[0].rotation.y = flap;
-        ud.wings[1].rotation.y = -flap;
-        slot.mesh.rotation.y = eTheta;
-      }
+      const animEn = en.type === 'robot' ? { ...en, type: 'chaser', alert: 0 } : en;
+      animateEnemy(slot.mesh, animEn, { time, dt: this._realDt || 1 / 60, eTheta, player: { col: player.col, floor: player.floor }, camCol, COLS });
 
       // Off-screen warning for incoming flyers that are still around the curve of the tower
       if (en.spawned && Math.abs(eTheta) > Math.PI * 0.38 && Math.abs(eTheta) < Math.PI * 0.95) {
@@ -1732,7 +1380,7 @@ export class GameRenderer {
   // Distance from an enemy model's origin down to its lowest point (after the group scale),
   // so walkers/rollers/bouncers touch the ledge instead of sinking into it. Flyers keep a hover.
   _enemyGroundOffset(mesh, type) {
-    const ground = ['roller', 'bouncer', 'chaser', 'shieldbug', 'puffer', 'splitter'];
+    const ground = ['roller', 'bouncer', 'chaser', 'robot', 'shieldbug', 'puffer', 'splitter'];
     if (!ground.includes(type)) return 0.28;
     const body = mesh.userData.body || mesh;
     const box = new THREE.Box3();
