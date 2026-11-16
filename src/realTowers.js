@@ -122,9 +122,10 @@ export function buildGridTower(top, { id = 0, look = 'eye', idTag = 'g' } = {}) 
   for (let r = 0; r < H; r++) {
     for (let c = 0; c < COLS; c++) {
       if (at(r, c) !== '^') continue;
-      // '^' is drawn at body height, on top of the ledge cell the lift rests in: the platform is
-      // level with that ledge, so you walk on and off it (top and middle stops sit in ledge rows)
-      const bottom = r > 0 && '-.<>'.includes(at(r - 1, c)) ? r - 1 : r;
+      // The platform '^' sits one step above the ledge cell under it (the 7800 draws a white block
+      // on that ledge): you walk into it and Pogo steps up onto it like a stair, and steps off it
+      // the same way. Top and middle stops are level with their ledges.
+      const bottom = r;
       const stops = [bottom];
       let t = null;
       for (let k = r + 1; k < H; k++) {
@@ -140,7 +141,8 @@ export function buildGridTower(top, { id = 0, look = 'eye', idTag = 'g' } = {}) 
         continue;
       }
       stops.push(t);
-      elevators.push({ col: c, minFloor: bottom, maxFloor: t, startFloor: bottom, stops, rowsPerSec: 4, speed: 4 / 1.5 });
+      // 3.1 rows/s: measured on the 7800 (12.4 rows in 4.0 s in the player's Level 1 video)
+      elevators.push({ col: c, minFloor: bottom, maxFloor: t, startFloor: bottom, stops, rowsPerSec: 3.1, speed: 3.1 / 1.5 });
     }
   }
 

@@ -84,7 +84,7 @@ export function solveGrid(rowsTop, reach = rebootReach) {
   const rows = rowsTop.slice().reverse();
   const H = rows.length;
   const at = (c, r) => (r >= 0 && r < H ? rows[r][wrap(c)] : ' ');
-  const standable = (c, r) => isPlat(at(c, r)) && at(c, r + 1) !== '!' && at(c, r + 2) !== '!';
+  const standable = (c, r) => (isPlat(at(c, r)) || at(c, r) === '^') && !'!^'.includes(at(c, r + 1)) && at(c, r + 2) !== '!';
   const key = (c, r) => `${wrap(c)},${r}`;
   // ledges are solid from below: a jump or hop under a ledge 3 rows up bumps Pogo's head (2 rows
   // tall) on its slab at once, so it can't be counted on
@@ -144,8 +144,8 @@ export function solveGrid(rowsTop, reach = rebootReach) {
       }
     }
     // a lift platform: ride to its stops; each stop is a one-cell run you can move on from
-    // ('^' sits at body height on the ledge cell the lift rests in, so you board it standing there)
-    if (at(c, r + 1) === '^') for (const s of liftStops(c, r + 1)) {
+    // (a lift platform '^' is stood on, one step above its ledge)
+    if (at(c, r) === '^') for (const s of liftStops(c, r)) {
       for (const dir of [1, -1]) {
         for (let dx = 1; dx <= 5; dx++) {
           for (let dy = -14; dy <= 1; dy++) {
@@ -315,20 +315,17 @@ const PIECES = {
     }
     return { c: lc, r, dir: cur.dir };
   },
-  // a lift level with the route (walk on), rising 3-12 rows, with an exit ledge at the top. Like
-  // the real towers, '^' is drawn at body height on the ledge cell the platform rests in.
+  // a lift one step up from the route (walk into it and step up, like the real towers), rising
+  // 3-12 rows, with an exit ledge level with its top stop
   lift(g, cur, R, { route, lifts, act, top }) {
     const rise = Math.min(top - cur.r - 1, R.int(3, act === 1 ? 7 : 12));
     if (rise < 3) return null;
     const lc = cur.c + cur.dir;
     const pr = cur.r + 1;
     const tr = pr + rise;
-    if (!g.canStand(lc, cur.r)) return null;
-    for (let r = pr + 2; r <= tr + 2; r++) if (!g.free(lc, r)) return null;
+    for (let r = pr; r <= tr + 2; r++) if (!g.free(lc, r)) return null;
     const ec = lc + cur.dir;
     if (!g.canStand(ec, tr)) return null;
-    g.stand(lc, cur.r);
-    route.push([wrap(lc), cur.r]);
     for (let r = pr; r <= tr + 2; r++) g.reserve(lc, r);
     g.set(lc, pr, '^');
     g.set(lc, tr, 'v');
