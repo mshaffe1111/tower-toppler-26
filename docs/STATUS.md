@@ -33,28 +33,30 @@ unsourced gets marked UNVERIFIED in docs/ORIGINAL-RULES.md.
   port. Treat them as UNCERTAIN until 7800 footage agrees.
 - The map images (ZX hand-drawn, NES Castelian) are not in the repo; RESEARCH.md lists their URLs.
 
-### Confirmed findings that change the Original (not yet applied)
-- **Tower size:** heights are 47, 71, 49, 66, 96, 64, 80, 96 rows. Ours follow SPEC's 24–46, so
-  they're about half as tall. The 16 columns are right.
-- **Time limits:** 100, 120, 140 … 240 (+20 per tower). SPEC has 85–165.
-- **Doors:** 1 column by 3 rows, always in pairs at column c and c+8. Tower 7 has no tunnels.
-- **Enemies:** at most 4 at once, at fixed spots. The molecule is a timed flyer that crosses at
-  Pogo's height about every 10 s; it doesn't spawn when you linger.
-- **Slippery ledges:** they push you left or right, not "slide with your momentum".
-- **Getting hit:** you "land a few levels down", falling through platforms (about 8 rows in the
-  port).
-- **Scoring:**
-  - Lift points depend on the length of the ride (7800 manual).
-  - The technique bonus is paid ×10 and skipped on Tower 1 (C64).
-  - There's a third "Extras" tally: +5 per ball and +2 per block shot, paid ×10.
-- **Tower 8 summit:** doors at columns 9–12, exit at 10.
+### Applied to the Original (see ORIGINAL-RULES.md, "What the Original mode does now")
+- **Towers:** the Original campaign is the 8 real towers, built cell for cell from
+  docs/research/original-towers-grid.txt by src/realTowers.js. All 8 are verified climbable with
+  the sourced physics by an engine-driven check that simulates walks, jumps, lifts and tunnels.
+  - The Reboot keeps 3 generated levels per tower.
+  - Generated levels under the Original's physics failed the check (6 of 16 blocked), so the
+    Original has no generated levels for now.
+- **Physics:**
+  - Jump: walking speed, 1.5 columns, 2.25 rows; no standing jump.
+  - Step hop, faster falls, and you bump your head on ledges above.
+  - Snowballs go 3 columns, one at a time.
+  - Crumbling ledges vanish the moment you stand on one; slippery ledges push you while you
+    stand still.
+  - Lifts: 4 rows/s, middle stops, drop back after 10 s, knock you off if ridden into a
+    flashing block.
+- **Getting hit:** the tumble sends you down a few levels.
+- **Enemies:** the 7 kinds at fixed spots, at most 4 at once, and the molecule every 10 s.
+- **Scoring and time:** Time, Technique ×10 (not on Tower 1) and Extras tallies; no combos;
+  time limits 100–240.
 
-### Strong leads from the port (check against footage before using)
-- **Jump:** sideways speed equals the walk, about 1.5 columns long, peak 2.25 rows. Ours is
-  2.6 columns/s and 1.15 rows.
-- **Snowball:** about 3 columns of range, one on screen at a time. Ours is 6.
-- **Crumbling ledges:** vanish as soon as you stand on one and don't regrow during that attempt.
-- **Stairs:** no source supports Pogo sliding back down when he stops.
+### Still open
+- Which way each slippery ledge pushes (UNVERIFIED).
+- The lift ride-length bonus formula (unknown).
+- Patroller looks on Towers 3–8 (undocumented).
 
 ### Measured from the player's 7800 clips
 Walk 2.0 columns/s; a stair step is 1 column × 1 brick row; Pogo is about 2 rows tall.
@@ -98,23 +100,21 @@ Walk 2.0 columns/s; a stair step is 1 column × 1 brick row; Pogo is about 2 row
   hand with `g.update(1/60)` in timing tests.
 
 ## Next, in order
-1. **Real towers:** build each Original tower from docs/research/original-towers-grid.txt, using
-   its real heights, doors, lifts, blocks, crumbling and slippery ledges, and enemy spots. Use the
-   real time limits (100–240). Check the result against the ZX maps.
-2. **Confirmed rules from RESEARCH.md:**
-   - molecule timing, enemy cap and fixed spots;
-   - slippery push;
-   - the hit fall;
-   - lift ride-length points, technique ×10, the Extras tally.
-3. **Port values:** check the jump (speed = walk, ~1.5 columns, 2.25-row peak) and the snowball
-   (~3 columns) against footage before adopting them.
-4. **Remaining presentation:**
+1. **Reboot generator:** a new generator for the Reboot, built from what the real towers show.
+   - Building blocks: stairs, 3-row door pairs, lifts with stops, pillars, flashing blocks capping
+     shafts, single crumbling cells.
+   - Proportions: 47–96 rows; at most 4 enemies, at fixed spots.
+   - Then layer the Reboot twists on top.
+   - Verify every tower with the engine-driven check (scratchpad reach-real.js models lifts and
+     tunnels).
+   - Compare its statistics with the real towers.
+2. **Generated Original levels:** optional; only if the generator understands the Original's
+   physics.
+3. **Presentation:**
    - the seven-segment clock with a facing arrow;
    - the ring-by-ring topple;
    - the two-step catch in the sub stage;
-   - Tower 8's identical-looking real door.
-5. **Reboot:** the twists in docs/TWISTS.md, then the 10 worlds in docs/WORLDS.md. It can keep
-   generated towers.
+   - Tower 8's real door made to look identical to its decoys.
 
 ## Work in progress, not applied
 - **docs/wip/sub-stage-upgrade.patch:** sub-stage visual polish (shader precompile, depth-of-field

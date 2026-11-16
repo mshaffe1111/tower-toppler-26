@@ -100,7 +100,8 @@ export function saveProgress() {
 export function towerKey(mode, tower, mirror) {
   if (mode === 'daily') return `d${tower.seed ?? tower.id}`;
   if (mode === 'endless') return null;
-  if (mode === 'original') return `o${tower.id}${mirror ? 'm' : ''}`;
+  // the real 1987 towers get their own key (old 'o' ghosts were recorded on a generated layout)
+  if (mode === 'original') return `${tower.real ? 'or' : 'o'}${tower.id}${mirror ? 'm' : ''}`;
   return `c${tower.id}${mirror ? 'm' : ''}`;
 }
 

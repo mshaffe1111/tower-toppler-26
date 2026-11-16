@@ -138,14 +138,27 @@ export function makeOriginalTower(raw) {
   };
   const runs = ledgeRuns(t.ledges).sort((a, b) => a.floor - b.floor || a.ledges[0].col - b.ledges[0].col);
 
-  // Broken Path: long chains of crumbling ledges (every interior ledge of the longer runs)
+  // Broken Path: chains of crumbling ledges. The original's crumbling ledges vanish the moment
+  // you stand on one, so they are crossed by hopping: every other interior ledge of the longer
+  // runs (a 1-column gap is what a 1.5-column jump clears)
   if (th.crumbleChains) {
     for (const run of runs) {
       if (run.ledges.length < 3) continue;
       run.ledges.forEach((l, i) => {
-        if (safeInterior(run, i)) l.type = 'crumble';
+        if (i % 2 === 1 && safeInterior(run, i)) l.type = 'crumble';
       });
     }
+  }
+  // The same rule for any crumbling stretch the generator made: never two side by side
+  for (const run of runs) {
+    run.ledges.forEach((l, i) => {
+      if (l.type === 'crumble' && i > 0 && run.ledges[i - 1].type === 'crumble') l.type = 'solid';
+    });
+  }
+  // Ice becomes the original's slippery ledges, which push you one way while you stand still
+  // (one direction per run, alternating up the tower)
+  for (const run of runs) {
+    for (const l of run.ledges) if (l.type === 'ice') l.type = run.floor % 2 ? 'slideR' : 'slideL';
   }
 
   // Flashing blocks: in the middle of long solid runs, spread up the tower, never next to a

@@ -5,7 +5,7 @@ import { TowerTopplerGame } from './game.js';
 import { settings, setSetting, progress, saveProgress, getMedals, totalMedals, SKINS, skinUnlocked, currentSkin } from './settings.js';
 import { applyControls, bindControlsInput, ControlEditor } from './controls.js';
 import { OptionsMenu } from './options.js';
-import { LEVELS, makeCampaignProvider, towerOfIndex } from './campaign.js';
+import { LEVELS, levelsFor, makeCampaignProvider, towerOfIndex } from './campaign.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('game-canvas');
@@ -366,13 +366,19 @@ function refreshMenu() {
     saved.levels = LEVELS;
     saveProgress();
   }
+  // Original runs saved before it became the 8 real towers (one climb each): back to that tower
+  if (saved && saved.mode === 'campaign' && saved.variant === 'original' && saved.levels === LEVELS) {
+    saved.towerIndex = Math.floor(saved.towerIndex / LEVELS);
+    saved.levels = 1;
+    saveProgress();
+  }
   const canContinue =
-    saved && Boolean(procgen) && (saved.mode !== 'campaign' || saved.towerIndex < game.campaignTowers.length * LEVELS);
+    saved && Boolean(procgen) && (saved.mode !== 'campaign' || saved.towerIndex < game.campaignTowers.length * levelsFor(saved.variant));
   contBtn.classList.toggle('hidden', !canContinue);
   if (canContinue) {
     const where =
       saved.mode === 'campaign'
-        ? `${saved.variant === 'original' ? 'Original' : 'Reboot'} · T${towerOfIndex(saved.towerIndex).tower + 1}-${towerOfIndex(saved.towerIndex).level} ${titleCase(saved.towerName || '')}`
+        ? `${saved.variant === 'original' ? 'Original' : 'Reboot'} · T${towerOfIndex(saved.towerIndex, saved.variant).tower + 1}${saved.variant === 'original' ? '' : `-${towerOfIndex(saved.towerIndex, saved.variant).level}`} ${titleCase(saved.towerName || '')}`
         : `Endless · tower ${saved.towerIndex + 1}`;
     const lives = '♥'.repeat(Math.min(6, saved.lives || 1));
     $('continue-sub').textContent = `${where.replace(/\s+/g, ' ').trim()} · ${(saved.score || 0).toLocaleString()} pts · ${lives}`;
@@ -569,9 +575,9 @@ function startRun(cfg) {
   game.startNewGame({ mode: cfg.mode, startTower: cfg.startTower || 0, provider, runSeed: cfg.runSeed ?? null, resume: cfg.resume || null, variant: cfg.variant || 'reboot' });
 }
 
-const campaignStart = () => (Number($('start-tower').value) || 0) * (procgen ? LEVELS : 1);
-$('btn-start').addEventListener('click', () => startRun({ mode: 'campaign', variant: 'reboot', startTower: campaignStart() }));
-$('btn-original').addEventListener('click', () => startRun({ mode: 'campaign', variant: 'original', startTower: campaignStart() }));
+const campaignStart = (variant) => (Number($('start-tower').value) || 0) * (procgen ? levelsFor(variant) : 1);
+$('btn-start').addEventListener('click', () => startRun({ mode: 'campaign', variant: 'reboot', startTower: campaignStart('reboot') }));
+$('btn-original').addEventListener('click', () => startRun({ mode: 'campaign', variant: 'original', startTower: campaignStart('original') }));
 $('btn-daily').addEventListener('click', () => procgen && startRun({ mode: 'daily' }));
 $('btn-continue-run').addEventListener('click', () => {
   const saved = progress.savedRun;

@@ -416,6 +416,12 @@ export function buildLedge(l, pal, mats) {
     });
     const crate = new THREE.Mesh(G.box, boxMat);
     crate.position.set(0, 0.28, R + 0.36);
+    if (l.h) {
+      // real-tower blocks: one or two rows tall, standing on the step below
+      const hh = l.h * FH * 0.96;
+      crate.scale.y = hh / 0.56;
+      crate.position.y = hh / 2 + 0.005;
+    }
     crate.castShadow = true;
     node.add(crate);
     node.userData.mainMat = boxMat;
@@ -431,7 +437,16 @@ export function buildLedge(l, pal, mats) {
       body.rotation.z = k * 0.02;
     }
     node.userData.mainMat = mats.crumble;
-  } else if (l.type === 'ice') {
+  } else if (l.type === 'pillar') {
+    // Solid stone pillar (the original's poles): blocks the way, can't be stood on or shot
+    const hh = (l.h || 1) * FH;
+    const pil = new THREE.Mesh(new RoundedBoxGeometry(0.5, hh, 0.5, 2, 0.05), mats.ledgeFront);
+    pil.position.set(0, hh / 2, R + 0.3);
+    pil.castShadow = true;
+    pil.receiveShadow = true;
+    node.add(pil);
+    node.userData.mainMat = mats.ledgeFront;
+  } else if (l.type === 'ice' || l.type === 'slideR' || l.type === 'slideL') {
     add(G.iceSlab, mats.ice, -0.02);
     add(G.iceTop, mats.iceTop, 0.015);
     for (const k of [-0.34, -0.1, 0.12, 0.33]) {

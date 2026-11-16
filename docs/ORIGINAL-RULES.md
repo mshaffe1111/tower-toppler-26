@@ -132,19 +132,47 @@ Pogo stays fixed on screen, so the scroll is his motion.
   docs/RESEARCH.md will replace it with a sourced value.
 
 ### What the Original mode does now
-- **Jump:** a committed arc. Its sideways speed is fixed at takeoff (2.6 columns/s when
-  walking, UNVERIFIED; straight up from standing), it can't be steered in mid-air, and its
-  height is fixed.
-- **Walking:** 2.0 columns/s (measured).
-- **Snowballs:** about 6 columns of range, then they vanish (from the design brief). They
-  never come back round to hit you.
-- **Falls:** walking off a ledge, or being knocked off by an enemy, drops you straight down.
-- **Snowballs:** only thrown standing still. There is no charged shot and no ground-pound.
+Built from [RESEARCH.md](RESEARCH.md). "Port" means the PICO-8 port's values, scaled so its walk
+matches the 7800's measured 2.0 columns/s. That scale also turns its lift speed into the 4 rows/s
+the footage shows.
+- **Towers:** level 1 of each Original tower is the real 1987 layout, cell for cell, from the
+  Toppler transcription (`src/realTowerData.js`, checked against the ZX maps).
+  - Heights: 47, 71, 49, 66, 96, 64, 80, 96 rows.
+  - Time limits: 100–240 s (+20 per tower).
+  - Doors: 3-row door pairs at column c and c+8.
+  - Pillars: solid, can't be shot.
+  - Lifts: start one step up, with middle stops.
+- **Walking:** 2.0 columns/s (measured), one speed.
+- **Jump:** walking speed sideways, 1.5 columns long, 2.25 rows high (port); fixed at takeoff and
+  can't be steered. No jumping from a standstill (manuals); standing still, UP is doors and lifts.
+  Ledges are solid blocks, so you bump your head on one above.
+- **Stairs:** walking into a 1-row step hops onto it (14-tick arc, port).
+- **Falls:**
+  - After an arc, or walking off a ledge, you drop straight down (port: +1 unit/tick every 2
+    ticks, up to 4/tick).
+  - Getting hit tumbles you: a hop of about 2 rows, then a fall through platforms for 8 rows
+    (3 for the molecule), then you land ("land a few levels down", Hewson manual).
+- **Snowballs:** only standing still, one at a time, 3 columns at twice walking speed, rising
+  about a row (port; "short-range" in a review). They're absorbed by pillars and immune enemies.
+- **Crumbling ledges:** vanish the moment you stand on one and stay gone for that attempt; cross
+  them by jumping (manuals plus port).
+- **Slippery ledges:** push you while you stand still or shoot (Hewson manual: "push you left or
+  right"). Which way each one pushes is UNVERIFIED.
+- **Lifts:**
+  - Ride at 4 rows/s; hold to pass middle stops.
+  - An empty lift drops back to its bottom after 10 s.
+  - Riding into a flashing block knocks you off.
+  - Lifts can't be called by shooting.
+- **Enemies:**
+  - The seven kinds at their fixed spots: rolling ball, bouncing ball (moving or parked), slow and
+    fast vertical patrollers, slow and fast horizontal patrollers.
+  - At most 4 at once, appearing as you reach them and leaving 12 rows below you.
+  - The molecule crosses the screen at your height every 10 s.
+  - Only bouncing balls can be destroyed; rolling balls are stunned and still block you.
 - **Points:**
-  - Stairs: 40 per new step climbed on foot, first time only.
-  - Lifts: 50 the first time you board each one; height gained on a lift pays nothing.
-  - End of a climb: 10 per whole second left on the clock; from Tower 2 on, a technique bonus
-    of 100 minus 2 per knockdown.
-- **Crumbling ledges:** dissolve about 1 s after you step on them.
-- **Losing a life:** you restart at the tower's base with a fresh clock.
-
+  - 40 per new stair step and 50 per lift boarding (7800 manual), flat (no combos).
+  - End of a climb: Time 10/s; Technique (100 − 2 per knock-down) ×10 from Tower 2; Extras
+    (+5 per ball, +2 per block) ×10.
+  - Lift ride-length points: the formula is unknown, so not paid.
+- **Losing a life:** you restart at the bottom with a fresh clock; crumbled ledges, shot blocks
+  and enemies come back.
