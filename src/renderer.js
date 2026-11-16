@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { TowerFx } from './towerFx.js';
-import { createPropMaterials, themeLedgeMaterials, buildTowerBody, buildDoor, buildLiftTrack, buildLiftPod, buildLedge, animateConveyorTextures, FH, setStepHeight, STEP_ORIGINAL, STEP_REBOOT } from './props.js';
+import { createPropMaterials, themeLedgeMaterials, buildTowerBody, buildDoor, buildLiftTrack, buildLiftPod, buildLedge, animateConveyorTextures, FH, setStepHeight, STEP_ORIGINAL, STEP_REBOOT, ORIGINAL_STEP_OPTS } from './props.js';
 import { PogoRig } from './pogo.js';
 import { Ocean } from './water.js';
 import { createTowerStoneMaterial, createLedgeStoneMaterial, setWaterlineY } from './materials.js';
@@ -1222,7 +1222,8 @@ export class GameRenderer {
   renderTowerScene(state) {
     const { tower, player, camCol, camFloor, time, particles, snowballs, topple } = state;
     // the Original is built to the 7800's proportions (lower steps against the tower)
-    setStepHeight(state.original ? STEP_ORIGINAL : STEP_REBOOT);
+    if (state.original) setStepHeight(STEP_ORIGINAL, ORIGINAL_STEP_OPTS);
+    else setStepHeight(STEP_REBOOT);
     const pal = tower.palette;
     // A long lens from further back: the 7800 draws the tower flat, so Pogo (who stands in front
     // of it) mustn't be magnified against it. 46 degrees made him 0.30 of the tower's radius on
@@ -1521,7 +1522,8 @@ export class GameRenderer {
       this.pogoGroup.rotation.set(player.hang ? -0.25 : 0, pTheta, 0);
       // Reboot: ~2 steps tall. Original: the 7800 sprite, 2.1 rows of its lower steps (0.24 of the
       // tower's radius, 0.8 of a column wide), measured from the player's clip
-      this.pogoGroup.scale.setScalar(0.72 * (FH / 0.36) * (2.1 / 2.0));
+      // Pogo's height in steps: 2.0 on the 7800 (Level 1 video), 2.1 in the Reboot
+      this.pogoGroup.scale.setScalar(0.72 * (FH / 0.36) * ((state.original ? 2.0 : 2.1) / 2.0));
 
       // Nearest threat drives Pogo's eyes and nerves
       let dangerDir = null;

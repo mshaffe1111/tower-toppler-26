@@ -63,8 +63,11 @@ const ICE_TOP = 1.6; // a frozen enemy's ice block top, in steps above its floor
 const POGO_H = 1.8;
 // What you see, in steps (renderer: Pogo 2.08 rows tall; ledge slabs 0.175 units = 0.62 of a
 // 0.28 row): heads bump on the slab's underside, so Pogo never pokes into a ledge above
-const POGO_VIS_H = 2.05;
-const SLAB_ROWS = 0.62;
+const POGO_VIS_H_REBOOT = 2.05;
+const POGO_VIS_H_ORIGINAL = 1.95;
+// drawn ledge thickness in steps (props.js: Original 0.8 of a row; Reboot 0.175 / 0.28)
+const SLAB_ROWS_ORIGINAL = 0.8;
+const SLAB_ROWS_REBOOT = 0.62;
 // ORIGINAL timing from the PICO-8 port, on the same clock as everything else: 32 port ticks a
 // second, the scale at which its walk and lift speeds match the 7800 footage (2.0 columns/s,
 // 4 rows/s). Port source: the molecule ("bonker") waits 600 ticks after the last one, then
@@ -1283,8 +1286,8 @@ export class TowerTopplerGame {
       }
     } else if (p.onElevator) {
       const el = p.onElevator;
-      if (Math.abs(colDist(p.col, el.col + 0.5)) > 0.4 && !el.autoDir) {
-        // walked off: onto the ledge beside it (level), or off the edge
+      if (Math.abs(colDist(p.col, el.col + 0.5)) > 0.5 && !el.autoDir) {
+        // walked off: onto a ledge beside it at the same level, or a step down off its edge
         p.onElevator = null;
         p.onGround = Boolean(this._findLedgeAt(p.col, p.floor));
       } else if (Math.abs(colDist(p.col, el.col + 0.5)) > 0.65) {
@@ -1363,8 +1366,10 @@ export class TowerTopplerGame {
       // Ledges are solid blocks (as in 1987): a jump bumps its head on the slab's underside
       // instead of passing through it
       if (p.vy > 0 && !p.tumbling) {
-        const head = p.floor + POGO_VIS_H;
-        const prevHead = prevFloor + POGO_VIS_H;
+        const visH = this.original ? POGO_VIS_H_ORIGINAL : POGO_VIS_H_REBOOT;
+        const SLAB_ROWS = this.original ? SLAB_ROWS_ORIGINAL : SLAB_ROWS_REBOOT;
+        const head = p.floor + visH;
+        const prevHead = prevFloor + visH;
         for (const l of this.ledges) {
           if (!this._isSolid(l) || Math.abs(colDist(p.col, l.col + 0.5)) > 0.42) continue;
           const bottom = l.type === 'box' || l.type === 'pillar' ? l.floor : l.floor - SLAB_ROWS;

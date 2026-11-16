@@ -342,7 +342,8 @@ export function createPropMaterials(pal, chromeEnv) {
 // Ledges: stacked limestone slabs protruding from the wall (a lighter top course of three
 // slabs over a darker course of four, laid like bricks)
 // ---------------------------------------------------------------------------------------------
-const LEDGE_T = 0.175; // ledge thickness: one brick row
+const LEDGE_T0 = 0.175; // the slab geometry's own thickness
+let LEDGE_T = LEDGE_T0; // drawn thickness (setStepHeight: the 7800's ledges are ~0.8 of a row)
 let LGEO = null;
 function slabCourse(r0, r1, count, height, bevel, gapA, offset = 0) {
   const pieceA = (COL_ANGLE * 0.94 - gapA * (count - 1)) / count;
@@ -394,9 +395,15 @@ export function buildLedge(l, pal, mats) {
   const node = new THREE.Group();
   node.position.y = l.floor * FH;
   node.rotation.y = (l.col + 0.5) * COL_ANGLE;
+  const SLABS = [G.top, G.body, G.crumbleTop, G.crumbleBody, G.iceSlab, G.iceTop, G.convBase, G.convTread, G.convHazard];
   const add = (geo, mat, y = 0, cast = true) => {
     const m = new THREE.Mesh(geo, mat);
     m.position.y = y;
+    if (SLABS.includes(geo)) {
+      // slabs hang down from their top surface: thicken them to this mode's ledge thickness
+      m.position.y = y * (LEDGE_T / LEDGE_T0);
+      m.scale.y = LEDGE_T / LEDGE_T0;
+    }
     m.castShadow = cast;
     m.receiveShadow = true;
     node.add(m);
@@ -485,20 +492,25 @@ export function buildLedge(l, pal, mats) {
 export const DOOR_W = 0.68; // world units across the opening
 // World height of one floor (one stair step). Measured from 7800 footage: a step is about one
 // brick row and Pogo is about two steps tall, so steps are low and wide like real stairs.
-// Both modes use the 7800's proportions, measured from the player's clip: a step row is 0.28 of
-// a column's width (21.5 px rows on a 195 px-radius tower), so stairs, Pogo and enemies sit low
-// against the tower. (Kept switchable per mode with setStepHeight(); everything reads FH live.)
-export const STEP_ORIGINAL = 0.28;
+// ORIGINAL: the 7800 as in the player's Level 1 video: a step is one big brick row, 0.43 of a
+// column tall (54 px rows on a 321 px-radius tower), ledges ~0.8 of a row thick, Pogo 2 rows.
+// (An earlier clip measured 0.28, but it was the NES version, Castelian.) REBOOT: its own look.
+export const STEP_ORIGINAL = 0.43;
 export const STEP_REBOOT = 0.28;
+export const ORIGINAL_STEP_OPTS = { courses: 1, ledgeRows: 0.8 };
 export let FH = STEP_REBOOT;
 export let DOOR_H = FH * 2.78; // a doorway is ~2.8 steps tall: taller than Pogo
 let COURSE_H = FH / 2; // two brick courses per step
-export function setStepHeight(h) {
-  if (h === FH) return;
+// courses: brick courses per step (the 7800 draws one big brick row per step); ledgeRows: how
+// thick ledges are drawn, in steps (null = the slab's own 0.175)
+export function setStepHeight(h, { courses = 2, ledgeRows = null } = {}) {
   FH = h;
   DOOR_H = h * 2.78;
-  COURSE_H = h / 2;
+  COURSE_H = h / courses;
+  LEDGE_T = ledgeRows ? ledgeRows * h : LEDGE_T0;
 }
+// how thick a ledge is drawn, in steps (heads bump on its underside)
+export const slabRows = () => LEDGE_T / FH;
 const DGEOS = {};
 function doorGeos() {
   if (DGEOS[FH]) return DGEOS[FH];
