@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { TowerFx } from './towerFx.js';
-import { createPropMaterials, buildTowerBody, buildDoor, buildLiftTrack, buildLiftPod, buildLedge, animateConveyorTextures, FH } from './props.js';
+import { createPropMaterials, themeLedgeMaterials, buildTowerBody, buildDoor, buildLiftTrack, buildLiftPod, buildLedge, animateConveyorTextures, FH } from './props.js';
 import { PogoRig } from './pogo.js';
 import { Ocean } from './water.js';
 import { createTowerStoneMaterial, createLedgeStoneMaterial, setWaterlineY } from './materials.js';
@@ -11,6 +11,68 @@ import { COLS } from './levels.js';
 import { createEnemyModel, animateEnemy, warmEnemyModelsAsync } from './enemyModels.js';
 
 const TWO_PI = Math.PI * 2;
+// REBOOT time of day: keyframes from night through dawn, day, golden hour and dusk. The climb
+// drives it: dawn at the base, high sun partway up, sunset near the summit.
+const TOD_KEYS = [
+  [0.0, { top: '#040818', hor: '#16264f', sun: '#ff9d6a', elev: -0.12, sunAmt: 0.0, key: '#a8b8ff', keyI: 0.95, hemiSky: '#3b5aa8', hemiGround: '#070b18', hemiI: 0.38, fog: '#0d1838', exp: 0.92, stars: 1, day: 0, clouds: 0.25, mount: '#070d22' }],
+  [0.12, { top: '#1d2a66', hor: '#ec7f86', sun: '#ffb27c', elev: 0.05, sunAmt: 1, key: '#ffd3b4', keyI: 1.4, hemiSky: '#8aa0e0', hemiGround: '#22182c', hemiI: 0.48, fog: '#5a4a7c', exp: 0.96, stars: 0.3, day: 0.45, clouds: 0.6, mount: '#231d44' }],
+  [0.35, { top: '#1554c8', hor: '#6fb0f0', sun: '#fff2d8', elev: 0.62, sunAmt: 1, key: '#fff6ea', keyI: 1.95, hemiSky: '#9ccdff', hemiGround: '#2a3a2e', hemiI: 0.62, fog: '#5f9ad8', exp: 1.0, stars: 0, day: 1, clouds: 0.75, mount: '#2f5684' }],
+  [0.6, { top: '#1a58c0', hor: '#7cb6e8', sun: '#ffe8c2', elev: 0.38, sunAmt: 1, key: '#fff0da', keyI: 1.85, hemiSky: '#8cbcf0', hemiGround: '#2c3022', hemiI: 0.58, fog: '#6aa0d4', exp: 1.0, stars: 0, day: 1, clouds: 0.7, mount: '#345a86' }],
+  [0.8, { top: '#2b3274', hor: '#ff7a3a', sun: '#ff8a3c', elev: 0.1, sunAmt: 1, key: '#ffc690', keyI: 1.65, hemiSky: '#b48cd2', hemiGround: '#2c1822', hemiI: 0.52, fog: '#a25a62', exp: 0.98, stars: 0.08, day: 0.72, clouds: 0.8, mount: '#3a2044' }],
+  [0.92, { top: '#151842', hor: '#b24c6c', sun: '#ff6a52', elev: 0.0, sunAmt: 0.8, key: '#d8a4c4', keyI: 1.15, hemiSky: '#6a5aa8', hemiGround: '#120c1c', hemiI: 0.42, fog: '#4c2c52', exp: 0.94, stars: 0.6, day: 0.25, clouds: 0.5, mount: '#1c1430' }],
+  [1.0, { top: '#040818', hor: '#16264f', sun: '#ff9d6a', elev: -0.12, sunAmt: 0.0, key: '#a8b8ff', keyI: 0.95, hemiSky: '#3b5aa8', hemiGround: '#070b18', hemiI: 0.38, fog: '#0d1838', exp: 0.92, stars: 1, day: 0, clouds: 0.25, mount: '#070d22' }],
+];
+// REBOOT horizons: picked per tower (fitting its material), coloured by the time of day
+const SCENERY = ['peaks', 'islands', 'mesas', 'dunes', 'city', 'forest', 'volcano', 'icebergs'];
+const SCENERY_LOOK = {
+  peaks: { near: '#3e5a7a', far: '#8aa4c0', sea: '#0a7aa0', snow: 1 },
+  islands: { near: '#2e6a3e', far: '#7aaa96', sea: '#12c0b4' },
+  mesas: { near: '#a0583a', far: '#d09a7a', sea: '#1a8aa0' },
+  dunes: { near: '#d0a066', far: '#e6c89c', sea: '#20a0b0' },
+  city: { near: '#3a4250', far: '#8a94a6', sea: '#1a6a8a', lights: 1 },
+  forest: { near: '#24502e', far: '#6a9a7a', sea: '#0e7a7a' },
+  volcano: { near: '#2a2226', far: '#6a5a60', sea: '#1a4a5a' },
+  icebergs: { near: '#dcf0fa', far: '#b4d2e6', sea: '#0a5a80', snow: 0.4 },
+};
+const MATERIAL_SCENERY = {
+  rock: ['peaks', 'forest', 'islands'],
+  timber: ['forest', 'islands', 'peaks'],
+  siding: ['islands', 'city', 'forest'],
+  straw: ['dunes', 'islands', 'forest'],
+  shingle: ['islands', 'city', 'peaks'],
+  bamboo: ['forest', 'islands', 'volcano'],
+  sandstone: ['mesas', 'dunes'],
+  metal: ['city', 'peaks', 'volcano'],
+  brass: ['city', 'mesas', 'dunes'],
+  copper: ['city', 'islands'],
+  ice: ['icebergs', 'peaks'],
+  crystal: ['icebergs', 'peaks', 'volcano'],
+  marble: ['islands', 'mesas', 'peaks'],
+  obsidian: ['volcano', 'mesas'],
+};
+export function sceneryFor(tower) {
+  if (!tower) return 'peaks';
+  if (tower.scenery && SCENERY_LOOK[tower.scenery]) return tower.scenery;
+  const pool = MATERIAL_SCENERY[tower.material] || SCENERY;
+  const h = Math.imul(((tower.seed | 0) ^ Math.imul(tower.id | 0, 0x9e3779b1) ^ ((tower.level | 0) * 0x85ebca6b)) >>> 0, 0x27d4eb2d) >>> 0;
+  return pool[(h >>> 9) % pool.length];
+}
+const _todA = new THREE.Color();
+const _todB = new THREE.Color();
+function todSample(tod) {
+  let i = 0;
+  while (i < TOD_KEYS.length - 2 && tod > TOD_KEYS[i + 1][0]) i++;
+  const [t0, a] = TOD_KEYS[i];
+  const [t1, b] = TOD_KEYS[i + 1];
+  const k = Math.max(0, Math.min(1, (tod - t0) / Math.max(1e-6, t1 - t0)));
+  const out = {};
+  for (const key of Object.keys(a)) {
+    if (typeof a[key] === 'number') out[key] = a[key] + (b[key] - a[key]) * k;
+    else out[key] = _todA.set(a[key]).lerp(_todB.set(b[key]), k).getHexString();
+  }
+  return out;
+}
+
 // ORIGINAL enemy size factors (on top of the 0.95 base scale): see the enemy update below
 // (the molecule is sized by its whole orbit of atoms, not just the nucleus: ~2 rows overall)
 const ORIGINAL_SIZE = { eye: 1.5, robot: 1.22, chaser: 1.22, bouncer: 1.63, roller: 1.55, molecule: 1.8, spiker: 1.24 };
@@ -126,6 +188,14 @@ function createSkyMaterial() {
       sunAmount: { value: 1 },
       sunset: { value: 0 }, // 1 = the 1987 look: black starry sky over a banded sunset
       mountains: { value: 0 }, // 1 = ring of mountain silhouettes on the horizon
+      day: { value: 0 }, // Reboot time of day: 0 = night (nebula), 1 = full daylight
+      clouds: { value: 0 }, // Reboot cloud cover
+      mountainColor: { value: new THREE.Color('#0a1430') },
+      scenery: { value: 0 }, // horizon type (SCENERY below); 0 = the 1987 mountain ring
+      sceneFar: { value: new THREE.Color('#6a7a90') }, // the hazy far layer behind it
+      sceneFarAmt: { value: 0 },
+      snow: { value: 0 }, // snow caps on the near layer
+      cityLights: { value: 0 }, // lit windows (city at night)
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
@@ -145,6 +215,14 @@ function createSkyMaterial() {
       uniform float sunAmount;
       uniform float sunset;
       uniform float mountains;
+      uniform float day;
+      uniform float clouds;
+      uniform vec3 mountainColor;
+      uniform float scenery;
+      uniform vec3 sceneFar;
+      uniform float sceneFarAmt;
+      uniform float snow;
+      uniform float cityLights;
       varying vec3 vDir;
 
       float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -166,6 +244,50 @@ function createSkyMaterial() {
         return v;
       }
 
+      // The horizon's outline for each kind of scenery (height above the horizon at angle a)
+      float skyline(float a, float kind) {
+        if (kind < 0.5) {
+          // mountain peaks (ridged noise)
+          float ridge = 1.0 - abs(2.0 * fbm(vec2(a * 2.4, 7.3)) - 1.0);
+          return 0.006 + (0.07 + 0.03 * (1.0 - sunset)) * pow(ridge, 2.2) + 0.012 * noise(vec2(a * 18.0, 2.0));
+        } else if (kind < 1.5) {
+          // islands: green humps with open sea between
+          float isl = smoothstep(0.5, 0.68, noise(vec2(a * 2.6, 1.3)));
+          return -0.01 + isl * (0.03 + 0.03 * noise(vec2(a * 9.0, 4.1)) + 0.01 * noise(vec2(a * 30.0, 2.2)));
+        } else if (kind < 2.5) {
+          // mesas: flat-topped buttes with sheer sides
+          float n = noise(vec2(a * 3.2, 5.7));
+          return 0.004 + 0.045 * smoothstep(0.47, 0.5, n) + 0.03 * smoothstep(0.67, 0.7, n) + 0.003 * noise(vec2(a * 60.0, 1.0));
+        } else if (kind < 3.5) {
+          // dunes: long smooth swells
+          return 0.006 + 0.024 * pow(0.5 + 0.5 * sin(a * 4.0 + 2.5 * noise(vec2(a * 1.5, 3.0))), 1.6);
+        } else if (kind < 4.5) {
+          // city: blocks of towers, the odd spire
+          float c = floor(a * 46.0);
+          float hh = hash(vec2(c, 3.1));
+          float cl = smoothstep(0.3, 0.6, noise(vec2(a * 2.0, 8.0)));
+          float spire = step(0.9, hash(vec2(c, 9.7))) * step(abs(fract(a * 46.0) - 0.5), 0.1) * 0.03;
+          return 0.003 + cl * (0.012 + 0.05 * hh * hh + spire);
+        } else if (kind < 5.5) {
+          // forest: rolling hills furred with pointed trees
+          float hills = 0.012 + 0.024 * noise(vec2(a * 3.0, 6.0));
+          float f = fract(a * 110.0);
+          return hills + (1.0 - abs(f - 0.5) * 2.0) * 0.011 * (0.55 + 0.45 * hash(vec2(floor(a * 110.0), 1.7)));
+        } else if (kind < 6.5) {
+          // volcano: one great cone with a notched crater, among low ridges
+          float dv = abs(mod(a - 1.2 + 3.14159, 6.28318) - 3.14159);
+          float cone = min(max(0.0, 0.16 - dv * 0.32), 0.12) - 0.012 * (1.0 - smoothstep(0.0, 0.08, dv));
+          return max(cone, 0.006 + 0.02 * noise(vec2(a * 4.0, 2.0)));
+        }
+        // icebergs: scattered flat-topped white blocks
+        float c = floor(a * 7.0);
+        float f = fract(a * 7.0);
+        float on = step(0.4, hash(vec2(c, 2.3)));
+        float w = 0.2 + 0.25 * hash(vec2(c, 5.1));
+        float tri = clamp((w - abs(f - 0.5)) * 6.0, 0.0, 1.0);
+        return -0.01 + on * min(tri * 0.07, 0.022 + 0.025 * hash(vec2(c, 7.9)));
+      }
+
       void main() {
         vec3 d = normalize(vDir);
         float h = d.y;
@@ -180,7 +302,22 @@ function createSkyMaterial() {
         float n = fbm(uv * 1.6 + vec2(time * 0.01, 0.0));
         float n2 = fbm(uv * 3.1 - vec2(0.0, time * 0.008));
         float neb = smoothstep(0.45, 0.85, n) * smoothstep(-0.1, 0.35, h) * (1.0 - smoothstep(0.55, 0.95, h));
-        col += mix(glowColor, vec3(0.85, 0.45, 1.0), n2) * neb * 0.13 * (1.0 - sunset * 0.85);
+        col += mix(glowColor, vec3(0.85, 0.45, 1.0), n2) * neb * 0.13 * (1.0 - sunset * 0.85) * (1.0 - day);
+        // Reboot clouds: a soft band of cumulus near the horizon and thin cirrus higher up, lit by
+        // the sun (bright on the sun's side, shadowed underneath)
+        if (clouds > 0.0) {
+          vec2 cu = vec2(ang * 2.2, h * 7.0);
+          float c1 = fbm(cu * 1.3 + vec2(time * 0.006, 0.0));
+          float c2 = fbm(cu * 2.7 + vec2(-time * 0.004, 1.7));
+          float band = smoothstep(0.0, 0.08, h) * (1.0 - smoothstep(0.22, 0.42, h));
+          float cum = smoothstep(0.5, 0.78, c1 * 0.75 + c2 * 0.35) * band;
+          float cir = smoothstep(0.58, 0.9, fbm(vec2(ang * 0.9, h * 2.0) * 2.0 + vec2(time * 0.003, 0.0))) * smoothstep(0.25, 0.6, h) * 0.5;
+          float sdc = max(dot(d, normalize(sunDir)), 0.0);
+          vec3 lit = mix(vec3(0.62, 0.66, 0.78), vec3(1.0), day) * (0.75 + 0.25 * c2) + sunColor * pow(sdc, 6.0) * 0.6;
+          vec3 shade = mix(horizonColor, topColor, 0.5) * 0.62;
+          vec3 cc = mix(shade, lit, smoothstep(0.35, 0.9, c2 + h * 2.0));
+          col = mix(col, cc, clamp((cum + cir) * clouds, 0.0, 0.92));
+        }
         // The 1987 sky: near-black above, a banded sunset (yellow > orange > red > dusk) at the
         // horizon, with faint copper-bar banding as a nod to the Amiga
         if (sunset > 0.0) {
@@ -195,12 +332,35 @@ function createSkyMaterial() {
         // Mountain silhouettes ringing the horizon (ridged noise), lighter at the peaks
         if (mountains > 0.0) {
           float a = ang * 2.2;
-          float ridge = 1.0 - abs(2.0 * fbm(vec2(a * 2.4, 7.3)) - 1.0);
-          float m = 0.006 + 0.07 * pow(ridge, 2.2) + 0.012 * noise(vec2(a * 18.0, 2.0));
+          // the far layer: the same kind of scenery further off, paler in the haze
+          if (sceneFarAmt > 0.0) {
+            float mf = skyline(a * 0.8 + 11.3, scenery) * 0.8 + 0.012;
+            float inF = 1.0 - smoothstep(mf - 0.003, mf + 0.003, h);
+            col = mix(col, sceneFar, inF * sceneFarAmt * step(-0.03, h));
+          }
+          float m = skyline(a, scenery);
           float inside = 1.0 - smoothstep(m - 0.003, m + 0.003, h);
           float peak = smoothstep(m - 0.035, m, h);
-          vec3 mc = mix(vec3(0.03, 0.05, 0.14), vec3(0.24, 0.3, 0.55), peak * 0.8);
+          vec3 mc = mix(mountainColor, mountainColor * 2.4 + vec3(0.05), peak * 0.8 * (1.0 - snow));
+          // snow on the tops (lit by the day)
+          mc = mix(mc, vec3(0.9, 0.94, 1.0) * (0.3 + 0.7 * day), snow * smoothstep(m - 0.03, m - 0.006, h) * step(0.02, m));
+          // city windows after dark
+          if (cityLights > 0.0) {
+            float wv = step(0.8, hash(floor(vec2(a * 260.0, h * 420.0))));
+            mc += vec3(1.0, 0.78, 0.42) * wv * cityLights * step(h, m - 0.004) * 0.9;
+          }
           col = mix(col, mc, inside * mountains * step(-0.03, h));
+          // the volcano: glowing crater and a plume of smoke drifting off it
+          if (scenery > 5.5 && scenery < 6.5) {
+            float dv = mod(a - 1.2 + 3.14159, 6.28318) - 3.14159;
+            float crater = exp(-abs(dv) * 30.0) * exp(-abs(h - 0.108) * 60.0);
+            col += vec3(1.0, 0.35, 0.08) * crater * (0.6 + 0.6 * (1.0 - day)) * mountains;
+            float rise = max(h - 0.1, 0.0);
+            float px = dv - rise * 1.6 - sin(time * 0.05) * 0.05;
+            float plume = smoothstep(0.1 + rise * 1.2, 0.0, abs(px)) * smoothstep(0.1, 0.12, h) * (1.0 - smoothstep(0.3, 0.6, h));
+            plume *= 0.5 + 0.5 * fbm(vec2(px * 9.0, h * 14.0 - time * 0.12));
+            col = mix(col, mix(vec3(0.22, 0.2, 0.22), vec3(0.6, 0.58, 0.6), day) + vec3(0.4, 0.12, 0.0) * smoothstep(0.2, 0.1, h) * (1.0 - day), plume * 0.85 * mountains);
+          }
         }
         // Low sun behind the tower: disc, corona, and a warm band along the horizon
         float sd = max(dot(d, normalize(sunDir)), 0.0);
@@ -326,9 +486,72 @@ export class GameRenderer {
   }
 
   // Image-based lighting from the current sky (rebuilt only when the sky's look changes)
+  // REBOOT: the sky, sun, lights, fog and sea follow the time of day, which follows the climb
+  _applyTimeOfDay(state, mech, dark, bolt) {
+    const dt = this._realDt || 0.016;
+    const exitF = Math.max(4, state.exitFloor || (state.tower?.floors || 20) - 2);
+    const prog = Math.max(0, Math.min(1, (state.player?.floor || 0) / exitF));
+    let target = state.mode === 'title' ? 0.3 : 0.1 + prog * 0.8;
+    if (mech.kind === 'dark') target = 0.0; // the night tower stays night
+    if (this._tod == null || Math.abs(this._tod - target) > 0.5) this._tod = target;
+    this._tod += (target - this._tod) * Math.min(1, dt * 0.6);
+    const T = todSample(this._tod);
+    const overcast = mech.kind === 'storm' || mech.kind === 'wind' || mech.kind === 'blizzard' ? 0.55 : mech.kind === 'flood' ? 0.35 : 0;
+    const sky = this.skyMat.uniforms;
+    const grey = this._tempColor;
+    sky.topColor.value.set('#' + T.top).lerp(grey.set('#3a4458'), overcast * 0.5);
+    sky.horizonColor.value.set('#' + T.hor).lerp(grey.set('#7a8496'), overcast * 0.45);
+    sky.sunColor.value.set('#' + T.sun);
+    const el = T.elev;
+    this._sunDir = (this._sunDir || new THREE.Vector3()).set(SUN_DIR.x, 0, SUN_DIR.z).normalize().multiplyScalar(Math.cos(el * 1.3)).setY(Math.sin(el * 1.3));
+    sky.sunDir.value.copy(this._sunDir);
+    sky.sunAmount.value = T.sunAmt * (1 - overcast * 0.7) * (1 - dark * 0.9);
+    sky.day.value = T.day * (1 - dark);
+    sky.clouds.value = Math.min(1, T.clouds + overcast);
+    // the horizon: this tower's scenery, in the colours of the hour
+    const scName = sceneryFor(state.tower);
+    const SC = SCENERY_LOOK[scName];
+    sky.scenery.value = SCENERY.indexOf(scName);
+    sky.mountains.value = 0.94;
+    sky.mountainColor.value.set('#' + T.mount).lerp(this._tempColor2.set(SC.near), T.day * 0.8 * (1 - overcast * 0.4) * (1 - dark));
+    sky.snow.value = SC.snow || 0;
+    sky.cityLights.value = SC.lights ? Math.max(0, 1 - T.day * 1.4) : 0;
+    this._sceneSea = (this._sceneSea || new THREE.Color()).set(SC.sea);
+    this.towerScene.background.copy(sky.topColor.value);
+    if (!dark) {
+      this.towerScene.fog.color.set('#' + T.fog).lerp(grey.set('#8a94a6'), overcast * 0.4);
+      this.towerScene.fog.near = 26 + T.day * 10 - overcast * 8;
+      this.towerScene.fog.far = 70 + T.day * 30 - overcast * 20;
+    }
+    sky.horizonColor.value.lerp(this.towerScene.fog.color, 0.25);
+    sky.sceneFar.value.copy(sky.horizonColor.value).lerp(this._tempColor2.set(SC.far), T.day * 0.45).lerp(sky.mountainColor.value, 0.25);
+    sky.sceneFarAmt.value = 0.85;
+    // lights: the key light takes the day's colour; the rim light is the sun behind the tower
+    const dimmed = 1 - dark * 0.85;
+    this.keyLight.color.set('#' + T.key);
+    this.keyLight.intensity = T.keyI * dimmed * (1 - overcast * 0.25);
+    this.hemiLight.color.set('#' + T.hemiSky);
+    this.hemiLight.groundColor.set('#' + T.hemiGround);
+    this.hemiLight.intensity = T.hemiI * (1 - dark * 0.7) + bolt * 1.4 + overcast * 0.1;
+    this.rimLight.color.set('#' + T.sun);
+    this.rimLight.intensity = (0.5 + T.sunAmt * 0.9) * (1 - dark * 0.8) * (1 - overcast * 0.5);
+    this.rimLight.position.copy(this._sunDir).multiplyScalar(30);
+    this.fillLight.intensity = (0.22 + (1 - T.day) * 0.12) * (1 - dark * 0.9);
+    this.webgl.toneMappingExposure = T.exp * (1 - dark * 0.3) + bolt * 0.5;
+    // stars and the planet only show in the dark hours
+    if (this.starPoints) this.starPoints.material.opacity = 0.95 * Math.max(T.stars, dark);
+    if (this.planetGroup) this.planetGroup.visible = T.stars > 0.25 || dark > 0.5;
+    // the sea reflects the sky and the sun
+    const su = this.seaMat.uniforms;
+    su.skyColor.value.copy(this.towerScene.fog.color).lerp(sky.horizonColor.value, 0.3);
+    su.sunDir.value.copy(this._sunDir);
+    su.sunStrength.value = (0.4 + T.sunAmt * 0.6) * (1 - dark * 0.8);
+    this._todKey = Math.round(this._tod * 12) + (overcast ? 100 : 0) + sky.scenery.value * 1000;
+  }
+
   _updateEnvironment(pal, mech, heal) {
     const dark = mech?.darkness || 0;
-    const key = `${pal.glow}|${pal.brickA}|${dark.toFixed(1)}|${Math.round((heal || 0) * 4)}|${this.skyMat.uniforms.sunset.value}`;
+    const key = `${pal.glow}|${pal.brickA}|${dark.toFixed(1)}|${Math.round((heal || 0) * 4)}|${this.skyMat.uniforms.sunset.value}|${this._todKey ?? ''}`;
     if (this._envKey === key) return;
     this._envKey = key;
     if (!this._pmrem) {
@@ -505,6 +728,7 @@ export class GameRenderer {
     this._skyBaseColor = new THREE.Color('#020512');
     this._fogBaseColor = new THREE.Color('#061024');
     this._tempColor = new THREE.Color();
+    this._tempColor2 = new THREE.Color();
 
     this.enemyPool = [];
     this.snowballPool = [];
@@ -702,6 +926,7 @@ export class GameRenderer {
     const group = new THREE.Group();
     this._stoneMats = this._stoneMats || new Set();
     const mats = createPropMaterials(pal, this.chromeEnv);
+    if (tower.material && !tower.real) themeLedgeMaterials(mats, tower.material);
     for (const m of mats.stoneList) this._stoneMats.add(m);
 
     // Tower body: instanced cut stones (style per tower), string courses, crown, plinth
@@ -1049,6 +1274,21 @@ export class GameRenderer {
     if (orig) {
       sky.topColor.value.set('#020309');
       this.towerScene.fog.color.set('#1c0a22');
+      // the classic sky: no clouds or daylight, the fixed low sun behind the tower
+      sky.day.value = 0;
+      sky.clouds.value = 0;
+      sky.mountainColor.value.set('#0a1430');
+      sky.scenery.value = 0;
+      sky.sceneFarAmt.value = 0;
+      sky.snow.value = 0;
+      sky.cityLights.value = 0;
+      sky.sunDir.value.copy(SUN_DIR);
+      sky.sunColor.value.set('#ffb46e');
+      this.keyLight.color.set('#fff4e0');
+      this.hemiLight.groundColor.set('#020617');
+      this.rimLight.position.copy(SUN_DIR).multiplyScalar(30);
+      if (this.starPoints) this.starPoints.material.opacity = 0.95;
+      this._todKey = null;
     }
     this.planetGroup.visible = !orig;
     sky.time.value = time;
@@ -1070,6 +1310,11 @@ export class GameRenderer {
     const cleanDeep = this._c4 || (this._c4 = new THREE.Color('#012a40'));
     su.shallowColor.value.copy(toxicShallow).lerp(cleanShallow, heal).lerp(this._tempColor.set(pal.brickA), 0.15).multiplyScalar(0.75);
     su.deepColor.value.copy(toxicDeep).lerp(cleanDeep, heal);
+    // each scenery has its own sea (tropical turquoise, cold arctic blue...)
+    if (!orig && this._sceneSea) {
+      su.shallowColor.value.lerp(this._tempColor.copy(this._sceneSea).multiplyScalar(0.75), 0.5 * heal);
+      su.deepColor.value.lerp(this._tempColor.copy(this._sceneSea).multiplyScalar(0.18), 0.4 * heal);
+    }
     const seaY = mech.kind === 'flood' ? mech.waterFloor * FLOOR_HEIGHT : -0.62;
     // Ripples: splashes from the game, raindrops in storms, and the occasional lapping ring
     if (state.waterEvents && state.waterEvents.length) {
@@ -1118,6 +1363,8 @@ export class GameRenderer {
       this.towerScene.fog.near = 20;
       this.towerScene.fog.far = 58;
     }
+
+    if (!orig) this._applyTimeOfDay(state, mech, dark, bolt);
 
     // Swap cached tower group if tower changed
     const cached = this._getOrBuildTowerGroup(tower);

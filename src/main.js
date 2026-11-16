@@ -8,6 +8,7 @@ import { OptionsMenu } from './options.js';
 import { LEVELS, levelsFor, makeCampaignProvider, towerOfIndex } from './campaign.js';
 import { TROPHIES, TROPHY_GROUPS, trophyState, trophyCount, checkTrophies } from './trophies.js';
 import { makeGeneratedTower, dailyPlan } from './towergen.js';
+import { materialForSeed } from './props.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('game-canvas');
@@ -652,6 +653,7 @@ function startRun(cfg) {
       makeGeneratedTower({ seed: plan.seed, height: plan.height, difficulty: plan.difficulty, mechanic: plan.mechanic, palette: base.palette, name: `DAILY · ${plan.label.toUpperCase()}`, look: ['eye', 'robot', 'spiker'][plan.weekday % 3] }) ||
       procgen.generateTower({ seed: plan.seed, difficulty: 0.55, id: 900, name: null });
     tower.seed = plan.seed;
+    tower.material = materialForSeed(plan.seed, plan.mechanic);
     provider = (i) => (i === 0 ? tower : null);
   } else if (cfg.mode === 'campaign') {
     // 8 towers x 3 levels: classic layout first, then two fresh generated levels per tower
@@ -666,6 +668,7 @@ function startRun(cfg) {
       if (!cache.has(i)) {
         const t = procgen.endlessTower(i, runSeed);
         t.seed = t.seed ?? runSeed * 31 + i;
+        t.material = t.material || materialForSeed((runSeed >>> 0) + i * 7919, t.mechanic);
         cache.set(i, t);
       }
       return cache.get(i);

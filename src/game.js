@@ -317,7 +317,7 @@ export class TowerTopplerGame {
       enemies: raw.enemies.map((e) => ({ ...e })),
       spawn: { ...raw.spawn },
       mechanic: raw.mechanic || 'none',
-      cacheKey: `${raw.id}|${raw.seed ?? ''}|${settings.mirror ? 'm' : ''}|${raw.original ? 'o' : ''}${raw.real ? 'r' : ''}`,
+      cacheKey: `${raw.id}|${raw.seed ?? ''}|${settings.mirror ? 'm' : ''}|${raw.original ? 'o' : ''}${raw.real ? 'r' : ''}|${raw.material || ''}`,
     };
     if (settings.mirror) {
       const mc = (c) => COLS - 1 - c;

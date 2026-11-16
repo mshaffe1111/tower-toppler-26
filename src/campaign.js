@@ -13,6 +13,7 @@ export const SPEC_FLOORS = [24, 28, 26, 32, 36, 34, 40, 46];
 const GEN_MECH = { none: 'none', pistons: 'pistons', vault: 'none', blizzard: 'blizzard', collapse: 'collapse', flood: 'flood', dark: 'dark', storm: 'wind' };
 
 import { buildRealTower, hasRealTower } from './realTowers.js';
+import { TOWER_MATERIAL } from './props.js';
 
 const mix = (a, b) => (Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x632be5ab, 0xc2b2ae35)) >>> 0;
 
@@ -39,7 +40,7 @@ export function makeCampaignProvider({ towers, procgen, runSeed, variant }) {
     }
     if (!procgen) {
       const t = towers[i];
-      return t ? { ...t, level: 1, levels: 1 } : null;
+      return t ? { ...t, level: 1, levels: 1, material: TOWER_MATERIAL[t.id]?.[0] } : null;
     }
     const { tower, level } = towerOfIndex(i);
     const base = towers[tower];
@@ -59,6 +60,7 @@ export function makeCampaignProvider({ towers, procgen, runSeed, variant }) {
         style: variant === 'original' ? 'classic' : 'modern',
       });
       t.palette = base.palette;
+      t.material = TOWER_MATERIAL[base.id]?.[level - 1];
       t.level = level;
       t.levels = LEVELS;
       t.canonical = canonical;
