@@ -18,11 +18,6 @@ export const isStandalone =
 
 const UA = navigator.userAgent || '';
 const isIOS = /iPad|iPhone|iPod/.test(UA) || (/Macintosh/.test(UA) && navigator.maxTouchPoints > 1);
-const isMobile =
-  (navigator.userAgentData && navigator.userAgentData.mobile) ||
-  isIOS ||
-  /Android|Mobile|Silk|Kindle/i.test(UA) ||
-  (mq('(pointer: coarse)') && !mq('(hover: hover)'));
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
@@ -168,58 +163,4 @@ export function setupInstallPrompt(buttonEl) {
       if (iosHint) hide();
     }, 9000);
   }
-}
-
-/**
- * In a mobile browser tab (not standalone), go fullscreen on the first tap on #stage-wrap.
- * Fullscreens the whole document so the HUD and touch controls stay visible.
- * Touch pointerdown doesn't grant user activation (only pointerup/touchend do), so for touch the
- * request is made on the matching pointerup. Harmless where unsupported (e.g. iPhone Safari).
- */
-export function requestFullscreenOnFirstTap({ target = '#stage-wrap' } = {}) {
-  if (isStandalone || !isMobile) return;
-  const root = document.documentElement;
-  const req = root.requestFullscreen || root.webkitRequestFullscreen;
-  const enabled = document.fullscreenEnabled || document.webkitFullscreenEnabled;
-  if (!req || !enabled) return;
-  const el = typeof target === 'string' ? document.querySelector(target) : target;
-  if (!el) return;
-
-  let failures = 0;
-  const isFullscreen = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
-
-  const attempt = () => {
-    if (isFullscreen()) return done();
-    try {
-      const p = req.call(root, { navigationUI: 'hide' });
-      if (p && typeof p.then === 'function') {
-        p.then(done, () => {
-          if (++failures >= 3) done();
-        });
-      } else {
-        done();
-      }
-    } catch (_) {
-      if (++failures >= 3) done();
-    }
-  };
-
-  const onDown = (e) => {
-    if (e.pointerType === 'mouse') {
-      attempt();
-      return;
-    }
-    const onUp = (u) => {
-      if (u.pointerId !== e.pointerId) return;
-      window.removeEventListener('pointerup', onUp, true);
-      attempt();
-    };
-    window.addEventListener('pointerup', onUp, true);
-  };
-
-  function done() {
-    el.removeEventListener('pointerdown', onDown, true);
-  }
-
-  el.addEventListener('pointerdown', onDown, { capture: true, passive: true });
 }

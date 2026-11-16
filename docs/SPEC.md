@@ -140,6 +140,12 @@ Related: [ORIGINAL-RULES.md](ORIGINAL-RULES.md), [TWISTS.md](TWISTS.md), [WORLDS
   swipe up for doors").
 
 ## Gap list (current build vs this spec), in build order
+Done since this list was written:
+- **Controls (1):** tap to fire (standing still), no on-screen buttons, two fingers rewind.
+- **Towers (2):** spec heights; staircase-led; barrier bricks; molecules spawn on lingering.
+- **Feel (3):** committed 2-column jump arc in the Original.
+- **Scoring (4):** stair, lift and technique scoring.
+
 1. **Controls:** tap to fire, second-thumb tap fires, no on-screen button deck (full screen),
    drag-clutch walking.
 2. **Towers:** taller (24–46 rows); staircase-led climbing; many more barrier bricks, including

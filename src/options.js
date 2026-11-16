@@ -124,6 +124,7 @@ export const OPTION_TABS = [
       },
       { key: 'diorama', label: 'Diorama focus', desc: 'Tilt-shift depth of field, like a toy model', options: ONOFF },
       { key: 'reducedMotion', label: 'Reduced motion', desc: 'No screen shake, flashes or camera swoops', options: ONOFF },
+      { key: 'autoFullscreen', label: 'Full screen', desc: 'On phones, hide the browser bars when a game starts', options: ONOFF },
     ],
   },
   {

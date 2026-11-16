@@ -95,8 +95,8 @@
 
       <!-- Main Menu -->
       <div id="overlay-title" class="overlay overlay-hero">
-        <div class="modal-card modal-hero">
-          <div class="retro-pill">A NEBULUS REBOOT • 2026</div>
+        <div class="modal-card modal-hero title-screen">
+          <div class="title-kicker">A NEBULUS REBOOT · 2026</div>
           <h1 class="game-title logo" aria-label="Tower Toppler '26">
             <span class="logo-tower" aria-hidden="true"><i>T</i><i>O</i><i>W</i><i>E</i><i>R</i></span>
             <span class="logo-toppler" aria-hidden="true"><i>T</i><i>O</i><i>P</i><i>P</i><i>L</i><i>E</i><i>R</i></span>
@@ -105,41 +105,47 @@
           </h1>
           <p class="game-tagline">Climb eight towers. Reach the top. Topple them all.</p>
 
-          <button id="btn-continue-run" class="btn-continue hidden" type="button">
-            <span class="cont-title">▶ CONTINUE</span>
-            <span id="continue-sub" class="cont-sub"></span>
-          </button>
-          <div class="campaign-row">
-            <button id="btn-original" class="btn-campaign btn-campaign-orig" type="button">
-              <span class="camp-name">ORIGINAL</span>
-              <span class="camp-sub">The 1987 towers &amp; rules</span>
-            </button>
-            <button id="btn-start" class="btn-campaign btn-campaign-reboot" type="button">
-              <span class="camp-name">REBOOT</span>
-              <span class="camp-sub">Twists, new foes, rewind</span>
-            </button>
-          </div>
-          <div class="tower-select-row">
-            <label for="start-tower">TOWER</label>
-            <select id="start-tower"></select>
-          </div>
+          <div class="title-lower">
+            <div class="tower-pick" role="group" aria-label="Starting tower">
+              <button id="tp-prev" class="tp-arrow" type="button" aria-label="Previous tower"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg></button>
+              <div class="tp-center">
+                <div class="tp-num">TOWER <b id="tp-n">1</b> / 8</div>
+                <div id="tp-name" class="tp-name">The Tower of Eyes</div>
+                <div id="tp-dots" class="tp-dots" aria-hidden="true"></div>
+              </div>
+              <button id="tp-next" class="tp-arrow" type="button" aria-label="Next tower"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" /></svg></button>
+              <select id="start-tower" class="visually-hidden" tabindex="-1" aria-hidden="true"></select>
+            </div>
 
-          <div class="mode-row">
-            <button id="btn-daily" class="btn-mode" type="button">
-              <span class="mode-ico">📅</span><span class="mode-name">DAILY TOWER</span><span id="daily-sub" class="mode-sub">New every day</span>
-            </button>
-            <button id="btn-endless" class="btn-mode" type="button">
-              <span class="mode-ico">♾️</span><span class="mode-name">ENDLESS</span><span id="endless-sub" class="mode-sub">How high can you go?</span>
-            </button>
-          </div>
+            <nav class="title-menu" aria-label="Play">
+              <button id="btn-continue-run" class="tm-item tm-continue hidden" type="button">
+                <span class="tm-name">CONTINUE</span>
+                <span id="continue-sub" class="tm-sub"></span>
+              </button>
+              <button id="btn-original" class="tm-item tm-orig" type="button">
+                <span class="tm-name">ORIGINAL</span>
+                <span class="tm-sub">The 1987 towers &amp; rules</span>
+              </button>
+              <button id="btn-start" class="tm-item tm-reboot" type="button">
+                <span class="tm-name">REBOOT</span>
+                <span class="tm-sub">Twists · new foes · rewind</span>
+              </button>
+            </nav>
 
-          <div class="menu-row">
-            <button id="btn-settings" class="btn-chip" type="button">⚙ OPTIONS</button>
-            <button id="btn-skins" class="btn-chip" type="button">🎨 POGO</button>
-            <button id="btn-howto" class="btn-chip" type="button">❔ HOW TO</button>
-            <button id="btn-install" class="btn-chip hidden" type="button">⬇ INSTALL</button>
+            <div class="title-modes">
+              <button id="btn-daily" class="tl-link" type="button"><span class="tl-name">DAILY TOWER</span><span id="daily-sub" class="tl-sub">New every day</span></button>
+              <button id="btn-endless" class="tl-link" type="button"><span class="tl-name">ENDLESS</span><span id="endless-sub" class="tl-sub">How high can you go?</span></button>
+            </div>
+
+            <div class="title-icons">
+              <button id="btn-settings" class="ti-btn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2" /><path d="M12 2.8v2.6M12 18.6v2.6M21.2 12h-2.6M5.4 12H2.8M18.5 5.5l-1.8 1.8M7.3 16.7l-1.8 1.8M18.5 18.5l-1.8-1.8M7.3 7.3L5.5 5.5" /><circle cx="12" cy="12" r="6.6" /></svg><span>OPTIONS</span></button>
+              <button id="btn-skins" class="ti-btn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 15.5c0-4.4 3.4-7.6 7.5-7.6s7.5 3.2 7.5 7.6c0 2.6-3.3 3.9-7.5 3.9s-7.5-1.3-7.5-3.9z" /><circle cx="8.6" cy="7.6" r="2.4" /><circle cx="15.4" cy="7.6" r="2.4" /><path d="M9.3 14.6c1.6 1 3.8 1 5.4 0" /></svg><span>POGO</span></button>
+              <button id="btn-howto" class="ti-btn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M9.6 9.4a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1.1.9-1.1 1.6v.6" /><circle cx="12" cy="17" r="0.6" /></svg><span>HOW TO</span></button>
+              <button id="btn-fullscreen" class="ti-btn hidden" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="fs-in" d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" /><path class="fs-out" d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5" /></svg><span>FULL SCREEN</span></button>
+              <button id="btn-install" class="ti-btn hidden" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v11M7.5 10l4.5 4.5 4.5-4.5M5 19.5h14" /></svg><span>INSTALL</span></button>
+            </div>
+            <div id="medal-summary" class="medal-summary">0 medals</div>
           </div>
-          <div id="medal-summary" class="medal-summary">🏅 0 medals</div>
         </div>
       </div>
 
@@ -194,6 +200,7 @@
           <p id="pause-tower-name" class="modal-sub">Tower 1: The Tower of Eyes</p>
           <button id="btn-resume" class="btn-primary" type="button">RESUME</button>
           <button id="btn-pause-settings" class="btn-secondary" type="button">⚙ OPTIONS</button>
+          <button id="btn-pause-fullscreen" class="btn-secondary hidden" type="button">⛶ FULL SCREEN</button>
           <button id="btn-restart" class="btn-secondary" type="button">QUIT TO MENU</button>
         </div>
       </div>
@@ -315,6 +322,6 @@
     }
   }
   </script>
-  <script type="module" src="src/main.js?v=11"></script>
+  <script type="module" src="src/main.js?v=12"></script>
 </body>
 </html>

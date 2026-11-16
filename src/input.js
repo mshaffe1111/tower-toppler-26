@@ -35,6 +35,7 @@ export class InputController {
     this._padPrev = {};
     this.onPause = null; // set by main.js; fired by Esc / P / gamepad Start
     this.lastDevice = 'touch';
+    this.chargeEnabled = true; // the game turns hold-to-charge off in the Original
 
     this._bindTouch();
     this._bindKeyboard();
@@ -224,6 +225,8 @@ export class InputController {
       entry.el?.classList.remove('active');
     } else if (entry.type === 'canvas' && entry.action) {
       this._hold(entry.action, src, false);
+    } else if (entry.type === 'rewind2') {
+      this._hold('rewind', src, false);
     } else if (entry.type === 'slide') {
       clearTimeout(entry.holdTimer);
       for (const d of entry.dirs || []) this._hold(d, src, false);
@@ -240,11 +243,12 @@ export class InputController {
     }
   }
 
-  // ---------- Slide (default): one thumb anywhere on the screen ----------
-  // Put a thumb down anywhere that isn't a button and slide: left / right walks (speed by how far
-  // you slide), up jumps (and goes through doors / rides lifts up: the game makes jump smart),
-  // down rides lifts down or ground-pounds. The centre follows the thumb, so it never runs out of
-  // room. Only FIRE and REWIND are buttons.
+  // ---------- Slide (default): one thumb anywhere on the screen, no buttons ----------
+  // Put a thumb down anywhere and slide: left / right walks (speed by how far you slide), a push up
+  // (straight or diagonal) jumps (and goes through doors / rides lifts up: the game makes jump
+  // smart), down rides lifts down or ground-pounds. The centre follows the thumb, so it never runs
+  // out of room. A TAP throws a snowball (you're stopped whenever no thumb is sliding); touch and
+  // hold still charges a mega-snowball (Reboot); a second finger held down rewinds (Reboot).
   _bindSlide() {
     const app = document.getElementById('app');
     if (!app) return;
@@ -257,11 +261,15 @@ export class InputController {
       (e) => {
         if (!isSlide() || excluded(e.target)) return;
         for (const ent of this._activePointers.values()) {
-          if (ent.type === 'slide') {
-            // a second thumb tapping anywhere fires (the first one keeps walking)
+          if (ent.type === 'slide' || ent.type === 'rewind2') {
+            // a second finger held down = REWIND (the first one keeps control). It never fires:
+            // snowballs are thrown standing still, with a tap.
             e.preventDefault();
             e.stopPropagation();
-            this._pulseAction('fire', 90);
+            if (ent.type === 'rewind2') return;
+            this._activePointers.set(e.pointerId, { type: 'rewind2', id: e.pointerId });
+            this._hold('rewind', `ptr:${e.pointerId}`, true);
+            try { app.setPointerCapture(e.pointerId); } catch (_) {}
             return;
           }
         }
@@ -272,7 +280,7 @@ export class InputController {
         this._activePointers.set(e.pointerId, entry);
         // touch and hold still = charge a mega-snowball (released on lift-off)
         entry.holdTimer = setTimeout(() => {
-          if (!this._activePointers.has(e.pointerId) || entry.moved > 12) return;
+          if (!this.chargeEnabled || !this._activePointers.has(e.pointerId) || entry.moved > 12) return;
           entry.charging = true;
           this._hold('fire', `ptr:${e.pointerId}`, true);
         }, 320);
@@ -289,7 +297,7 @@ export class InputController {
     });
     const onUp = (e) => {
       const entry = this._activePointers.get(e.pointerId);
-      if (!entry || entry.type !== 'slide') return;
+      if (!entry || (entry.type !== 'slide' && entry.type !== 'rewind2')) return;
       this._releasePointer(e.pointerId);
     };
     app.addEventListener('pointerup', onUp);
