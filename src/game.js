@@ -42,7 +42,7 @@ const PHYS = {
   poundVy: -14,
 };
 const ENEMY_PACE = 0.62; // global enemy speed multiplier (classic, deliberate pace)
-const ICE_TOP = 0.72; // a frozen enemy's ice block top, in floors above its centre floor
+const ICE_TOP = 0.95; // a frozen enemy's ice block top, in floors above its floor (matches the drawn block)
 const REWIND_MAX = 3; // seconds of rewind in the meter
 const HISTORY_MAX = 240; // 4s of snapshots at 60fps
 const GHOST_HZ = 15;
@@ -1114,17 +1114,24 @@ export class TowerTopplerGame {
     } else if (p.onElevator) {
       const el = p.onElevator;
       if (Math.abs(colDist(p.col, el.col + 0.5)) > 0.65) {
+        el.autoDir = 0;
         p.onElevator = null;
         p.onGround = false;
       } else {
-        if (inp.up || inp.jump) {
+        // Lifts ride on their own once started: one press / flick of UP (or jump) carries you to
+        // the top stop, DOWN to the bottom; holding still works, and the other way reverses it
+        if (this.input.justPressed.up || this.input.justPressed.jump || inp.up || inp.jump) el.autoDir = 1;
+        else if (this.input.justPressed.down || inp.down) el.autoDir = -1;
+        if (el.autoDir === 1) {
           el.recallTarget = null;
           el.dir = 1;
           el.floor = Math.min(el.maxFloor, el.floor + el.speed * 0.45 * dt);
-        } else if (inp.down) {
+          if (el.floor >= el.maxFloor) el.autoDir = 0;
+        } else if (el.autoDir === -1) {
           el.recallTarget = null;
           el.dir = -1;
           el.floor = Math.max(el.minFloor, el.floor - el.speed * 0.45 * dt);
+          if (el.floor <= el.minFloor) el.autoDir = 0;
         }
         p.floor = el.floor;
         p.vy = 0;
@@ -1461,7 +1468,7 @@ export class TowerTopplerGame {
       let consumed = false;
       for (const en of this.enemies) {
         if (en.dead || sb.hit.has(en)) continue;
-        if (Math.abs(en.floor - sb.floor) < 0.65 + sb.power * 0.25 && Math.abs(colDist(sb.col, en.col)) < 0.55 + sb.power * 0.2) {
+        if (Math.abs(en.floor - sb.floor) < 0.72 + sb.power * 0.25 && Math.abs(colDist(sb.col, en.col)) < 0.62 + sb.power * 0.2) {
           sb.hit.add(en);
           en.hitFlash = 0.18;
           const immune = en.type === 'robot' || (this.original && (en.type === 'eye' || en.type === 'molecule'));
@@ -1629,7 +1636,7 @@ export class TowerTopplerGame {
       }
 
       // Contact: knocked back down to the ledge below (into the sea if there's none)
-      if (p.invuln <= 0 && !p.hidden && Math.abs(en.floor - p.floor) < 0.55 && Math.abs(colDist(en.col, p.col)) < 0.5) {
+      if (p.invuln <= 0 && !p.hidden && Math.abs(en.floor - p.floor) < 0.6 && Math.abs(colDist(en.col, p.col)) < 0.56) {
         this._knockDown(colDist(en.col, p.col) >= 0 ? 1 : -1);
         if (en.fireball) {
           en.dead = true;
