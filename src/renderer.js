@@ -511,7 +511,7 @@ export class GameRenderer {
     this.towerScene.add(this.debrisPool.group);
 
     this.sharedParticleGeo = new THREE.BoxGeometry(0.14, 0.14, 0.14);
-    this.sharedSnowballGeo = new THREE.IcosahedronGeometry(0.16, 1);
+    this.sharedSnowballGeo = new THREE.IcosahedronGeometry(0.11, 1);
     this.sharedSnowballMat = new THREE.MeshStandardMaterial({
       color: '#ffffff',
       emissive: '#7dd3fc',
@@ -754,7 +754,7 @@ export class GameRenderer {
   _createEnemyMesh(type) {
     const model = type === 'robot' ? 'chaser' : type;
     const g = createEnemyModel(model, { chromeEnv: this.chromeEnv, softDotTex: this.softDotTex });
-    g.scale.setScalar(1.6); // about Pogo's size, like the 1987 sprites
+    g.scale.setScalar(0.95); // Pogo-sized, like the 7800 sprites
     return g;
   }
 
@@ -1254,7 +1254,7 @@ export class GameRenderer {
       this._applySkin(this.pogoGroup, currentSkin());
       this.pogoGroup.position.set(px, py + (player.hang ? 0.05 : 0), pz);
       this.pogoGroup.rotation.set(player.hang ? -0.25 : 0, pTheta, 0);
-      this.pogoGroup.scale.setScalar(1.1); // the plumper body is wider: keep him about one ledge wide, like the original
+      this.pogoGroup.scale.setScalar(0.72); // like the 7800 sprite (~15% of the tower face), small against the tower
 
       // Nearest threat drives Pogo's eyes and nerves
       let dangerDir = null;
@@ -1343,7 +1343,7 @@ export class GameRenderer {
       // Ground enemies sit exactly on the ledge surface (measured from the model's own bounds)
       if (slot.groundOffset === undefined) slot.groundOffset = this._enemyGroundOffset(slot.mesh, en.type);
       // frozen: the ice block's top sits exactly where Pogo can stand on it (game ICE_TOP 0.95)
-      const yOff = en.stunTimer > 0 && !en.dead ? 0.95 - 0.367 * slot.mesh.scale.y : slot.groundOffset;
+      const yOff = en.stunTimer > 0 && !en.dead ? 0.62 - 0.367 * slot.mesh.scale.y : slot.groundOffset;
       slot.mesh.position.set(er * Math.sin(eTheta), en.floor * FLOOR_HEIGHT + yOff, er * Math.cos(eTheta));
       const animEn = en.type === 'robot' ? { ...en, type: 'chaser', alert: 0 } : en;
       animateEnemy(slot.mesh, animEn, { time, dt: this._realDt || 1 / 60, eTheta, player: { col: player.col, floor: player.floor }, camCol, COLS });
@@ -1378,7 +1378,7 @@ export class GameRenderer {
       m.visible = true;
       const st = wrapAngle((sb.col - camCol) * COL_ANGLE);
       const sr = TOWER_RADIUS + 0.38;
-      m.position.set(sr * Math.sin(st), sb.floor * FLOOR_HEIGHT + 0.28, sr * Math.cos(st));
+      m.position.set(sr * Math.sin(st), sb.floor * FLOOR_HEIGHT, sr * Math.cos(st)); // from Pogo's hands
       m.rotation.set(time * 6, time * 8, 0);
       m.scale.setScalar(1 + (sb.power || 0) * 1.6);
     }

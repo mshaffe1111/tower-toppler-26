@@ -1080,8 +1080,8 @@ export class PogoRig {
       ud.legs[1].hip.position.y = HIP.y - 0.01 + Math.max(0, -k) * 0.08;
     }
     const breathe = Math.sin(t * 2.2 + st.idleSeed) * 0.012;
-    const bob = moving ? Math.abs(Math.sin(ph)) * 0.055 * stepAmt : breathe;
-    const waddle = moving ? Math.sin(ph) * 0.13 * stepAmt : 0;
+    const bob = moving ? Math.abs(Math.sin(ph)) * 0.035 * stepAmt : breathe;
+    const waddle = moving ? Math.sin(ph) * 0.07 * stepAmt : 0;
     const accel = (s.vx - st.prevVx) / dt;
     st.prevVx = s.vx;
     const leanGoal = moving ? Math.min(0.16, speed * 0.045) : 0;
