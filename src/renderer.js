@@ -1410,7 +1410,7 @@ export class GameRenderer {
       this.skyDome.position.copy(skyPos);
     }
     this._updateEnvironment(pal, mech, heal);
-    this.postfx.render({ time, focus, flash: (state.mech?.lightning || 0) * 0.35, darkness: state.mech?.darkness || 0 });
+    this.postfx.render({ time, focus, flash: (state.mech?.lightning || 0) * 0.35, darkness: state.mech?.darkness || 0, sharp: state.mode === 'title' });
   }
 
   // Distance from an enemy model's origin down to its lowest point (after the group scale),

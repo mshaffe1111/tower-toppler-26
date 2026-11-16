@@ -195,11 +195,15 @@ export class PostFX {
     }
   }
 
-  render({ time = 0, focus = 0.42, flash = 0, darkness = 0 } = {}) {
+  // sharp: skip the tilt-shift this frame (the title screen shows the tower crisp)
+  render({ time = 0, focus = 0.42, flash = 0, darkness = 0, sharp = false } = {}) {
     if (!this.useComposer || !this.composer) {
       this.webgl.render(this.scene, this.camera);
       return;
     }
+    const tilt = this.diorama && this.tier !== 'low' && !sharp;
+    this.tiltH.enabled = tilt;
+    this.tiltV.enabled = tilt;
     this.tiltH.uniforms.focus.value = focus;
     this.tiltV.uniforms.focus.value = focus;
     this.grade.uniforms.time.value = time;

@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS = {
   skin: 'classic',
   ghosts: true,
   haptics: true,
+  autoFullscreen: true, // phones: go full screen when a game starts (hides the browser bars)
 };
 
 const DEFAULT_PROGRESS = {

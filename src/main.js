@@ -223,7 +223,6 @@ import('./pwa.js')
   .then((m) => {
     m.registerPWA?.();
     m.setupInstallPrompt?.($('btn-install'));
-    m.requestFullscreenOnFirstTap?.();
   })
   .catch(() => {});
 
@@ -357,6 +356,7 @@ function refreshMenu() {
     sel.appendChild(opt);
   });
   if (prevVal) sel.value = prevVal;
+  showTowerPick(0);
   // Continue a saved campaign / endless run
   const saved = progress.savedRun;
   const contBtn = $('btn-continue-run');
@@ -416,10 +416,128 @@ handleResize();
 replayLogo();
 $('start-tower').addEventListener('change', () => {
   if (game.mode === 'title') game.loadTower(Number($('start-tower').value) || 0);
+  showTowerPick(0);
 });
+
+// Tower picker on the title: ‹ TOWER n / 8 › with the name and a dot per tower in its colour.
+// The arrows step through; a sideways swipe anywhere on the title does the same.
+function showTowerPick(dir) {
+  const towers = game.campaignTowers;
+  const i = Number($('start-tower').value) || 0;
+  const t = towers[i];
+  if (!t) return;
+  $('tp-n').textContent = String(i + 1);
+  const m = getMedals(`c${t.id}${settings.mirror ? 'm' : ''}`);
+  const icons = `${m.time ? '⏱️' : ''}${m.nohit ? '🛡️' : ''}${m.secrets ? '⭐' : ''}`;
+  const name = $('tp-name');
+  name.textContent = titleCase(t.name);
+  if (icons) {
+    const sp = document.createElement('span');
+    sp.className = 'tp-medals';
+    sp.textContent = icons;
+    name.appendChild(sp);
+  }
+  const dots = $('tp-dots');
+  if (dots.children.length !== towers.length) {
+    dots.innerHTML = '';
+    for (const tw of towers) {
+      const d = document.createElement('i');
+      d.style.setProperty('--c', tw.palette?.brickB || '#7dd3fc');
+      dots.appendChild(d);
+    }
+  }
+  [...dots.children].forEach((d, k) => d.classList.toggle('on', k === i));
+  const pick = document.querySelector('.tower-pick');
+  pick.style.setProperty('--tp-glow', `${t.palette?.glow || '#38bdf8'}99`);
+  $('tp-prev').disabled = i <= 0;
+  $('tp-next').disabled = i >= towers.length - 1;
+  if (dir) {
+    pick.classList.remove('flip-l', 'flip-r');
+    void pick.offsetWidth;
+    pick.classList.add(dir > 0 ? 'flip-r' : 'flip-l');
+  }
+}
+function pickTower(delta) {
+  const sel = $('start-tower');
+  const cur = Number(sel.value) || 0;
+  const next = Math.max(0, Math.min(game.campaignTowers.length - 1, cur + delta));
+  if (next === cur) return;
+  sel.value = String(next);
+  if (game.mode === 'title') game.loadTower(next);
+  showTowerPick(delta);
+  sound.uiTap?.();
+}
+$('tp-prev').addEventListener('click', () => pickTower(-1));
+$('tp-next').addEventListener('click', () => pickTower(1));
+{
+  const card = document.querySelector('#overlay-title .title-screen');
+  let sw = null;
+  card.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;
+    sw = { x: e.clientX, y: e.clientY, t: performance.now() };
+  });
+  card.addEventListener('pointerup', (e) => {
+    if (!sw) return;
+    const dx = e.clientX - sw.x;
+    const dy = e.clientY - sw.y;
+    const quick = performance.now() - sw.t < 700;
+    sw = null;
+    if (quick && Math.abs(dx) > 44 && Math.abs(dx) > Math.abs(dy) * 1.4) pickTower(dx < 0 ? 1 : -1);
+  });
+  card.addEventListener('pointercancel', () => (sw = null));
+}
+
+// ---------------- Full screen ----------------
+// Phones lose a lot of screen to the browser bars. Android / desktop browsers can go full screen
+// from a tap; iPhone Safari can't (Add to Home Screen does the same there), so the controls hide.
+const fsRoot = document.documentElement;
+const fsRequest = fsRoot.requestFullscreen || fsRoot.webkitRequestFullscreen;
+const fsExit = document.exitFullscreen || document.webkitExitFullscreen;
+const isStandalone = () => window.matchMedia?.('(display-mode: standalone), (display-mode: fullscreen)').matches || navigator.standalone === true;
+const canFullscreen = Boolean(fsRequest) && document.fullscreenEnabled !== false && !isStandalone();
+const isFullscreen = () => Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+const isPhone = () => window.matchMedia?.('(pointer: coarse)').matches;
+function enterFullscreen() {
+  if (!canFullscreen || isFullscreen()) return;
+  try {
+    const r = fsRequest.call(fsRoot, { navigationUI: 'hide' });
+    if (r && r.catch) r.catch(() => {});
+  } catch (_) {}
+}
+function toggleFullscreen() {
+  if (isFullscreen()) {
+    try {
+      const r = fsExit && fsExit.call(document);
+      if (r && r.catch) r.catch(() => {});
+    } catch (_) {}
+  } else enterFullscreen();
+}
+function syncFullscreenUi() {
+  const full = isFullscreen();
+  const tb = $('btn-fullscreen');
+  tb.classList.toggle('hidden', !canFullscreen);
+  tb.classList.toggle('is-full', full);
+  tb.querySelector('span').textContent = full ? 'EXIT FULL' : 'FULL SCREEN';
+  const pb = $('btn-pause-fullscreen');
+  pb.classList.toggle('hidden', !canFullscreen);
+  pb.textContent = full ? '⛶ EXIT FULL SCREEN' : '⛶ FULL SCREEN';
+}
+$('btn-fullscreen').addEventListener('click', toggleFullscreen);
+$('btn-pause-fullscreen').addEventListener('click', toggleFullscreen);
+document.addEventListener('fullscreenchange', () => {
+  syncFullscreenUi();
+  handleResize();
+});
+document.addEventListener('webkitfullscreenchange', () => {
+  syncFullscreenUi();
+  handleResize();
+});
+syncFullscreenUi();
 
 function startRun(cfg) {
   lastRunConfig = cfg;
+  // starting a game is a tap, so the browser lets us go full screen here
+  if (settings.autoFullscreen !== false && isPhone()) enterFullscreen();
   appEl.classList.remove('on-title');
   handleResize(); // the HUD is back, so the playfield is shorter
   sound.unlock();
@@ -492,6 +610,7 @@ document.addEventListener('visibilitychange', () => {
 });
 $('btn-resume').addEventListener('click', () => {
   sound.unlock();
+  if (settings.autoFullscreen !== false && isPhone()) enterFullscreen(); // back to full screen if you'd left it
   hide('pause');
   game.togglePause();
   sound.setMusicActive(true);

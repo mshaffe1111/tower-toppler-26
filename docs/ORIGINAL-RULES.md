@@ -116,3 +116,30 @@ Sources: vgmaps.com NES atlas (`Castelian-*.png`), retrogarden.co.uk C64 review 
 - **Tower colours vary by version:** NES T1 purple, T2 blue, T3 red, T4 violet, T5 magenta,
   T6 olive, T7 green, T8 sea green; C64 T1 blue, T2 red; Amiga screenshots show red and green.
   The constant is **one strong colour per tower**.
+
+### Measured movement (the player's two 7800 clips, frame-by-frame brick tracking)
+Method: 60 fps frames, phase correlation of the brickwork to get the tower's scroll per frame.
+Pogo stays fixed on screen, so the scroll is his motion.
+- **Updates:** the 7800 moves the tower in coarse steps, about every 4 frames (~15 Hz).
+  Sideways steps are about 1/6 of a column; vertical steps are half a brick row.
+- **Stair step:** one column wide by one brick row high. Climbing pauses sideways motion for a
+  few frames at each step.
+- **Walking:** about 2.0 of the 7800's columns per second, or 7.1 brick rows per second. Ours
+  is 2.8 of our narrower columns per second, about 7.8 rows per second.
+- **Jump:** the tower turns about 8.5 brick rows per second sideways during a jump, which is
+  about 3.0 of our columns per second. With our arc (1.15 steps high, 0.66 s in the air) that
+  gives a 2-column hop, matching the design brief.
+
+### What the Original mode does now
+- **Jump:** a committed arc. Its sideways speed is fixed at takeoff (3.0 columns/s when
+  walking, straight up from standing), it can't be steered in mid-air, and its height is fixed.
+- **Falls:** walking off a ledge, or being knocked off by an enemy, drops you straight down.
+- **Snowballs:** only thrown standing still. There is no charged shot and no ground-pound.
+- **Points:**
+  - Stairs: 40 per new step climbed on foot, first time only.
+  - Lifts: 50 the first time you board each one; height gained on a lift pays nothing.
+  - End of a climb: 10 per whole second left on the clock; from Tower 2 on, a technique bonus
+    of 100 minus 2 per knockdown.
+- **Crumbling ledges:** dissolve about 1 s after you step on them.
+- **Losing a life:** you restart at the tower's base with a fresh clock.
+

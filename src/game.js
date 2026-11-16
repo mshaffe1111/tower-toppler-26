@@ -40,6 +40,10 @@ const PHYS = {
   stepVy: 6.9, // auto step-up hop onto the next stair
   maxFall: 13,
   poundVy: -17,
+  // ORIGINAL: a jump is a committed arc. Its sideways speed is fixed at takeoff and can't be
+  // steered in mid-air: walking -> a 2-column hop (measured from 7800 footage: the tower turns
+  // ~8.5 brick rows/s during a jump), standing -> straight up
+  origJumpVx: 3.0,
 };
 const ENEMY_PACE = 0.62; // global enemy speed multiplier (classic, deliberate pace)
 const ICE_TOP = 1.6; // a frozen enemy's ice block top, in steps above its floor (matches the drawn block)
@@ -295,6 +299,7 @@ export class TowerTopplerGame {
     this.comboCount = 0;
     this.comboTimer = 0;
     this.hitsTaken = 0;
+    this.input.chargeEnabled = !this.classic; // the Original has no charged shot (resting a thumb never fires)
     this.deathsHere = 0;
     this.history = [];
     this.rewindMeter = REWIND_MAX;
@@ -923,7 +928,12 @@ export class TowerTopplerGame {
     }
     if (p.idleTime === 0) p.yawned = false;
 
-    if ((p.knockbackTimer || 0) <= 0 && !p.hang) {
+    if (p.onGround || p.onElevator || p.hang) p.committed = null;
+    if (this.original && !p.onGround && !p.onElevator && !p.hang && !p.autoHop) {
+      // ORIGINAL: no air control. A jump keeps the arc it took off with; walking off a ledge,
+      // missing a jump or getting knocked off drops you straight down (your angle locks)
+      p.vx = p.committed ? p.committed.vx : 0;
+    } else if ((p.knockbackTimer || 0) <= 0 && !p.hang) {
       let rate;
       if (isIce && p.onGround) rate = 5.5;
       else if (!p.onGround) rate = targetVx === 0 ? 10 : 24;
@@ -971,14 +981,27 @@ export class TowerTopplerGame {
     else p.vx = 0;
 
     // Doors (UP): exit, tunnels and secret vaults
-    // Smart jump: jumping while standing at a door goes through it (why else jump at a door?)
-    const jumpAtDoor =
+    // Smart jump: jumping at a door goes through it (why else jump at a door?), but only from the
+    // door's centre, so a door beside a gap never swallows the jump you need there. Standing still
+    // in the doorway counts anywhere inside the frame; on the move you have to be dead centre.
+    const doorReach = targetVx !== 0 ? 0.2 : 0.42;
+    const jumpDoor =
       this.input.justPressed.jump &&
       !stunned &&
       !p.hidden &&
       (p.onGround || p.coyoteTimer > 0) &&
-      this.tower.doors.some((d) => Math.abs(d.floor - p.floor) < 0.5 && Math.abs(colDist(p.col, d.col + 0.5)) < 0.55);
-    if (jumpAtDoor) this.input.justPressed.jump = false;
+      this.tower.doors.find(
+        (d) =>
+          (d.isExit || d.decoy || d.targetId || (d.vault && !d.used)) &&
+          Math.abs(d.floor - p.floor) < 0.5 &&
+          Math.abs(colDist(p.col, d.col + 0.5)) < doorReach
+      );
+    const jumpAtDoor = Boolean(jumpDoor);
+    if (jumpAtDoor) {
+      this.input.justPressed.jump = false;
+      p.col = wrapCol(jumpDoor.col + 0.5); // step into the doorway
+      p.vx = 0;
+    }
     const upTapped = this.input.consumeJustPressed('up') || jumpAtDoor;
     if (!inp.up) p.doorLock = false;
     if (!stunned && (upTapped || (inp.up && !p.doorLock)) && (p.onGround || p.coyoteTimer > 0)) {
@@ -1047,7 +1070,10 @@ export class TowerTopplerGame {
     if (!stunned && p.jumpBufferTimer > 0 && (p.onGround || p.coyoteTimer > 0 || p.hang)) {
       p.hang = null;
       p.vy = PHYS.jumpVy;
-      if (targetVx !== 0) p.vx = Math.sign(targetVx) * Math.max(Math.abs(p.vx), PHYS.walkSpeed);
+      if (this.original) {
+        p.vx = targetVx !== 0 ? Math.sign(targetVx) * PHYS.origJumpVx : 0;
+        p.committed = { vx: p.vx };
+      } else if (targetVx !== 0) p.vx = Math.sign(targetVx) * Math.max(Math.abs(p.vx), PHYS.walkSpeed);
       p.onGround = false;
       p.onElevator = null;
       p.onIce = null;
@@ -1061,7 +1087,7 @@ export class TowerTopplerGame {
 
     // Ground pound: DOWN in mid-air slams straight down
     const downTapped = this.input.consumeJustPressed('down');
-    if (downTapped && !p.onGround && !p.hang && !stunned && !p.pound && p.floor - p.landingFloor > 0.5) {
+    if (downTapped && !this.original && !p.onGround && !p.hang && !stunned && !p.pound && p.floor - p.landingFloor > 0.5) {
       p.pound = true;
       p.vy = PHYS.poundVy;
       p.vx = 0;
@@ -1099,7 +1125,7 @@ export class TowerTopplerGame {
 
     // Variable jump cut (real jumps only)
     if (p.onGround) p.autoHop = false;
-    if (!inp.jump && !p.autoHop && !p.onGround && !p.onElevator && !p.pound && p.vy > 3.4) {
+    if (!this.original && !inp.jump && !p.autoHop && !p.onGround && !p.onElevator && !p.pound && p.vy > 3.4) {
       p.vy *= Math.pow(0.85, dt * 60);
     }
 
@@ -1151,6 +1177,8 @@ export class TowerTopplerGame {
         p.floor = el.floor;
         p.vy = 0;
         p.onGround = true;
+        // in the Original, lifts pay on boarding, not for the height they carry you
+        if (this.original) p.bestFloor = Math.max(p.bestFloor || 0, Math.floor(el.floor + 0.01));
       }
     }
 
@@ -1194,6 +1222,11 @@ export class TowerTopplerGame {
               p.vy = 0;
               p.onGround = true;
               p.onElevator = el;
+              if (this.original && !el.boarded) {
+                el.boarded = true;
+                this.addScore(50);
+                this.addPopup({ col: p.col, floor: p.floor + 1.0, text: '+50', color: '#a7f3d0', maxLife: 0.7 });
+              }
               this._landImpact(wasOnGround, prevVy);
               if (p.pound) this._poundShockwave(null);
               break;
@@ -1272,24 +1305,25 @@ export class TowerTopplerGame {
 
   _checkHints(dt) {
     const p = this.player;
+    const slideCtl = settings.controls?.scheme === 'slide';
     if (this.towerTime > 1.5) {
-      if (settings.controls?.scheme === 'slide') this._hint('walk-slide', 'Drag anywhere to walk · flick up to jump (or go through a door) · tap to fire.');
+      if (slideCtl) this._hint('walk-slide2', 'Slide anywhere to walk · push up (or diagonally up) to jump and go through doors · stop and tap to throw a snowball.');
       else this._hint('walk', 'Push the stick to walk round the tower. Walk into a step to climb it.');
     }
-    if (p.teeter > 0) this._hint('jump', 'Careful — that\'s the sea! Press JUMP to hop across gaps.');
-    if (this.towerTime > 9) this._hint('peek', 'Drag anywhere on the screen to look around the tower and plan your route.');
+    if (p.teeter > 0) this._hint('jump', slideCtl ? 'Careful — that\'s the sea! Push up to hop across gaps.' : 'Careful — that\'s the sea! Press JUMP to hop across gaps.');
+    if (this.towerTime > 9 && !slideCtl) this._hint('peek', 'Drag anywhere on the screen to look around the tower and plan your route.');
     const near = this.enemies.find((e) => !e.dead && Math.abs(e.floor - p.floor) < 0.8 && Math.abs(colDist(e.col, p.col)) < 3.5);
     if (near) {
       if (this.original) this._hint('fire-orig', 'Snowballs pop cannonballs and break flashing blocks. Eyes, molecules and robots can\'t be hurt: time your way past.');
-      else this._hint('fire', 'Tap FIRE to throw a snowball. Bouncers & molecules pop; rollers just freeze.');
+      else this._hint(slideCtl ? 'fire-tap' : 'fire', slideCtl ? 'Stop and tap the screen to throw a snowball. Bouncers & molecules pop; rollers just freeze.' : 'Tap FIRE to throw a snowball. Bouncers & molecules pop; rollers just freeze.');
       if (near.type === 'shieldbug') this._hint('shieldbug', 'Shield beetle: its shield blocks shots. Jump over it and hit it from behind, or crack the shield with a charged shot.');
       if (near.type === 'puffer') this._hint('puffer', 'Puffers puff up and blow you along the ledge. Freeze one with a snowball.');
       if (near.type === 'splitter') this._hint('splitter', 'Splitters pop into two quick minis. Pop those too, or freeze the big one with a charged shot.');
       if (near.type === 'robot') this._hint('robot', 'Robots can\'t be hurt. Jump over them, or go round by a lift or a door.');
-      if (!this.original && (near.type === 'eye' || near.type === 'roller' || near.type === 'chaser')) this._hint('charge', 'Hold FIRE to pack a mega-snowball — it freezes anything into an ice block you can stand on!');
+      if (!this.original && (near.type === 'eye' || near.type === 'roller' || near.type === 'chaser')) this._hint('charge', slideCtl ? 'Touch and hold still to pack a mega-snowball, let go to throw: it freezes anything into an ice block you can stand on!' : 'Hold FIRE to pack a mega-snowball — it freezes anything into an ice block you can stand on!');
     }
-    if (!p.onGround && p.floor - p.landingFloor > 1.6 && this.towerTime > 4) this._hint('pound', 'In mid-air, push ▼ to ground-pound: it stuns enemies and smashes blocks.');
-    if (this.hitsTaken > 0 && !this.classic) this._hint('rewind', 'Knocked down? Hold ⏪ REWIND to turn back time a few seconds.');
+    if (!this.original && !p.onGround && p.floor - p.landingFloor > 1.6 && this.towerTime > 4) this._hint('pound', slideCtl ? 'In mid-air, push down to ground-pound: it stuns enemies and smashes blocks.' : 'In mid-air, push ▼ to ground-pound: it stuns enemies and smashes blocks.');
+    if (this.hitsTaken > 0 && !this.classic) this._hint('rewind', slideCtl ? 'Knocked down? Hold two fingers on the screen to turn back time a few seconds.' : 'Knocked down? Hold ⏪ REWIND to turn back time a few seconds.');
     if (this.secretsGot > 0) this._hint('star', `Hidden star-fish! Find all ${this.secretsTotal} on a tower for a medal.`);
     if (this.mech.kind === 'pistons') this._hint('m-pistons', 'Clockwork ledges slide into the wall — watch for the red blink!');
     if (this.mech.kind === 'vault') this._hint('m-vault', 'Some doors here are tricks… and some hide secret vaults.');
@@ -1319,7 +1353,7 @@ export class TowerTopplerGame {
     if (l.type === 'crumble' && !l.crumbling) {
       l.crumbling = true;
       l.shake = true;
-      l.crumbleTimer = 0.48;
+      l.crumbleTimer = this.original ? 1.0 : 0.48; // the 7800's crumbling ledges dissolve in about a second
     }
   }
 
@@ -1359,14 +1393,20 @@ export class TowerTopplerGame {
   _updateFire(dt, stunned) {
     const p = this.player;
     const inp = this.input.state;
-    const fireTapped = this.input.consumeJustPressed('fire');
+    if (this.input.consumeJustPressed('fire')) p.fireBuffer = 0.18;
+    else p.fireBuffer = Math.max(0, (p.fireBuffer || 0) - dt);
     if (stunned) {
       p.chargeHeld = 0;
       p.charge = 0;
       return;
     }
-    if (fireTapped && p.fireCooldown <= 0) {
+    // ORIGINAL: you can only throw a snowball standing still on solid ground (on the 7800, FIRE
+    // while moving was the jump). A tap just as you stop is kept for a moment, not dropped.
+    const moving = typeof inp.axisX === 'number' && Math.abs(inp.axisX) > 0.05 ? true : inp.left || inp.right;
+    const canFire = !this.original || (p.onGround && !moving && Math.abs(p.vx) < 0.6);
+    if (p.fireBuffer > 0 && canFire && p.fireCooldown <= 0) {
       this._shoot(0);
+      p.fireBuffer = 0;
       p.fireCooldown = 0.22;
       p.chargeHeld = 0;
     }
@@ -2089,7 +2129,8 @@ export class TowerTopplerGame {
     p.stunTimer = 0.5;
     p.hurtFace = 1.2;
     p.vy = 2.6;
-    p.vx = dir * 0.9;
+    p.vx = this.original ? 0 : dir * 0.9; // the Original drops you straight down that column
+    p.committed = null;
     p.onGround = false;
     p.onElevator = null;
     p.onIce = null;
@@ -2112,9 +2153,11 @@ export class TowerTopplerGame {
       const gained = f - (p.bestFloor || 0);
       p.bestFloor = f;
       if (this.mode === 'tower') {
-        this.addScore(25 * gained);
+        // the 7800 pays 40 per new stair step climbed (first ascent only)
+        const pts = (this.original ? 40 : 25) * gained;
+        this.addScore(pts);
         sound.climb?.();
-        this.addPopup({ col: p.col, floor: f + 1.0, text: `+${25 * gained}`, color: '#a7f3d0', maxLife: 0.7 });
+        this.addPopup({ col: p.col, floor: f + 1.0, text: `+${pts}`, color: '#a7f3d0', maxLife: 0.7 });
       }
     }
   }
@@ -2206,6 +2249,7 @@ export class TowerTopplerGame {
       const l = this._findLedgeAt(col, floor);
       return Boolean(l);
     };
+    if (this.original) return { col: this.tower.spawn.col + 0.5, floor: this.tower.spawn.floor };
     if (ok(p.safeCol, p.safeFloor)) return { col: p.safeCol, floor: p.safeFloor };
     if (p.checkpoint && ok(p.checkpoint.col, p.checkpoint.floor)) return p.checkpoint;
     // Lowest solid ledge safely above the hazard
@@ -2230,7 +2274,7 @@ export class TowerTopplerGame {
       return;
     }
     this.cb.onBanner?.(reason, settings.assist ? 'ASSIST MODE' : `${this.lives} ${this.lives === 1 ? 'LIFE' : 'LIVES'} LEFT`);
-    if (this.timer <= 0) this.timer = this.tower.timeLimit;
+    if (this.timer <= 0 || this.original) this.timer = this.tower.timeLimit;
 
     const spot = this._respawnSpot();
     // Push rising water / collapse back below the respawn point so you get a fair go
@@ -2296,7 +2340,8 @@ export class TowerTopplerGame {
       awardMedals(this.key, earned, this.towerTime);
       saveGhostIfBest(this.key, this.towerTime, this.ghostRec);
     }
-    const bonus = 250 + (settings.clock !== false ? Math.ceil(this.timer) * 5 : 0);
+    const ob = this._originalBonus();
+    const bonus = ob ? ob.total : 250 + (settings.clock !== false ? Math.ceil(this.timer) * 5 : 0);
     this.addScore(bonus);
     this.mode = 'levelclear';
     this.levelClear = { t: 0 };
@@ -2307,7 +2352,7 @@ export class TowerTopplerGame {
     sound.door?.();
     this.input.haptic([20, 30, 40]);
     this._burstAt(p.col, p.floor + 1, '#fde047', 22, 180);
-    this.cb.onBanner?.(`LEVEL ${this.tower.level} CLEAR!`, `+${bonus} · ON TO LEVEL ${this.tower.level + 1}`);
+    this.cb.onBanner?.(`LEVEL ${this.tower.level} CLEAR!`, `${ob ? ob.label : `+${bonus}`} · ON TO LEVEL ${this.tower.level + 1}`);
   }
 
   _updateLevelClear(dt) {
@@ -2336,16 +2381,29 @@ export class TowerTopplerGame {
     }
   }
 
+  // ORIGINAL end-of-climb tally (7800): 10 per whole second left on the clock, plus from Tower 2 on
+  // a technique bonus of 100 minus 2 for every enemy that knocked you down on this climb
+  _originalBonus() {
+    if (!this.original) return null;
+    const time = settings.clock !== false ? Math.max(0, Math.ceil(this.timer)) * 10 : 0;
+    const technique = this.tower.id >= 2 ? Math.max(0, 100 - 2 * this.hitsTaken) : 0;
+    const parts = [];
+    if (settings.clock !== false) parts.push(`TIME +${time}`);
+    if (this.tower.id >= 2) parts.push(`TECHNIQUE +${technique}`);
+    return { time, technique, total: time + technique, label: parts.join(' · ') || 'CLEAR' };
+  }
+
   _triggerTowerTopple() {
     this.mode = 'topple';
     this.topple = { active: true, progress: 0, duration: 2.8 };
     const timeBonus = settings.clock !== false ? Math.ceil(this.timer) * 10 : 0;
-    this.towerBonus = 500 + timeBonus;
+    const ob = this._originalBonus();
+    this.towerBonus = ob ? ob.total : 500 + timeBonus;
     this.addScore(this.towerBonus);
     this.addShake(12);
     sound.towerTopple();
     this.input.haptic([30, 40, 60]);
-    this.cb.onBanner?.('TOWER TOPPLED!', `+${this.towerBonus} BONUS`);
+    this.cb.onBanner?.('TOWER TOPPLED!', ob ? ob.label : `+${this.towerBonus} BONUS`);
   }
 
   _updateTopple(dt) {
