@@ -222,6 +222,7 @@ export class TowerTopplerGame {
       mode: this.runMode,
       variant: this.variant || 'reboot',
       towerIndex: this.towerIndex,
+      levels: this.tower?.levels || 1,
       towerName: this.tower?.name || '',
       score: this.score,
       lives: Number.isFinite(this.lives) ? this.lives : 3,
@@ -390,13 +391,13 @@ export class TowerTopplerGame {
     this.camFloor = Math.max(2, this.player.floor + 1.0);
 
     // Ghost of your best run on this tower
-    this.key = towerKey(this.original ? 'original' : this.runMode, t, settings.mirror);
+    this.key = this.runMode === 'campaign' && t.procedural ? null : towerKey(this.original ? 'original' : this.runMode, t, settings.mirror);
     this.ghostData = settings.ghosts ? getGhost(this.key) : null;
     this.ghostRec = [];
     this.ghostRecT = 0;
     this.ghost = null;
 
-    const sub = this.runMode === 'campaign' ? `${this.original ? 'ORIGINAL · ' : ''}TOWER ${t.id}` : this.runMode === 'daily' ? 'DAILY TOWER' : `ENDLESS · TOWER ${this.towerIndex + 1}`;
+    const sub = this.runMode === 'campaign' ? `${this.original ? 'ORIGINAL · ' : ''}TOWER ${t.id}${t.levels > 1 ? ` · LEVEL ${t.level}` : ''}` : this.runMode === 'daily' ? 'DAILY TOWER' : `ENDLESS · TOWER ${this.towerIndex + 1}`;
     this.cb.onBanner?.(sub, t.name);
     this.cb.onTowerStart?.(t);
     this._syncHud();
@@ -499,7 +500,7 @@ export class TowerTopplerGame {
 
   _difficulty() {
     // 0 on the first tower -> 1 by the eighth (endless keeps climbing)
-    return this.runMode === 'campaign' ? this.towerIndex / 7 : Math.min(1.4, 0.25 + this.towerIndex * 0.12);
+    return this.runMode === 'campaign' ? ((this.tower?.id || 1) - 1) / 7 + ((this.tower?.level || 1) - 1) * 0.06 : Math.min(1.4, 0.25 + this.towerIndex * 0.12);
   }
 
   _makeEnemy(e) {
@@ -526,7 +527,7 @@ export class TowerTopplerGame {
     const active = this.enemies.filter((e) => e.spawned && !e.dead && !e.fireball).length;
     if (active >= 2) return;
     const side = Math.random() < 0.5 ? -1 : 1;
-    const lvl = this.runMode === 'campaign' ? this.towerIndex : Math.min(7, this.towerIndex + 2);
+    const lvl = this.runMode === 'campaign' ? (this.tower?.id || 1) - 1 : Math.min(7, this.towerIndex + 2);
     const type = lvl >= 2 && Math.random() < 0.35 ? 'eye' : 'molecule';
     const speed = 2.0 + lvl * 0.14;
     this.enemies.push(
@@ -692,7 +693,7 @@ export class TowerTopplerGame {
       lives: settings.assist ? Infinity : this.lives,
       timer: this.timer,
       towerId: this.tower ? this.tower.id : 1,
-      towerLabel: this.runMode === 'campaign' ? `T${this.tower?.id ?? 1}` : this.runMode === 'daily' ? 'DAY' : `E${this.towerIndex + 1}`,
+      towerLabel: this.runMode === 'campaign' ? `T${this.tower?.id ?? 1}${this.tower?.levels > 1 ? `·${this.tower.level}` : ''}` : this.runMode === 'daily' ? 'DAY' : `E${this.towerIndex + 1}`,
       dirHint,
       mode: this.mode,
       altitudePct,
@@ -765,6 +766,8 @@ export class TowerTopplerGame {
       this._updateAudio();
     } else if (this.mode === 'summit') {
       this._updateSummit(clampedDt);
+    } else if (this.mode === 'levelclear') {
+      this._updateLevelClear(clampedDt);
     } else if (this.mode === 'topple') {
       this._updateTopple(clampedDt);
     } else if (this.mode === 'submarine') {
@@ -1543,7 +1546,7 @@ export class TowerTopplerGame {
     const p = this.player;
     this.flyerTimer -= dt;
     if (this.flyerTimer <= 0) {
-      const lvl = this.runMode === 'campaign' ? this.towerIndex : this.towerIndex + 2;
+      const lvl = this.runMode === 'campaign' ? (this.tower?.id || 1) - 1 : this.towerIndex + 2;
       this.flyerTimer = Math.max(4.5, 9 - lvl * 0.55) + Math.random() * 3;
       if ((p.floor > 0.5 || lvl > 0) && !this.original) this._spawnFlyer();
     }
@@ -2167,6 +2170,10 @@ export class TowerTopplerGame {
   // ---------------------------------------------------------------------------------------
 
   _reachSummit() {
+    if (this.runMode === 'campaign' && (this.tower.level || 1) < (this.tower.levels || 1)) {
+      this._levelClear();
+      return;
+    }
     this.mode = 'summit';
     this.summit = { t: 0, duration: 1.7 };
     this.rewinding = false;
@@ -2179,6 +2186,45 @@ export class TowerTopplerGame {
     this._burstAt(p.col, p.floor + 1, '#fde047', 26, 200);
     this._burstAt(p.col, p.floor + 1, '#f472b6', 18, 160);
     this.cb.onBanner?.('SUMMIT!', this.tower.name);
+  }
+
+  // Levels 1-2 of a tower: no topple yet. Medals and ghost runs belong to the classic level-1
+  // layout; then straight on to the next (generated) level of the same tower.
+  _levelClear() {
+    const p = this.player;
+    if (this.key) {
+      const earned = {
+        time: this.towerTime <= this.tower.timeLimit * 0.6,
+        nohit: this.hitsTaken === 0 && this.deathsHere === 0,
+        secrets: this.secretsTotal > 0 && this.secretsGot >= this.secretsTotal,
+      };
+      awardMedals(this.key, earned, this.towerTime);
+      saveGhostIfBest(this.key, this.towerTime, this.ghostRec);
+    }
+    const bonus = 250 + (settings.clock !== false ? Math.ceil(this.timer) * 5 : 0);
+    this.addScore(bonus);
+    this.mode = 'levelclear';
+    this.levelClear = { t: 0 };
+    this.rewinding = false;
+    p.vx = 0;
+    p.celebrate = 1;
+    sound.celebrate?.();
+    sound.door?.();
+    this.input.haptic([20, 30, 40]);
+    this._burstAt(p.col, p.floor + 1, '#fde047', 22, 180);
+    this.cb.onBanner?.(`LEVEL ${this.tower.level} CLEAR!`, `+${bonus} · ON TO LEVEL ${this.tower.level + 1}`);
+  }
+
+  _updateLevelClear(dt) {
+    this.levelClear.t += dt;
+    this.player.celebrate = 1;
+    this._syncHud();
+    if (this.levelClear.t >= 1.6) {
+      this.towerIndex += 1;
+      this.loadTower(this.towerIndex);
+      this.mode = 'tower';
+      this._saveRun();
+    }
   }
 
   _updateSummit(dt) {
