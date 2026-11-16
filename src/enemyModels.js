@@ -1956,6 +1956,12 @@ function buildEye(g, body, ud, env) {
   const lidMat = physical(ud, { color: '#8b5cf6', roughness: 0.45, clearcoat: 0.5, sheen: 0.4, sheenColor: C('#ddd6fe') }, { rim: '#e9d5ff', rimStrength: 0.3 });
   const eye = makeEye(float, { x: 0, y: EYE_C[1], z: EYE_C[2], r: EYE_R, mat: eyeMat, lidMat, lower: true, lidR: 1.06, lash: basic('#1e0b45') });
   eye.side = 1;
+  // Like the 1987 flying eye, the EYEBALL must read first at phone size: a bigger eye pushed
+  // forward, with the hood shrunk back to a brow-and-horns frame behind it
+  eye.eg.scale.setScalar(1.3);
+  eye.eg.position.z += 0.05;
+  hood.scale.setScalar(0.82);
+  hood.position.z = -0.05;
   addOutline(eye.ball, 0.009);
   const glints = new THREE.Mesh(
     glintGeo('batEye', [
@@ -1965,6 +1971,9 @@ function buildEye(g, body, ud, env) {
     GLINT_MAT
   );
   glints.userData.noShadow = true;
+  // same transform as the enlarged eyeball (scale 1.3 about the eye centre, +0.05 forward)
+  glints.scale.setScalar(1.3);
+  glints.position.set(0, EYE_C[1] - EYE_C[1] * 1.3, EYE_C[2] + 0.05 - EYE_C[2] * 1.3);
   float.add(glints);
   const wMat = physical(
     ud,

@@ -1114,17 +1114,24 @@ export class TowerTopplerGame {
     } else if (p.onElevator) {
       const el = p.onElevator;
       if (Math.abs(colDist(p.col, el.col + 0.5)) > 0.65) {
+        el.autoDir = 0;
         p.onElevator = null;
         p.onGround = false;
       } else {
-        if (inp.up || inp.jump) {
+        // Lifts ride on their own once started: one press / flick of UP (or jump) carries you to
+        // the top stop, DOWN to the bottom; holding still works, and the other way reverses it
+        if (this.input.justPressed.up || this.input.justPressed.jump || inp.up || inp.jump) el.autoDir = 1;
+        else if (this.input.justPressed.down || inp.down) el.autoDir = -1;
+        if (el.autoDir === 1) {
           el.recallTarget = null;
           el.dir = 1;
           el.floor = Math.min(el.maxFloor, el.floor + el.speed * 0.45 * dt);
-        } else if (inp.down) {
+          if (el.floor >= el.maxFloor) el.autoDir = 0;
+        } else if (el.autoDir === -1) {
           el.recallTarget = null;
           el.dir = -1;
           el.floor = Math.max(el.minFloor, el.floor - el.speed * 0.45 * dt);
+          if (el.floor <= el.minFloor) el.autoDir = 0;
         }
         p.floor = el.floor;
         p.vy = 0;

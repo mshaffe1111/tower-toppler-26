@@ -253,11 +253,19 @@ export class InputController {
       'pointerdown',
       (e) => {
         if (!isSlide() || excluded(e.target)) return;
-        for (const ent of this._activePointers.values()) if (ent.type === 'slide') return; // one thumb steers
+        for (const ent of this._activePointers.values()) {
+          if (ent.type === 'slide') {
+            // a second finger tapping anywhere jumps (the first one keeps steering)
+            e.preventDefault();
+            e.stopPropagation();
+            this._pulseAction('jump', 260);
+            return;
+          }
+        }
         e.preventDefault();
         e.stopPropagation(); // the slide owns this touch (no stick zone / camera drag)
         this.lastDevice = 'touch';
-        const entry = { type: 'slide', id: e.pointerId, ox: e.clientX, oy: e.clientY, dirs: [] };
+        const entry = { type: 'slide', id: e.pointerId, ox: e.clientX, oy: e.clientY, upRef: e.clientY, downRef: e.clientY, lastT: performance.now(), dirs: [] };
         this._activePointers.set(e.pointerId, entry);
         try { app.setPointerCapture(e.pointerId); } catch (_) {}
         this._slideFx(entry, e.clientX, e.clientY, true);
@@ -282,35 +290,64 @@ export class InputController {
 
   _updateSlide(entry, x, y) {
     const c = settings.controls || {};
-    // how far you slide for full speed (px): shorter = more sensitive
-    const R = c.sensitivity === 'high' ? 34 : c.sensitivity === 'low' ? 56 : 44;
+    const now = performance.now();
+    // Short leash: full speed after a small slide, so the thumb never travels far
+    const R = c.sensitivity === 'high' ? 22 : c.sensitivity === 'low' ? 36 : 28;
+    const DEAD = 0.2;
     let dx = x - entry.ox;
-    let dy = y - entry.oy;
-    // the centre follows the thumb, so a drifting thumb never runs out of room
     if (Math.abs(dx) > R) {
       entry.ox = x - Math.sign(dx) * R;
       dx = Math.sign(dx) * R;
     }
-    const VR = R * 1.25;
-    if (Math.abs(dy) > VR) {
-      entry.oy = y - Math.sign(dy) * VR;
-      dy = Math.sign(dy) * VR;
+    // Snap reversal: once walking one way, pulling the thumb back ~12px from its furthest point
+    // flips direction straight away (no need to slide all the way back past the centre)
+    const walk = Math.sign(this.state.axisX || 0);
+    if (walk !== 0) {
+      if (entry.extX == null || (x - entry.extX) * walk > 0) entry.extX = x;
+      if ((entry.extX - x) * walk > 12) {
+        entry.ox = x + walk * (DEAD * R + 3);
+        dx = x - entry.ox;
+        entry.extX = x;
+      }
+    } else {
+      entry.extX = null;
     }
-    const { dead } = SENSITIVITY[c.sensitivity] || SENSITIVITY.medium;
     const nx = dx / R;
-    // full speed by ~75% of the slide, so a quick flick of the thumb is a full-speed dodge
-    const ax = Math.abs(nx) < dead ? 0 : Math.sign(nx) * Math.min(1, (Math.abs(nx) - dead) / (0.75 - dead));
+    const ax = Math.abs(nx) < DEAD ? 0 : Math.sign(nx) * Math.min(1, (Math.abs(nx) - DEAD) / (0.6 - DEAD));
     this.state.axisX = ax;
     const dirs = [];
     if (ax > 0) dirs.push('right');
     else if (ax < 0) dirs.push('left');
-    // up = jump (smart: doors / lifts) with hysteresis so it doesn't flicker; down = down
-    const upT = Math.max(0.35, Math.min(0.8, c.upThreshold ?? 0.55));
-    const wasUp = (entry.dirs || []).includes('jump');
-    const wasDown = (entry.dirs || []).includes('down');
-    if (dy < -R * (wasUp ? upT * 0.45 : upT)) dirs.push('jump', 'up');
-    else if (dy > R * (wasDown ? upT * 0.45 : upT + 0.05)) dirs.push('down');
     this._setStickDirs(entry, dirs);
+
+    // Jump = PUSH UP, in any upward direction (straight up or diagonally up-left / up-right:
+    // you push toward where you want to go and the walk direction carries the jump). The 'up'
+    // reference follows the thumb down at once but creeps up only slowly, so the slow rise of a
+    // thumb arcing while it walks never reaches the threshold; a deliberate push does.
+    // Down works the same way (pound / lift down / drop).
+    const dt = Math.min(0.1, Math.max(0, (now - (entry.lastT || now)) / 1000));
+    entry.lastT = now;
+    const JUMP_PX = c.sensitivity === 'high' ? 18 : c.sensitivity === 'low' ? 30 : 24;
+    const DOWN_PX = JUMP_PX + 8;
+    const LEAK = 30; // px/s the reference drifts after a slow thumb
+    if (entry.upRef == null) entry.upRef = y;
+    if (entry.downRef == null) entry.downRef = y;
+    entry.upRef = y > entry.upRef ? y : entry.upRef - Math.min(entry.upRef - y, LEAK * dt);
+    entry.downRef = y < entry.downRef ? y : entry.downRef + Math.min(y - entry.downRef, LEAK * dt);
+    const hist = entry.hist || (entry.hist = []);
+    hist.push({ t: now, x, y });
+    while (hist.length > 2 && now - hist[0].t > 160) hist.shift();
+    const o = hist[0];
+    const steepEnough = Math.abs(y - o.y) > Math.abs(x - o.x) * 0.45; // above ~24 degrees
+    if (entry.upRef - y > JUMP_PX && steepEnough && now - (entry.lastFlick || 0) > 180) {
+      entry.lastFlick = now;
+      entry.upRef = y; // re-arm: dip a little and push again to jump again
+      this._pulseAction('jump', 260);
+    } else if (y - entry.downRef > DOWN_PX && steepEnough && now - (entry.lastFlick || 0) > 180) {
+      entry.lastFlick = now;
+      entry.downRef = y;
+      this._pulseAction('down', 200);
+    }
     this._slideFx(entry, x, y, false);
   }
 
