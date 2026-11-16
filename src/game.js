@@ -42,15 +42,31 @@ const PHYS = {
   stepVy: 6.9, // auto step-up hop onto the next stair
   maxFall: 13,
   poundVy: -17,
-  // ORIGINAL: a jump is a committed arc. Its sideways speed is fixed at takeoff and can't be
-  // steered in mid-air: walking -> a hop of ~1.75 columns, a little quicker sideways than the
-  // walk (as on the 7800), standing -> straight up
-  origJumpVx: 2.6,
+  // ORIGINAL arcs: the PICO-8 port's tables (RESEARCH.md 2, 3; pico8-port-constants.txt), scaled
+  // so its walk (1 unit/tick) matches the 7800's measured 2.0 columns/s, i.e. 32 ticks/s. The
+  // same scale turns its lift speed into 4 rows/s, which is what the 7800 footage shows.
+  origJumpT: 0.75, // 24 ticks: 1.5 columns at walking speed, sideways speed fixed at takeoff
+  origJumpVy: 12, // peak 2.25 rows
+  origJumpG: 32,
+  origClimbT: 0.4375, // walking into a 1-row step: a 14-tick hop peaking 1.25 rows up
+  origClimbVy: 11.43,
+  origClimbG: 52.2,
+  origFallG: 64, // falling: +1 unit/tick every 2 ticks...
+  origMaxFall: 16, // ...up to 4 units/tick
+  origShotSpeed: 4.0, // snowball: 2x walking speed for 24 ticks = 3 columns, one at a time
+  origShotLife: 0.75,
 };
 const ENEMY_PACE = 0.62; // global enemy speed multiplier (classic, deliberate pace)
 const ICE_TOP = 1.6; // a frozen enemy's ice block top, in steps above its floor (matches the drawn block)
 // Sizes in steps (one step = props FH, ~one brick row): Pogo is ~1.8 steps tall, enemies ~1.6
 const POGO_H = 1.8;
+// ORIGINAL enemy timing (PICO-8 port, RESEARCH.md 6): the molecule crosses the screen every
+// 600 ticks, slowly for 128 ticks and then twice as fast, gone after 202 (port ticks are 1/60 s)
+const MOLECULE_PERIOD = 10;
+const MOLECULE_SLOW = 128 / 60;
+const MOLECULE_LIFE = 202 / 60;
+const MOLECULE_SPAN = 6.5; // columns either side of the camera: just off-screen
+const MAX_REAL_ENEMIES = 4;
 const REWIND_MAX = 3; // seconds of rewind in the meter
 const HISTORY_MAX = 240; // 4s of snapshots at 60fps
 const GHOST_HZ = 15;
@@ -261,7 +277,7 @@ export class TowerTopplerGame {
       enemies: raw.enemies.map((e) => ({ ...e })),
       spawn: { ...raw.spawn },
       mechanic: raw.mechanic || 'none',
-      cacheKey: `${raw.id}|${raw.seed ?? ''}|${settings.mirror ? 'm' : ''}|${raw.original ? 'o' : ''}`,
+      cacheKey: `${raw.id}|${raw.seed ?? ''}|${settings.mirror ? 'm' : ''}|${raw.original ? 'o' : ''}${raw.real ? 'r' : ''}`,
     };
     if (settings.mirror) {
       const mc = (c) => COLS - 1 - c;
@@ -269,6 +285,8 @@ export class TowerTopplerGame {
         l.col = mc(l.col);
         if (l.type === 'conveyorR') l.type = 'conveyorL';
         else if (l.type === 'conveyorL') l.type = 'conveyorR';
+        else if (l.type === 'slideR') l.type = 'slideL';
+        else if (l.type === 'slideL') l.type = 'slideR';
       }
       for (const e of t.elevators) e.col = mc(e.col);
       for (const d of t.doors) d.col = mc(d.col);
@@ -285,7 +303,7 @@ export class TowerTopplerGame {
   loadTower(idx) {
     let raw = this.towerProvider(idx);
     if (!raw) return false;
-    if (this.original) raw = makeOriginalTower(raw);
+    if (this.original) raw = raw.real ? { ...raw, original: true } : makeOriginalTower(raw);
     const t = this._prepareTower(raw);
     this.tower = t;
     this.towers = this.runMode === 'campaign' ? this.campaignTowers : [t];
@@ -339,6 +357,13 @@ export class TowerTopplerGame {
     this.elevators = t.elevators.map((e) => ({ ...e, floor: e.startFloor, dir: 1, recallTarget: null }));
     this.enemies = t.enemies.map((e) => this._makeEnemy(e));
     this.flyerTimer = 5.5;
+    // ORIGINAL real towers: enemies wait at fixed spots and appear as they come into view, never
+    // more than 4 at once, molecule included (RESEARCH.md 6)
+    this.spawnPoints = t.real ? t.enemies.map((e) => ({ ...e, state: 'idle' })) : null;
+    if (t.real) this.enemies = [];
+    this.moleculeTimer = MOLECULE_PERIOD;
+    this.moleculeDir = 1;
+    this.extras = 0;
 
     // Checkpoint flags roughly every 5 floors on a solid ledge
     this.checkpoints = [];
@@ -607,7 +632,7 @@ export class TowerTopplerGame {
   _scoreComboHit(basePts, popupPos, baseColor) {
     this.comboCount = Math.min(4, (this.comboCount || 0) + 1);
     this.comboTimer = 3.2;
-    const mult = this.comboCount;
+    const mult = this.original ? 1 : this.comboCount; // the 7800 pays flat: 100 a ball, 50 a block
     const pts = basePts * mult;
     this.addScore(pts);
     const label = mult > 1 ? `+${pts} (${mult}x!)` : `+${pts}`;
@@ -700,7 +725,7 @@ export class TowerTopplerGame {
           actionPrompt = '▲▼ RIDE LIFT';
         } else {
           const nearEl = this.elevators.find((el) => Math.abs(colDist(p.col, el.col + 0.5)) < 1.15);
-          if (nearEl && Math.abs(nearEl.floor - p.floor) > 0.35) actionPrompt = '❄️ CALL LIFT';
+          if (nearEl && !this.original && Math.abs(nearEl.floor - p.floor) > 0.35) actionPrompt = '❄️ CALL LIFT';
         }
       }
     }
@@ -888,6 +913,10 @@ export class TowerTopplerGame {
 
     // Elevators
     for (const el of this.elevators) {
+      if (this.original && this.player.onElevator !== el && el.floor > el.minFloor + 0.01 && el.recallTarget === null) {
+        el.idleT = (el.idleT || 0) + dt;
+        if (el.idleT > 10) el.floor = Math.max(el.minFloor, el.floor - 16 * dt); // port: 600 ticks, then down fast
+      }
       if (el.recallTarget !== null) {
         const diff = el.recallTarget - el.floor;
         if (Math.abs(diff) < 0.05) {
@@ -911,6 +940,9 @@ export class TowerTopplerGame {
     // Surface under the player
     const underLedge = p.onGround ? this._findLedgeAt(p.col, p.floor) : null;
     const isIce = underLedge && underLedge.type === 'ice';
+    // ORIGINAL crumbling ledges vanish the moment you stand on one (port: the first tick in walk
+    // state) and stay gone for this attempt: cross them by jumping (RESEARCH.md 3)
+    if (this.original && underLedge && underLedge.type === 'crumble' && !p.onElevator) this._vanishCrumble(underLedge);
     const convPush = underLedge ? (underLedge.type === 'conveyorR' ? 1.5 : underLedge.type === 'conveyorL' ? -1.5 : 0) : 0;
 
     // Horizontal input (analog stick = proportional; digital = full speed)
@@ -918,7 +950,7 @@ export class TowerTopplerGame {
     const axis = typeof inp.axisX === 'number' && inp.axisX !== 0 ? inp.axisX : (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
     let targetVx = 0;
     if (!stunned && !p.hang && !p.pound && Math.abs(axis) > 0.05) {
-      const mag = Math.min(1, Math.max(0.55, Math.abs(axis))); // no slow crawl from a light push
+      const mag = this.original ? 1 : Math.min(1, Math.max(0.55, Math.abs(axis))); // no slow crawl from a light push (the Original walks at one speed)
       targetVx = Math.sign(axis) * maxSpeed * mag;
       p.facing = Math.sign(axis);
     }
@@ -930,11 +962,12 @@ export class TowerTopplerGame {
     }
     if (p.idleTime === 0) p.yawned = false;
 
-    if (p.onGround || p.onElevator || p.hang) p.committed = null;
-    if (this.original && !p.onGround && !p.onElevator && !p.hang && !p.autoHop) {
-      // ORIGINAL: no air control. A jump keeps the arc it took off with; walking off a ledge,
-      // missing a jump or getting knocked off drops you straight down (your angle locks)
-      p.vx = p.committed ? p.committed.vx : 0;
+    if (p.onGround || p.onElevator || p.hang) p.arc = null;
+    if (this.original && !p.onGround && !p.onElevator && !p.hang) {
+      // ORIGINAL: no air control. A jump or step-hop keeps the sideways speed it took off with
+      // for the length of its arc; walking off a ledge, an arc that ends over nothing, or a
+      // knock-down drops you straight down (your angle locks)
+      p.vx = p.arc && p.arc.t < p.arc.T ? p.arc.vx : 0;
     } else if ((p.knockbackTimer || 0) <= 0 && !p.hang) {
       let rate;
       if (isIce && p.onGround) rate = 5.5;
@@ -949,7 +982,13 @@ export class TowerTopplerGame {
     const g = this.mech.gust;
     const gustDrift = g.state === 'blow' ? g.dir * g.strength * (p.onGround ? 0.7 : 1) : 0;
 
-    const moveDelta = p.hang ? 0 : (p.vx + (p.onGround ? convPush : 0) + gustDrift + (this.pufferPush || 0)) * dt;
+    // Slippery ledges (Original): "push you left or right" while you stand still or shoot; walking
+    // overrides them (RESEARCH.md 3)
+    const slidePush =
+      p.onGround && underLedge && targetVx === 0 && (underLedge.type === 'slideR' || underLedge.type === 'slideL')
+        ? (underLedge.type === 'slideR' ? 1 : -1) * PHYS.origWalkSpeed
+        : 0;
+    const moveDelta = p.hang ? 0 : (p.vx + (p.onGround ? convPush + slidePush : 0) + gustDrift + (this.pufferPush || 0)) * dt;
     let nextCol = wrapCol(p.col + moveDelta);
 
     // Edge guard: never walk (or get blown) off a solid ledge straight into the sea.
@@ -967,7 +1006,12 @@ export class TowerTopplerGame {
     // sliding cannonball: stunning it only buys time, you still can't get past)
     const blockingBox =
       this.ledges.find(
-        (l) => this._isSolid(l) && l.type === 'box' && Math.abs(l.floor - p.floor) < 0.6 && Math.abs(colDist(nextCol, l.col + 0.5)) < 0.52
+        (l) =>
+          this._isSolid(l) &&
+          (l.type === 'box' || l.type === 'pillar') &&
+          this._blocksBody(l, p.floor) &&
+          Math.abs(colDist(nextCol, l.col + 0.5)) < 0.52 &&
+          Math.abs(colDist(nextCol, l.col + 0.5)) < Math.abs(colDist(p.col, l.col + 0.5)) + 0.001
       ) ||
       (this.original &&
         this.enemies.find(
@@ -1069,13 +1113,22 @@ export class TowerTopplerGame {
     if (liftRide && p.jumpBufferTimer > 0) p.jumpBufferTimer = 0;
 
     // Jump (also lets go of a ledge hang)
-    if (!stunned && p.jumpBufferTimer > 0 && (p.onGround || p.coyoteTimer > 0 || p.hang)) {
+    const canJump = !stunned && p.jumpBufferTimer > 0 && (p.onGround || p.coyoteTimer > 0 || p.hang);
+    if (canJump && this.original && targetVx === 0) {
+      // ORIGINAL: no jumping from a standstill (on the 7800, FIRE standing still shoots and UP is
+      // for doors and lifts, both handled above)
+      p.jumpBufferTimer = 0;
+      this._hint('orig-jump', 'Jumps need a run-up: walk and push up. Standing still, push up at a door or a lift.');
+    } else if (canJump) {
       p.hang = null;
-      p.vy = PHYS.jumpVy;
       if (this.original) {
-        p.vx = targetVx !== 0 ? Math.sign(targetVx) * PHYS.origJumpVx : 0;
-        p.committed = { vx: p.vx };
-      } else if (targetVx !== 0) p.vx = Math.sign(targetVx) * Math.max(Math.abs(p.vx), PHYS.walkSpeed);
+        p.vy = PHYS.origJumpVy;
+        p.vx = Math.sign(targetVx) * PHYS.origWalkSpeed;
+        p.arc = { t: 0, T: PHYS.origJumpT, vx: p.vx, g: PHYS.origJumpG };
+      } else {
+        p.vy = PHYS.jumpVy;
+        if (targetVx !== 0) p.vx = Math.sign(targetVx) * Math.max(Math.abs(p.vx), PHYS.walkSpeed);
+      }
       p.onGround = false;
       p.onElevator = null;
       p.onIce = null;
@@ -1105,13 +1158,21 @@ export class TowerTopplerGame {
         (b) => this._isSolid(b) && Math.abs(b.floor - stepFloor) < 0.25 && Math.abs(colDist(p.col, b.col + 0.5)) < 0.35
       );
       if (!blockedOverhead) {
-        const stepLedge = this.ledges.find((l) => {
-          if (!this._isSolid(l) || l.type === 'box' || Math.abs(l.floor - stepFloor) > 0.2) return false;
-          const dc = colDist(p.col, l.col + 0.5);
-          return Math.sign(dc) === p.facing && Math.abs(dc) > 0.14 && Math.abs(dc) <= 0.62;
-        });
+        const stepLedge =
+          this.ledges.find((l) => {
+            if (!this._isSolid(l) || l.type === 'box' || l.type === 'pillar' || Math.abs(l.floor - stepFloor) > 0.2) return false;
+            const dc = colDist(p.col, l.col + 0.5);
+            return Math.sign(dc) === p.facing && Math.abs(dc) > 0.14 && Math.abs(dc) <= 0.62;
+          }) ||
+          (this.original &&
+            this.elevators.find((el) => {
+              if (Math.abs(el.floor - stepFloor) > 0.2) return false;
+              const dc = colDist(p.col, el.col + 0.5);
+              return Math.sign(dc) === p.facing && Math.abs(dc) > 0.14 && Math.abs(dc) <= 0.62;
+            }));
         if (stepLedge) {
-          p.vy = PHYS.stepVy;
+          p.vy = this.original ? PHYS.origClimbVy : PHYS.stepVy;
+          if (this.original) p.arc = { t: 0, T: PHYS.origClimbT, vx: p.facing * PHYS.origWalkSpeed, g: PHYS.origClimbG };
           p.onGround = false;
           p.onElevator = null;
           p.onIce = null;
@@ -1165,16 +1226,38 @@ export class TowerTopplerGame {
         // the top stop, DOWN to the bottom; holding still works, and the other way reverses it
         if (this.input.justPressed.up || this.input.justPressed.jump || inp.up || inp.jump) el.autoDir = 1;
         else if (this.input.justPressed.down || inp.down) el.autoDir = -1;
+        // Original lifts ride at 4 rows/s and stop at middle stops unless you keep holding the
+        // direction (RESEARCH.md 3)
+        const rate = el.rowsPerSec || el.speed * 1.5;
+        const stops = el.stops && el.stops.length > 2 ? el.stops : null;
+        el.idleT = 0;
         if (el.autoDir === 1) {
           el.recallTarget = null;
           el.dir = 1;
-          el.floor = Math.min(el.maxFloor, el.floor + el.speed * 1.5 * dt);
-          if (el.floor >= el.maxFloor) el.autoDir = 0;
+          const held = inp.up || inp.jump;
+          const target = stops && !held ? stops.find((s) => s > el.floor + 0.001) ?? el.maxFloor : el.maxFloor;
+          el.floor = Math.min(target, el.floor + rate * dt);
+          if (el.floor >= target - 1e-6) {
+            el.floor = target;
+            if (!held || target >= el.maxFloor) el.autoDir = 0;
+          }
+          // riding up into a flashing block capping the shaft knocks you off
+          if (this.original && this.ledges.some((l) => l.type === 'box' && this._isSolid(l) && Math.abs(colDist(el.col + 0.5, l.col + 0.5)) < 0.5 && l.floor < el.floor + POGO_H && l.floor + (l.h || 1.55) > el.floor + 0.6)) {
+            el.autoDir = 0;
+            el.floor = Math.floor(el.floor);
+            p.floor = el.floor;
+            this._knockDown(p.facing, true);
+          }
         } else if (el.autoDir === -1) {
           el.recallTarget = null;
           el.dir = -1;
-          el.floor = Math.max(el.minFloor, el.floor - el.speed * 1.5 * dt);
-          if (el.floor <= el.minFloor) el.autoDir = 0;
+          const held = inp.down;
+          const target = stops && !held ? [...stops].reverse().find((s) => s < el.floor - 0.001) ?? el.minFloor : el.minFloor;
+          el.floor = Math.max(target, el.floor - rate * dt);
+          if (el.floor <= target + 1e-6) {
+            el.floor = target;
+            if (!held || target <= el.minFloor) el.autoDir = 0;
+          }
         }
         p.floor = el.floor;
         p.vy = 0;
@@ -1186,9 +1269,31 @@ export class TowerTopplerGame {
 
     if (!p.onElevator && !p.hang) {
       const prevFloor = p.floor;
-      const maxFall = p.pound ? -PHYS.poundVy : PHYS.maxFall;
-      p.vy = Math.max(-maxFall, p.vy - PHYS.gravity * dt);
+      let maxFall = p.pound ? -PHYS.poundVy : PHYS.maxFall;
+      let grav = PHYS.gravity;
+      if (this.original) {
+        if (p.arc) p.arc.t += dt;
+        grav = p.arc && p.arc.t < p.arc.T ? p.arc.g : PHYS.origFallG;
+        maxFall = PHYS.origMaxFall;
+      }
+      p.vy = Math.max(-maxFall, p.vy - grav * dt);
       p.floor += p.vy * dt;
+      // ORIGINAL: ledges are solid blocks, so a jump bumps its head on one above instead of passing
+      // through (our slabs are half a row thick, so the bump is at the slab's underside)
+      if (this.original && p.vy > 0 && !p.tumbling) {
+        const head = p.floor + POGO_H;
+        const prevHead = prevFloor + POGO_H;
+        for (const l of this.ledges) {
+          if (!this._isSolid(l) || Math.abs(colDist(p.col, l.col + 0.5)) > 0.42) continue;
+          const bottom = l.type === 'box' || l.type === 'pillar' ? l.floor : l.floor - 0.5;
+          if (l.type === 'box' && !l.h) continue;
+          if (bottom > prevHead - 0.01 && bottom <= head) {
+            p.floor = bottom - POGO_H - 0.001;
+            p.vy = 0;
+            break;
+          }
+        }
+      }
       p.onGround = false;
       p.onIce = null;
 
@@ -1268,6 +1373,11 @@ export class TowerTopplerGame {
       }
     }
     if (p.onGround && p.pound) p.pound = false;
+    if (p.onGround && p.tumbling) {
+      p.tumbling = false;
+      p.stunTimer = 0.15;
+      p.invuln = 0.4;
+    }
 
     // Footsteps
     if (p.onGround && Math.abs(p.vx) > 0.4) {
@@ -1352,10 +1462,12 @@ export class TowerTopplerGame {
       p.safeCol = l.col + 0.5;
       p.safeFloor = l.floor;
     }
-    if (l.type === 'crumble' && !l.crumbling) {
+    if (l.type === 'crumble' && this.original) {
+      this._vanishCrumble(l);
+    } else if (l.type === 'crumble' && !l.crumbling) {
       l.crumbling = true;
       l.shake = true;
-      l.crumbleTimer = this.original ? 1.0 : 0.48; // the 7800's crumbling ledges dissolve in about a second
+      l.crumbleTimer = 0.48;
     }
   }
 
@@ -1405,7 +1517,7 @@ export class TowerTopplerGame {
     // ORIGINAL: you can only throw a snowball standing still on solid ground (on the 7800, FIRE
     // while moving was the jump). A tap just as you stop is kept for a moment, not dropped.
     const moving = typeof inp.axisX === 'number' && Math.abs(inp.axisX) > 0.05 ? true : inp.left || inp.right;
-    const canFire = !this.original || (p.onGround && !moving && Math.abs(p.vx) < 0.6);
+    const canFire = !this.original || (p.onGround && !moving && Math.abs(p.vx) < 0.6 && this.snowballs.length === 0);
     if (p.fireBuffer > 0 && canFire && p.fireCooldown <= 0) {
       this._shoot(0);
       p.fireBuffer = 0;
@@ -1434,21 +1546,24 @@ export class TowerTopplerGame {
   _shoot(power) {
     const p = this.player;
     p.muzzleFlash = 0.14 + power * 0.1;
-    const nearEl = this.elevators.find((el) => Math.abs(colDist(p.col, el.col + 0.5)) < 1.15);
+    // Reboot: shooting next to a lift calls it (the Original has no such thing)
+    const nearEl = this.original ? null : this.elevators.find((el) => Math.abs(colDist(p.col, el.col + 0.5)) < 1.15);
     if (nearEl && Math.abs(nearEl.floor - p.floor) > 0.35) {
       nearEl.recallTarget = Math.max(nearEl.minFloor, Math.min(nearEl.maxFloor, p.floor));
       sound.elevator();
     }
     // Reboot: snowballs travel all the way round the tower (dodge your own if it comes back!).
-    // Original: a short throw, about 6 columns, as on the 7800.
+    // Original: a short throw, 3 columns at twice walking speed, rising about a row as it goes
+    // (port values, RESEARCH.md 2).
     this.snowballs.push({
       col: wrapCol(p.col + p.facing * 0.4),
       floor: p.floor + 0.85, // from his hands
       dir: p.facing,
-      life: this.original ? 6 / 8.5 : power > 0 ? 2.4 : 2.05,
+      rise: this.original ? 1 / PHYS.origShotLife : 0,
+      life: this.original ? PHYS.origShotLife : power > 0 ? 2.4 : 2.05,
       dist: 0,
       power,
-      speed: power > 0 ? 7.2 : 8.5,
+      speed: this.original ? PHYS.origShotSpeed : power > 0 ? 7.2 : 8.5,
       hit: new Set(),
     });
     if (power > 0) {
@@ -1471,6 +1586,7 @@ export class TowerTopplerGame {
       const step = sb.speed * dt;
       sb.col = wrapCol(sb.col + sb.dir * step);
       sb.dist += step;
+      if (sb.rise) sb.floor += sb.rise * dt;
       sb.life -= dt;
       if (sb.life <= 0) {
         this.snowballs.splice(i, 1);
@@ -1511,12 +1627,28 @@ export class TowerTopplerGame {
 
       // Shootable blocks
       const box = this.ledges.find(
-        (l) => this._isSolid(l) && l.type === 'box' && Math.abs(l.floor - sb.floor) < 0.7 && Math.abs(colDist(sb.col, l.col + 0.5)) < 0.5
+        (l) =>
+          this._isSolid(l) &&
+          l.type === 'box' &&
+          sb.floor > l.floor - 0.3 &&
+          sb.floor < l.floor + (l.h || 1.55) + 0.2 &&
+          Math.abs(colDist(sb.col, l.col + 0.5)) < 0.5
       );
+      // pillars soak up snowballs
+      if (
+        this.ledges.some(
+          (l) => l.type === 'pillar' && sb.floor > l.floor - 0.2 && sb.floor < l.floor + l.h + 0.2 && Math.abs(colDist(sb.col, l.col + 0.5)) < 0.5
+        )
+      ) {
+        this._burstAt(sb.col, sb.floor, '#e0f2fe', 5, 60);
+        this.snowballs.splice(i, 1);
+        continue;
+      }
       if (box) {
         box.gone = true;
         box.respawnTimer = 999;
         this._scoreComboHit(50, { col: box.col + 0.5, floor: box.floor + 0.5 }, '#fde047');
+        if (this.original) this.extras = (this.extras || 0) + 2;
         this.addShake(3.5);
         this._burstAt(box.col + 0.5, box.floor + 0.3, '#bae6fd', 8, 95);
         sound.hitEnemy();
@@ -1537,7 +1669,12 @@ export class TowerTopplerGame {
         if (sdy > -0.4 - sb.power * 0.5 && sdy < 1.9 + sb.power * 0.5 && Math.abs(colDist(sb.col, en.col)) < 0.55 + sb.power * 0.2) {
           sb.hit.add(en);
           en.hitFlash = 0.18;
-          const immune = en.type === 'robot' || (this.original && (en.type === 'eye' || en.type === 'molecule'));
+          const immune =
+            en.type === 'robot' ||
+            en.kind === 'vpat' ||
+            en.kind === 'hpat' ||
+            en.kind === 'bonker' ||
+            (this.original && (en.type === 'eye' || en.type === 'molecule'));
           if (immune) {
             // the snowball just bursts against it
             this._burstAt(en.col, en.floor + 0.3, '#e0f2fe', 6, 65);
@@ -1635,6 +1772,7 @@ export class TowerTopplerGame {
     if (!this.player.emote || this.player.emote.t <= 0) this.player.emote = { kind: 'smug', t: 0.7 };
     en.dead = true;
     en.deathTimer = 0.5;
+    if (this.original && en.type === 'bouncer') this.extras = (this.extras || 0) + 5;
     const pts = en.fireball ? 75 : en.type === 'molecule' || en.type === 'spiker' ? 150 : en.type === 'chaser' || en.type === 'shieldbug' ? 250 : en.mini ? 75 : 100;
     const col = en.fireball ? '#fb923c' : en.type === 'molecule' ? '#f472b6' : en.type === 'spiker' ? '#fde047' : en.type === 'chaser' ? '#e2e8f0' : '#fca5a5';
     this._scoreComboHit(pts, { col: en.col, floor: en.floor + 0.5 }, col);
@@ -1654,20 +1792,20 @@ export class TowerTopplerGame {
       this.flyerTimer = Math.max(4.5, 9 - lvl * 0.55) + Math.random() * 3;
       if ((p.floor > 0.5 || lvl > 0) && !this.original) this._spawnFlyer();
     }
-    // ORIGINAL: mutant molecules are anti-loitering pressure. Linger in one height zone for ~10s
-    // (8-12s) and one drifts in from round the tower toward your row.
-    if (this.original && this.mode === 'tower' && !p.hidden) {
-      const band = Math.floor(p.floor / 4);
-      if (band !== this._lingerBand) {
-        this._lingerBand = band;
-        this._lingerT = 0;
-        this._lingerLimit = 8 + Math.random() * 4;
-      } else if ((this._lingerT = (this._lingerT || 0) + dt) > (this._lingerLimit || 10)) {
-        this._lingerT = 0;
-        this._lingerLimit = 8 + Math.random() * 4;
-        this._spawnFlyer('molecule');
+    // ORIGINAL: the mutant molecule is a timed flyer. Every 10 s it crosses the screen at Pogo's
+    // height, alternating sides, slow at first and then faster (RESEARCH.md 6)
+    if (this.original && this.mode === 'tower') {
+      this.moleculeTimer -= dt;
+      const live = this.enemies.filter((e) => !e.dead).length;
+      if (this.moleculeTimer <= 0 && !p.hidden && live < MAX_REAL_ENEMIES) {
+        this.moleculeTimer = MOLECULE_PERIOD;
+        this.moleculeDir = -this.moleculeDir;
+        this.enemies.push(
+          this._makeEnemy({ type: 'molecule', kind: 'bonker', col: this.camCol, floor: p.floor + 0.2, dir: this.moleculeDir, kt: 0 })
+        );
       }
     }
+    if (this.spawnPoints) this._updateSpawnPoints();
     const hz = this._hazardFloor();
 
     for (let ei = this.enemies.length - 1; ei >= 0; ei--) {
@@ -1691,7 +1829,9 @@ export class TowerTopplerGame {
         continue;
       }
 
-      if (en.type === 'spiker') {
+      if (en.kind) {
+        if (this._moveRealEnemy(en, ei, dt, hz)) continue;
+      } else if (en.type === 'spiker') {
         // Hovers up and down over its step, guarding the staircase
         en.floor = en.baseFloor + 0.6 + (Math.sin(this.time * 1.5 + en.phase) * 0.5 + 0.5) * (en.range || 1.2) * 2.5;
         en.col = en.col + Math.sin(this.time * 2.3 + en.phase) * 0.002;
@@ -1777,7 +1917,7 @@ export class TowerTopplerGame {
       // Contact: knocked back down to the ledge below (into the sea if there's none)
       const dfl = en.floor - p.floor;
       if (p.invuln <= 0 && !p.hidden && dfl > -1.5 && dfl < POGO_H - 0.1 && Math.abs(colDist(en.col, p.col)) < 0.5) {
-        this._knockDown(colDist(en.col, p.col) >= 0 ? 1 : -1);
+        this._knockDown(colDist(en.col, p.col) >= 0 ? 1 : -1, en.kind === 'bonker');
         if (en.fireball) {
           en.dead = true;
           en.deathTimer = 0.3;
@@ -1785,6 +1925,157 @@ export class TowerTopplerGame {
       }
     }
     this.pufferPush = pufferPush;
+  }
+
+  // ---- ORIGINAL enemies (real towers): the seven kinds from the tower data (RESEARCH.md 6) ----
+
+  // Is any solid cell (ledge block, pillar, flashing block) overlapping rows [a, b) at this column?
+  // Ledge blocks are one row thick: a ledge Pogo stands on at floor L fills [L - 1, L).
+  _cellSolid(col, a, b) {
+    for (const l of this.ledges) {
+      if (!this._isSolid(l) || Math.abs(colDist(col, l.col + 0.5)) > 0.5) continue;
+      const lo = l.type === 'box' || l.type === 'pillar' ? l.floor : l.floor - 1;
+      const hi = l.type === 'box' || l.type === 'pillar' ? l.floor + (l.h || 1.55) : l.floor;
+      if (lo < b && hi > a) return true;
+    }
+    return false;
+  }
+
+  _platformAt(col, floor) {
+    return (
+      this._findLedgeAt(col, floor) ||
+      this.elevators.find((el) => Math.abs(el.floor - floor) < 0.12 && Math.abs(colDist(col, el.col + 0.5)) < 0.55)
+    );
+  }
+
+  _updateSpawnPoints() {
+    const p = this.player;
+    // a ball destroyed by a snowball stays destroyed for this attempt
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      const en = this.enemies[i];
+      if (en.spawnKey && en.dead && !en.spawned && en.deathTimer <= 0) {
+        const sp = this.spawnPoints.find((s) => s.spawnKey === en.spawnKey);
+        if (sp && sp.state === 'live') sp.state = 'destroyed';
+        this.enemies.splice(i, 1);
+      }
+    }
+    // despawn more than 12 rows below Pogo; the spot can spawn again later
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      const en = this.enemies[i];
+      if (en.spawnKey && !en.dead && en.floor < p.floor - 12) {
+        const sp = this.spawnPoints.find((s) => s.spawnKey === en.spawnKey);
+        if (sp) sp.state = 'idle';
+        this.enemies.splice(i, 1);
+      }
+    }
+    let live = this.enemies.filter((e) => !e.dead).length;
+    if (live >= MAX_REAL_ENEMIES || p.hidden) return;
+    // spawn the nearest waiting spots that have come into view
+    const cands = this.spawnPoints
+      .filter((s) => s.state === 'idle' && s.floor >= p.floor - 4 && s.floor <= p.floor + 9)
+      .sort((a, b) => Math.abs(a.floor - p.floor) - Math.abs(b.floor - p.floor));
+    for (const sp of cands) {
+      if (live >= MAX_REAL_ENEMIES) break;
+      sp.state = 'live';
+      const en = this._makeEnemy({ ...sp });
+      en.speed = sp.kspeed;
+      this.enemies.push(en);
+      live++;
+    }
+  }
+
+  // Returns true when the enemy left play this frame (removed from the list)
+  _moveRealEnemy(en, ei, dt, hz) {
+    const p = this.player;
+    en.kt = (en.kt || 0) + dt;
+    if (en.kind === 'bonker') {
+      // screen-space flyer: its column is measured from the camera, so walking doesn't shake it off
+      const slowSpeed = (MOLECULE_SPAN * 2) / (MOLECULE_SLOW + 2 * (MOLECULE_LIFE - MOLECULE_SLOW));
+      const sx = en.kt < MOLECULE_SLOW ? slowSpeed * en.kt : slowSpeed * MOLECULE_SLOW + 2 * slowSpeed * (en.kt - MOLECULE_SLOW);
+      en.col = wrapCol(this.camCol - en.dir * MOLECULE_SPAN + en.dir * sx);
+      en.floor = en.baseFloor + Math.sin(this.time * 3 + en.phase) * 0.15;
+      if (en.kt > MOLECULE_LIFE) {
+        this.enemies.splice(ei, 1);
+        return true;
+      }
+      return false;
+    }
+    if (en.kind === 'vpat') {
+      // straight up and down its column, turning at anything solid
+      const nf = en.baseFloor + en.dir * en.speed * dt;
+      if (nf < 0 || nf + 1 > (this.tower.floors || 99) || this._cellSolid(en.col, nf + 0.02, nf + 0.98)) en.dir *= -1;
+      else en.baseFloor = nf;
+      en.floor = en.baseFloor;
+      return false;
+    }
+    if (en.kind === 'hpat') {
+      // round the tower at a fixed height, turning at anything solid
+      const nc = wrapCol(en.col + en.dir * en.speed * dt);
+      if (this._cellSolid(nc + en.dir * 0.45, en.baseFloor + 0.02, en.baseFloor + 0.98)) en.dir *= -1;
+      else en.col = nc;
+      en.floor = en.baseFloor;
+      return false;
+    }
+    // Ground kinds: rolling ball ('roll'), bouncing ball ('bounce'), parked bouncing ball ('park')
+    const floorLvl = Math.round(en.baseFloor);
+    if (en.kind === 'park') {
+      // a parked ball sets off toward Pogo when he walks on its row within a quarter lap
+      const dc = colDist(en.col, p.col);
+      if (Math.abs(p.floor - floorLvl) < 0.5 && Math.abs(dc) <= 4 && !p.hidden) {
+        en.kind = 'bounce';
+        en.dir = Math.sign(dc) || 1;
+        en.speed = 2.0;
+      }
+    }
+    if (en.falling) {
+      en.fallVy = Math.max(-PHYS.origMaxFall, en.fallVy - PHYS.origFallG * dt);
+      const prev = en.baseFloor;
+      en.baseFloor += en.fallVy * dt;
+      const land = this.ledges.find(
+        (l) =>
+          this._isSolid(l) &&
+          l.type !== 'box' &&
+          l.type !== 'pillar' &&
+          prev >= l.floor - 0.05 &&
+          en.baseFloor <= l.floor + 0.02 &&
+          Math.abs(colDist(en.col, l.col + 0.5)) < 0.55
+      );
+      if (land) {
+        en.baseFloor = land.floor;
+        en.falling = false;
+        en.fallVy = 0;
+      }
+      en.floor = en.baseFloor;
+      if (en.floor < Math.max(-0.6, hz)) {
+        this.waterEvents.push({ col: en.col, strength: 1.0 });
+        en.dead = true;
+        en.deathTimer = 0.3;
+        en.spawned = true; // let the cleanup remove it; its spot can spawn again
+        const sp = this.spawnPoints?.find((s) => s.spawnKey === en.spawnKey);
+        if (sp) sp.state = 'idle';
+      }
+      return false;
+    }
+    if (!this._platformAt(en.col, floorLvl)) {
+      en.falling = true;
+      en.fallVy = 0;
+      return false;
+    }
+    if (en.speed > 0) {
+      const nc = wrapCol(en.col + en.dir * en.speed * dt);
+      const ahead = nc + en.dir * 0.45;
+      const wall = this._cellSolid(ahead, floorLvl + 0.05, floorLvl + 0.95);
+      const liftAhead = this.elevators.some((el) => Math.abs(colDist(ahead, el.col + 0.5)) < 0.5);
+      if (wall || (en.kind === 'roll' && (liftAhead || !this._platformAt(ahead, floorLvl)))) en.dir *= -1;
+      else en.col = nc; // a bouncing ball carries on over the edge and drops
+    }
+    // the bounce: a 1.5-row arc every 0.66 s (port: 21 ticks at 32/s)
+    if (en.type === 'bouncer') {
+      const ph = (en.kt % 0.66) / 0.66;
+      en.floor = floorLvl + 6 * ph * (1 - ph);
+    } else en.floor = floorLvl;
+    en.baseFloor = floorLvl;
+    return false;
   }
 
   // Ice-block platforms made from frozen enemies
@@ -2120,7 +2411,8 @@ export class TowerTopplerGame {
   // Hits, deaths, respawn
   // ---------------------------------------------------------------------------------------
 
-  _knockDown(dir) {
+  // small: a shorter tumble (the molecule, or riding a lift into a block): RESEARCH.md 4
+  _knockDown(dir, small = false) {
     const p = this.player;
     sound.hurt();
     this.addShake(9);
@@ -2133,7 +2425,7 @@ export class TowerTopplerGame {
     p.hurtFace = 1.2;
     p.vy = 2.6;
     p.vx = this.original ? 0 : dir * 0.9; // the Original drops you straight down that column
-    p.committed = null;
+    p.arc = null;
     p.onGround = false;
     p.onElevator = null;
     p.onIce = null;
@@ -2143,6 +2435,17 @@ export class TowerTopplerGame {
     p.jumpBufferTimer = 0;
     p.knockbackTimer = 0.5;
     p.dropThrough = Math.round(p.floor);
+    if (this.original) {
+      // ORIGINAL tumble: "you will tumble off the ledge and land a few levels down" (Hewson
+      // manual). Port shape: a hop of ~2 rows, then a fall straight through platforms for ~8 rows
+      // (3 for the small tumble), then a normal fall onto whatever is below.
+      const start = p.floor;
+      p.vy = 16; // ~2 rows up at the Original's falling gravity
+      p.dropThrough = start - (small ? 3 : 8) + 0.5;
+      p.tumbling = true;
+      p.invuln = 99; // collisions are off for the whole tumble
+      p.stunTimer = 99;
+    }
     p.squashX = 1.25;
     p.squashY = 0.78;
     this.comboCount = 0;
@@ -2183,9 +2486,27 @@ export class TowerTopplerGame {
     return best;
   }
 
+  // Does a wall cell (flashing block / pillar) overlap Pogo's body standing at this floor? Blocks
+  // from the real towers have a height h in rows; the generated ones sit on Pogo's own floor.
+  _blocksBody(l, floor) {
+    if (!l.h) return Math.abs(l.floor - floor) < 0.6;
+    return l.floor < floor + 1.7 && l.floor + l.h > floor + 0.1;
+  }
+
+  _vanishCrumble(l) {
+    if (l.gone) return;
+    l.gone = true;
+    l.crumbling = false;
+    l.shake = false;
+    l.respawnTimer = Infinity;
+    sound.crumble();
+    this.addShake(3);
+    this._burstAt(l.col + 0.5, l.floor, '#f59e0b', 10, 85);
+  }
+
   _findLedgeAt(col, floor) {
     return this.ledges.find(
-      (l) => this._isSolid(l) && l.type !== 'box' && Math.abs(l.floor - floor) < 0.12 && Math.abs(colDist(col, l.col + 0.5)) < 0.66
+      (l) => this._isSolid(l) && l.type !== 'box' && l.type !== 'pillar' && Math.abs(l.floor - floor) < 0.12 && Math.abs(colDist(col, l.col + 0.5)) < 0.66
     );
   }
 
@@ -2194,6 +2515,7 @@ export class TowerTopplerGame {
       (l) =>
         this._isSolid(l) &&
         l.type !== 'box' &&
+        l.type !== 'pillar' &&
         (dropThrough == null || l.floor < dropThrough - 0.05) &&
         prevFloor >= l.floor - 0.15 &&
         nextFloor <= l.floor + 0.05 &&
@@ -2299,6 +2621,26 @@ export class TowerTopplerGame {
     this.player.invuln = 1.8;
     this.enemies = this.enemies.filter((e) => !e.spawned);
     this.flyerTimer = 6;
+    if (this.original) {
+      // ORIGINAL: a lost life restarts the tower from the bottom ("start all over again at the
+      // bottom of the tower", 7800 manual): crumbled ledges, shot blocks and enemies come back
+      for (const l of this.ledges) {
+        if ((l.type === 'crumble' || l.type === 'box') && l.gone) {
+          l.gone = false;
+          l.crumbling = false;
+          l.shake = false;
+          l.respawnTimer = 0;
+        }
+      }
+      this.enemies = this.enemies.filter((e) => !e.kind && !e.spawnKey);
+      if (this.spawnPoints) for (const sp of this.spawnPoints) sp.state = 'idle';
+      this.moleculeTimer = MOLECULE_PERIOD;
+      for (const el of this.elevators) {
+        el.floor = el.startFloor;
+        el.autoDir = 0;
+        el.idleT = 0;
+      }
+    }
     this.history = [];
     this.camAnchor = this.player.floor;
     this.comboCount = 0;
@@ -2386,14 +2728,19 @@ export class TowerTopplerGame {
 
   // ORIGINAL end-of-climb tally (7800): 10 per whole second left on the clock, plus from Tower 2 on
   // a technique bonus of 100 minus 2 for every enemy that knocked you down on this climb
+  // End-of-climb tally (C64 / CPC; RESEARCH.md 5): Time 10 per whole second left; Technique 100
+  // minus 2 per knock-down, paid x10, not on Tower 1; Extras +5 per ball and +2 per flashing block
+  // shot, paid x10
   _originalBonus() {
     if (!this.original) return null;
     const time = settings.clock !== false ? Math.max(0, Math.ceil(this.timer)) * 10 : 0;
-    const technique = this.tower.id >= 2 ? Math.max(0, 100 - 2 * this.hitsTaken) : 0;
+    const technique = this.tower.id >= 2 ? Math.max(0, 100 - 2 * this.hitsTaken) * 10 : 0;
+    const extras = (this.extras || 0) * 10;
     const parts = [];
     if (settings.clock !== false) parts.push(`TIME +${time}`);
     if (this.tower.id >= 2) parts.push(`TECHNIQUE +${technique}`);
-    return { time, technique, total: time + technique, label: parts.join(' · ') || 'CLEAR' };
+    if (extras) parts.push(`EXTRAS +${extras}`);
+    return { time, technique, extras, total: time + technique + extras, label: parts.join(' · ') || 'CLEAR' };
   }
 
   _triggerTowerTopple() {

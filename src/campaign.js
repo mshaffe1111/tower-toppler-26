@@ -3,23 +3,40 @@
 // mean something); levels 2-3 are fresh every campaign. Every level keeps the tower's identity
 // (id -> brick colour and, in the Original, its enemy cast; in the Reboot, its twist). The run seed
 // is saved with the run so CONTINUE rebuilds the same levels. Only level 3 topples the tower.
-export const LEVELS = 3;
+export const LEVELS = 3; // Reboot: 3 levels per tower
+// The ORIGINAL is the 1987 game: the 8 real towers, one climb each (realTowers.js)
+export const levelsFor = (variant) => (variant === 'original' ? 1 : LEVELS);
 // Tower heights in steps, from the design spec (docs/SPEC.md): T1 24 ... T8 46
 export const SPEC_FLOORS = [24, 28, 26, 32, 36, 34, 40, 46];
 
 // Reboot twists the generator knows (vault and the guardian are hand-built only)
 const GEN_MECH = { none: 'none', pistons: 'pistons', vault: 'none', blizzard: 'blizzard', collapse: 'collapse', flood: 'flood', dark: 'dark', storm: 'wind' };
 
+import { buildRealTower, hasRealTower } from './realTowers.js';
+
 const mix = (a, b) => (Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x632be5ab, 0xc2b2ae35)) >>> 0;
 
-export function towerOfIndex(i) {
-  return { tower: Math.floor(i / LEVELS), level: (i % LEVELS) + 1 };
+export function towerOfIndex(i, variant) {
+  const n = levelsFor(variant);
+  return { tower: Math.floor(i / n), level: (i % n) + 1 };
 }
 
 // procgen may be null (still loading): then the campaign is the classic towers only
 export function makeCampaignProvider({ towers, procgen, runSeed, variant }) {
   const cache = new Map();
   return (i) => {
+    if (variant === 'original') {
+      const base = towers[i];
+      if (!base || !hasRealTower(base.id)) return null;
+      if (!cache.has(i)) {
+        const t = buildRealTower(base.id, base);
+        t.level = 1;
+        t.levels = 1;
+        t.canonical = true;
+        cache.set(i, t);
+      }
+      return cache.get(i);
+    }
     if (!procgen) {
       const t = towers[i];
       return t ? { ...t, level: 1, levels: 1 } : null;
