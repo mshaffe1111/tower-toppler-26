@@ -2,7 +2,7 @@ import { sound } from './audio.js';
 import { InputController } from './input.js';
 import { GameRenderer } from './renderer.js';
 import { TowerTopplerGame } from './game.js';
-import { settings, setSetting, progress, getMedals, totalMedals, SKINS, skinUnlocked, currentSkin } from './settings.js';
+import { settings, setSetting, progress, saveProgress, getMedals, totalMedals, SKINS, skinUnlocked, currentSkin } from './settings.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('game-canvas');
@@ -283,6 +283,12 @@ $('btn-settings-close').addEventListener('click', () => {
   sound.uiBack?.();
   hide('settings');
   show(settingsReturn);
+});
+$('btn-reset-hints').addEventListener('click', () => {
+  progress.hintsSeen = {};
+  saveProgress();
+  $('btn-reset-hints').textContent = '💡 HINTS WILL SHOW AGAIN';
+  sound.uiTap?.();
 });
 $('btn-howto').addEventListener('click', () => {
   hide('title');
