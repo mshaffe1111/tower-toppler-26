@@ -5,7 +5,7 @@ import { TowerTopplerGame } from './game.js';
 import { settings, setSetting, progress, saveProgress, getMedals, totalMedals, SKINS, skinUnlocked, currentSkin, MEDALS } from './settings.js';
 import { applyControls, bindControlsInput, ControlEditor } from './controls.js';
 import { OptionsMenu } from './options.js';
-import { LEVELS, levelsFor, makeCampaignProvider, towerOfIndex } from './campaign.js';
+import { LEVELS, levelsFor, makeCampaignProvider, towerOfIndex, campaignLength, WORLDS, TOWERS_PER_WORLD, CAMPAIGN_TOWERS, worldTowerPlan } from './campaign.js';
 import { TROPHIES, TROPHY_GROUPS, trophyState, trophyCount, checkTrophies } from './trophies.js';
 import { makeGeneratedTower, dailyPlan } from './towergen.js';
 import { materialForSeed } from './props.js';
@@ -46,6 +46,7 @@ const overlays = {
   howto: $('overlay-howto'),
   results: $('overlay-results'),
   trophies: $('overlay-trophies'),
+  worlds: $('overlay-worlds'),
 };
 const show = (name) => overlays[name].classList.remove('hidden');
 const hide = (name) => overlays[name].classList.add('hidden');
@@ -358,10 +359,7 @@ $('btn-skins-close').addEventListener('click', () => {
 function renderTrophyRoom() {
   const medalsEl = $('tr-medals');
   medalsEl.innerHTML = '';
-  for (const [label, prefix, list] of [
-    ['ORIGINAL', 'or', MEDALS.original],
-    ['REBOOT', 'c', MEDALS.reboot],
-  ]) {
+  for (const [label, prefix, list] of [['ORIGINAL', 'or', MEDALS.original]]) {
     const row = document.createElement('div');
     row.className = 'tr-mrow';
     const lab = document.createElement('div');
@@ -375,6 +373,27 @@ function renderTrophyRoom() {
       cell.style.setProperty('--c', t.palette?.brickB || '#7dd3fc');
       cell.title = `${i + 1}. ${titleCase(t.name)}`;
       cell.innerHTML = `<span class="tr-mnum">${i + 1}</span><span class="tr-mdots">${list.map((md) => `<i class="${m[md.id] ? 'on' : ''}">${md.icon}</i>`).join('')}</span>`;
+      row.appendChild(cell);
+    });
+    medalsEl.appendChild(row);
+  }
+  // Reboot: medals per world (5 towers x 5 medals)
+  {
+    const row = document.createElement('div');
+    row.className = 'tr-mrow tr-mrow-worlds';
+    row.innerHTML = '<div class="tr-mlabel">REBOOT</div>';
+    WORLDS.forEach((W, w) => {
+      let n = 0;
+      for (let t = 0; t < TOWERS_PER_WORLD; t++) {
+        const m = getMedals(`c${worldTowerPlan(w * TOWERS_PER_WORLD + t).id}`);
+        n += MEDALS.reboot.filter((md) => m[md.id]).length;
+      }
+      const pal = game.campaignTowers[W.palette % game.campaignTowers.length]?.palette || {};
+      const cell = document.createElement('div');
+      cell.className = 'tr-mcell';
+      cell.style.setProperty('--c', pal.brickB || '#7dd3fc');
+      cell.title = `World ${w + 1}: ${W.name}`;
+      cell.innerHTML = `<span class="tr-mnum">W${w + 1}</span><span class="tr-wcount${n ? ' on' : ''}">${n}<small>/25</small></span>`;
       row.appendChild(cell);
     });
     medalsEl.appendChild(row);
@@ -414,6 +433,68 @@ $('btn-trophies-close').addEventListener('click', () => {
   refreshMenu();
   show('title');
 });
+
+// ---------------- Reboot world map ----------------
+// 10 worlds x 5 towers. A tower is open once the one before it is cleared; tap any open tower to
+// play from there, or PLAY to carry on from the next one you haven't cleared.
+const rebootNext = () => Math.min(CAMPAIGN_TOWERS - 1, (progress.rebootCleared ?? -1) + 1);
+function renderWorldMap() {
+  const cleared = progress.rebootCleared ?? -1;
+  const next = rebootNext();
+  const list = $('wm-list');
+  list.innerHTML = '';
+  WORLDS.forEach((W, w) => {
+    const first = w * TOWERS_PER_WORLD;
+    const open = first <= cleared + 1;
+    const pal = game.campaignTowers[W.palette % game.campaignTowers.length]?.palette || {};
+    const card = document.createElement('div');
+    card.className = `wm-world${open ? '' : ' locked'}${next >= first && next < first + TOWERS_PER_WORLD ? ' current' : ''}`;
+    card.style.setProperty('--c', pal.glow || '#38bdf8');
+    card.style.setProperty('--c2', pal.brickB || '#7dd3fc');
+    const twist = Array.isArray(W.twist) ? 'Mixed twists' : { none: 'No twist', pistons: 'Clockwork ledges', blizzard: 'Blizzard', collapse: 'Crumbling base', dark: 'Night storm', flood: 'Rising sea', wind: 'Gale' }[W.twist];
+    let done = 0;
+    let medals = 0;
+    const pips = [];
+    for (let t = 0; t < TOWERS_PER_WORLD; t++) {
+      const i = first + t;
+      const plan = worldTowerPlan(i);
+      const m = getMedals(`c${plan.id}${settings.mirror ? 'm' : ''}`);
+      const got = MEDALS.reboot.filter((md) => m[md.id]).length;
+      medals += got;
+      if (i <= cleared) done++;
+      const state = i <= cleared ? 'cleared' : i === cleared + 1 ? 'next' : 'locked';
+      pips.push(
+        `<button class="wm-t ${state}${plan.summit ? ' summit' : ''}" type="button" data-i="${i}" ${state === 'locked' ? 'disabled' : ''} aria-label="${titleCase(plan.name)}${state === 'locked' ? ' (locked)' : ''}"><b>${['I', 'II', 'III', 'IV', 'V'][t]}</b><span class="wm-tm">${state === 'cleared' ? `${got}/5` : state === 'next' ? 'NEXT' : '🔒'}</span></button>`
+      );
+    }
+    card.innerHTML = `<div class="wm-num">${w + 1}</div><div class="wm-body"><div class="wm-name">${W.name.toUpperCase()}</div><div class="wm-meta">${twist} · ${done}/5 cleared${medals ? ` · 🏅 ${medals}` : ''}</div><div class="wm-blurb">${open ? W.blurb : 'Clear the world before this one to open it.'}</div><div class="wm-towers">${pips.join('')}</div></div>`;
+    list.appendChild(card);
+  });
+  const total = Math.max(0, cleared + 1);
+  $('wm-prog-text').textContent = `${total} / ${CAMPAIGN_TOWERS} towers`;
+  $('wm-prog-bar').style.width = `${Math.round((total / CAMPAIGN_TOWERS) * 100)}%`;
+  const np = worldTowerPlan(next);
+  $('wm-play-sub').textContent = total >= CAMPAIGN_TOWERS ? 'Play the last tower again' : `World ${np.world + 1} · ${titleCase(np.name)}`;
+  // keep the current world in view
+  requestAnimationFrame(() => list.querySelector('.wm-world.current')?.scrollIntoView({ block: 'center' }));
+}
+function openWorldMap() {
+  renderWorldMap();
+  hide('title');
+  show('worlds');
+  sound.uiTap?.();
+}
+$('btn-worlds-close').addEventListener('click', () => {
+  hide('worlds');
+  refreshMenu();
+  show('title');
+});
+$('wm-list').addEventListener('click', (e) => {
+  const b = e.target.closest('.wm-t');
+  if (!b || b.disabled) return;
+  startRun({ mode: 'campaign', variant: 'reboot', startTower: Number(b.dataset.i) });
+});
+$('btn-worlds-play').addEventListener('click', () => startRun({ mode: 'campaign', variant: 'reboot', startTower: rebootNext() }));
 const trophyQueue = [];
 let trophyShowing = false;
 function showNextTrophy() {
@@ -464,13 +545,20 @@ function refreshMenu() {
     saved.levels = 1;
     saveProgress();
   }
+  // Reboot runs saved before the worlds campaign don't map onto it: drop them
+  if (saved && saved.mode === 'campaign' && (saved.variant || 'reboot') === 'reboot' && saved.campaign !== 'worlds') {
+    progress.savedRun = null;
+    saveProgress();
+  }
   const canContinue =
-    saved && Boolean(procgen) && (saved.mode !== 'campaign' || saved.towerIndex < game.campaignTowers.length * levelsFor(saved.variant));
+    progress.savedRun && Boolean(procgen) && (saved.mode !== 'campaign' || saved.towerIndex < campaignLength(saved.variant || 'reboot'));
   contBtn.classList.toggle('hidden', !canContinue);
   if (canContinue) {
     const where =
       saved.mode === 'campaign'
-        ? `${saved.variant === 'original' ? 'Original' : 'Reboot'} · T${towerOfIndex(saved.towerIndex, saved.variant).tower + 1}${saved.variant === 'original' ? '' : `-${towerOfIndex(saved.towerIndex, saved.variant).level}`} ${titleCase(saved.towerName || '')}`
+        ? saved.variant === 'original'
+          ? `Original · T${saved.towerIndex + 1} ${titleCase(saved.towerName || '')}`
+          : `Reboot · W${towerOfIndex(saved.towerIndex, 'reboot').tower + 1}-${towerOfIndex(saved.towerIndex, 'reboot').level} ${titleCase(saved.towerName || '')}`
         : `Endless · tower ${saved.towerIndex + 1}`;
     const lives = '♥'.repeat(Math.min(6, saved.lives || 1));
     $('continue-sub').textContent = `${where.replace(/\s+/g, ' ').trim()} · ${(saved.score || 0).toLocaleString()} pts · ${lives}`;
@@ -498,7 +586,7 @@ function titleCase(s) {
   return s
     .toLowerCase()
     .split(' ')
-    .map((w, i) => (i > 0 && SMALL_WORDS.has(w) ? w : w.charAt(0).toUpperCase() + w.slice(1)))
+    .map((w, i) => (/^[ivx]+$/.test(w) && i > 0 ? w.toUpperCase() : i > 0 && SMALL_WORDS.has(w) ? w : w.charAt(0).toUpperCase() + w.slice(1)))
     .join(' ');
 }
 refreshMenu();
@@ -656,7 +744,7 @@ function startRun(cfg) {
     tower.material = materialForSeed(plan.seed, plan.mechanic);
     provider = (i) => (i === 0 ? tower : null);
   } else if (cfg.mode === 'campaign') {
-    // 8 towers x 3 levels: classic layout first, then two fresh generated levels per tower
+    // Original: the 8 real towers. Reboot: the worlds campaign (worlds.js), 50 fixed towers
     const runSeed = cfg.runSeed ?? ((Date.now() & 0xffffff) ^ 0x2f1a3b);
     cfg.runSeed = runSeed;
     provider = makeCampaignProvider({ towers: game.campaignTowers, procgen, runSeed, variant: cfg.variant || 'reboot' });
@@ -691,7 +779,7 @@ function startRun(cfg) {
 }
 
 const campaignStart = (variant) => (Number($('start-tower').value) || 0) * (procgen ? levelsFor(variant) : 1);
-$('btn-start').addEventListener('click', () => startRun({ mode: 'campaign', variant: 'reboot', startTower: campaignStart('reboot') }));
+$('btn-start').addEventListener('click', openWorldMap);
 $('btn-original').addEventListener('click', () => startRun({ mode: 'campaign', variant: 'original', startTower: campaignStart('original') }));
 $('btn-daily').addEventListener('click', () => procgen && startRun({ mode: 'daily' }));
 $('btn-continue-run').addEventListener('click', () => {
