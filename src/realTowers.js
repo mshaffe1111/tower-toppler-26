@@ -46,6 +46,19 @@ export function hasRealTower(id) {
 export function buildRealTower(id, base = {}) {
   const top = REAL_TOWER_GRIDS[id];
   if (!top) return null;
+  const t = buildGridTower(top, { id, look: PATROL_LOOK[id], idTag: `real${id}` });
+  return {
+    ...t,
+    name: base.name || `TOWER ${id}`,
+    palette: base.palette,
+    timeLimit: REAL_TIME_LIMITS[id - 1] || 100,
+    real: true,
+    cacheKey: `real${id}`,
+  };
+}
+
+// Any tower in the grid format (top row first): the real towers and generated ones (towergen.js)
+export function buildGridTower(top, { id = 0, look = 'eye', idTag = 'g' } = {}) {
   const rows = top.slice().reverse(); // rows[0] is the bottom
   // Toppler stores an empty row under the ground ledge (the sea); our floor 0 is the ground row
   while (rows.length && !rows[0].trim()) rows.shift();
@@ -92,7 +105,7 @@ export function buildRealTower(id, base = {}) {
     for (const { c, r0, n } of runs(sym)) {
       for (let k = 0; k + 3 <= n; k += 3) {
         const floor = r0 + k - 1;
-        const d = { id: `real${id}d${c}f${floor}`, col: c, floor, targetId: null, isExit: sym === 'T' };
+        const d = { id: `${idTag}d${c}f${floor}`, col: c, floor, targetId: null, isExit: sym === 'T' };
         doors.push(d);
         doorAt.set(`${c},${floor}`, d);
       }
@@ -135,7 +148,7 @@ export function buildRealTower(id, base = {}) {
       if (!KIND[code]) continue;
       const k = KIND[code];
       enemies.push({
-        type: k.type || PATROL_LOOK[id] || 'eye',
+        type: k.type || look || 'eye',
         kind: k.kind,
         kspeed: k.speed,
         col: c + 0.5,
@@ -146,13 +159,10 @@ export function buildRealTower(id, base = {}) {
     }
   }
 
-  if (problems.length && typeof console !== 'undefined') console.warn(`real tower ${id}:`, problems);
+  if (problems.length && typeof console !== 'undefined') console.warn(`grid tower ${idTag}:`, problems);
   const exit = doors.find((d) => d.isExit);
   return {
     id,
-    name: base.name || `TOWER ${id}`,
-    palette: base.palette,
-    timeLimit: REAL_TIME_LIMITS[id - 1] || 100,
     floors: H,
     ledges,
     doors,
@@ -160,8 +170,6 @@ export function buildRealTower(id, base = {}) {
     enemies,
     spawn: { col: 0, floor: 0 },
     exitFloor: exit ? exit.floor : H - 4,
-    real: true,
     mechanic: 'none',
-    cacheKey: `real${id}`,
   };
 }
