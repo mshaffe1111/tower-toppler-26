@@ -192,6 +192,15 @@ function buildRoute(rng, D, exitFloor, mech, idTag) {
     return run;
   };
   const doorClear = (c, f) => doors.every((d) => d.floor !== f || Math.abs(colDist(d.col, c)) >= 2);
+  // A jump from floor f peaks about 1.5 floors up, where the ledge-hang assist can grab a lip
+  // two floors up within ~1 column ahead. Keep that zone empty so no decoy can catch the jump.
+  const hangZoneFree = (e, d, f, n) => {
+    for (let i = 1; i <= n; i++) if (L.occupied(e + d * i, f + 2)) return false;
+    return true;
+  };
+  const reserveHangZone = (e, d, f, n) => {
+    for (let i = 1; i <= n; i++) L.reserve(e + d * i, f + 2);
+  };
 
   // Spawn run at floor 0
   let dir = rng.chance(0.5) ? 1 : -1;
@@ -235,24 +244,27 @@ function buildRoute(rng, D, exitFloor, mech, idTag) {
         next = addRun(cols, nf, d, m);
       } else if (m === MOVE.JUMP_UP) {
         const nf = f + 1;
-        const gapFree = L.free(e + d, f) && L.free(e + d, nf);
+        const gapFree = !L.occupied(e + d, f) && !L.occupied(e + d, nf) && hangZoneFree(e, d, f, 3);
         const cols = runCells(e + 2 * d, d, landWidth(nf));
         if (!gapFree || !runOk(cols, nf, ignore)) continue;
         L.reserve(e + d, f);
         L.reserve(e + d, nf);
+        reserveHangZone(e, d, f, 3);
         next = addRun(cols, nf, d, m);
       } else if (m === MOVE.JUMP_FLAT || m === MOVE.BOX) {
         const g = m === MOVE.BOX ? 1 : rng.chance(lerp(0.1, 0.7, D)) ? maxGap : 1;
         let gapFree = true;
         for (let i = 1; i <= g; i++) {
-          if (!L.free(e + d * i, f) || !L.free(e + d * i, f + 1) || L.nearRoute(e + d * i, f, ignore)) gapFree = false;
+          if (L.occupied(e + d * i, f) || L.occupied(e + d * i, f + 1) || L.nearRoute(e + d * i, f, ignore)) gapFree = false;
         }
+        if (!hangZoneFree(e, d, f, g + 2)) gapFree = false;
         const cols = runCells(e + d * (g + 1), d, landWidth(f));
         if (!gapFree || !runOk(cols, f, ignore)) continue;
         for (let i = 1; i <= g; i++) {
           if (m === MOVE.JUMP_FLAT) L.reserve(e + d * i, f);
           L.reserve(e + d * i, f + 1);
         }
+        reserveHangZone(e, d, f, g + 2);
         if (m === MOVE.BOX) L.add(e + d, f, 'box', 'box');
         next = addRun(cols, f, d, m);
         next.gap = g;
@@ -349,7 +361,7 @@ function extraOk(L, c, f, ignore = null, maxFloor = Infinity) {
   return f >= 1 && f <= maxFloor && L.free(c, f) && !L.nearRoute(c, f, ignore);
 }
 
-function placeSecrets(rng, R, D, exitFloor, idTag) {
+function placeSecrets(rng, R, D, exitFloor, idTag, cpFloors) {
   const { L, runs, elevators, doors, nooks } = R;
   const secrets = [];
   const used = new Set(); // runs already used as a branch anchor
@@ -370,7 +382,7 @@ function placeSecrets(rng, R, D, exitFloor, idTag) {
       for (let k = 0; k < steps; k++) {
         cells.push([s - d * (1 + 2 * k), f + 1 + k], [s - d * (2 + 2 * k), f + 1 + k]);
       }
-      if (!cells.every(([c, fl]) => extraOk(L, c, fl, ignore, exitFloor))) return null;
+      if (!cells.every(([c, fl]) => extraOk(L, c, fl, ignore, exitFloor) && !cpFloors.has(fl))) return null;
       // the spur must be unique cells
       for (const [c, fl] of cells) L.add(c, fl, 'solid', 'branch');
       used.add(run.id);
@@ -386,6 +398,7 @@ function placeSecrets(rng, R, D, exitFloor, idTag) {
       for (const side of rng.shuffle([-run.liftBoardDir, run.liftBoardDir])) {
         for (const k of rng.shuffle([2, h - 1].filter((x, i, a) => x >= 2 && a.indexOf(x) === i))) {
           const fl = el.minFloor + k;
+          if (cpFloors.has(fl)) continue;
           const cells = [el.col + side, el.col + 2 * side];
           if (!cells.every((c) => extraOk(L, c, fl, null, exitFloor))) continue;
           for (const c of cells) L.add(c, fl, 'solid', 'branch');
@@ -404,7 +417,7 @@ function placeSecrets(rng, R, D, exitFloor, idTag) {
         if (run.doors.has(a) || !doorClear(a, f)) continue;
         for (const dfl of rng.shuffle([1, 2, -1])) {
           const fl = f + dfl;
-          if (fl < 1 || fl > exitFloor - 1) continue;
+          if (fl < 1 || fl > exitFloor - 1 || cpFloors.has(fl)) continue;
           const b = a + COLS / 2;
           const d2 = rng.chance(0.5) ? 1 : -1;
           const cells = [b, b + d2, b + 2 * d2].slice(0, rng.int(2, 3));
@@ -488,7 +501,7 @@ function placeSpecials(rng, R, D) {
 }
 
 // Decoy ledges: short runs near the route that lead nowhere useful (some crumble, some ice).
-function placeDecoys(rng, R, D, exitFloor) {
+function placeDecoys(rng, R, D, exitFloor, cpFloors) {
   const { L } = R;
   const target = Math.round((exitFloor + 2) * lerp(0.4, 0.55, D));
   let placed = 0;
@@ -501,7 +514,8 @@ function placeDecoys(rng, R, D, exitFloor) {
     const cols = runCells(c, side, w);
     if (!cols.every((x) => extraOk(L, x, f, null, exitFloor - 1))) continue;
     const roll = rng.next();
-    const type = roll < lerp(0.15, 0.4, D) ? 'crumble' : roll < lerp(0.25, 0.55, D) ? 'ice' : 'solid';
+    let type = roll < lerp(0.15, 0.4, D) ? 'crumble' : roll < lerp(0.25, 0.55, D) ? 'ice' : 'solid';
+    if (cpFloors.has(f)) type = 'crumble';
     cols.forEach((x) => L.add(x, f, type, 'decoy'));
     // A shootable box on the far end of some wider decoys (bonus points, never in the way)
     if (w >= 2 && rng.chance(lerp(0.1, 0.35, D))) {
@@ -686,26 +700,29 @@ export function generateTower({ seed, difficulty = 0.5, id = 100, name = null, m
   }
   if (!R) throw new Error(`procgen: could not build a route for seed ${seed}`);
 
-  const extraRng = sub('extras');
-  const secrets = placeSecrets(extraRng, R, D, exitFloor, idTag);
-  const specials = placeSpecials(sub('specials'), R, D);
-  placeDecoys(sub('decoys'), R, D, exitFloor);
-  const enemies = placeEnemies(sub('enemies'), R, D, floors);
-
-  const est = estimateRouteTime(R, enemies, specials, mech);
-  const timeLimit = Math.max(60, Math.round((est * lerp(1.6, 1.25, D)) / 5) * 5);
-
-  // Checkpoints: roughly every 5 floors, on a floor where the main route has a solid ledge
-  const solidFloors = [...new Set(R.L.route.filter((c) => c.type === 'solid').map((c) => c.floor))].sort((a, b) => a - b);
+  // Checkpoints: roughly every 5 floors, on a floor where the main route has a solid ledge.
+  // (The game flags the middle solid/ice ledge of that floor, so extras placed later on these
+  // floors are never solid or ice: the flag always lands on the main route.)
+  const routeFloors = [...new Set(R.L.route.map((c) => c.floor))].sort((a, b) => a - b);
   const checkpoints = [];
   for (let k = 5; k < exitFloor - 1; k += 5) {
     let best = null;
-    for (const fl of solidFloors) {
+    for (const fl of routeFloors) {
       if (fl <= 0 || fl >= exitFloor) continue;
       if (best === null || Math.abs(fl - k) < Math.abs(best - k) || (Math.abs(fl - k) === Math.abs(best - k) && fl < best)) best = fl;
     }
     if (best !== null && !checkpoints.includes(best) && Math.abs(best - k) <= 2) checkpoints.push(best);
   }
+  const cpFloors = new Set(checkpoints);
+
+  const extraRng = sub('extras');
+  const secrets = placeSecrets(extraRng, R, D, exitFloor, idTag, cpFloors);
+  const specials = placeSpecials(sub('specials'), R, D);
+  placeDecoys(sub('decoys'), R, D, exitFloor, cpFloors);
+  const enemies = placeEnemies(sub('enemies'), R, D, floors);
+
+  const est = estimateRouteTime(R, enemies, specials, mech);
+  const timeLimit = Math.max(60, Math.round((est * lerp(1.6, 1.25, D)) / 5) * 5);
 
   const ledges = [...R.L.cells.values()]
     .map((c) => ({ col: c.col, floor: c.floor, type: c.type }))

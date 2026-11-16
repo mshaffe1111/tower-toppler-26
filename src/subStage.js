@@ -10,13 +10,13 @@ const INTRO_TIME = 1.1; // sub glides in from the left
 const ARRIVE_TIME = 4.6; // surfacing next to the next tower
 const TOWER_LEAD = 5.2; // the next tower starts scrolling in this long before the ride ends
 
-const FISH_POINTS = { small: 40, big: 250, gold: 1000 };
-const JELLY_POINTS = 150;
-const PEARL_POINTS = 500;
-const PERFECT_BONUS = 1000;
-const SCHOOL_BONUS = 200; // whole school caught in one go
+const FISH_POINTS = { small: 25, big: 200, gold: 800 };
+const JELLY_POINTS = 100;
+const PEARL_POINTS = 400;
+const PERFECT_BONUS = 750;
+const SCHOOL_BONUS = 150; // whole school caught in one go
 const HIT_PENALTY = 100;
-const MAX_MULT = 5;
+const MAX_MULT = 4;
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -151,9 +151,9 @@ export class SubStage {
   }
 
   _layout() {
-    this.surfaceY = this.height * 0.085;
+    this.surfaceY = this.height * 0.115;
     this.seabedY = this.height * 0.905;
-    this.top = this.surfaceY + 30 * this.s; // highest the sub may go while riding
+    this.top = this.surfaceY + 26 * this.s; // highest the sub may go while riding
     this.bottom = this.seabedY - 10 * this.s; // lowest (pearls sit on the seabed just below)
   }
 
@@ -341,7 +341,7 @@ export class SubStage {
     } else if (this.phase === 'arrive') {
       // Autopilot: swim in front of the tower's base and break the surface
       const tx = this.tower.x - this.tower.r * 0.95 - sub.rx * 0.2;
-      const ty = this.surfaceY + sub.ry * 0.15;
+      const ty = this.surfaceY + sub.ry * 0.3;
       const dx = tx - sub.x;
       const dy = ty - sub.y;
       const maxV = 190 * s;
@@ -635,7 +635,6 @@ export class SubStage {
           for (const g of this.fish) {
             if (g.school === f.school && g.state === 'swim') this._bubbleFish(g, k++ * 0.05);
           }
-          fx.popup?.(f.x, f.y - 18 * this.s, 'SCHOOL BUBBLED!', '#a5f3fc');
         } else {
           this._bubbleFish(f, 0);
         }

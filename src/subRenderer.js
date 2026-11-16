@@ -51,15 +51,15 @@ function mulberry32(seed) {
 // ---------------------------------------------------------------------------------- palettes
 // Three stops: healing 0 (toxic murk) / 0.5 / 1 (clear sunlit turquoise)
 const PAL_HEX = {
-  fog: ['#1d1431', '#123a50', '#0b7393'],
+  fog: ['#1d1431', '#123a50', '#0a6787'],
   hemiSky: ['#a6c25a', '#9ad8e6', '#d8fbff'],
   hemiGround: ['#2a1036', '#103043', '#0b4560'],
   sun: ['#c3cc6c', '#e6f4d6', '#fff2d2'],
-  surf: ['#3f5a24', '#3c95a6', '#7fe3f3'],
-  surfHi: ['#a8c84e', '#c9f6ff', '#ffffff'],
+  surf: ['#3f5a24', '#3a8fa2', '#5ccbe0'],
+  surfHi: ['#a8c84e', '#c2f2fb', '#effdff'],
   ray: ['#9cc040', '#c9f2ea', '#fff4d4'],
-  sandA: ['#241b2c', '#4a4b48', '#b48d5c'],
-  sandB: ['#3e3248', '#7c7a68', '#efd6a2'],
+  sandA: ['#241b2c', '#45463f', '#8c6d48'],
+  sandB: ['#3e3248', '#716f5e', '#c9ad7c'],
   caustic: ['#9dff6a', '#c9fff5', '#fffbe8'],
   toxic: ['#7dff2e', '#6be08a', '#40c0a0'],
   snow: ['#c4e05e', '#cdeff2', '#f4ffff'],
@@ -299,7 +299,7 @@ function buildStaghorn(rng) {
 }
 
 function buildBrain() {
-  const g = new THREE.SphereGeometry(1, 36, 22);
+  const g = new THREE.SphereGeometry(1, 26, 16);
   const p = g.attributes.position;
   const v = new THREE.Vector3();
   for (let i = 0; i < p.count; i++) {
@@ -417,8 +417,8 @@ function buildSpire(rng) {
   return g;
 }
 
-function buildFish() {
-  const body = new THREE.SphereGeometry(1, 18, 12);
+function buildFish(low = false) {
+  const body = low ? new THREE.SphereGeometry(1, 10, 7) : new THREE.SphereGeometry(1, 16, 10);
   body.scale(1, 0.5, 0.3);
   paint(body, (x, y, z, c) => {
     let k = y < 0 ? 1.0 : lerp(1.0, 0.58, clamp(y / 0.45, 0, 1));
@@ -444,13 +444,16 @@ function buildFish() {
   solid(fin, 0.85, 0.85, 0.85);
   const eyes = [];
   for (const sz of [1, -1]) {
-    const w = new THREE.SphereGeometry(0.15, 10, 8);
-    w.translate(-0.6, 0.1, 0.17 * sz);
-    solid(w, 1.0, 1.0, 1.0);
-    const e = new THREE.SphereGeometry(0.095, 10, 8);
+    if (!low) {
+      const w = new THREE.SphereGeometry(0.15, 8, 6);
+      w.translate(-0.6, 0.1, 0.17 * sz);
+      solid(w, 1.0, 1.0, 1.0);
+      eyes.push(w);
+    }
+    const e = low ? new THREE.SphereGeometry(0.1, 5, 4) : new THREE.SphereGeometry(0.095, 8, 6);
     e.translate(-0.66, 0.11, 0.23 * sz);
     solid(e, 0.02, 0.02, 0.03);
-    eyes.push(w, e);
+    eyes.push(e);
   }
   return merge([body, tail, dorsal, fin, ...eyes]);
 }
@@ -584,8 +587,8 @@ function jellyBellMaterial(U) {
         float gon = smoothstep(0.55, 0.95, sin(ang * 4.0) * 0.5 + 0.5) * smoothstep(0.15, 0.5, vL.y) * smoothstep(0.82, 0.45, vL.y);
         float rim = smoothstep(0.12, -0.08, vL.y);
         float beat = 0.75 + 0.25 * sin(uTime * 3.0 + vPh);
-        vec3 col = vC * (0.5 + fres * 1.7) * beat + vC * gon * 1.1 + vec3(1.0) * (fres * 0.45 + rim * 0.5);
-        float a = clamp(0.34 + fres * 0.6 + gon * 0.3 + rim * 0.3, 0.0, 1.0) * vA;
+        vec3 col = vC * (0.42 + fres * 1.5) * beat + vC * gon * 1.2 + vec3(1.0) * (fres * 0.3 + rim * 0.45);
+        float a = clamp(0.5 + fres * 0.5 + gon * 0.3 + rim * 0.3, 0.0, 1.0) * vA;
         gl_FragColor = vec4(col, a);
         ${GLSL_OUT}
       }`,
@@ -659,7 +662,7 @@ function lightConeMaterial() {
     vertexShader: /* glsl */ `
       varying float vT; varying vec3 vN; varying vec3 vV;
       void main(){
-        vT = clamp(0.5 - position.y / 4.5, 0.0, 1.0); // 0 at the tip, 1 at the open end
+        vT = clamp((position.x - 1.32) / 4.5, 0.0, 1.0); // 0 at the tip (nose), 1 at the open end
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz);
         gl_Position = projectionMatrix * mv;
@@ -852,9 +855,9 @@ export class SubRenderer {
           float c = caustic(p * 0.16, uTime * 0.5) * 0.7 + caustic(p * 0.31 + 3.1, uTime * 0.62) * 0.45;
           col += uCausticColor * c * uCaustic * (0.55 + 0.45 * lam);
           float tn = vnoise(p * 0.22 + 7.3) * 0.7 + vnoise(p * 0.9 + 2.0) * 0.3;
-          float tox = smoothstep(0.55, 0.72, tn) * uToxicAmt;
-          col = mix(col, uToxic * 0.22, tox * 0.85);
-          col += uToxic * tox * (0.22 + 0.16 * sin(uTime * 2.0 + p.x * 0.7));
+          float tox = smoothstep(0.6, 0.76, tn) * uToxicAmt;
+          col = mix(col, uToxic * 0.16, tox * 0.85);
+          col += uToxic * tox * (0.1 + 0.07 * sin(uTime * 2.0 + p.x * 0.7));
           float f = smoothstep(uFogNear, uFogFar, vDepth);
           gl_FragColor = vec4(mix(col, uFogColor, f), 1.0);
           ${GLSL_OUT}
@@ -902,7 +905,7 @@ export class SubRenderer {
           vec3 col = uSurf * (0.6 + 0.5 * n) + uSurfHi * c * 1.25;
           float f = smoothstep(uFogNear * 0.55, uFogFar * 0.85, vDepth);
           col = mix(col, uFogColor, f);
-          gl_FragColor = vec4(col, 0.9);
+          gl_FragColor = vec4(col, 0.8);
           ${GLSL_OUT}
         }`,
     });
@@ -1098,15 +1101,15 @@ export class SubRenderer {
       const N = 30;
       const mesh = instanced(geo, mat, N, { glow: true });
       const items = [];
-      const kelpCols = ['#3fae4a', '#6cbf3a', '#9cc43a', '#2f9e6a'].map((h) => new THREE.Color(h));
+      const kelpCols = ['#2f8a3e', '#4f9a33', '#6f9a2e', '#2a7f5a'].map((h) => new THREE.Color(h));
       const dead = new THREE.Color('#4a3d2c');
       for (let i = 0; i < N; i++) {
         items.push({
           u: rng(),
-          z: lerp(-2.5, -12, rng()),
+          z: lerp(-4, -13, rng()),
           dy: -0.15,
-          sx: lerp(0.9, 1.6, rng()),
-          sy: lerp(4.5, 9.5, rng()),
+          sx: lerp(0.8, 1.4, rng()),
+          sy: lerp(3.5, 8, rng()),
           sz: 1,
           ry: (rng() - 0.5) * 0.8,
           lush: kelpCols[i % kelpCols.length],
@@ -1295,6 +1298,8 @@ export class SubRenderer {
     const chromeMat = new THREE.MeshStandardMaterial({ color: '#d7e0ea', metalness: 0.55, roughness: 0.22 });
     const darkMat = new THREE.MeshStandardMaterial({ color: '#2a3140', metalness: 0.4, roughness: 0.5 });
     this.flashMats = [hullMat, redMat];
+    hullMat.userData = { er: 1.0, eg: 0.62, eb: 0.0 };
+    redMat.userData = { er: 1.0, eg: 0.1, eb: 0.05 };
 
     const L0 = -1.22;
     const L1 = 1.3;
@@ -1480,7 +1485,7 @@ export class SubRenderer {
     });
     const fishGeo = buildFish();
     this.fishMesh = instanced(fishGeo, fishMat, MAX_FISH, { glow: true, anim: true });
-    this.ambMesh = instanced(fishGeo.clone(), fishMat, MAX_AMB, { glow: true, anim: true });
+    this.ambMesh = instanced(buildFish(true), fishMat, MAX_AMB, { glow: true, anim: true });
     this.scene.add(this.fishMesh, this.ambMesh);
 
     // background schools (purely decorative)
@@ -1589,6 +1594,18 @@ export class SubRenderer {
     this.glowMesh = instanced(new THREE.PlaneGeometry(1, 1), glowMat, MAX_GLOW);
     this.glowMesh.renderOrder = 9;
     this.scene.add(this.glowMesh);
+    // dark soft halos behind the sub and hazards so they read against bright, busy water
+    this.shadeMat = new THREE.MeshBasicMaterial({
+      map: this.softDot,
+      color: '#00060e',
+      transparent: true,
+      depthWrite: false,
+      opacity: 0.3,
+      toneMapped: false,
+    });
+    this.shadeMesh = instanced(new THREE.PlaneGeometry(1, 1), this.shadeMat, 48, { color: false });
+    this.shadeMesh.renderOrder = 1;
+    this.scene.add(this.shadeMesh);
 
     // shock-wave rings
     const ringTex = canvasTex(128, 128, (ctx) => {
@@ -1670,25 +1687,25 @@ export class SubRenderer {
     }
     g.computeVertexNormals();
     const stoneTex = canvasTex(256, 256, (ctx, w, h) => {
-      ctx.fillStyle = '#3c3a4a';
+      ctx.fillStyle = '#4a4658';
       ctx.fillRect(0, 0, w, h);
       const rows = 8;
       for (let r = 0; r < rows; r++) {
         const off = (r % 2) * 16;
         for (let c = -1; c < 8; c++) {
-          const v = 50 + Math.floor(rng() * 30);
-          ctx.fillStyle = `rgb(${v},${v - 4},${v + 12})`;
+          const v = 92 + Math.floor(rng() * 40);
+          ctx.fillStyle = `rgb(${v},${v - 6},${v + 14})`;
           ctx.fillRect(c * 32 + off + 2, r * 32 + 2, 28, 28);
         }
       }
     }, { repeat: true });
     stoneTex.repeat.set(4, 2);
-    this.rubble = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: stoneTex, roughness: 0.95, side: THREE.DoubleSide, color: '#b8b0c8' }));
+    this.rubble = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: stoneTex, roughness: 0.9, side: THREE.DoubleSide, color: '#ffffff', emissive: '#1a1426' }));
     this.rubble.scale.set(1, 6, 1);
     this.rubble.rotation.z = 0.12;
     this.scene.add(this.rubble);
     const bg = new THREE.BoxGeometry(1, 0.7, 0.9);
-    this.blocks = instanced(bg, new THREE.MeshStandardMaterial({ map: stoneTex, roughness: 0.95, color: '#b8b0c8' }), 9, { color: false });
+    this.blocks = instanced(bg, new THREE.MeshStandardMaterial({ map: stoneTex, roughness: 0.9, color: '#ffffff', emissive: '#1a1426' }), 9, { color: false });
     this.blockItems = [];
     for (let i = 0; i < 9; i++) {
       this.blockItems.push({
@@ -2080,7 +2097,7 @@ export class SubRenderer {
     bu.uSandA.value.copy(C.sandA);
     bu.uSandB.value.copy(C.sandB);
     bu.uCausticColor.value.copy(C.caustic);
-    bu.uCaustic.value = lerp(0.14, 0.95, h);
+    bu.uCaustic.value = lerp(0.14, 0.8, h);
     bu.uToxic.value.copy(C.toxic);
     bu.uToxicAmt.value = Math.pow(1 - h, 1.4);
     this.surfMat.uniforms.uSurf.value.copy(C.surf);
@@ -2090,8 +2107,9 @@ export class SubRenderer {
     this.snowMat.uniforms.uColor.value.copy(C.snow);
     this.snowMat.uniforms.uAlpha.value = lerp(0.95, 0.6, h);
     this.vigMat.uniforms.uColor.value.copy(C.vignette);
-    this.vigMat.uniforms.uStr.value = lerp(0.62, 0.38, h);
+    this.vigMat.uniforms.uStr.value = lerp(0.45, 0.32, h);
     this._coralRim.value = lerp(0.08, 0.28, h);
+    this.shadeMat.opacity = lerp(0.0, 0.42, h);
 
     const c = this._c;
     // far + rock colours
@@ -2121,7 +2139,7 @@ export class SubRenderer {
       }
       glowAttr.needsUpdate = true;
       layer.mesh.instanceColor.needsUpdate = true;
-      layer.visibleFrac = isKelp ? 0.22 + 0.78 * h : coralFrac;
+      layer.visibleFrac = isKelp ? 0.2 + 0.55 * h : coralFrac;
       layer.mesh.count = Math.max(1, Math.round(layer.items.length * layer.visibleFrac));
     }
     this._composeLayer(this.kelpLayer);
@@ -2134,6 +2152,7 @@ export class SubRenderer {
 
   // ------------------------------------------------------------------ glow helpers
   _glowBegin() {
+    this._sN = 0;
     this._gN = 0;
   }
   _glow(x, y, z, size, r, g, b) {
@@ -2162,7 +2181,22 @@ export class SubRenderer {
     c[i * 3 + 1] = g;
     c[i * 3 + 2] = b;
   }
+  _shade(x, y, size, sy = size) {
+    if (this._sN >= 48) return;
+    const o = this._sN++ * 16;
+    const m = this.shadeMesh.instanceMatrix.array;
+    m.fill(0, o, o + 16);
+    m[o] = size;
+    m[o + 5] = sy;
+    m[o + 10] = 1;
+    m[o + 12] = x;
+    m[o + 13] = y;
+    m[o + 14] = -0.9;
+    m[o + 15] = 1;
+  }
   _glowEnd() {
+    this.shadeMesh.count = this._sN;
+    this.shadeMesh.instanceMatrix.needsUpdate = true;
     this.glowMesh.count = this._gN;
     this.glowMesh.instanceMatrix.needsUpdate = true;
     this.glowMesh.instanceColor.needsUpdate = true;
@@ -2331,7 +2365,7 @@ export class SubRenderer {
   _updateTowers(stage, scrollW, seabedW, surfW, time, h) {
     const v = this._v;
     // rubble of the tower we toppled, scrolling away behind us
-    const rx0 = this._toWorld(stage.width * 0.08, 0, RUBBLE_Z, v).x;
+    const rx0 = this._toWorld(stage.width * 0.5, 0, RUBBLE_Z, v).x;
     const rx = rx0 - scrollW;
     const rVisible = rx > -this._halfW(RUBBLE_Z) - 12;
     this.rubble.visible = rVisible;
@@ -2410,8 +2444,9 @@ export class SubRenderer {
     let fl = 0;
     if (sub.stun > 0) fl = Math.sin(time * 42) > 0 ? 1.1 : 0.15;
     else if (sub.invuln > 0) fl = Math.sin(time * 26) > 0.4 ? 0.35 : 0;
+    const base = lerp(0.07, 0.015, this._heal); // keep the hull vivid in murky water
     for (const m of this.flashMats) {
-      m.emissive.setRGB(fl, fl * 0.9, fl * 0.95);
+      m.emissive.setRGB(fl + base * m.userData.er, fl * 0.9 + base * m.userData.eg, fl * 0.95 + base * m.userData.eb);
     }
     const lightOn = sub.stun > 0 ? (Math.sin(time * 30) > 0 ? 0.3 : 0) : 1;
     const h = this._heal;
@@ -2424,6 +2459,7 @@ export class SubRenderer {
     const ny = v.y + bob + 1.3 * sc * s;
     this._glow(nx, ny, 0.6, sc * 1.1 * lightOn, 1.0 * lightOn, 0.95 * lightOn, 0.7 * lightOn);
     this._glow(v.x, v.y + bob, -0.8, sc * 4.6, 0.14, 0.12, 0.05);
+    this._shade(v.x, v.y + bob, sc * 5.2, sc * 3.6);
     this._subTail = this._subTail || new THREE.Vector3();
     this._subTail.set(v.x - 1.45 * sc * c, v.y + bob - 1.45 * sc * s, 0);
     this._subSc = sc;
@@ -2466,6 +2502,7 @@ export class SubRenderer {
       glow[n] = f.type === 'gold' ? 0.75 + 0.35 * Math.sin(time * 6) : f.type === 'big' ? 0.12 : 0.22;
       // halo behind catchable fish
       const hk = f.type === 'gold' ? 0.55 : f.type === 'big' ? 0.12 : 0.2;
+      if (f.type !== 'small') this._shade(v.x, v.y, s * 4.2, s * 3.4);
       this._glow(v.x, v.y, -0.5, s * (f.type === 'gold' ? 5 : 3.2), c.r * hk, c.g * hk, c.b * hk);
       if (f.type === 'gold' && (Math.sin(time * 9 + i) > 0.6)) {
         this._glow(v.x + Math.sin(time * 3.1) * s, v.y + Math.cos(time * 2.3) * s * 0.6, 0.6, s * 0.9, 1, 0.95, 0.6);
@@ -2603,6 +2640,7 @@ export class SubRenderer {
       ta[n] = a;
       const gk = (0.32 + 0.12 * ps) * a;
       this._glow(v.x, v.y + r * 0.25, 0.25, r * 3.4, c.r * gk, c.g * gk, c.b * gk);
+      if (!popped) this._shade(v.x, v.y - r * 0.4, r * 4.2, r * 5.2);
       n++;
     }
     bell.count = n;
@@ -2638,6 +2676,7 @@ export class SubRenderer {
       const on = m.blink < 0.5 ? 1 : 0.18;
       this._glow(mx, my + r * 1.05, 0.9, r * (1.4 + on * 1.4), 1.0 * on, 0.18 * on, 0.1 * on);
       this._glow(mx, my, -0.6, r * 5.2, 0.32, 0.04, 0.02);
+      this._shade(mx, my, r * 5.5);
       if (m.kind === 'anchored') {
         const top = my - r * 1.0;
         const len = top - seabedW;

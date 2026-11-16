@@ -534,5 +534,53 @@
     .modal-hero .mode-sub {
       display: none;
     }
+
+    .overlay > .modal-card {
+      padding: 10px 16px;
+    }
+
+    .btn-primary {
+      padding: 9px 14px;
+    }
+
+    .btn-secondary {
+      margin-top: 5px;
+      padding: 7px 14px;
+    }
+
+    .modal-heading {
+      font-size: 18px;
+    }
+
+    .modal-sub {
+      margin-bottom: 8px;
+    }
+
+    .set-row small {
+      display: none;
+    }
+
+    .settings-list {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .set-row {
+      padding: 3px 8px;
+    }
+
+    .set-row strong {
+      font-size: 12.5px;
+      line-height: 1.1;
+    }
+
+    .set-row select {
+      padding: 3px 4px;
+    }
+
+    .modal-scroll .controls-preview {
+      font-size: 11px;
+      gap: 4px 12px;
+      padding: 6px 9px;
+    }
   }
 }

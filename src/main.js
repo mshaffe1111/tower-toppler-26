@@ -427,6 +427,7 @@ function toMenu() {
   sound.setUnderwater?.(false);
   sound.setTowerTheme?.('title');
   game.runMode = 'campaign';
+  game.healing = 0;
   game.towerProvider = (i) => game.campaignTowers[i] || null;
   game.loadTower(Number($('start-tower').value) || 0);
   refreshMenu();
