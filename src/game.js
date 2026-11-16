@@ -33,7 +33,9 @@ function mulberry32(seed) {
 
 // Classic-paced movement tuning (deliberate like the 7800 original, but with modern assists)
 const PHYS = {
-  walkSpeed: 2.8, // columns / second on the ground (~6s per lap: original feel, quick enough to dodge)
+  walkSpeed: 2.8, // columns / second on the ground (Reboot: ~6s per lap, quick enough to dodge)
+  // ORIGINAL: measured from 7800 footage, the tower turns 2.0 columns/s while you walk (8s a lap)
+  origWalkSpeed: 2.0,
   airSpeed: 4.0, // a running jump carries a little extra distance
   gravity: 22, // snappy, arcade hop like the original (not floaty)
   jumpVy: 7.3, // ~1.2 floors high, ~0.66s in the air
@@ -41,9 +43,9 @@ const PHYS = {
   maxFall: 13,
   poundVy: -17,
   // ORIGINAL: a jump is a committed arc. Its sideways speed is fixed at takeoff and can't be
-  // steered in mid-air: walking -> a 2-column hop (measured from 7800 footage: the tower turns
-  // ~8.5 brick rows/s during a jump), standing -> straight up
-  origJumpVx: 3.0,
+  // steered in mid-air: walking -> a hop of ~1.75 columns, a little quicker sideways than the
+  // walk (as on the 7800), standing -> straight up
+  origJumpVx: 2.6,
 };
 const ENEMY_PACE = 0.62; // global enemy speed multiplier (classic, deliberate pace)
 const ICE_TOP = 1.6; // a frozen enemy's ice block top, in steps above its floor (matches the drawn block)
@@ -912,7 +914,7 @@ export class TowerTopplerGame {
     const convPush = underLedge ? (underLedge.type === 'conveyorR' ? 1.5 : underLedge.type === 'conveyorL' ? -1.5 : 0) : 0;
 
     // Horizontal input (analog stick = proportional; digital = full speed)
-    const maxSpeed = p.onGround ? PHYS.walkSpeed : PHYS.airSpeed;
+    const maxSpeed = p.onGround ? (this.original ? PHYS.origWalkSpeed : PHYS.walkSpeed) : PHYS.airSpeed;
     const axis = typeof inp.axisX === 'number' && inp.axisX !== 0 ? inp.axisX : (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
     let targetVx = 0;
     if (!stunned && !p.hang && !p.pound && Math.abs(axis) > 0.05) {
@@ -1437,12 +1439,13 @@ export class TowerTopplerGame {
       nearEl.recallTarget = Math.max(nearEl.minFloor, Math.min(nearEl.maxFloor, p.floor));
       sound.elevator();
     }
-    // Snowballs travel all the way round the tower — dodge your own if it comes back!
+    // Reboot: snowballs travel all the way round the tower (dodge your own if it comes back!).
+    // Original: a short throw, about 6 columns, as on the 7800.
     this.snowballs.push({
       col: wrapCol(p.col + p.facing * 0.4),
       floor: p.floor + 0.85, // from his hands
       dir: p.facing,
-      life: power > 0 ? 2.4 : 2.05,
+      life: this.original ? 6 / 8.5 : power > 0 ? 2.4 : 2.05,
       dist: 0,
       power,
       speed: power > 0 ? 7.2 : 8.5,
@@ -1496,7 +1499,7 @@ export class TowerTopplerGame {
       }
 
       // Your own snowball coming back round: brrr!
-      if (sb.dist > 11 && !p.hidden && p.invuln <= 0 && Math.abs(colDist(sb.col, p.col)) < 0.4 && Math.abs(sb.floor - (p.floor + 0.3)) < 0.5) {
+      if (!this.original && sb.dist > 11 && !p.hidden && p.invuln <= 0 && Math.abs(colDist(sb.col, p.col)) < 0.4 && Math.abs(sb.floor - (p.floor + 0.3)) < 0.5) {
         p.frozenSelf = 0.9;
         p.vx = 0;
         this.addPopup({ col: p.col, floor: p.floor + 1.1, text: 'BRRR!', color: '#a5f3fc' });

@@ -298,6 +298,8 @@ export class InputController {
     const onUp = (e) => {
       const entry = this._activePointers.get(e.pointerId);
       if (!entry || (entry.type !== 'slide' && entry.type !== 'rewind2')) return;
+      // a quick flick can lift off before its last move event arrives: count the final position
+      if (entry.type === 'slide' && e.type === 'pointerup') this._updateSlide(entry, e.clientX, e.clientY);
       this._releasePointer(e.pointerId);
     };
     app.addEventListener('pointerup', onUp);
@@ -338,30 +340,35 @@ export class InputController {
     else if (ax < 0) dirs.push('left');
     this._setStickDirs(entry, dirs);
 
-    // Jump = PUSH UP, in any upward direction (straight up or diagonally up-left / up-right:
-    // you push toward where you want to go and the walk direction carries the jump). The 'up'
-    // reference follows the thumb down at once but creeps up only slowly, so the slow rise of a
-    // thumb arcing while it walks never reaches the threshold; a deliberate push does.
-    // Down works the same way (pound / lift down / drop).
+    // Jump = PUSH UP, like a joystick: straight up or diagonally up-left / up-right (the walk
+    // direction carries the jump). Fast flick or slow push both count: what matters is how far
+    // the thumb has risen above its lowest recent point. That reference follows the thumb down
+    // at once and only creeps up very slowly, so a thumb that wanders up over several seconds of
+    // walking re-centres instead of jumping. After a jump, push a little further (or dip and push
+    // again) to jump again. Down works the same way (lift down / pound).
     const dt = Math.min(0.1, Math.max(0, (now - (entry.lastT || now)) / 1000));
     entry.lastT = now;
-    const JUMP_PX = c.sensitivity === 'high' ? 18 : c.sensitivity === 'low' ? 30 : 24;
-    const DOWN_PX = JUMP_PX + 8;
-    const LEAK = 30; // px/s the reference drifts after a slow thumb
+    const JUMP_PX = c.sensitivity === 'high' ? 16 : c.sensitivity === 'low' ? 28 : 22;
+    const DOWN_PX = JUMP_PX + 6;
+    const CREEP = 6; // px/s the reference follows a thumb that drifts (not a push)
     if (entry.upRef == null) entry.upRef = y;
     if (entry.downRef == null) entry.downRef = y;
-    entry.upRef = y > entry.upRef ? y : entry.upRef - Math.min(entry.upRef - y, LEAK * dt);
-    entry.downRef = y < entry.downRef ? y : entry.downRef + Math.min(y - entry.downRef, LEAK * dt);
+    entry.upRef = y >= entry.upRef ? y : entry.upRef - Math.min(entry.upRef - y, CREEP * dt);
+    entry.downRef = y <= entry.downRef ? y : entry.downRef + Math.min(y - entry.downRef, CREEP * dt);
+    // the thumb's latest motion (last ~0.2s) has to point up (or down) more than sideways,
+    // steeper than ~30 degrees, so the arc of a walking thumb never counts as a push
     const hist = entry.hist || (entry.hist = []);
     hist.push({ t: now, x, y });
-    while (hist.length > 2 && now - hist[0].t > 160) hist.shift();
+    while (hist.length > 2 && now - hist[0].t > 200) hist.shift();
     const o = hist[0];
-    const steepEnough = Math.abs(y - o.y) > Math.abs(x - o.x) * 0.45; // above ~24 degrees
-    if (entry.upRef - y > JUMP_PX && steepEnough && now - (entry.lastFlick || 0) > 180) {
+    const wdx = Math.abs(x - o.x);
+    const steepUp = o.y - y > 0 && o.y - y >= wdx * 0.58;
+    const steepDown = y - o.y > 0 && y - o.y >= wdx * 0.58;
+    if (entry.upRef - y > JUMP_PX && steepUp && now - (entry.lastFlick || 0) > 160) {
       entry.lastFlick = now;
-      entry.upRef = y; // re-arm: dip a little and push again to jump again
+      entry.upRef = y; // re-arm: push a little further, or dip and push again
       this._pulseAction('jump', 260);
-    } else if (y - entry.downRef > DOWN_PX && steepEnough && now - (entry.lastFlick || 0) > 180) {
+    } else if (y - entry.downRef > DOWN_PX && steepDown && now - (entry.lastFlick || 0) > 160) {
       entry.lastFlick = now;
       entry.downRef = y;
       this._pulseAction('down', 200);
