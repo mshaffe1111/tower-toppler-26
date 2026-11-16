@@ -360,6 +360,9 @@ export class TowerFx {
     // Horizon turns with the tower; only towers still standing are on it
     if (this.horizon) {
       this.horizon.rotation.y = -camCol * COL_ANGLE;
+      // the ring of islands and far towers (34-50 units out) always stays behind the camera,
+      // which sits further back with the long lens (scaled about the tower, so it looks the same)
+      this.horizon.scale.setScalar(Math.max(1, (cam.position.z + 14) / 34));
       const towers = state.campaignTowers || [];
       const standing = state.runMode === 'campaign' ? Math.max(0, 7 - (state.towerIndex || 0)) : 5;
       this.farTowers.forEach((ft, i) => {

@@ -122,7 +122,10 @@ export function buildGridTower(top, { id = 0, look = 'eye', idTag = 'g' } = {}) 
   for (let r = 0; r < H; r++) {
     for (let c = 0; c < COLS; c++) {
       if (at(r, c) !== '^') continue;
-      const stops = [r];
+      // '^' is drawn at body height, on top of the ledge cell the lift rests in: the platform is
+      // level with that ledge, so you walk on and off it (top and middle stops sit in ledge rows)
+      const bottom = r > 0 && '-.<>'.includes(at(r - 1, c)) ? r - 1 : r;
+      const stops = [bottom];
       let t = null;
       for (let k = r + 1; k < H; k++) {
         const ch = at(k, c);
@@ -137,7 +140,7 @@ export function buildGridTower(top, { id = 0, look = 'eye', idTag = 'g' } = {}) 
         continue;
       }
       stops.push(t);
-      elevators.push({ col: c, minFloor: r, maxFloor: t, startFloor: r, stops, rowsPerSec: 4, speed: 4 / 1.5 });
+      elevators.push({ col: c, minFloor: bottom, maxFloor: t, startFloor: bottom, stops, rowsPerSec: 4, speed: 4 / 1.5 });
     }
   }
 

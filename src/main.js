@@ -666,7 +666,20 @@ function startRun(cfg) {
     const cache = new Map();
     provider = (i) => {
       if (!cache.has(i)) {
-        const t = procgen.endlessTower(i, runSeed);
+        // endless: grid towers growing taller and meaner, a random twist from the second one
+        const seed = ((runSeed >>> 0) * 31 + i * 7919 + 17) >>> 0;
+        const twists = ['none', 'pistons', 'blizzard', 'dark', 'flood', 'collapse', 'wind'];
+        const t =
+          makeGeneratedTower({
+            seed,
+            height: Math.min(90, 46 + i * 4),
+            difficulty: Math.min(0.95, 0.15 + i * 0.06),
+            id: 100 + i,
+            name: `ENDLESS · TOWER ${i + 1}`,
+            look: ['eye', 'robot', 'spiker'][i % 3],
+            palette: game.campaignTowers[i % game.campaignTowers.length].palette,
+            mechanic: i === 0 ? 'none' : twists[seed % twists.length],
+          }) || procgen.endlessTower(i, runSeed);
         t.seed = t.seed ?? runSeed * 31 + i;
         t.material = t.material || materialForSeed((runSeed >>> 0) + i * 7919, t.mechanic);
         cache.set(i, t);

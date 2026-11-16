@@ -99,6 +99,20 @@ Walk 2.0 columns/s; a stair step is 1 column × 1 brick row; Pogo is about 2 row
 - **Running tests:** Playwright with swiftshader. It draws only about 2 fps, so step the game by
   hand with `g.update(1/60)` in timing tests.
 
+## Proportions, lifts and solid ledges (measured from the player's 7800 clip)
+- **Step height:** a 7800 step row is 0.28 of a column (21.5 px rows, tower radius 195 px).
+  `FH` = 0.28 in both modes (was 0.36). Pogo is 2.1 rows tall (measured 2.05–2.2).
+- **Lens:** the 7800 is drawn flat. Our 46° camera magnified Pogo against the tower (0.30 of
+  its radius on screen, vs 0.236). The Original now uses 18° from further back (0.243); the
+  Reboot uses 30° (0.26). The island and far-tower ring scales out with the camera.
+- **Lifts:** level with the floor. The data's `^` sits at body height on the ledge cell the
+  lift rests in; all 62 lift bottoms in the 8 towers sit on a ledge. Walk on, push UP, walk off.
+- **Ledges are solid from below in both modes:** heads bump on the slab's underside (no
+  clipping). All 8 real towers and all 24 Reboot levels still pass the engine check.
+- **Original camera:** follows Pogo's height (the 7800 scrolls the tower to keep him level).
+- **Jump:** the clips show the stair hop matches the port (peak ~1.2 rows, ~14 ticks at ~32
+  ticks/s); no running jump is in them yet, so the jump arc is still the port's table.
+
 ## Reboot look (done)
 - **Materials (src/props.js `MATERIAL_THEMES`):** 14 wall materials, each with its own block
   shape and procedural surface texture (src/materials.js `surfaceMaps`): rock, timber, siding,

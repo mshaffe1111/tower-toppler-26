@@ -15,7 +15,7 @@ Goal: a new tower every day, and generated Reboot campaign levels, that:
 | Platform density | 1.1–1.6 cells per row (sparse: you see the brick wall, not a ledge forest) |
 | Platform runs | mostly **single cells** (diagonal stairs, stepping stones); a few long ledges (7+) per tower |
 | Row gaps | mostly 1 (stairs); big gaps (4–13 rows) are bridged by **lifts** |
-| Lifts | 6–14 per tower; rise 2–25 rows, typically ~9; the platform sits **one step up** from its ledge |
+| Lifts | 6–14 per tower; rise 2–25 rows, typically ~9; the platform is **level with the ledge** it rests in (the data draws `^` at body height on that ledge cell), so you walk on and off |
 | Tunnels | 4–10 door pairs (column c and c+8); Tower 7 has none |
 | Crumbling cells | almost always **single**, never side by side: hop each one |
 | Flashing blocks | gate a ledge or cap a lift shaft (shoot first: a lock and its key) |
@@ -31,7 +31,7 @@ from a pattern in the real towers.
 | LEDGE(n) | flat run | breathing room; long ones carry patrols |
 | HOP(dx, dy) | a gap to a stepping stone | timing, nerve |
 | CRUMBLE BRIDGE(n) | run with single crumbling cells | commitment (hop each) |
-| LIFT(rise, side) | platform one step up, top stop, exit ledge | big height, choices |
+| LIFT(rise, side) | platform level with the route, top stop, exit ledge | big height, choices |
 | CAPPED LIFT | a lift with a flashing block on the shaft | lock and key (shoot, then ride) |
 | GATE | flashing block across a run | lock and key |
 | TUNNEL | door at c, door and exit ledge at c+8 | the 180° twist: route moves to the far side |
@@ -118,6 +118,12 @@ batch report compares 100 generated towers with the 8 real ones.
   its pieces reachable.
 - **Engine check:** confirmed a full week of daily towers (Monday to Sunday, 46–90 rows) is
   climbable.
+
+## 8b. Since then
+- **Lifts are level with the floor** (walk on, walk off), in the real towers and generated ones.
+- **Ledges are solid from below:** the solver doesn't count on a jump or hop under a ledge 3 rows up.
+- **The Reboot campaign and endless mode use this generator** (24 campaign levels, 44–85 rows).
+  All 24 pass the engine-driven check (pistons counted as out: they're out 68% of each cycle).
 
 ## 9. New elements (the Reboot adds its own)
 The grammar is open. Each new element becomes a **piece** (placed on the route) or a **twist**
