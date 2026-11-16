@@ -672,6 +672,75 @@ export const TOWER_STYLES = {
   gold: { brick: '#d6a21e', alt: '#c48f18', hi: '#fff1a8', mortar: '#3a2a06', vary: 0.07, burnt: 0.02 },
 };
 const STYLE_BY_TOWER = { 1: 'red', 2: 'green', 3: 'blue', 4: 'ice', 5: 'orange', 6: 'teal', 7: 'magenta', 8: 'gold' };
+
+// REBOOT materials: each changes the wall's block layout and surface, plus its ledges and crown.
+//   around: blocks round the tower; rows: brick courses per block row; jitter: block width
+//   variation; proud: how much blocks stand in and out; colours, roughness, metalness, glow.
+export const MATERIAL_THEMES = {
+  rock: { around: 9, rows: [2, 3], jitter: 0.35, proud: 0.05, bevel: 0.05, joint: 0.07, surface: 'stone', tile: 0.45, colors: ['#8f877a', '#7a7367', '#a0978a', '#857d70', '#6e685e', '#958a78'], mortar: '#1a1714', roughness: 1, metalness: 0, normal: 1.4, hi: '#f4e8d4', ledge: ['#a39a8a', '#7d7568', 0.95, 0], crown: '#7b7468' },
+  timber: { around: 7, rows: [1], jitter: 0.35, proud: 0.015, bevel: 0.028, joint: 0.028, surface: 'wood', tile: 0.5, colors: ['#9a6438', '#8a5630', '#a8703e', '#7c4c2a', '#b07a46'], bands: { every: 6, color: '#4a2c16', proud: 0.035 }, mortar: '#1a0f07', roughness: 0.8, metalness: 0, normal: 1, hi: '#ffd8a0', ledge: ['#9a6a3e', '#6e4426', 0.8, 0], crown: '#5a3820' },
+  metal: { around: 8, rows: [4], jitter: 0, proud: 0.01, bevel: 0.025, joint: 0.03, surface: 'brushed', tile: 0.6, colors: ['#8b9198', '#6f757d', '#9ca2a9', '#868079', '#646b74'], mortar: '#0c0e12', roughness: 0.5, metalness: 0.65, normal: 0.6, hi: '#eef3ff', rivets: '#c4c9cf', ledge: ['#5a6470', '#3a424c', 0.45, 0.7], crown: '#4a525e' },
+  brass: { around: 8, rows: [3], jitter: 0, proud: 0.01, bevel: 0.025, joint: 0.03, surface: 'brushed', tile: 0.6, colors: ['#d2a04a', '#c08c3a', '#deb25c', '#b8784a', '#c9973f'], mortar: '#1c1206', roughness: 0.38, metalness: 0.6, normal: 0.6, hi: '#fff2c8', rivets: '#f2dc98', ledge: ['#a07a36', '#6e5222', 0.4, 0.7], crown: '#8a6a2e' },
+  crystal: { around: 12, rows: [2, 3], jitter: 0.3, proud: 0.07, bevel: 0.04, joint: 0.04, surface: 'crystal', tile: 0.8, colors: ['#b49af0', '#c8a8f6', '#9a86e8', '#d6b8fa', '#a890ee', '#e0b0f0'], mortar: '#3a1d6e', roughness: 0.15, metalness: 0.1, normal: 1, hi: '#ffffff', glow: ['#a070f0', 0.5], blockGlow: 0.12, ledge: ['#e8dcff', '#b49ae8', 0.15, 0.05], crown: '#9a7ae0' },
+  siding: { around: 5, rows: [1], jitter: 0.2, proud: 0, bevel: 0.012, joint: 0.012, tilt: -0.16, surface: 'paint', tile: 0.6, colors: ['#e9ecef', '#dfe4e8', '#f2f4f5', '#e4e8ea'], paints: [['#e9ecef', '#dfe4e8', '#f2f4f5'], ['#6f9fc8', '#6496c0', '#78a8d0'], ['#c24a3e', '#b84236', '#cc5446'], ['#7fae8a', '#76a482', '#88b692'], ['#f0d58a', '#e8cc80', '#f6dc94']], bands: { every: 9, color: '#f6f6f2', proud: 0.03 }, mortar: 'paint', roughness: 0.6, metalness: 0, normal: 0.8, hi: '#ffffff', ledge: ['#f2f2ee', '#c8ccd0', 0.6, 0], crown: '#5a6068' },
+  straw: { around: 18, rows: [2], jitter: 0.4, proud: 0.09, bevel: 0.04, joint: 0, tilt: -0.42, overlap: 1.35, surface: 'straw', tile: 0.9, colors: ['#d9a850', '#c8963e', '#e2b860', '#bf8a3a', '#d4a24c'], mortar: '#3a2a12', roughness: 1, metalness: 0, normal: 1.4, hi: '#fff0b0', ledge: ['#a87c44', '#7a5630', 0.9, 0], crown: '#8a6a32' },
+  shingle: { around: 34, rows: [1], jitter: 0, proud: 0.02, bevel: 0.012, joint: 0.012, tilt: -0.12, shape: 'scale', surface: null, tile: 0.8, colors: ['#c8643a', '#b85a34', '#d27046', '#a8502e', '#c06a40'], mortar: '#2a140c', roughness: 0.85, metalness: 0, normal: 0.8, hi: '#ffd0a8', ledge: ['#8a7a6a', '#5e5246', 0.9, 0], crown: '#7a3a22' },
+  bamboo: { around: 76, rows: [4], jitter: 0, proud: 0.02, bevel: 0, joint: 0.01, shape: 'pole', surface: 'bamboo', tile: 1, colors: ['#a8b048', '#8e9a3e', '#c4bc5c', '#b0a24a', '#7e8c3a', '#c8c070'], mortar: '#26300f', roughness: 0.5, metalness: 0, normal: 0.6, hi: '#fff8c0', ledge: ['#8a7a4a', '#5e5230', 0.7, 0], crown: '#6a6430' },
+  sandstone: { around: 8, rows: [3, 4, 2], jitter: 0.3, proud: 0.035, bevel: 0.05, joint: 0.045, surface: 'strata', tile: 0.4, colors: ['#d8a26a', '#cc945e', '#e2b07a', '#c68a58', '#d49c64'], mortar: '#5a3a22', roughness: 1, metalness: 0, normal: 1.3, hi: '#fff0d0', ledge: ['#c8986a', '#9a7048', 0.95, 0], crown: '#a8784a' },
+  copper: { around: 9, rows: [3], jitter: 0, proud: 0.01, bevel: 0.025, joint: 0.03, surface: 'patina', tile: 0.5, colors: ['#f2f2f2', '#e6e6e6', '#fafafa', '#dedede'], mortar: '#14100c', roughness: 1, metalness: 0.75, normal: 0.8, hi: '#fff0e0', rivets: '#9ad0b8', ledge: ['#5e9a86', '#3e6a5c', 0.6, 0.2], crown: '#4e8a76' },
+  ice: { around: 8, rows: [3], jitter: 0.2, proud: 0.03, bevel: 0.06, joint: 0.035, surface: 'frost', tile: 0.5, colors: ['#bfe6f6', '#aedcf2', '#d0eefa', '#a4d4ee'], mortar: '#3a7ea6', roughness: 0.2, metalness: 0.05, normal: 0.9, hi: '#ffffff', glow: ['#6cc8f0', 0.25], blockGlow: 0.05, ledge: ['#e8f6ff', '#a8d4ee', 0.25, 0.05], crown: '#a8d8f0' },
+  marble: { around: 10, rows: [3], jitter: 0.1, proud: 0.015, bevel: 0.03, joint: 0.03, surface: 'marble', tile: 0.45, colors: ['#ece8e0', '#e2dcd2', '#f4f0e8', '#dcd4c6'], mortar: '#a88a48', roughness: 0.4, metalness: 0, normal: 0.6, hi: '#ffffff', ledge: ['#f0ece4', '#c8c0b0', 0.35, 0], crown: '#d8d0c0' },
+  obsidian: { around: 10, rows: [2, 3], jitter: 0.3, proud: 0.04, bevel: 0.04, joint: 0.07, surface: 'glass', tile: 0.6, colors: ['#1e1828', '#261c32', '#17121e', '#2c2038'], mortar: '#ff5a1a', roughness: 0.25, metalness: 0.2, normal: 1, hi: '#a888e8', glow: ['#ff5a1a', 1.2], ledge: ['#3a2e44', '#221a2a', 0.35, 0.2], crown: '#2a1e36' },
+};
+
+// Re-skin the ledge and lift materials to a tower's material theme (Reboot)
+// Which material each Reboot tower is built from (campaign by tower id; daily by weekday)
+// Which materials each Reboot tower is built from: [level 1, level 2, level 3]
+export const TOWER_MATERIAL = {
+  1: ['rock', 'straw', 'shingle'],
+  2: ['metal', 'brass', 'copper'],
+  3: ['marble', 'siding', 'bamboo'],
+  4: ['ice', 'crystal', 'siding'],
+  5: ['timber', 'sandstone', 'straw'],
+  6: ['siding', 'shingle', 'copper'],
+  7: ['obsidian', 'sandstone', 'metal'],
+  8: ['obsidian', 'crystal', 'brass'],
+};
+export const MATERIAL_NAMES = Object.keys(MATERIAL_THEMES);
+// The daily tower's material: picked by the date's seed from the ones that suit its twist
+const TWIST_MATERIALS = {
+  blizzard: ['ice', 'crystal', 'siding', 'timber'],
+  flood: ['shingle', 'siding', 'copper', 'timber', 'rock'],
+  dark: ['obsidian', 'metal', 'crystal', 'marble'],
+  wind: ['straw', 'bamboo', 'sandstone', 'rock'],
+  collapse: ['sandstone', 'rock', 'straw', 'timber'],
+  pistons: ['brass', 'metal', 'copper'],
+};
+export function materialForSeed(seed, mechanic = 'none') {
+  const pool = TWIST_MATERIALS[mechanic] || MATERIAL_NAMES;
+  const h = Math.imul((seed | 0) ^ 0x5bd1e995, 0x27d4eb2d) >>> 0;
+  return pool[(h >>> 7) % pool.length];
+}
+
+export function themeLedgeMaterials(mats, theme) {
+  const T = MATERIAL_THEMES[theme];
+  if (!T) return;
+  const [top, front, rough, metal] = T.ledge;
+  for (const [k, c] of [
+    ['ledgeTop', top],
+    ['ledgeFront', front],
+    ['liftDisc', top],
+  ]) {
+    if (!mats[k]) continue;
+    const m = mats[k].clone();
+    m.color.set(c);
+    m.roughness = rough;
+    m.metalness = metal;
+    m.emissive.set(T.glow ? T.glow[0] : '#000000');
+    m.emissiveIntensity = T.glow ? T.glow[1] * 0.15 : 0.05;
+    mats[k] = m;
+  }
+}
 export function towerStyleName(tower) {
   if (tower.style && TOWER_STYLES[tower.style]) return tower.style;
   if (STYLE_BY_TOWER[tower.id]) return STYLE_BY_TOWER[tower.id];
@@ -722,6 +791,11 @@ export function buildTowerBody(tower, pal, mats, softDotTex, chromeEnv = null) {
     g.add(back);
   }
 
+  const theme = MATERIAL_THEMES[tower.material];
+  if (theme) {
+    const res = buildThemedWall(g, tower, theme, holes, totalH, coreMat);
+    return finishTowerBody(g, tower, pal, mats, softDotTex, totalH, styleName, coreMat, new THREE.Color(theme.crown), theme.hi, res, res.mats);
+  }
   const N = BRICKS_AROUND;
   const blockA = TWO_PI / N;
   // chamfered (one-segment) bevel: reads exactly like the classic bricks and keeps the
@@ -838,8 +912,233 @@ export function buildTowerBody(tower, pal, mats, softDotTex, chromeEnv = null) {
     g.add(im);
   }
 
-  // Crown: brick battlements in the tower's colour
-  const crownMat = createBrickMaterial(brickCol.clone().multiplyScalar(BRICK_GAIN), { hi: S.hi });
+  return finishTowerBody(g, tower, pal, mats, softDotTex, totalH, styleName, coreMat, brickCol.clone().multiplyScalar(BRICK_GAIN), S.hi, null, [brickMat]);
+}
+
+// The Reboot's material walls: rows of blocks (rough stone in uneven courses, long timber planks
+// with darker frame bands, riveted metal panels, crystal and obsidian blocks), cut round the door
+// openings, each with its own surface texture
+function buildThemedWall(g, tower, T, holes, totalH, coreMat) {
+  const R = TOWER_RADIUS;
+  if (T.mortar !== 'paint') coreMat.color.set(T.mortar);
+  if (T.glow) {
+    // seams that glow (lava between obsidian blocks, light inside crystal)
+    coreMat.emissive = new THREE.Color(T.glow[0]);
+    coreMat.emissiveIntensity = T.glow[1];
+  }
+  const N = T.around;
+  const blockA = TWO_PI / N;
+  const baseH = T.rows[0] * COURSE_H;
+  const BEV = T.bevel;
+  const over = T.overlap || 1; // thatch layers hang over the row below
+  const BLOCK_HT = baseH * over - T.joint * 0.6;
+  const R1 = R + BRICK_PROUD - BEV;
+  const CAP_A = (blockA * (R + BRICK_PROUD) - T.joint - 2 * BEV) / R1;
+  const RF = R + BRICK_PROUD; // the wall face
+  let geo;
+  let poleHalf = 0;
+  if (T.shape === 'scale') {
+    // a fish-scale tile: square top, round bottom, hanging over the row below
+    const w = blockA * RF - T.joint;
+    const rr = w / 2;
+    const sh = new THREE.Shape();
+    const top = baseH + rr * 0.9;
+    sh.moveTo(-w / 2, top);
+    sh.lineTo(w / 2, top);
+    sh.lineTo(w / 2, rr * 0.9);
+    sh.absarc(0, rr * 0.9, rr, 0, Math.PI, true);
+    sh.closePath();
+    geo = new THREE.ExtrudeGeometry(sh, { depth: 0.03, bevelEnabled: true, bevelThickness: 0.01, bevelSize: 0.01, bevelSegments: 1, curveSegments: 8 });
+    geo.translate(0, -rr * 0.9, RF - 0.035);
+  } else if (T.shape === 'pole') {
+    // a bamboo culm segment with a swollen node at each end
+    const pr = (blockA * RF) / 2 - T.joint / 2;
+    poleHalf = pr / RF;
+    const H = baseH;
+    const prof = [
+      [0.001, 0],
+      [pr * 0.96, 0],
+      [pr * 1.1, 0.014],
+      [pr * 0.94, 0.04],
+      [pr * 0.9, H * 0.5],
+      [pr * 0.94, H - 0.03],
+      [pr * 1.06, H - 0.008],
+      [0.001, H],
+    ].map(([x, y]) => new THREE.Vector2(x, y));
+    geo = new THREE.LatheGeometry(prof, 10);
+    geo.translate(0, 0, RF - pr * 0.6);
+  } else {
+    geo = arcSlab(R - 0.02, R1, CAP_A, BLOCK_HT, BEV, Math.max(2, Math.ceil(blockA / 0.1)), 1, Math.min(0.025, BEV));
+    geo.translate(0, BLOCK_HT, 0);
+    if (over > 1) geo.translate(0, -(BLOCK_HT - baseH), 0);
+  }
+  if (T.tilt) {
+    // lap boards / thatch / tiles: each row's top tucks in, so its lower edge stands proud. A
+    // conical tilt (in each vertex's own radial plane), so long curved boards stay level.
+    const P = geo.attributes.position;
+    const c = Math.cos(T.tilt);
+    const sn = Math.sin(T.tilt);
+    for (let i = 0; i < P.count; i++) {
+      const x = P.getX(i);
+      const y = P.getY(i);
+      const z = P.getZ(i);
+      const r = Math.hypot(x, z);
+      if (r < 1e-6) continue;
+      const dr = r - RF;
+      const r2 = RF + c * dr + sn * y;
+      P.setXYZ(i, (x / r) * r2, c * y - sn * dr, (z / r) * r2);
+    }
+    geo.computeVertexNormals();
+  }
+  const mat = createBrickMaterial('#ffffff', { hi: T.hi, brickHalf: [(CAP_A * R1) / 2 + BEV, BLOCK_HT / 2], edgeDarken: T.metalness > 0.4 ? 0.15 : 0.3, surface: T.surface, tile: T.tile, angular: true });
+  mat.roughness = T.roughness;
+  mat.metalness = T.metalness;
+  if (mat.normalScale) mat.normalScale.setScalar(0.45 * T.normal);
+  if (T.glow && T.blockGlow) {
+    mat.emissive = new THREE.Color(T.glow[0]);
+    mat.emissiveIntensity = T.blockGlow;
+  }
+  const minRow = Math.min(...T.rows) * COURSE_H;
+  const cap = Math.ceil(totalH / minRow + 2) * N * 3 + 64;
+  const spanAttr = new THREE.InstancedBufferAttribute(new Float32Array(cap).fill(1), 1);
+  geo.setAttribute('aSpan', spanAttr);
+  const inst = new THREE.InstancedMesh(geo, mat, cap);
+  inst.receiveShadow = true;
+  inst.castShadow = false;
+  const m4 = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const e = new THREE.Euler();
+  const pos = new THREE.Vector3();
+  const scl = new THREE.Vector3();
+  const col = new THREE.Color();
+  let seed = (tower.id || 1) * 9137 + ((tower.seed | 0) % 7919) + 11;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  // painted siding: one paint colour per tower
+  const cols = (T.paints ? T.paints[Math.floor(rnd() * T.paints.length)] : T.colors).map((c) => new THREE.Color(c));
+  // siding: the gaps between boards are the boards' own colour in shadow, not black
+  if (T.mortar === 'paint') coreMat.color.copy(cols[0]).multiplyScalar(0.45);
+  const bandCol = T.bands ? new THREE.Color(T.bands.color) : null;
+  const half = (CAP_A * R1 + 2 * BEV) / 2 / (R + BRICK_PROUD);
+  const joint = T.joint / (R + BRICK_PROUD);
+  const angDist = (a, b) => {
+    let d = (a - b) % TWO_PI;
+    if (d > Math.PI) d -= TWO_PI;
+    if (d < -Math.PI) d += TWO_PI;
+    return d;
+  };
+  const rivets = [];
+  let n = 0;
+  let band = false;
+  const shaped = T.shape === 'scale' || T.shape === 'pole';
+  const place = (a0, a1, y0, hr) => {
+    const span = a1 - a0;
+    if (span < blockA * 0.12 || hr < 0.07 || n >= inst.count) return;
+    q.setFromEuler(e.set(0, (a0 + a1) / 2, 0));
+    const proud = band ? T.bands.proud : T.proud;
+    const out = 1 + (band ? proud / R : (rnd() - 0.5) * 2 * (proud / R));
+    const sy = shaped ? hr / baseH : (hr * over - T.joint * 0.6) / BLOCK_HT;
+    m4.compose(pos.set(0, y0 + 0.014, 0), q, scl.set(out, sy, out));
+    inst.setMatrixAt(n, m4);
+    spanAttr.setX(n, T.shape === 'pole' ? 1 : Math.max(0.1, span / (half * 2)));
+    if (band) col.copy(bandCol).multiplyScalar(BRICK_GAIN * (0.92 + rnd() * 0.16));
+    else col.copy(cols[Math.floor(rnd() * cols.length)]).multiplyScalar(BRICK_GAIN * (0.93 + rnd() * 0.14));
+    inst.setColorAt(n, col);
+    n++;
+    if (T.rivets && span > blockA * 0.35) {
+      // a row of rivets along each panel's top and bottom edge
+      const k = Math.max(2, Math.round((span * R) / 0.4));
+      for (let j = 0; j < k; j++) {
+        const a = a0 + span * ((j + 0.5) / k);
+        rivets.push({ a, y: y0 + 0.014 + hr * 0.11 }, { a, y: y0 + 0.014 + hr * 0.89 });
+      }
+    }
+  };
+  // place a block over angles a0..a1, cut round door openings: the parts beside an opening keep
+  // their height, the part over it is cut down to the lintel (and under it to the sill)
+  const gapV = Math.max(0.02, T.joint * 0.6);
+  const overUnder = (a0, a1, y0, hr, h) => {
+    if (h.y0 - y0 - gapV > 0.07) place(a0, a1, y0, h.y0 - y0 - gapV);
+    if (y0 + hr - h.y1 - gapV > 0.07) place(a0, a1, h.y1 + gapV, y0 + hr - h.y1 - gapV);
+  };
+  const placeCut = (a0, a1, y0, hr) => {
+    for (const h of holes) {
+      if (!(y0 + hr > h.y0 && y0 < h.y1)) continue;
+      const d0 = angDist(a0, h.a);
+      const hs = a0 - d0; // the opening's centre, unwrapped next to a0
+      if (T.shape === 'pole') {
+        // poles are never sliced lengthwise: one in the opening is shortened instead
+        if (Math.abs(angDist((a0 + a1) / 2, h.a)) < h.w + poleHalf * 0.6) {
+          overUnder(a0, a1, y0, hr, h);
+          return;
+        }
+        continue;
+      }
+      const L = hs - h.w;
+      const Rr = hs + h.w;
+      if (a1 <= L || a0 >= Rr) continue;
+      if (a0 < L - joint / 2) placeCut(a0, L - joint / 2, y0, hr);
+      overUnder(Math.max(a0, L), Math.min(a1, Rr), y0, hr, h);
+      if (a1 > Rr + joint / 2) placeCut(Rr + joint / 2, a1, y0, hr);
+      return;
+    }
+    place(a0, a1, y0, hr);
+  };
+  let y0 = 0;
+  const pole = T.shape === 'pole';
+  for (let r = 0; y0 < totalH + (pole ? baseH : 0); r++) {
+    const hr = T.rows[Math.floor(rnd() * T.rows.length)] * COURSE_H;
+    band = Boolean(T.bands) && r % T.bands.every === T.bands.every - 1;
+    // walk round the tower with jittered block widths; each row starts half a block on
+    let a = (r % 2) * blockA * 0.5 + rnd() * blockA * T.jitter;
+    const end = a + TWO_PI;
+    let k = 0;
+    while (a < end - blockA * 0.2) {
+      let w = band ? blockA * 1.5 : shaped ? blockA : blockA * (1 + (rnd() - 0.5) * 2 * T.jitter);
+      if (end - (a + w) < blockA * 0.45) w = end - a; // close the ring without a sliver
+      // bamboo: neighbouring poles' joints are staggered (by a third or two thirds of a segment)
+      const yo = pole ? -hr * ((k * 7) % 3) / 3 : 0;
+      placeCut(a + joint / 2, a + w - joint / 2, y0 + yo, hr);
+      a += w;
+      k++;
+    }
+    y0 += hr;
+  }
+  inst.count = n;
+  inst.instanceMatrix.needsUpdate = true;
+  spanAttr.needsUpdate = true;
+  if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+  g.add(inst);
+  const mats = [mat];
+  // metal: rivets
+  if (rivets.length) {
+    const rg = new THREE.SphereGeometry(0.026, 8, 5);
+    const rm = new THREE.MeshStandardMaterial({ color: T.rivets, roughness: 0.3, metalness: 0.85 });
+    const ri = new THREE.InstancedMesh(rg, rm, rivets.length);
+    rivets.forEach((v, k) => {
+      const rr = R + BRICK_PROUD + T.proud + 0.004;
+      m4.compose(pos.set(Math.sin(v.a) * rr, v.y, Math.cos(v.a) * rr), q.identity(), scl.set(1, 1, 0.6));
+      ri.setMatrixAt(k, m4);
+    });
+    ri.receiveShadow = true;
+    g.add(ri);
+    mats.push(rm);
+  }
+  return { metalness: T.metalness, roughness: T.roughness, mats };
+}
+
+function finishTowerBody(g, tower, pal, mats, softDotTex, totalH, styleName, coreMat, crownCol, crownHi, themed, wallMats = []) {
+  const R = TOWER_RADIUS;
+  const m4 = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const e = new THREE.Euler();
+  const pos = new THREE.Vector3();
+  const scl = new THREE.Vector3();
+  // Crown: battlements in the tower's colour / material
+  const crownMat = createBrickMaterial(crownCol, { hi: crownHi });
+  if (themed) {
+    crownMat.metalness = themed.metalness;
+    crownMat.roughness = themed.roughness;
+  }
   const cap = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.09, R + 0.03, 0.12, 64), crownMat);
   cap.position.y = totalH + 0.06;
   cap.castShadow = true;
@@ -898,6 +1197,6 @@ export function buildTowerBody(tower, pal, mats, softDotTex, chromeEnv = null) {
     update,
     coreMat,
     styleName,
-    stoneMats: [plinth.material, brickMat, crownMat],
+    stoneMats: [plinth.material, ...wallMats, crownMat],
   };
 }

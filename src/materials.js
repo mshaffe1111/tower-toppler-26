@@ -491,15 +491,292 @@ function brickMaps() {
   return BRICK_MAPS;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Reboot wall surfaces: one tileable set of maps per material (stone, wood grain, brushed metal,
+// marble veins, crystal facets, glassy obsidian). u runs round the tower, v runs up it.
+// ---------------------------------------------------------------------------------------------
+const SURFACE_MAPS = {};
+export function surfaceMaps(kind) {
+  if (SURFACE_MAPS[kind]) return SURFACE_MAPS[kind];
+  const N = 256;
+  const rand = mulberry32({ stone: 11, wood: 23, brushed: 37, marble: 41, crystal: 53, glass: 67, straw: 71, bamboo: 79, strata: 83, patina: 89, frost: 97, paint: 101 }[kind] || 7);
+  // tileable value noise with separate x and y frequencies (px, py cells across the tile)
+  const lat = (px, py = px) => {
+    const g = new Float32Array(px * py);
+    for (let i = 0; i < g.length; i++) g[i] = rand();
+    return (x, y) => {
+      const fx = (((x / N) * px) % px + px) % px;
+      const fy = (((y / N) * py) % py + py) % py;
+      const ix = Math.floor(fx);
+      const iy = Math.floor(fy);
+      const tx = fx - ix;
+      const ty = fy - iy;
+      const ux = tx * tx * (3 - 2 * tx);
+      const uy = ty * ty * (3 - 2 * ty);
+      const x1 = (ix + 1) % px;
+      const y1 = (iy + 1) % py;
+      const a = g[iy * px + ix];
+      const b = g[iy * px + x1];
+      const c = g[y1 * px + ix];
+      const d = g[y1 * px + x1];
+      return (a + (b - a) * ux) * (1 - uy) + (c + (d - c) * ux) * uy;
+    };
+  };
+  // tileable Voronoi: nearest and second-nearest feature point, and the nearest cell's id
+  const voronoi = (G) => {
+    const pts = [];
+    for (let j = 0; j < G; j++) for (let i = 0; i < G; i++) pts.push([(i + 0.15 + rand() * 0.7) / G, (j + 0.15 + rand() * 0.7) / G, rand(), rand(), rand()]);
+    return (x, y) => {
+      const u = x / N;
+      const v = y / N;
+      const ci = Math.floor(u * G);
+      const cj = Math.floor(v * G);
+      let d1 = 9;
+      let d2 = 9;
+      let best = null;
+      let bdx = 0;
+      let bdy = 0;
+      for (let dj = -1; dj <= 1; dj++)
+        for (let di = -1; di <= 1; di++) {
+          const ii = ci + di;
+          const jj = cj + dj;
+          const P = pts[(((jj % G) + G) % G) * G + (((ii % G) + G) % G)];
+          const px = P[0] + Math.floor(ii / G);
+          const py = P[1] + Math.floor(jj / G);
+          const dx = u - px;
+          const dy = v - py;
+          const d = Math.hypot(dx, dy) * G;
+          if (d < d1) {
+            d2 = d1;
+            d1 = d;
+            best = P;
+            bdx = dx * G;
+            bdy = dy * G;
+          } else if (d < d2) d2 = d;
+        }
+      return { d1, d2, cell: best, dx: bdx, dy: bdy };
+    };
+  };
+  const h = new Float32Array(N * N);
+  const alb = new ImageData(N, N);
+  const orm = new ImageData(N, N);
+  const nrmDirect = kind === 'crystal' ? new Float32Array(N * N * 2) : null;
+  const n4 = lat(4);
+  const n8 = lat(8);
+  const n16 = lat(16);
+  const n32 = lat(32);
+  const n64 = lat(64);
+  const streak = lat(3, 128); // long horizontal streaks
+  const streak2 = lat(6, 256);
+  const scr = lat(4, 192); // the odd long scratch
+  const vor = kind === 'crystal' ? voronoi(5) : kind === 'glass' ? voronoi(4) : kind === 'stone' ? voronoi(6) : kind === 'frost' ? voronoi(5) : null;
+  const fib = lat(96, 4); // vertical fibres (straw)
+  const fib2 = lat(160, 8);
+  const band = lat(2, 24); // horizontal strata (sandstone)
+  const blot = lat(6); // patina blotches
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const i = y * N + x;
+      const broad = n4(x, y) * 0.5 + n8(x, y) * 0.5;
+      const mid = n16(x, y);
+      const fine = n32(x, y) * 0.6 + n64(x, y) * 0.4;
+      const grain = rand();
+      let ht = 0;
+      let r = 1;
+      let g = 1;
+      let b = 1;
+      let rough = 1;
+      let metal = 1;
+      if (kind === 'stone') {
+        // rough-hewn: big soft lumps, chisel pits, hairline cracks along cell edges, pale lichen
+        const V = vor(x, y);
+        const crack = 1 - Math.min(1, (V.d2 - V.d1) / 0.05);
+        const pit = Math.max(0, n64(x + 31, y + 17) - 0.78) * 3;
+        ht = broad * 0.5 + mid * 0.3 + fine * 0.25 - pit * 0.5 - crack * 0.35 + (grain - 0.5) * 0.06;
+        let v = 0.8 + (broad - 0.5) * 0.35 + (mid - 0.5) * 0.12 + (grain - 0.5) * 0.08 - crack * 0.3 - pit * 0.12;
+        r = g = b = v;
+        const lichen = Math.max(0, n16(x + 7, y + 3) * 0.6 + n64(x, y) * 0.4 - 0.66) * 4;
+        r += lichen * 0.12;
+        g += lichen * 0.16;
+        b -= lichen * 0.02;
+        rough = 0.9 + fine * 0.1;
+      } else if (kind === 'wood') {
+        // planks: grain running round the tower, warped growth rings, darker late-wood streaks, knots
+        const warp = n4(x, y) * 3 + n16(x, y) * 0.6;
+        const ring = 0.5 + 0.5 * Math.sin(((y / N) * 18 + warp) * Math.PI * 2);
+        const st = streak(x, y);
+        const st2 = streak2(x, y);
+        const k = n8(x + 13, y + 29);
+        const knot = Math.max(0, k - 0.8) * 5;
+        ht = ring * 0.18 + st * 0.25 + st2 * 0.15 - knot * 0.4 + (grain - 0.5) * 0.03;
+        const v = 0.78 + (ring - 0.5) * 0.22 + (st - 0.5) * 0.18 + (st2 - 0.5) * 0.1 - knot * 0.35;
+        r = v * 1.02;
+        g = v * 0.97;
+        b = v * 0.92;
+        rough = 0.75 + st2 * 0.25;
+      } else if (kind === 'brushed') {
+        // brushed plate: fine horizontal lines, a few scratches, soft grime clouds
+        const st = streak2(x, y);
+        const scratch = Math.max(0, scr(x, y) - 0.86) * 5;
+        const grime = Math.max(0, broad - 0.55) * 1.4;
+        ht = st * 0.12 - scratch * 0.2 + (grain - 0.5) * 0.02;
+        const v = 0.92 + (st - 0.5) * 0.12 - grime * 0.22 + scratch * 0.08;
+        r = g = b = v;
+        rough = 0.55 + st * 0.25 + grime * 0.5;
+      } else if (kind === 'marble') {
+        // polished marble: turbulent grey veins with the odd gold thread
+        let turb = 0;
+        turb += Math.abs(n4(x, y) - 0.5) * 1;
+        turb += Math.abs(n8(x, y) - 0.5) * 0.5;
+        turb += Math.abs(n16(x, y) - 0.5) * 0.25;
+        turb += Math.abs(n32(x, y) - 0.5) * 0.125;
+        const vein = Math.abs(Math.sin(((x / N) * 2 + (y / N) * 1 + turb * 2.2) * Math.PI * 2));
+        const dark = 1 - Math.min(1, vein / 0.14);
+        const thin = 1 - Math.min(1, Math.abs(Math.sin(((x / N) * 3 - (y / N) * 2 + turb * 3) * Math.PI * 2)) / 0.04);
+        ht = -dark * 0.05 + (grain - 0.5) * 0.01;
+        const v = 0.95 + (broad - 0.5) * 0.06 - dark * 0.42;
+        r = v - thin * 0.05 + thin * 0.08;
+        g = v - thin * 0.1 + thin * 0.04;
+        b = v - thin * 0.25;
+        rough = 0.35 + dark * 0.4;
+      } else if (kind === 'paint') {
+        // painted boards: the grain shows faintly through the paint
+        const warp = n4(x, y) * 3;
+        const ring = 0.5 + 0.5 * Math.sin(((y / N) * 18 + warp) * Math.PI * 2);
+        const st = streak2(x, y);
+        ht = st * 0.1 + ring * 0.06;
+        const v = 0.94 + (st - 0.5) * 0.06 + (ring - 0.5) * 0.04 - Math.max(0, broad - 0.62) * 0.25;
+        r = g = b = v;
+        rough = 0.6 + st * 0.2;
+      } else if (kind === 'straw') {
+        // thatch: bundles of straw fibres running up the tower, darker in the gaps
+        const f1 = fib(x, y);
+        const f2 = fib2(x, y);
+        const gap = Math.max(0, 0.35 - f1) * 2;
+        ht = f1 * 0.45 + f2 * 0.3 + (grain - 0.5) * 0.08;
+        const v = 0.8 + (f1 - 0.5) * 0.35 + (f2 - 0.5) * 0.2 - gap * 0.45 + (broad - 0.5) * 0.1;
+        r = v * 1.03;
+        g = v;
+        b = v * 0.9;
+        rough = 1;
+      } else if (kind === 'bamboo') {
+        // glossy culm: fine lengthwise fibres
+        const f2 = fib2(x, y);
+        ht = f2 * 0.08;
+        const v = 0.9 + (f2 - 0.5) * 0.1 + (broad - 0.5) * 0.1;
+        r = g = b = v;
+        rough = 0.4 + f2 * 0.2;
+      } else if (kind === 'strata') {
+        // sandstone: wavy bedding layers, sand grains, soft erosion
+        const layer = band(x + n16(x, y) * 30, y + n8(x, y) * 14);
+        const pit = Math.max(0, n64(x + 9, y + 5) - 0.8) * 2.5;
+        ht = layer * 0.4 + fine * 0.15 - pit * 0.3 + (grain - 0.5) * 0.08;
+        const v = 0.8 + (layer - 0.5) * 0.4 + (fine - 0.5) * 0.08 + (grain - 0.5) * 0.08 - pit * 0.1;
+        r = v * 1.02;
+        g = v * 0.98;
+        b = v * 0.94;
+        rough = 1;
+      } else if (kind === 'patina') {
+        // copper going green: verdigris blooms over the brushed metal (not metallic where green)
+        const st = streak2(x, y);
+        const bl = blot(x, y) * 0.55 + n16(x, y) * 0.3 + n64(x, y) * 0.15;
+        const green = Math.max(0, Math.min(1, (bl - 0.5) * 5));
+        ht = st * 0.1 + green * 0.25 + (grain - 0.5) * 0.03 * green;
+        const cu = [0.82, 0.5, 0.34];
+        const vg = [0.36, 0.7, 0.6];
+        const k2 = 0.95 + (st - 0.5) * 0.1;
+        r = (cu[0] + (vg[0] - cu[0]) * green) * k2;
+        g = (cu[1] + (vg[1] - cu[1]) * green) * k2;
+        b = (cu[2] + (vg[2] - cu[2]) * green) * k2;
+        rough = 0.35 + green * 0.6;
+        metal = 1 - green;
+      } else if (kind === 'frost') {
+        // ice: cloudy depths, white fracture lines, tiny bubbles
+        const V = vor(x, y);
+        const crack = 1 - Math.min(1, (V.d2 - V.d1) / 0.025);
+        const bubble = grain > 0.993 ? 1 : 0;
+        ht = -crack * 0.2 + mid * 0.1;
+        const v = 0.82 + (mid - 0.5) * 0.2 + (broad - 0.5) * 0.12 + crack * 0.3 + bubble * 0.2;
+        r = v * 0.97;
+        g = v;
+        b = Math.min(1, v * 1.04);
+        rough = 0.12 + crack * 0.5 + (fine > 0.68 ? 0.25 : 0);
+      } else if (kind === 'crystal') {
+        // facets: flat planes with sharp bright edges and cloudy inclusions
+        const V = vor(x, y);
+        const edge = 1 - Math.min(1, (V.d2 - V.d1) / 0.06);
+        const c = V.cell;
+        nrmDirect[i * 2] = (c[2] - 0.5) * 0.9;
+        nrmDirect[i * 2 + 1] = (c[3] - 0.5) * 0.9;
+        const v = 0.86 + (c[4] - 0.5) * 0.18 + edge * 0.25 + (mid - 0.5) * 0.08;
+        r = v * 0.97;
+        g = v;
+        b = Math.min(1.2, v * 1.03);
+        rough = 0.25 + (mid > 0.62 ? 0.4 : 0) + edge * 0.2;
+      } else if (kind === 'glass') {
+        // volcanic glass: conchoidal ripples round each fracture, glassy smooth
+        const V = vor(x, y);
+        const ripple = Math.sin(V.d1 * 26) * Math.exp(-V.d1 * 1.5);
+        const edge = 1 - Math.min(1, (V.d2 - V.d1) / 0.04);
+        ht = ripple * 0.09 + V.d1 * 0.2 - edge * 0.2;
+        const v = 0.9 + ripple * 0.06 + (broad - 0.5) * 0.1 - edge * 0.2;
+        r = g = b = v;
+        rough = 0.3 + edge * 0.4 + (fine > 0.7 ? 0.3 : 0);
+      }
+      h[i] = ht;
+      alb.data[i * 4] = Math.max(0, Math.min(1, r)) * 255;
+      alb.data[i * 4 + 1] = Math.max(0, Math.min(1, g)) * 255;
+      alb.data[i * 4 + 2] = Math.max(0, Math.min(1, b)) * 255;
+      alb.data[i * 4 + 3] = 255;
+      orm.data[i * 4] = 255;
+      orm.data[i * 4 + 1] = Math.max(0, Math.min(1, rough)) * 255;
+      orm.data[i * 4 + 2] = Math.max(0, Math.min(1, metal)) * 255;
+      orm.data[i * 4 + 3] = 255;
+    }
+  }
+  const nrm = new ImageData(N, N);
+  const k = { stone: 4, wood: 2.4, brushed: 1.6, marble: 1, crystal: 1, glass: 2.4, straw: 3.4, bamboo: 1, strata: 3, patina: 1.6, frost: 1.4, paint: 1.2 }[kind] || 2;
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const i = y * N + x;
+      let nx;
+      let ny;
+      if (nrmDirect) {
+        nx = nrmDirect[i * 2];
+        ny = nrmDirect[i * 2 + 1];
+      } else {
+        const hx = h[y * N + ((x + 1) % N)] - h[y * N + ((x - 1 + N) % N)];
+        const hy = h[((y + 1) % N) * N + x] - h[((y - 1 + N) % N) * N + x];
+        nx = -hx * k;
+        ny = hy * k;
+      }
+      const l = Math.hypot(nx, ny, 1);
+      nrm.data[i * 4] = ((nx / l) * 0.5 + 0.5) * 255;
+      nrm.data[i * 4 + 1] = ((ny / l) * 0.5 + 0.5) * 255;
+      nrm.data[i * 4 + 2] = ((1 / l) * 0.5 + 0.5) * 255;
+      nrm.data[i * 4 + 3] = 255;
+    }
+  }
+  const cv = (img) => {
+    const c = document.createElement('canvas');
+    c.width = N;
+    c.height = N;
+    c.getContext('2d').putImageData(img, 0, 0);
+    return c;
+  };
+  SURFACE_MAPS[kind] = { map: texFrom(cv(alb), true), normalMap: texFrom(cv(nrm), false), orm: texFrom(cv(orm), false), metalMap: kind === 'patina' };
+  return SURFACE_MAPS[kind];
+}
+
 // hi: colour the lit (top/left) bevels shift toward; brickHalf: [half width, half height] of one
 // brick in its local space, for the per-brick face gradient
 export function createBrickMaterial(
   color = '#ffffff',
-  { roughness = 1, emissive = '#000000', emissiveIntensity = 0, edgeDarken = 0.32, hi = '#ffffff', brickHalf = [0.24, 0.11] } = {}
+  { roughness = 1, emissive = '#000000', emissiveIntensity = 0, edgeDarken = 0.32, hi = '#ffffff', brickHalf = [0.24, 0.11], surface = null, tile = 0.7, angular = false } = {}
 ) {
-  const M = brickMaps();
+  const M = surface ? surfaceMaps(surface) : brickMaps();
   // ~1 tile per 1.4 world units: grains ~5 mm at brick scale
-  const rep = new THREE.Vector2(0.7, 0.7);
+  const rep = new THREE.Vector2(tile, tile);
   const tex = (t) => {
     const c = t.clone();
     c.repeat.copy(rep);
@@ -517,6 +794,7 @@ export function createBrickMaterial(
     emissive: new THREE.Color(emissive),
     emissiveIntensity,
   });
+  if (M.metalMap) mat.metalnessMap = mat.roughnessMap;
   addWaterlineWetness(mat);
   const wet = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader, r) => {
@@ -525,12 +803,41 @@ export function createBrickMaterial(
     shader.uniforms.brickHi = { value: new THREE.Color(hi) };
     shader.uniforms.brickHalf = { value: new THREE.Vector2(brickHalf[0], brickHalf[1]) };
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vBrickN;\nvarying vec2 vBrickP;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vBrickN;\nvarying vec2 vBrickP;' + (angular ? '\nattribute float aSpan;' : ''))
+      .replace(
+        '#include <begin_vertex>',
+        angular
+          ? `#include <begin_vertex>
+        {
+          // stretch the block round the tower (not straight sideways), so long boards stay curved
+          float rr = length(transformed.xz);
+          float aa = atan(transformed.x, transformed.z) * aSpan;
+          transformed.x = sin(aa) * rr;
+          transformed.z = cos(aa) * rr;
+        }`
+          : '#include <begin_vertex>'
+      )
       .replace(
         '#include <beginnormal_vertex>',
         `#include <beginnormal_vertex>
-        vBrickN = objectNormal;
-        vBrickP = position.xy;`
+        ${
+          angular
+            ? `{
+          float dA = atan(position.x, position.z) * (aSpan - 1.0);
+          float cd = cos(dA);
+          float sd = sin(dA);
+          objectNormal.xz = vec2(objectNormal.x * cd + objectNormal.z * sd, objectNormal.z * cd - objectNormal.x * sd);
+        }`
+            : ''
+        }
+        // the normal and position in the wall's own frame (across, up, out), so long curved
+        // blocks shade like small ones
+        {
+          vec2 rad = length(position.xz) > 1e-4 ? normalize(position.xz) : vec2(0.0, 1.0);
+          vec2 tng = vec2(rad.y, -rad.x);
+          vBrickN = vec3(dot(objectNormal.xz, tng), objectNormal.y, dot(objectNormal.xz, rad));
+          vBrickP = vec2(atan(position.x, position.z) * length(position.xz), position.y);
+        }`
       )
       .replace(
       '#include <uv_vertex>',
@@ -581,6 +888,7 @@ export function createBrickMaterial(
         #include <opaque_fragment>`
       );
   };
-  mat.customProgramCacheKey = () => 'wetbrick';
+  mat.customProgramCacheKey = () => (angular ? 'wetbrickA' : 'wetbrick');
+  if (surface) mat.userData.surface = surface;
   return mat;
 }

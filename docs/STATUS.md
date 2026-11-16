@@ -99,18 +99,30 @@ Walk 2.0 columns/s; a stair step is 1 column × 1 brick row; Pogo is about 2 row
 - **Running tests:** Playwright with swiftshader. It draws only about 2 fps, so step the game by
   hand with `g.update(1/60)` in timing tests.
 
+## Reboot look (done)
+- **Materials (src/props.js `MATERIAL_THEMES`):** 14 wall materials, each with its own block
+  shape and procedural surface texture (src/materials.js `surfaceMaps`): rock, timber, siding,
+  straw thatch, terracotta fish-scale shingles, bamboo, sandstone, steel, brass, copper with
+  patina, ice, amethyst crystal, marble, obsidian with lava seams. Ledges and lifts follow the
+  material. The Original keeps the classic brick.
+  - Campaign: `TOWER_MATERIAL` gives each tower a material per level.
+  - Daily and endless: `materialForSeed` picks one from the seed, from those that suit the twist.
+- **Time of day (src/renderer.js `TOD_KEYS`):** dawn at the base to dusk at the top; the night
+  tower stays night; clouds, sun, fog, lights and sea follow.
+- **Backgrounds:** 8 horizon types in the sky shader (peaks, islands, mesas, dunes, city with
+  lit windows at night, forest, smoking volcano, icebergs), two depth layers, each with its own
+  sea tint. Picked per tower by `sceneryFor` (fits the material, varies by seed and level).
+- **Render checks:** scratchpad matshot.js (every material), sceneshot.js / wideshot.js
+  (every horizon).
+
 ## Next, in order
-1. **Reboot generator:** a new generator for the Reboot, built from what the real towers show.
-   - Building blocks: stairs, 3-row door pairs, lifts with stops, pillars, flashing blocks capping
-     shafts, single crumbling cells.
-   - Proportions: 47–96 rows; at most 4 enemies, at fixed spots.
-   - Then layer the Reboot twists on top.
-   - Verify every tower with the engine-driven check (scratchpad reach-real.js models lifts and
-     tunnels).
-   - Compare its statistics with the real towers.
-2. **Generated Original levels:** optional; only if the generator understands the Original's
-   physics.
-3. **Presentation:**
+1. **New Reboot elements** as generator pieces or twists, with solver support (docs/GENERATOR.md
+   section 9): counter-rotating drums ("random directions"), inversion, portals, pressure
+   plates, launch pads, phase ledges, tilting planks, steam vents.
+2. **Then:** the 10-world Reboot campaign on the generator.
+3. **Possible graphics follow-ups:** make horizons taller and nearer so they show more in play;
+   weather particles per scenery (sand, snow, embers).
+4. **Presentation:**
    - the seven-segment clock with a facing arrow;
    - the ring-by-ring topple;
    - the two-step catch in the sub stage;
