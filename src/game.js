@@ -1243,7 +1243,7 @@ export class TowerTopplerGame {
     if (this.towerTime > 9) this._hint('peek', 'Drag anywhere on the screen to look around the tower and plan your route.');
     const near = this.enemies.find((e) => !e.dead && Math.abs(e.floor - p.floor) < 0.8 && Math.abs(colDist(e.col, p.col)) < 3.5);
     if (near) {
-      if (this.original) this._hint('fire-orig', 'FIRE throws a snowball. Bouncing cannonballs pop and flashing blocks break. Sliding cannonballs are only stunned; eyes, molecules and robots can\'t be hurt: time your way past.');
+      if (this.original) this._hint('fire-orig', 'Snowballs pop cannonballs and break flashing blocks. Eyes, molecules and robots can\'t be hurt: time your way past.');
       else this._hint('fire', 'Tap FIRE to throw a snowball. Bouncers & molecules pop; rollers just freeze.');
       if (!this.original && (near.type === 'eye' || near.type === 'roller' || near.type === 'chaser')) this._hint('charge', 'Hold FIRE to pack a mega-snowball — it freezes anything into an ice block you can stand on!');
     }
