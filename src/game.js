@@ -289,6 +289,7 @@ export class TowerTopplerGame {
     progress.savedRun = {
       mode: this.runMode,
       variant: this.variant || 'reboot',
+      campaign: this.variant === 'original' ? undefined : 'worlds',
       towerIndex: this.towerIndex,
       levels: this.tower?.levels || 1,
       towerName: this.tower?.name || '',
@@ -374,7 +375,7 @@ export class TowerTopplerGame {
     this.summit = null;
     this.topple = { active: false, progress: 0, duration: 2.6 };
     this.mech = this._freshMech(t.mechanic);
-    sound.setTowerTheme?.(this.runMode === 'campaign' ? t.id : this.runMode);
+    sound.setTowerTheme?.(this.runMode === 'campaign' ? (t.world != null ? 1 + Math.min(7, Math.round((t.world * 7) / 9)) : t.id) : this.runMode);
 
     const rand = mulberry32((t.seed ?? t.id) * 7919 + 13);
 
@@ -483,7 +484,7 @@ export class TowerTopplerGame {
     this.ghostRecT = 0;
     this.ghost = null;
 
-    const sub = this.runMode === 'campaign' ? `${this.original ? 'ORIGINAL · ' : ''}TOWER ${t.id}${t.levels > 1 ? ` · LEVEL ${t.level}` : ''}` : this.runMode === 'daily' ? 'DAILY TOWER' : `ENDLESS · TOWER ${this.towerIndex + 1}`;
+    const sub = this.runMode === 'campaign' ? (t.world != null ? `WORLD ${t.world + 1} · TOWER ${t.level}${t.summit ? ' · SUMMIT' : ''}` : `${this.original ? 'ORIGINAL · ' : ''}TOWER ${t.id}${t.levels > 1 ? ` · LEVEL ${t.level}` : ''}`) : this.runMode === 'daily' ? 'DAILY TOWER' : `ENDLESS · TOWER ${this.towerIndex + 1}`;
     this.cb.onBanner?.(sub, t.name);
     this.cb.onTowerStart?.(t);
     this._syncHud();
@@ -546,7 +547,7 @@ export class TowerTopplerGame {
         if (!safe(col, r.floor) || busy(col + 0.5, r.floor)) continue;
         // Reboot cast grows tower by tower: robots & shield beetles from tower 2, splitters from
         // 3, puffers from 4 (the newest arrival is the most likely in its debut tower)
-        const tid = this.tower.id || 1;
+        const tid = this._stageNo();
         const pool = ['bouncer', 'roller'];
         if (diff > 0.12) pool.push('chaser');
         if (tid >= 2) pool.push('shieldbug', 'robot');
@@ -595,8 +596,18 @@ export class TowerTopplerGame {
   }
 
   _difficulty() {
-    // 0 on the first tower -> 1 by the eighth (endless keeps climbing)
+    // a tower that knows its difficulty (the worlds campaign) uses it; otherwise 0 on the first
+    // tower -> 1 by the eighth (endless keeps climbing)
+    if (this.tower?.difficulty != null && this.tower?.world != null) return Math.max(0, (this.tower.difficulty - 0.12) / 0.83);
     return this.runMode === 'campaign' ? ((this.tower?.id || 1) - 1) / 7 + ((this.tower?.level || 1) - 1) * 0.06 : Math.min(1.4, 0.25 + this.towerIndex * 0.12);
+  }
+
+  // Where this tower sits on the old 1..8 scale (enemy cast, flyers, music): the Original's and
+  // daily towers use their id; the worlds campaign maps world 1..10 onto it
+  _stageNo() {
+    const t = this.tower;
+    if (t?.world != null) return 1 + Math.min(7, Math.round((t.world * 7) / 9));
+    return t?.id || 1;
   }
 
   _makeEnemy(e) {
@@ -623,7 +634,7 @@ export class TowerTopplerGame {
     const active = this.enemies.filter((e) => e.spawned && !e.dead && !e.fireball).length;
     if (active >= 2) return;
     const side = Math.random() < 0.5 ? -1 : 1;
-    const lvl = this.runMode === 'campaign' ? (this.tower?.id || 1) - 1 : Math.min(7, this.towerIndex + 2);
+    const lvl = this.runMode === 'campaign' ? this._stageNo() - 1 : Math.min(7, this.towerIndex + 2);
     const type = forceType || (lvl >= 2 && Math.random() < 0.35 ? 'eye' : 'molecule');
     const speed = 2.0 + lvl * 0.14;
     this.enemies.push(
@@ -798,7 +809,7 @@ export class TowerTopplerGame {
       lives: settings.assist ? Infinity : this.lives,
       timer: this.timer,
       towerId: this.tower ? this.tower.id : 1,
-      towerLabel: this.runMode === 'campaign' ? `T${this.tower?.id ?? 1}${this.tower?.levels > 1 ? `·${this.tower.level}` : ''}` : this.runMode === 'daily' ? 'DAY' : `E${this.towerIndex + 1}`,
+      towerLabel: this.runMode === 'campaign' ? this.tower?.label || `T${this.tower?.id ?? 1}${this.tower?.levels > 1 ? `·${this.tower.level}` : ''}` : this.runMode === 'daily' ? 'DAY' : `E${this.towerIndex + 1}`,
       dirHint,
       mode: this.mode,
       altitudePct,
@@ -1883,7 +1894,7 @@ export class TowerTopplerGame {
     let pufferPush = 0;
     this.flyerTimer -= dt;
     if (this.flyerTimer <= 0) {
-      const lvl = this.runMode === 'campaign' ? (this.tower?.id || 1) - 1 : this.towerIndex + 2;
+      const lvl = this.runMode === 'campaign' ? this._stageNo() - 1 : this.towerIndex + 2;
       this.flyerTimer = Math.max(4.5, 9 - lvl * 0.55) + Math.random() * 3;
       if ((p.floor > 0.5 || lvl > 0) && !this.original) this._spawnFlyer();
     }
@@ -2910,6 +2921,11 @@ export class TowerTopplerGame {
       };
     }
     const fresh = awardMedals(this.key, earned, timeTaken);
+    // the Reboot campaign: clearing a tower unlocks the next (and, after a summit, the next world)
+    if (this.runMode === 'campaign' && !this.original && this.tower.label) {
+      progress.rebootCleared = Math.max(progress.rebootCleared ?? -1, this.towerIndex);
+      saveProgress();
+    }
     // trophy stats
     const st = getStats();
     if (this.runMode === 'campaign') (this.original ? st.toppledO : st.toppledR)[this.tower.id] = 1;
@@ -2929,7 +2945,7 @@ export class TowerTopplerGame {
     progress.towersCleared = (progress.towersCleared || 0) + 1;
     if (this.runMode === 'endless') progress.endlessBestTower = Math.max(progress.endlessBestTower || 0, this.towerIndex + 1);
     saveProgress();
-    this.healing = Math.min(1, this.runMode === 'campaign' ? this.tower.id / 8 : (this.towerIndex + 1) / 8);
+    this.healing = Math.min(1, this.runMode === 'campaign' ? (this.tower.world != null ? (this.towerIndex + 1) / 50 : this.tower.id / 8) : (this.towerIndex + 1) / 8);
     sound.medal?.(Math.min(3, Object.values(earned).filter(Boolean).length));
     const newTrophies = checkTrophies();
     if (newTrophies.length) this.cb.onTrophies?.(newTrophies);
@@ -2938,7 +2954,7 @@ export class TowerTopplerGame {
     this.cb.onTowerResults?.({
       mode: this.runMode,
       towerName: this.tower.name,
-      towerLabel: this.runMode === 'campaign' ? `TOWER ${this.tower.id}` : this.runMode === 'daily' ? 'DAILY TOWER' : `ENDLESS ${this.towerIndex + 1}`,
+      towerLabel: this.runMode === 'campaign' ? (this.tower.label ? `WORLD ${this.tower.world + 1} · TOWER ${this.tower.level}` : `TOWER ${this.tower.id}`) : this.runMode === 'daily' ? 'DAILY TOWER' : `ENDLESS ${this.towerIndex + 1}`,
       timeTaken,
       timeLeft: this.timer,
       bonus: this.towerBonus,

@@ -63,6 +63,11 @@ const allMedals = (prefix, list) => {
   }
   return n;
 };
+// the Reboot worlds campaign: towers 101..150 (worlds.js), 5 per world
+const REBOOT_IDS = Array.from({ length: 50 }, (_, i) => 101 + i);
+const rebootMedalCount = (id) => REBOOT_IDS.filter((t) => (progress.medals[`c${t}`] || {})[id]).length;
+const rebootAllMedals = (list) => REBOOT_IDS.reduce((n, t) => n + list.filter((md) => (progress.medals[`c${t}`] || {})[md.id]).length, 0);
+const WORLD_NAMES = ['Sunrise Shoals', 'Clockwork Keep', 'Frostbite Spire', 'Crumbling Mesa', 'Lantern Night', 'Rising Tide', 'Gale Plains', 'Stormcrown', 'Abyss Rise', 'Edge of Doom'];
 const tiers = (base, icon, name, desc, goals, value, group) =>
   goals.map((g, i) => ({
     id: `${base}-${g}`,
@@ -102,11 +107,11 @@ export const TROPHIES = [
   ...tiers('steps', '🪜', 'Stair Master', 'Climb {n} new stair steps.', [100, 1000, 10000], () => stats().steps, O),
 
   // --- Reboot
-  ...TOWER_NAMES.map((n, i) => ({ id: `r-t${i + 1}`, icon: '⚡', name: `Reboot: ${n}`, desc: `Topple ${n} in the Reboot.`, goal: 1, value: () => (stats().toppledR[i + 1] ? 1 : 0), group: R })),
-  { id: 'reboot-all', icon: '🏆', name: 'Reboot Champion', desc: 'Finish the Reboot campaign.', goal: 1, value: () => stats().rebootDone || 0, group: R },
-  { id: 'reboot-purist', icon: '⏪', name: 'No Second Chances', desc: 'Finish the Reboot from Tower 1 without rewinding.', goal: 1, value: () => stats().rebootPurist || 0, group: R },
-  { id: 'combo-all', icon: '🔥', name: 'Combo Master', desc: 'Win 🔥 Combo on all 8 Reboot towers.', goal: 8, value: () => medalCount('c', 'combo'), group: R },
-  { id: 'explorer-all', icon: '🧭', name: 'Explorer', desc: 'Win ⭐ Explorer on all 8 Reboot towers.', goal: 8, value: () => medalCount('c', 'secrets'), group: R },
+  ...WORLD_NAMES.map((n, w) => ({ id: `r-w${w + 1}`, icon: '🌍', name: `World ${w + 1}: ${n}`, desc: `Clear all five towers of ${n}.`, goal: 5, value: () => Math.max(0, Math.min(5, (progress.rebootCleared ?? -1) + 1 - w * 5)), group: R })),
+  { id: 'reboot-all', icon: '🏆', name: 'Reboot Champion', desc: 'Clear all 50 towers of the Reboot.', goal: 50, value: () => Math.min(50, (progress.rebootCleared ?? -1) + 1), group: R },
+  { id: 'reboot-purist', icon: '⏪', name: 'No Second Chances', desc: 'Finish the Reboot from World 1 without rewinding.', goal: 1, value: () => stats().rebootPurist || 0, group: R },
+  ...tiers('combo-r', '🔥', 'Combo Master', 'Win 🔥 Combo on {n} Reboot towers.', [10, 25, 50], () => rebootMedalCount('combo'), R),
+  ...tiers('explorer-r', '🧭', 'Explorer', 'Win ⭐ Explorer on {n} Reboot towers.', [10, 25, 50], () => rebootMedalCount('secrets'), R),
   ...tiers('starfish', '⭐', 'Star-fish Hunter', 'Find {n} hidden star-fish.', [10, 50, 150], () => stats().starfish, R),
   ...tiers('freezes', '🧊', 'Ice Sculptor', 'Freeze {n} enemies with charged shots.', [10, 50, 200], () => stats().freezes, R),
 
@@ -119,7 +124,7 @@ export const TROPHIES = [
   ...tiers('toppled', '🗼', 'Demolition Crew', 'Topple {n} towers.', [1, 25, 100], () => progress.towersCleared || 0, C),
   ...tiers('medals', '🏅', 'Medal Collector', 'Win {n} medals.', [10, 40, 80], () => totalMedals(), C),
   { id: 'cabinet-o', icon: '🥇', name: 'Original Cabinet', desc: 'Win all 40 medals on the original towers.', goal: 40, value: () => allMedals('or', MEDALS.original), group: C },
-  { id: 'cabinet-r', icon: '🥈', name: 'Reboot Cabinet', desc: 'Win all 40 medals on the Reboot towers.', goal: 40, value: () => allMedals('c', MEDALS.reboot), group: C },
+  { id: 'cabinet-r', icon: '🥈', name: 'Reboot Cabinet', desc: 'Win all 250 medals on the Reboot towers.', goal: 250, value: () => rebootAllMedals(MEDALS.reboot), group: C },
   ...tiers('fish', '🐟', 'Gone Fishing', 'Catch {n} fish from the sub.', [25, 100, 500], () => stats().fish, C),
   ...tiers('lives', '❤️', 'Extra Life', 'Earn {n} extra lives.', [1, 10, 50], () => stats().extraLives, C),
   ...tiers('score', '💯', 'High Roller', 'Score {n} points in one run.', [10000, 50000, 150000], () => stats().bestScore, C),
