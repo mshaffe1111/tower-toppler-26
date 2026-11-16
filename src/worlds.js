@@ -103,7 +103,7 @@ export const WORLDS = [
 ];
 
 export const CAMPAIGN_TOWERS = WORLDS.length * TOWERS_PER_WORLD;
-export const PUZZLE_TYPES = ['lights', 'bells', 'beam'];
+export const PUZZLE_TYPES = ['lights', 'bells', 'beam', 'blocks'];
 
 // A rune door for a puzzle room: a quiet ledge cell in the middle part of the tower with room for
 // a 3-row doorway above it, away from other doors. `rows` is the tower grid, top row first.

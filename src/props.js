@@ -521,6 +521,72 @@ function doorGeos() {
   return DGEO;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Puzzle-room clues painted on the tower wall (the room doesn't show them):
+//   bells: a row of coloured banners, the order to ring them, left to right
+//   lights: a carved panel of rune tiles, the pattern to light (row 0 = the chamber's back row)
+// ---------------------------------------------------------------------------------------------
+export function buildClue(clue) {
+  const R = TOWER_RADIUS;
+  const g = new THREE.Group();
+  g.rotation.y = (clue.col + 0.5) * COL_ANGLE;
+  g.position.y = clue.floor * FH + FH * 1.1;
+  g.scale.set(1.5, 1.5, 1); // big enough to read from the climb
+  const anim = [];
+  const plaque = (w, h) => {
+    const m = new THREE.Mesh(new RoundedBoxGeometry(w, h, 0.05, 2, 0.02), new THREE.MeshStandardMaterial({ color: '#2a2018', roughness: 0.85, metalness: 0.1 }));
+    m.position.set(0, h / 2, R + 0.06);
+    return m;
+  };
+  if (clue.kind === 'bells') {
+    const n = clue.order.length;
+    const gap = 0.2;
+    const w = n * gap + 0.12;
+    // a gilded rail with a banner hanging for each bell, in the order to ring them
+    const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, w, 8), new THREE.MeshStandardMaterial({ color: '#e8b04a', metalness: 0.8, roughness: 0.3 }));
+    rail.rotation.z = Math.PI / 2;
+    rail.position.set(0, 0.62, R + 0.1);
+    g.add(rail);
+    clue.order.forEach((ci, k) => {
+      // clue.colors is already in ringing order (one colour per bell to ring)
+      const col = clue.colors?.[k] || '#ffffff';
+      const geo = new THREE.PlaneGeometry(0.15, 0.42, 1, 6);
+      // swallowtail banner: notch the bottom edge
+      const pos = geo.attributes.position;
+      for (let v = 0; v < pos.count; v++) if (pos.getY(v) < -0.2 && Math.abs(pos.getX(v)) < 0.01) pos.setY(v, -0.12);
+      geo.translate(0, -0.21, 0);
+      const mat = new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.15, roughness: 0.85, side: THREE.DoubleSide });
+      const b = new THREE.Mesh(geo, mat);
+      b.position.set(-w / 2 + 0.06 + gap * (k + 0.5), 0.6, R + 0.11);
+      g.add(b);
+      anim.push((t) => {
+        b.rotation.x = Math.sin(t * 1.6 + k * 0.9) * 0.08;
+      });
+    });
+  } else if (clue.kind === 'lights') {
+    const n = clue.n;
+    const cell = 0.11;
+    const size = n * cell + 0.08;
+    g.add(plaque(size, size));
+    const lit = new THREE.MeshStandardMaterial({ color: '#7ff5e6', emissive: '#2dd4bf', emissiveIntensity: 1.2, roughness: 0.4 });
+    const dark = new THREE.MeshStandardMaterial({ color: '#4a4036', roughness: 0.9 });
+    const tile = new RoundedBoxGeometry(cell * 0.82, cell * 0.82, 0.03, 2, 0.012);
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n; c++) {
+        const on = clue.pattern[r * n + c];
+        const m = new THREE.Mesh(tile, on ? lit : dark);
+        // row 0 (the chamber's back row) at the top
+        m.position.set(-size / 2 + 0.04 + cell * (c + 0.5), size - 0.04 - cell * (r + 0.5), R + 0.095);
+        g.add(m);
+      }
+    }
+    anim.push((t) => {
+      lit.emissiveIntensity = 0.9 + 0.35 * Math.sin(t * 2.2);
+    });
+  }
+  return { group: g, update: (t) => anim.forEach((f) => f(t)) };
+}
+
 // A carved rune glyph (canvas), shared by every rune door
 let RUNE_TEX = null;
 function runeTexture() {

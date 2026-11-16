@@ -594,6 +594,8 @@ function setViewBasis(v) {
 }
 
 // ------------------------------------------------------------------------------------ the room
+const SEEN = { up: false }; // has this player ever sent a real `up` (arrow / d-pad)? (jumpIsUp 'auto')
+
 export class PuzzleRoom {
   constructor() {
     this.width = 390;
@@ -606,7 +608,11 @@ export class PuzzleRoom {
     this.vfx = [];
     this._vfxId = 0;
     this.view = makeView();
-    this.jumpIsUp = true; // slide scheme: a push up pulses `jump`. Set false for keyboard/gamepad
+    // What the `jump` action means in here. The slide scheme pulses `jump` for a push up, keyboards
+    // and pads send `jump` for Space / A. true = move up, false = interact, 'auto' = move up until
+    // a real `up` input (arrow key, d-pad, stick) has been seen, then interact. The host can also set
+    // it per frame, e.g. room.jumpIsUp = input.lastDevice === 'touch'.
+    this.jumpIsUp = 'auto';
     this.puzzle = null;
     this.type = 'lights';
     this.cols = 5;
@@ -684,6 +690,10 @@ export class PuzzleRoom {
     this.rewardT = -1; // stage time the reward appeared
     this.collectT = -1; // stage time Pogo grabbed it
     this._finished = false;
+    this._introBanner = false;
+    this._autoWalking = false;
+    this._nothingCount = 0;
+    this._wasHit = false;
     this._leaveBy = 'door';
     this._autoPath = null;
     this._fireBuf = false;
@@ -753,7 +763,10 @@ export class PuzzleRoom {
     const p = this.puzzle;
     this.solved = true;
     if (p.type === 'lights') this.lit = Uint8Array.from(p.target);
-    else if (p.type === 'bells') this.progress = p.order.length;
+    else if (p.type === 'bells') {
+      this.progress = p.order.length;
+      this.rung = p.order.map((b) => p.bells[b].color);
+    }
     else if (p.type === 'beam') {
       this.mirrors.forEach((m, i) => {
         m.rot = p.solution[i];
@@ -820,76 +833,99 @@ export class PuzzleRoom {
     const H = this.height;
     const aspect = W / H;
     v.aspect = aspect;
-    v.fov = aspect < 0.75 ? 46 : aspect < 1.2 ? 42 : 36;
-    const pitch = (lerp(47, 63, clamp((aspect - 0.45) / 1.0, 0, 1)) * Math.PI) / 180;
+    v.fov = aspect < 0.75 ? 36 : aspect < 1.2 ? 38 : 34;
     const cols = this.cols;
     const rows = this.rows;
-    const hx = cols / 2 + 0.7;
-    const zBack = -rows / 2 - 0.6;
-    const zFront = rows / 2 + 0.95; // the door threshold
-    const backH = this.type === 'lights' ? 2.7 : this.type === 'bells' ? 2.2 : 1.6;
-    const pts = [
-      [-hx, 0, zFront],
-      [hx, 0, zFront],
-      [-hx, 0, zBack],
-      [hx, 0, zBack],
-      [-hx * 0.9, backH, zBack - 0.4],
-      [hx * 0.9, backH, zBack - 0.4],
-      [0, backH, zBack - 0.6],
-    ];
-    const topSafe = (64 + 10) * this.s; // the HUD panel
-    const botSafe = 10 * this.s;
-    const sideSafe = 6 * this.s;
-    // look at a point slightly behind the centre so the room sits a little low (the door is near)
-    const tz = 0.15;
-    v.target[0] = 0;
-    v.target[1] = 0.25;
-    v.target[2] = tz;
-    let lo = 4;
-    let hi = 60;
-    for (let it = 0; it < 30; it++) {
-      const dist = (lo + hi) / 2;
+    const hx = cols / 2 + (this.type === 'beam' ? 1.0 : 0.3); // the beam's emitter + crystal stand outside the grid
+    const zBack = -rows / 2 - 0.5;
+    const zFront = rows / 2 + 0.9; // the door threshold
+    const backH = this.type === 'lights' ? 2.55 : this.type === 'bells' ? 2.2 : 1.5;
+    const pts = (this._fitPts = this._fitPts || []);
+    pts.length = 0;
+    pts.push([-hx, 0, zFront], [hx, 0, zFront], [-hx, 0, zBack], [hx, 0, zBack], [-hx * 0.8, backH, zBack - 0.35], [hx * 0.8, backH, zBack - 0.35], [0, backH, zBack - 0.55]);
+    // the HUD panel: a full-width strip on tall screens, a compact top-left card on wide ones
+    const topSafe = aspect > 1.1 ? 12 * this.s : (64 + 12) * this.s;
+    const botSafe = 14 * this.s;
+    const sideSafe = 8 * this.s;
+    // Try a range of tilts and keep the one that shows the floor biggest (a slight bias toward the
+    // lower, more atmospheric angles): tall phones end up steeper, wide screens flatter.
+    let best = null;
+    for (let deg = 42; deg <= 70; deg += 2) {
+      const pitch = (deg * Math.PI) / 180;
+      const dist = this._fitDist(pitch, pts, topSafe, botSafe, sideSafe);
+      // on-screen size of the centre tile (width x depth: steeper = less foreshortened)
+      const ax = this.project(-0.5, 0, 0, this._sp).x;
+      const bx = this.project(0.5, 0, 0, this._sp).x;
+      const ay = this.project(0, 0, -0.5, this._sp).y;
+      const by = this.project(0, 0, 0.5, this._sp).y;
+      const score = Math.sqrt(Math.abs(bx - ax) * Math.abs(by - ay)) * (1 - (deg - 42) * 0.008);
+      if (!best || score > best.score) best = { score, pitch, dist };
+    }
+    this._fitDist(best.pitch, pts, topSafe, botSafe, sideSafe);
+    v.pitch = best.pitch;
+    v.dist = best.dist;
+  }
+
+  // pull the camera back (at this tilt) until everything fits, then centre it in the safe band
+  _fitDist(pitch, pts, topSafe, botSafe, sideSafe) {
+    const v = this.view;
+    const W = this.width;
+    const H = this.height;
+    const tz = 0.1;
+    let lo = 3;
+    let hi = 80;
+    const place = (dist, shift) => {
+      v.target[0] = 0;
+      v.target[1] = 0.25;
+      v.target[2] = tz;
       v.eye[0] = 0;
       v.eye[1] = v.target[1] + Math.sin(pitch) * dist;
       v.eye[2] = tz + Math.cos(pitch) * dist;
       setViewBasis(v);
-      let fits = true;
+      if (shift) {
+        for (let k = 0; k < 3; k++) {
+          v.target[k] += v.u[k] * shift;
+          v.eye[k] += v.u[k] * shift;
+        }
+      }
+    };
+    const extent = () => {
+      let minX = Infinity;
+      let maxX = -Infinity;
       let minY = Infinity;
       let maxY = -Infinity;
       for (const p of pts) {
         const sp = this.project(p[0], p[1], p[2], this._sp);
-        if (sp.x < sideSafe || sp.x > W - sideSafe) fits = false;
+        minX = Math.min(minX, sp.x);
+        maxX = Math.max(maxX, sp.x);
         minY = Math.min(minY, sp.y);
         maxY = Math.max(maxY, sp.y);
       }
-      if (maxY - minY > H - topSafe - botSafe) fits = false;
+      return [minX, maxX, minY, maxY];
+    };
+    for (let it = 0; it < 28; it++) {
+      const dist = (lo + hi) / 2;
+      place(dist, 0);
+      const [minX, maxX, minY, maxY] = extent();
+      const fits = minX >= sideSafe && maxX <= W - sideSafe && maxY - minY <= H - topSafe - botSafe;
       if (fits) hi = dist;
       else lo = dist;
     }
-    const dist = hi;
-    v.eye[1] = v.target[1] + Math.sin(pitch) * dist;
-    v.eye[2] = tz + Math.cos(pitch) * dist;
-    setViewBasis(v);
-    // centre the framed content vertically inside the safe band by shifting the look target
-    let minY = Infinity;
-    let maxY = -Infinity;
-    for (const p of pts) {
-      const sp = this.project(p[0], p[1], p[2], this._sp);
-      minY = Math.min(minY, sp.y);
-      maxY = Math.max(maxY, sp.y);
+    place(hi, 0);
+    // centre vertically: moving the camera along its up vector moves the picture down
+    for (let it = 0; it < 2; it++) {
+      const [, , minY, maxY] = extent();
+      const want = (topSafe + (H - botSafe)) / 2;
+      const have = (minY + maxY) / 2;
+      const pxToWorld = (2 * v.tanH * hi) / H;
+      const shift = (want - have) * pxToWorld;
+      for (let k = 0; k < 3; k++) {
+        v.target[k] += v.u[k] * shift;
+        v.eye[k] += v.u[k] * shift;
+      }
+      setViewBasis(v);
     }
-    const want = (topSafe + (H - botSafe)) / 2;
-    const have = (minY + maxY) / 2;
-    // screen px -> world shift along the camera's up vector at the target distance
-    const pxToWorld = (2 * v.tanH * dist) / H;
-    const shift = (have - want) * pxToWorld;
-    for (let k = 0; k < 3; k++) {
-      v.target[k] += v.u[k] * shift;
-      v.eye[k] += v.u[k] * shift;
-    }
-    setViewBasis(v);
-    v.dist = dist;
-    v.pitch = pitch;
+    return hi;
   }
 
   /** World point -> CSS-pixel screen position (same maths as the renderer's camera). */
@@ -965,7 +1001,13 @@ export class PuzzleRoom {
     this._readInput(input, dt);
     let fire = !!firePressed;
     const jump = !!input.jump;
-    if (!this.jumpIsUp && jump && !this._wasJump) fire = true; // keyboard Space / gamepad A = interact
+    const jumpEdge = jump && !this._wasJump;
+    if (jumpEdge) {
+      if (!this._jumpUp()) fire = true; // keyboard Space / gamepad A = interact
+      // a host that passes `fire || jump` as firePressed (like the sub stage): when the press was
+      // only the slide's push-up (jump without fire held), it is a step up, not an interaction
+      else if (!input.fire) fire = false;
+    }
     this._wasJump = jump;
 
     const po = this.pogo;
@@ -1034,7 +1076,8 @@ export class PuzzleRoom {
     d[0] = ax > 0.25 || (!ax && !!input.right);
     d[2] = ax < -0.25 || (!ax && !!input.left);
     d[1] = ay > 0.4 || (!ay && !!input.down);
-    d[3] = ay < -0.4 || (!ay && (!!input.up || (this.jumpIsUp && !!input.jump)));
+    if (input.up) SEEN.up = true;
+    d[3] = ay < -0.4 || (!ay && (!!input.up || (this._jumpUp() && !!input.jump)));
     for (let k = 0; k < 4; k++) {
       if (d[k]) {
         if (!this._was[k]) {
@@ -1046,6 +1089,11 @@ export class PuzzleRoom {
       this._was[k] = d[k];
     }
     if (this._buffer >= 0 && !d[this._buffer] && this._held[this._buffer] === 0 && !this._bufferFresh) this._buffer = -1;
+  }
+
+  _jumpUp() {
+    const j = this.jumpIsUp;
+    return j === 'auto' ? !SEEN.up : !!j;
   }
 
   _tryInputMove(fx, sound) {
@@ -1594,7 +1642,7 @@ export class PuzzleRoom {
   }
 
   _solve(fx, sound) {
-    if (this.solved && this.phase !== 'play') return;
+    if (this.solved) return;
     this.solved = true;
     this.phase = 'solved';
     this.phaseT = 0;

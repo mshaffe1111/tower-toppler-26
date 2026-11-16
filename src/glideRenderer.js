@@ -26,7 +26,7 @@ const TAU = Math.PI * 2;
 const DEG = Math.PI / 180;
 const FOV = 50;
 const CAM_Z = 16;
-const PITCH = 7 * DEG; // the camera looks a little up: horizon ~63% down the screen
+const PITCH = 9 * DEG; // the camera looks a little up: horizon ~67% down the screen
 const TOWER_Z = -6.5; // the next tower when you land beside it
 const TOWER_FAR_Z = -300; // ... and when it first shows on the horizon
 const SKY_Z = -400;
@@ -51,6 +51,9 @@ const MAX_POP = 18;
 const MAX_BOLT_SEG = 120;
 const MAX_PRECIP = 520;
 const MAX_WARN = 4;
+
+// storm cloud = 4 puffs: [offset x, offset y, scale, atlas cell] (relative to the cloud width)
+const STORM_PUFFS = [0, 0, 1.0, 0, -0.32, 0.06, 0.62, 1, 0.34, 0.03, 0.68, 2, 0.05, 0.22, 0.6, 3];
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -79,16 +82,16 @@ function mulberry32(seed) {
 // Index = GlideStage.themeKey. sun: [x, y, z] direction (normalised at build); size in radians.
 const THEMES = {
   dawn: {
-    top: '#3d5fa8', mid: '#e9a3a0', hor: '#ffd9a8', haze: '#f6c9a6', sun: '#ffcf8a', sunDir: [-0.1, 0.07, -1], sunSize: 0.05,
+    top: '#2c4a96', mid: '#d98a9a', hor: '#ffc98f', haze: '#f0b993', sun: '#ffc27a', sunDir: [-0.14, 0.09, -1], sunSize: 0.05,
     stars: 0.0, moon: 0, rays: 0.55, cirrus: 0.6, rainbow: 0,
-    cloudLit: '#fff1de', cloudShade: '#b48aa3', cloudRim: '#ffd59a', sea: '#2b5a8a', seaFar: '#9fb6c8', glint: 1.2, chop: 0.6, foam: 0.15,
+    cloudLit: '#fff1de', cloudShade: '#b48aa3', cloudRim: '#ffd59a', sea: '#24507e', seaFar: '#7d8fb4', glint: 1.1, chop: 0.6, foam: 0.15,
     isle: '#3d5d4a', isleFar: '#8f8fa8', hemiSky: '#ffd9c0', hemiGround: '#2a3f5f', light: '#ffd7a8', lightI: 2.4, exposure: 1.05,
     precip: 'none', lanternK: 1.0, birds: 1, wind: 0.5,
   },
   day: {
-    top: '#2a6fd6', mid: '#69aef0', hor: '#d4ecff', haze: '#cfe6f7', sun: '#fff6dc', sunDir: [-0.08, 0.36, -1], sunSize: 0.04,
+    top: '#1d5fcf', mid: '#4f97e6', hor: '#bfe2ff', haze: '#b9dcf5', sun: '#fff3d6', sunDir: [-0.1, 0.36, -1], sunSize: 0.04,
     stars: 0, moon: 0, rays: 0.35, cirrus: 0.8, rainbow: 0,
-    cloudLit: '#ffffff', cloudShade: '#a9bdd6', cloudRim: '#ffffff', sea: '#1f6fae', seaFar: '#a9d2ec', glint: 1.4, chop: 0.7, foam: 0.2,
+    cloudLit: '#ffffff', cloudShade: '#93acd0', cloudRim: '#ffffff', sea: '#0f4f86', seaFar: '#4f97c8', glint: 1.2, chop: 0.7, foam: 0.2,
     isle: '#3f7a4c', isleFar: '#8fb0c6', hemiSky: '#dff1ff', hemiGround: '#2d5a7a', light: '#fff6e4', lightI: 2.8, exposure: 1.0,
     precip: 'none', lanternK: 0.8, birds: 1, wind: 0.6,
   },
@@ -109,7 +112,7 @@ const THEMES = {
   night: {
     top: '#040921', mid: '#0f1d48', hor: '#2b3f78', haze: '#26386a', sun: '#dfe8ff', sunDir: [-0.1, 0.3, -1], sunSize: 0.05,
     stars: 1.0, moon: 1, rays: 0.12, cirrus: 0.35, rainbow: 0,
-    cloudLit: '#7d8fc4', cloudShade: '#1a2246', cloudRim: '#c9d6ff', sea: '#08132e', seaFar: '#2b3d6e', glint: 1.0, chop: 0.55, foam: 0.08,
+    cloudLit: '#7d8fc4', cloudShade: '#1a2246', cloudRim: '#c9d6ff', sea: '#050d22', seaFar: '#1d2c58', glint: 0.6, chop: 0.55, foam: 0.05,
     isle: '#0f1730', isleFar: '#26355f', hemiSky: '#6f84c8', hemiGround: '#0b1028', light: '#c9d6ff', lightI: 1.0, exposure: 1.12,
     precip: 'fireflies', lanternK: 2.1, birds: 0, wind: 0.4,
   },
@@ -128,9 +131,9 @@ const THEMES = {
     precip: 'leaves', lanternK: 1.0, birds: 1, wind: 1.0,
   },
   storm: {
-    top: '#151b2a', mid: '#2c3446', hor: '#59647a', haze: '#4a5468', sun: '#c9d4ea', sunDir: [-0.1, 0.25, -1], sunSize: 0.05,
+    top: '#151b2a', mid: '#2c3446', hor: '#59647a', haze: '#4a5468', sun: '#8f9cb8', sunDir: [-0.1, 0.25, -1], sunSize: 0.05, disc: 0,
     stars: 0, moon: 0, rays: 0.05, cirrus: 0.0, rainbow: 0,
-    cloudLit: '#8a95ab', cloudShade: '#262c3b', cloudRim: '#b9c6e0', sea: '#16262f', seaFar: '#4b5868', glint: 0.25, chop: 1.1, foam: 0.6,
+    cloudLit: '#8a95ab', cloudShade: '#262c3b', cloudRim: '#b9c6e0', sea: '#0f1d26', seaFar: '#3a4656', glint: 0.25, chop: 1.1, foam: 0.4,
     isle: '#1c2430', isleFar: '#3d4758', hemiSky: '#8e9bb4', hemiGround: '#1a2230', light: '#b8c4dc', lightI: 1.1, exposure: 1.15,
     precip: 'rain', lanternK: 1.6, birds: 0, wind: 0.9,
   },
@@ -451,10 +454,10 @@ function buildIsland(rng, { peaks = 2, flat = 0.4 } = {}) {
         const d = Math.hypot(Math.cos(a) * 0.5 - Math.cos(pa) * 0.35, Math.sin(a) * 0.5 - Math.sin(pa) * 0.35);
         pk = Math.max(pk, Math.exp(-d * d * 6));
       }
-      h = 1 + pk * (1 - flat) * 0.9;
-      r *= 0.55;
+      h = 1 + pk * (1 - flat) * 0.55;
+      r *= 0.78 - pk * 0.25;
     } else {
-      r *= 1 - y * 0.25;
+      r *= 1 - y * y * 0.2;
     }
     p.setXYZ(i, x * r, h, z * r);
   }
@@ -643,19 +646,23 @@ function cloudMaterial(U, tex, { fg = false } = {}) {
     fragmentShader: /* glsl */ `
       uniform sampler2D uMap; uniform vec3 uLit; uniform vec3 uShade; uniform vec3 uRim; uniform vec3 uHaze; uniform float uFlash; uniform float uTime;
       varying vec2 vUv; varying vec4 vC; varying float vDepth;
+      ${GLSL_NOISE}
       void main(){
         vec4 t = texture2D(uMap, vUv);
-        float a = t.a * vC.z;
+        vec2 q = vUv * vec2(9.0, 18.0) + vC.x * 3.7;
+        float nz = fbm3(q + vec2(uTime * 0.03, 0.0));
+        float dens = t.a + (nz - 0.5) * 0.55 * (1.0 - t.a * 0.6);
+        float a = smoothstep(0.12, 0.55, dens) * vC.z;
         if (a < 0.004) discard;
-        float lum = t.r;
+        float lum = clamp(t.r + (nz - 0.5) * 0.25, 0.0, 1.0);
         float storm = clamp(vC.w, 0.0, 1.0);
         float flick = max(vC.w - 1.0, 0.0);
         vec3 lit = mix(uLit, uLit * 0.42 + uShade * 0.2, storm);
         vec3 sh = mix(uShade, uShade * 0.35, storm);
-        vec3 col = mix(sh, lit, smoothstep(0.38, 0.95, lum)) * vC.y;
+        vec3 col = mix(sh, lit, smoothstep(0.42, 0.9, lum)) * vC.y;
         // silver lining where the puff thins out
-        float edge = smoothstep(0.02, 0.35, t.a) * (1.0 - smoothstep(0.35, 0.85, t.a));
-        col += uRim * edge * (0.35 + 0.4 * lum) * (1.0 - storm * 0.7);
+        float edge = smoothstep(0.12, 0.3, dens) * (1.0 - smoothstep(0.3, 0.75, dens));
+        col += uRim * edge * (0.2 + 0.3 * lum) * (1.0 - storm * 0.7);
         // storm cloud lighting up from inside before a strike
         col += vec3(0.75, 0.82, 1.0) * flick * (0.4 + 0.6 * lum);
         col += vec3(0.85, 0.9, 1.0) * uFlash * 0.6 * lum;
@@ -701,9 +708,6 @@ function lanternMaterial(U) {
 function gateMaterial(U) {
   return new THREE.ShaderMaterial({
     uniforms: { uTime: U.uTime },
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
     vertexShader: /* glsl */ `
       attribute float aGlow;
       varying vec3 vL; varying vec3 vC; varying float vG; varying vec3 vN; varying vec3 vV;
@@ -718,11 +722,18 @@ function gateMaterial(U) {
       varying vec3 vL; varying vec3 vC; varying float vG; varying vec3 vN; varying vec3 vV;
       void main(){
         float a = atan(vL.y, vL.x);
-        float chase = pow(0.5 + 0.5 * sin(a * 6.0 - uTime * 7.0), 6.0);
-        float ndv = clamp(abs(dot(normalize(vN), normalize(vV))), 0.0, 1.0);
-        vec3 col = vC * (0.55 + 0.6 * ndv + chase * 1.4 * vG) + vec3(1.0) * chase * 0.35 * vG;
+        // bulbs around the hoop, chasing toward the top
+        float cell = fract(a / 6.2831853 * 16.0);
+        float bulb = smoothstep(0.32, 0.1, abs(cell - 0.5));
+        float chase = pow(0.5 + 0.5 * sin(a * 2.0 - uTime * 9.0 + floor(a / 6.2831853 * 16.0) * 0.6), 3.0);
+        vec3 n = normalize(vN);
+        float lam = clamp(dot(n, normalize(vec3(-0.4, 0.7, 0.6))), 0.0, 1.0);
+        float spec = pow(clamp(dot(reflect(-normalize(vec3(-0.4, 0.7, 0.6)), n), normalize(vV)), 0.0, 1.0), 24.0);
+        vec3 metal = vC * (0.35 + 0.75 * lam) + vec3(1.0, 0.95, 0.8) * spec * 0.8;
+        vec3 lit = mix(vec3(1.0, 0.92, 0.6), vec3(0.75, 1.0, 1.0), chase) * (1.4 + chase * 1.4);
+        vec3 col = mix(metal, lit, bulb * vG * (0.45 + 0.55 * chase));
         gl_FragColor = vec4(col, 1.0);
-        #include <colorspace_fragment>
+        ${GLSL_OUT}
       }`,
   });
 }
@@ -732,7 +743,9 @@ function thermalMaterial(U) {
     uniforms: { uTime: U.uTime, uColor: { value: new THREE.Color('#ffcf7a') } },
     transparent: true,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.OneFactor,
+    blendDst: THREE.OneMinusSrcAlphaFactor,
     vertexShader: /* glsl */ `
       varying vec2 vUv; varying vec3 vC; varying float vPh;
       void main(){
@@ -750,11 +763,15 @@ function thermalMaterial(U) {
         float shimmer = vnoise(vec2(vUv.x * 7.0 + wob * 3.0, vUv.y * 9.0 - uTime * 2.2 + vPh));
         shimmer = 0.45 + 0.75 * shimmer;
         // rising chevrons: "this air goes UP"
-        float cy = fract(vUv.y * 5.0 - uTime * 0.85 + vPh);
-        float chev = smoothstep(0.06, 0.0, abs(cy - 0.5 - abs(x) * 0.22)) * (1.0 - smoothstep(0.25, 0.7, abs(x)));
-        float fadeY = smoothstep(0.0, 0.08, vUv.y) * (1.0 - smoothstep(0.7, 1.0, vUv.y));
-        float a = (edge * shimmer * 0.16 + chev * 0.32) * fadeY * vC.r;
-        gl_FragColor = vec4(uColor * a, a);
+        float cy = fract(vUv.y * 11.0 - uTime * 1.6 + vPh);
+        float row = floor(vUv.y * 11.0 - uTime * 1.6 + vPh);
+        float cx = x * 2.4 + sin(row * 1.7) * 0.5;
+        float chev = smoothstep(0.09, 0.0, abs(cy - 0.5 + abs(cx) * 0.35)) * (1.0 - smoothstep(0.18, 0.42, abs(cx)));
+        float fadeY = smoothstep(0.0, 0.08, vUv.y) * (1.0 - smoothstep(0.62, 1.0, vUv.y));
+        float body = edge * shimmer * 0.035;
+        float a = (body + chev * 0.2) * fadeY * vC.r;
+        vec3 col = uColor * (body + chev * 0.55) * fadeY * vC.r;
+        gl_FragColor = vec4(col, a * 0.7);
         #include <colorspace_fragment>
       }`,
   });
@@ -783,7 +800,7 @@ function streakMaterial() {
 
 function rainCurtainMaterial(U) {
   return new THREE.ShaderMaterial({
-    uniforms: { uTime: U.uTime, uColor: { value: new THREE.Color('#9fb3d6') } },
+    uniforms: { uTime: U.uTime, uColor: { value: new THREE.Color('#4d5868') } },
     transparent: true,
     depthWrite: false,
     vertexShader: /* glsl */ `
@@ -810,7 +827,10 @@ function boltMaterial() {
     transparent: true,
     depthWrite: false,
     depthTest: false,
-    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.OneFactor,
+    blendDst: THREE.OneMinusSrcAlphaFactor,
     vertexShader: /* glsl */ `
       attribute float aA; attribute float aE;
       varying float vA; varying float vE;
@@ -818,10 +838,13 @@ function boltMaterial() {
     fragmentShader: /* glsl */ `
       varying float vA; varying float vE;
       void main(){
-        float core = 1.0 - smoothstep(0.0, 0.35, abs(vE));
-        float halo = 1.0 - smoothstep(0.0, 1.0, abs(vE));
-        vec3 col = vec3(0.72, 0.8, 1.0) * halo * 0.7 + vec3(1.0) * core * 1.4;
-        gl_FragColor = vec4(col * vA, (halo * 0.5 + core) * vA);
+        float e = abs(vE);
+        float core = 1.0 - smoothstep(0.12, 0.3, e);
+        float halo = 1.0 - smoothstep(0.2, 1.0, e);
+        // white-hot core, violet halo: reads on a dark storm and on a bright day alike
+        vec3 col = mix(vec3(0.42, 0.36, 0.95) * halo, vec3(1.0, 1.0, 1.0) * 1.3, core);
+        float a = max(core, halo * 0.75);
+        gl_FragColor = vec4(col * a * vA, a * vA);
         #include <colorspace_fragment>
       }`,
   });
@@ -870,7 +893,7 @@ function precipMaterial(U, tex) {
         float sz = uKind < 0.5 ? 0.09 + fract(aSeed * 13.0) * 0.11
                  : uKind < 1.5 ? 0.22
                  : uKind < 2.5 ? 0.05 + fract(aSeed * 13.0) * 0.07
-                 : uKind < 3.5 ? 0.09 + fract(aSeed * 13.0) * 0.08
+                 : uKind < 3.5 ? 0.05 + fract(aSeed * 13.0) * 0.05
                  : uKind < 4.5 ? 0.14 + fract(aSeed * 13.0) * 0.1
                  : 0.16;
         gl_PointSize = sz * uPx / max(d, 0.5);
@@ -996,6 +1019,7 @@ export class GlideRenderer {
     this._kiteCols = KITE_HEX.map((h) => new THREE.Color(h));
     this._gold = new THREE.Color(GOLD_HEX);
     this._white = new THREE.Color(1, 1, 1);
+    this._birdCol = new THREE.Color('#888888');
 
     this._buildLights();
     this._buildSky();
@@ -1066,8 +1090,8 @@ export class GlideRenderer {
     this.hemi = new THREE.HemisphereLight('#dff1ff', '#2d5a7a', 1.6);
     this.sunLight = new THREE.DirectionalLight('#fff6e4', 2.6);
     this.sunLight.position.set(-3, 9, -6);
-    this.fill = new THREE.DirectionalLight('#ffffff', 0.7);
-    this.fill.position.set(2, 3, 10);
+    this.fill = new THREE.DirectionalLight('#ffffff', 0.7); // back rim from the sun side
+    this.fill.position.set(-2, 4, -12);
     this.scene.add(this.hemi, this.sunLight, this.fill);
   }
 
@@ -1088,6 +1112,7 @@ export class GlideRenderer {
         uRays: { value: 0.4 },
         uCirrus: { value: 0.5 },
         uRainbow: { value: 0 },
+        uDisc: { value: 1 },
         uFlash: U.uFlash,
         uScrollW: U.uScrollW,
       },
@@ -1098,7 +1123,7 @@ export class GlideRenderer {
       fragmentShader: /* glsl */ `
         uniform float uTime; uniform vec3 uTop; uniform vec3 uMid; uniform vec3 uHor; uniform vec3 uSunCol; uniform vec3 uSunDir;
         uniform float uSunSize; uniform float uStars; uniform float uMoon; uniform float uRays; uniform float uCirrus; uniform float uRainbow;
-        uniform float uFlash; uniform float uScrollW;
+        uniform float uFlash; uniform float uScrollW; uniform float uDisc;
         varying vec3 vW;
         ${GLSL_NOISE}
         void main(){
@@ -1128,7 +1153,7 @@ export class GlideRenderer {
           float ra = atan(rel.y, rel.x);
           float rays = vnoise(vec2(ra * 7.0, uTime * 0.07)) * 0.6 + vnoise(vec2(ra * 19.0, uTime * 0.11 + 4.0)) * 0.4;
           rays = smoothstep(0.35, 0.85, rays) * exp(-ang * 2.6) * smoothstep(0.03, 0.12, ang);
-          col += uSunCol * rays * uRays * 0.55;
+          col += uSunCol * rays * uRays * 0.4;
           // sun (or moon)
           float disc = smoothstep(uSunSize, uSunSize * 0.86, ang);
           if (uMoon > 0.5) {
@@ -1140,8 +1165,8 @@ export class GlideRenderer {
             col = mix(col, moonCol * 1.6, disc * (1.0 - shadow * 0.92));
             col += uSunCol * (exp(-ang * 9.0) * 0.35 + exp(-ang * 30.0) * 0.3);
           } else {
-            col = mix(col, uSunCol * 3.0 + vec3(0.6), disc);
-            col += uSunCol * (exp(-ang * 5.0) * 0.55 + exp(-ang * 18.0) * 0.8 + exp(-ang * 60.0) * 0.8);
+            col = mix(col, uSunCol * 3.0 + vec3(0.6), disc * uDisc);
+            col += uSunCol * (exp(-ang * 9.0) * 0.3 + (exp(-ang * 22.0) * 0.5 + exp(-ang * 60.0) * 0.7) * uDisc);
           }
           // warm glow along the horizon under the sun
           col += uSunCol * exp(-abs(e) * 14.0) * pow(max(sd, 0.0), 6.0) * 0.6;
@@ -1213,25 +1238,25 @@ export class GlideRenderer {
           vec3 n = normalize(vec3(-g.x * uChop * 0.28 * fadeN, 1.0, -g.y * uChop * 0.28 * fadeN));
           vec3 v = normalize(cameraPosition - vW);
           vec3 r = reflect(-v, n);
-          float fres = 0.03 + 0.97 * pow(1.0 - max(dot(n, v), 0.0), 5.0);
-          vec3 sky = mix(uSkyHor, uSkyTop, smoothstep(0.0, 0.45, r.y));
+          float fres = 0.02 + 0.98 * pow(1.0 - max(dot(n, v), 0.0), 5.0);
+          vec3 sky = mix(uSkyHor, uSkyTop, smoothstep(0.0, 0.3, r.y)) * 0.8;
           float sd = max(dot(r, uSunDir), 0.0);
-          float spec = pow(sd, 260.0) * 7.0 + pow(sd, 40.0) * 0.6 + pow(sd, 8.0) * 0.12;
+          float spec = pow(sd, 400.0) * 3.0 + pow(sd, 90.0) * 0.22;
           // glitter: sparkles in the sun path
-          vec2 gp = p * vec2(2.6, 5.0);
+          vec2 gp = p * vec2(5.0, 10.0);
           float sp = hash12(floor(gp) + floor(t * 7.0));
-          float glit = step(0.93, sp) * pow(sd, 6.0) * smoothstep(0.5, 0.0, length(fract(gp) - 0.5));
-          vec3 water = mix(uDeep, uFar, smoothstep(10.0, 260.0, vDist));
+          float glit = step(0.94, sp) * pow(sd, 6.0) * smoothstep(0.5, 0.0, length(fract(gp) - 0.5)) * smoothstep(10.0, 40.0, vDist);
+          vec3 water = mix(uDeep, uFar, smoothstep(40.0, 300.0, vDist));
           water *= 0.85 + 0.25 * n1;
-          vec3 col = mix(water, sky, fres * 0.85);
-          col += uSunCol * (spec + glit * 2.8) * uGlint;
+          vec3 col = mix(water, sky, clamp(fres, 0.0, 0.5));
+          col += uSunCol * (spec + glit * 2.2) * uGlint;
           // whitecaps
           float fn = vnoise(p * 0.9 + vec2(t * 0.5, 0.0)) * vnoise(p * 2.3 - vec2(0.0, t * 0.3));
-          float foam = smoothstep(0.42 - uFoam * 0.2, 0.62 - uFoam * 0.2, fn) * uFoam * smoothstep(160.0, 20.0, vDist);
-          col = mix(col, vec3(0.92, 0.96, 1.0) * (0.6 + 0.4 * uSkyHor), foam * 0.7);
+          float foam = smoothstep(0.5 - uFoam * 0.15, 0.64 - uFoam * 0.15, fn) * uFoam * smoothstep(160.0, 20.0, vDist);
+          col = mix(col, vec3(0.92, 0.96, 1.0) * (0.55 + 0.45 * uSkyHor), foam * 0.55);
           col += vec3(0.6, 0.7, 0.9) * uFlash * 0.25;
           // haze toward the horizon (meets the sky there)
-          col = mix(col, uHaze, smoothstep(40.0, 400.0, vDist) * 0.92);
+          col = mix(col, uHaze, smoothstep(140.0, 430.0, vDist) * 0.85);
           gl_FragColor = vec4(col, 1.0);
           ${GLSL_OUT}
         }`,
@@ -1276,8 +1301,8 @@ export class GlideRenderer {
       const mesh = instanced(geo, mat, N);
       const items = [];
       for (let i = 0; i < N; i++) {
-        const stack = rng() < 0.35;
-        items.push({ u: (i + rng() * 0.6) / N, z: lerp(-55, -120, rng()), sx: stack ? lerp(1.5, 3, rng()) : lerp(5, 11, rng()), sy: stack ? lerp(4, 9, rng()) : lerp(1.6, 4, rng()), ry: rng() * TAU, shade: lerp(0.9, 1.1, rng()) });
+        const stack = rng() < 0.2;
+        items.push({ u: (i + rng() * 0.6) / N, z: lerp(-80, -150, rng()), sx: stack ? lerp(1.5, 2.5, rng()) : lerp(6, 13, rng()), sy: stack ? lerp(3, 6, rng()) : lerp(1.2, 2.8, rng()), ry: rng() * TAU, shade: lerp(0.9, 1.1, rng()) });
       }
       this.midIsles = addLayer(mesh, items, 30, { kind: 'mid' });
     }
@@ -1322,9 +1347,9 @@ export class GlideRenderer {
     // background cumulus: banks on the horizon, mid and near layers (instances sorted far -> near)
     const defs = [
       { n: 14, z: [-300, -360], w: [70, 140], el: [0.2, 3.5], b: [0.85, 1.0], a: [0.85, 1.0] },
-      { n: 14, z: [-150, -230], w: [40, 80], el: [2, 12], b: [0.9, 1.05], a: [0.8, 1.0] },
-      { n: 12, z: [-70, -110], w: [20, 36], el: [4, 22], b: [0.95, 1.08], a: [0.75, 0.95] },
-      { n: 10, z: [-25, -45], w: [9, 16], el: [3, 24], b: [1.0, 1.1], a: [0.7, 0.92] },
+      { n: 10, z: [-150, -230], w: [36, 70], el: [1.5, 10], b: [0.9, 1.05], a: [0.8, 1.0] },
+      { n: 7, z: [-80, -120], w: [18, 30], el: [8, 24], b: [0.95, 1.05], a: [0.75, 0.95] },
+      { n: 4, z: [-35, -55], w: [8, 13], el: [14, 28], b: [1.0, 1.05], a: [0.55, 0.8] },
     ];
     const items = [];
     for (const d of defs) {
@@ -1378,10 +1403,11 @@ export class GlideRenderer {
     this.fgItems = [];
     const fa = fgGeo.attributes.aCloud.array;
     for (let i = 0; i < MAX_FGCLOUD; i++) {
-      this.fgItems.push({ u: (i + rng() * 0.5) / MAX_FGCLOUD, z: lerp(6, 10, rng()), w: lerp(12, 18, rng()), yf: lerp(-0.2, 1.15, rng()), cell: Math.floor(rng() * 4), flip: rng() < 0.5 ? -1 : 1, span: 40 });
+      const low = i % 2 === 0;
+      this.fgItems.push({ u: (i + rng() * 0.5) / MAX_FGCLOUD, z: lerp(6, 10, rng()), w: lerp(10, 15, rng()), yf: low ? lerp(-0.45, -0.25, rng()) : lerp(1.12, 1.3, rng()), cell: Math.floor(rng() * 4), flip: rng() < 0.5 ? -1 : 1, span: 40 });
       fa[i * 4] = this.fgItems[i].cell;
       fa[i * 4 + 1] = 1.05;
-      fa[i * 4 + 2] = 0.42;
+      fa[i * 4 + 2] = 0.3;
       fa[i * 4 + 3] = 0;
     }
     fgGeo.attributes.aCloud.needsUpdate = true;
@@ -1508,7 +1534,7 @@ export class GlideRenderer {
     });
     this.sailBack = { value: 0.5 };
     this.sailBackCol = { value: new THREE.Color('#fff2d0') };
-    this.gliderRim = { value: 0.45 };
+    this.gliderRim = { value: 0.3 };
     this.gliderRimCol = { value: new THREE.Color('#fff4d6') };
     this.sailMat = patchStd(new THREE.MeshStandardMaterial({ map: this.sailTex, roughness: 0.62, metalness: 0, side: THREE.DoubleSide }), U, {
       backLit: { str: this.sailBack, color: this.sailBackCol },
@@ -1516,19 +1542,24 @@ export class GlideRenderer {
       key: 'sail',
     });
     this.flashMats = [this.sailMat];
+    // the wing banks about the keel (shows its striped underside); Pogo + A-frame stay upright
+    const wing = new THREE.Group();
+    body.add(wing);
+    this.gWing = wing;
     const sailMesh = new THREE.Mesh(sail, this.sailMat);
-    body.add(sailMesh);
+    wing.add(sailMesh);
     this.sailMesh = sailMesh;
 
     // ---- frame: leading edges, keel, crossbar, king post, A-frame + control bar, wires
     const V = (x, y, z) => new THREE.Vector3(x, y, z);
-    const frame = [];
+    const frame = []; // upright: A-frame, control bar, strap
+    const wframe = []; // banks with the sail
     for (const s of [1, -1]) {
-      frame.push(solidC(tube(V(0.95, 0.0, 0), V(-0.42, 0.1, s * TIP), 0.028, 0.02, 8), MET));
-      frame.push(solidC(tube(V(0.2, 0.08, s * 0.04), V(0.02, 0.1, s * 1.0), 0.016, 0.016, 6), METD)); // crossbar
+      wframe.push(solidC(tube(V(0.95, 0.0, 0), V(-0.42, 0.1, s * TIP), 0.028, 0.02, 8), MET));
+      wframe.push(solidC(tube(V(0.2, 0.08, s * 0.04), V(0.02, 0.1, s * 1.0), 0.016, 0.016, 6), METD)); // crossbar
     }
-    frame.push(solidC(tube(V(0.98, 0.0, 0), V(-0.66, -0.02, 0), 0.026, 0.022, 8), MET)); // keel
-    frame.push(solidC(tube(V(0.12, 0.0, 0), V(0.1, 0.42, 0), 0.016, 0.012, 6), METD)); // king post
+    wframe.push(solidC(tube(V(0.98, 0.0, 0), V(-0.66, -0.02, 0), 0.026, 0.022, 8), MET)); // keel
+    wframe.push(solidC(tube(V(0.12, 0.0, 0), V(0.1, 0.42, 0), 0.016, 0.012, 6), METD)); // king post
     const BAR_Y = -0.92;
     const BAR_X = 0.36;
     const BAR_Z = 0.42;
@@ -1542,11 +1573,9 @@ export class GlideRenderer {
       [V(0.1, 0.42, 0), V(-0.62, 0.0, 0)],
       [V(0.1, 0.42, 0), V(-0.2, 0.06, 1.05)],
       [V(0.1, 0.42, 0), V(-0.2, 0.06, -1.05)],
-      [V(BAR_X, BAR_Y, BAR_Z), V(-0.2, 0.06, 1.05)],
-      [V(BAR_X, BAR_Y, -BAR_Z), V(-0.2, 0.06, -1.05)],
-      [V(BAR_X, BAR_Y, 0), V(0.95, 0.0, 0)],
     ];
-    for (const [a, b] of wires) frame.push(solidC(tube(a, b, 0.005, 0.005, 3), C('#c9d2dc')));
+    for (const [a, b] of wires) wframe.push(solidC(tube(a, b, 0.005, 0.005, 3), C('#c9d2dc')));
+    frame.push(solidC(tube(V(BAR_X, BAR_Y, 0), V(0.95, 0.0, 0), 0.005, 0.005, 3), C('#c9d2dc')));
     // hang strap down to Pogo's harness
     frame.push(solidC(tube(V(0.08, -0.02, 0), V(0.0, -0.6, 0), 0.014, 0.014, 5), C('#30343f')));
     // wing-tip lights (lamp colours, picked up again as glows)
@@ -1556,6 +1585,7 @@ export class GlideRenderer {
     });
     this.flashMats.push(frameMat);
     body.add(new THREE.Mesh(merge(frame), frameMat));
+    wing.add(new THREE.Mesh(merge(wframe), frameMat));
     this._tipNear = V(-0.42, 0.1, TIP);
     this._tipFar = V(-0.42, 0.1, -TIP);
     this._noseLocal = V(0.98, 0, 0);
@@ -1811,7 +1841,7 @@ export class GlideRenderer {
     this.scene.add(this.kiteMesh, this.kiteTail);
 
     // ring gates
-    const gateGeo = new THREE.TorusGeometry(1, 0.075, 10, 56);
+    const gateGeo = new THREE.TorusGeometry(1, 0.1, 10, 64);
     this.gateMesh = instanced(gateGeo, gateMaterial(U), MAX_GATE, { glow: true });
     this.gateMesh.renderOrder = 6;
     this.scene.add(this.gateMesh);
@@ -1835,7 +1865,7 @@ export class GlideRenderer {
     const rng = mulberry32(99);
     this.ambFlocks = [];
     for (let k = 0; k < 5; k++) {
-      this.ambFlocks.push({ u: rng(), z: lerp(-30, -110, rng()), el: lerp(2, 16, rng()) * DEG, n: 4 + Math.floor(rng() * 6), speed: lerp(1.5, 3.5, rng()), ph: rng() * TAU, dir: rng() < 0.7 ? 1 : -1 });
+      this.ambFlocks.push({ u: rng(), z: lerp(-90, -200, rng()), el: lerp(3, 14, rng()) * DEG, n: 3 + Math.floor(rng() * 4), speed: lerp(1.5, 3.5, rng()), ph: rng() * TAU, dir: rng() < 0.7 ? 1 : -1 });
     }
 
     // lightning bolts: ribbons of quads written per frame
@@ -1879,7 +1909,7 @@ export class GlideRenderer {
     this.starMesh.renderOrder = 26;
     this.scene.add(this.starMesh);
     // dark soft halos behind the glider / hazards so they read against a bright sky
-    this.shadeMat = new THREE.MeshBasicMaterial({ map: this.softDot, color: '#0a1020', transparent: true, depthWrite: false, opacity: 0.22, toneMapped: false });
+    this.shadeMat = new THREE.MeshBasicMaterial({ map: this.softDot, color: '#0a1020', transparent: true, depthWrite: false, opacity: 0.3, toneMapped: false });
     this.shadeMesh = instanced(new THREE.PlaneGeometry(1, 1), this.shadeMat, MAX_SHADE, { color: false });
     this.shadeMesh.renderOrder = 1;
     this.scene.add(this.shadeMesh);
@@ -2097,16 +2127,30 @@ export class GlideRenderer {
     this.crown = new THREE.Mesh(merge(crown.map((g) => solid(g, 1, 1, 1))), this.crownMat);
     this.crown.visible = false;
     this.scene.add(this.crown);
-    // its island with the landing beach in front
-    const ig = new THREE.CylinderGeometry(1, 1.25, 1, 48, 3, false);
-    ig.translate(0, 0.5, 0);
+    // its island: a grassy crown, a sand beach (where Pogo lands), a wet rim at the waterline
+    const prof = [
+      [0.0, 1.03],
+      [0.3, 1.04],
+      [0.52, 1.02],
+      [0.62, 1.0],
+      [0.82, 0.98],
+      [0.9, 0.9],
+      [0.97, 0.62],
+      [1.03, 0.28],
+      [1.08, 0.04],
+      [1.16, -0.25],
+    ];
+    // bottom -> top so the faces point outward
+    const ig = new THREE.LatheGeometry(prof.slice().reverse().map(([r, y]) => new THREE.Vector2(Math.max(r, 0.0001), y)), 72);
+    const irng = mulberry32(42);
+    const ph = [irng() * TAU, irng() * TAU];
     {
       const p = ig.attributes.position;
       for (let i = 0; i < p.count; i++) {
         const x = p.getX(i);
         const z = p.getZ(i);
         const a = Math.atan2(z, x);
-        const r = 1 + Math.sin(a * 5 + 1) * 0.05 + Math.sin(a * 11) * 0.025;
+        const r = 1 + Math.sin(a * 3 + ph[0]) * 0.06 + Math.sin(a * 7 + ph[1]) * 0.03;
         p.setX(i, x * r);
         p.setZ(i, z * r);
       }
@@ -2114,24 +2158,87 @@ export class GlideRenderer {
     }
     paint(ig, (x, y, z, c) => {
       const rr = Math.hypot(x, z);
-      if (y > 0.99 && rr < 0.8) {
-        c[0] = 0.62;
-        c[1] = 0.78;
-        c[2] = 0.42; // grass inland
-      } else if (y > 0.99) {
-        c[0] = 1.0;
-        c[1] = 0.88;
-        c[2] = 0.64; // beach rim
+      const n = 0.92 + 0.08 * Math.sin(x * 23 + z * 17) * Math.sin(x * 7 - z * 11);
+      if (y < 0.02) {
+        c[0] = 0.55 * n;
+        c[1] = 0.62 * n;
+        c[2] = 0.58 * n; // under water
+      } else if (y < 0.35) {
+        c[0] = 0.86 * n;
+        c[1] = 0.72 * n;
+        c[2] = 0.52 * n; // wet sand
+      } else if (rr < 0.58 + 0.05 * Math.sin(Math.atan2(z, x) * 5)) {
+        c[0] = 0.42 * n;
+        c[1] = 0.7 * n;
+        c[2] = 0.32 * n; // grass
       } else {
-        c[0] = 0.95;
-        c[1] = 0.82;
-        c[2] = 0.6;
+        c[0] = 1.0 * n;
+        c[1] = 0.87 * n;
+        c[2] = 0.62 * n; // dry sand
       }
     });
-    this.isleMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: false });
+    this.isleMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, color: '#b8b8b8' });
     this.isle = new THREE.Mesh(ig, this.isleMat);
     this.isle.visible = false;
     this.scene.add(this.isle);
+    // palms on the island (instanced, curved trunks and drooping fronds)
+    {
+      const parts = [];
+      const segs = 7;
+      let px = 0;
+      let py = 0;
+      for (let k = 0; k < segs; k++) {
+        const t0 = k / segs;
+        const t1 = (k + 1) / segs;
+        const x0 = Math.pow(t0, 2) * 0.55;
+        const x1 = Math.pow(t1, 2) * 0.55;
+        const seg = tube(new THREE.Vector3(x0, t0 * 3, 0), new THREE.Vector3(x1, t1 * 3, 0), lerp(0.13, 0.08, t0), lerp(0.13, 0.08, t1), 7);
+        solid(seg, k % 2 ? 0.52 : 0.44, k % 2 ? 0.38 : 0.32, 0.22);
+        parts.push(seg);
+        px = x1;
+        py = t1 * 3;
+      }
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * TAU + 0.3;
+        const leaf = new THREE.PlaneGeometry(1.6, 0.34, 8, 1);
+        leaf.translate(0.8, 0, 0);
+        const lp = leaf.attributes.position;
+        for (let i = 0; i < lp.count; i++) {
+          const lx = lp.getX(i);
+          const w = Math.sin((lx / 1.6) * Math.PI) * (lp.getY(i) > 0 ? 1 : -1) * 0.17;
+          lp.setY(i, w);
+          lp.setZ(i, -lx * lx * 0.32);
+        }
+        leaf.rotateX(-Math.PI / 2);
+        leaf.rotateZ(0.35 - (k % 2) * 0.25);
+        leaf.rotateY(a);
+        leaf.translate(px, py, 0);
+        paint(leaf, (x2, y2, z2, c) => {
+          const tip = Math.hypot(x2 - px, z2) / 1.6;
+          c[0] = lerp(0.2, 0.42, tip);
+          c[1] = lerp(0.55, 0.72, tip);
+          c[2] = lerp(0.2, 0.25, tip);
+        });
+        parts.push(leaf);
+      }
+      for (let k = 0; k < 3; k++) {
+        const nut = new THREE.SphereGeometry(0.1, 8, 6);
+        const a = (k / 3) * TAU;
+        nut.translate(px + Math.cos(a) * 0.12, py - 0.12, Math.sin(a) * 0.12);
+        solid(nut, 0.35, 0.25, 0.12);
+        parts.push(nut);
+      }
+      const palmMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide });
+      this.palms = instanced(merge(parts), palmMat, 4, { color: false });
+      this.palmSpots = [
+        [-0.7, 0.18, 0.9, 0.2],
+        [-0.42, -0.55, 1.15, 2.4],
+        [0.62, -0.42, 1.0, 3.6],
+        [0.78, 0.2, 0.8, 5.1],
+      ];
+      this.palms.count = 4;
+      this.scene.add(this.palms);
+    }
   }
 
   // ------------------------------------------------------------------ build: overlay (HUD, popups, particles, cinematic)
@@ -2779,6 +2886,7 @@ export class GlideRenderer {
     sk.uRays.value = T.rays;
     sk.uCirrus.value = T.cirrus;
     sk.uRainbow.value = T.rainbow;
+    sk.uDisc.value = T.disc ?? 1;
     const se = this.seaMat.uniforms;
     se.uDeep.value.set(T.sea);
     se.uFar.value.set(T.seaFar);
@@ -2790,12 +2898,13 @@ export class GlideRenderer {
     this.hemi.intensity = key === 'night' ? 1.3 : 1.7;
     this.sunLight.color.set(T.light);
     this.sunLight.intensity = T.lightI;
-    const sd = U.uSunDir.value;
-    this.sunLight.position.set(sd.x * 20, Math.max(4, sd.y * 30 + 6), sd.z * 20 + 4);
-    this.fill.intensity = key === 'night' ? 0.35 : 0.6;
+    // the sky's sun is ahead of us; key light comes from over the left shoulder so things read
+    this.sunLight.position.set(-6, 10, 12);
+    this.fill.intensity = key === 'night' ? 0.5 : 1.1;
+    this.fill.color.set(T.sun);
     this.exposure = T.exposure;
     this.sailBackCol.value.set(T.sun).lerp(this._c2.set('#ffffff'), 0.4);
-    this.sailBack.value = key === 'night' ? 0.15 : key === 'storm' ? 0.12 : 0.42;
+    this.sailBack.value = key === 'night' ? 0.1 : key === 'storm' ? 0.08 : 0.22;
     this.gliderRimCol.value.set(T.cloudRim);
     this.vigMat.uniforms.uColor.value.set(key === 'night' || key === 'storm' ? '#02040c' : key === 'ember' ? '#1a0408' : '#0a1530');
     this.vigMat.uniforms.uStr.value = key === 'night' || key === 'storm' ? 0.5 : 0.3;
@@ -2803,22 +2912,26 @@ export class GlideRenderer {
     // scenery tints
     const c = this._c;
     const tint = (layer, base, k = 1) => {
+      const bc = this._c3 || (this._c3 = new THREE.Color());
+      bc.copy(base);
       for (let i = 0; i < layer.items.length; i++) {
-        c.set(base).multiplyScalar((layer.items[i].shade || 1) * k);
+        c.copy(bc).multiplyScalar((layer.items[i].shade || 1) * k);
         layer.mesh.setColorAt(i, c);
       }
       layer.mesh.instanceColor.needsUpdate = true;
     };
-    tint(this.farIsles, T.isleFar);
-    tint(this.midIsles, T.isle, 1.6);
-    tint(this.farTowers, T.isleFar, 0.8);
+    const dim = key === 'night' ? 0.35 : key === 'storm' ? 0.45 : key === 'ember' ? 0.4 : 1;
+    tint(this.farIsles, this._c2.set(T.isleFar).lerp(this._c.set(T.haze), 0.15), 1);
+    tint(this.midIsles, this._c2.set('#ffffff').lerp(this._c.set(T.haze), 0.35).multiplyScalar(dim), 1);
+    tint(this.farTowers, this._c2.set(T.isleFar).multiplyScalar(0.85), 1);
+    this._birdCol.set(T.isleFar).lerp(this._c2.set(T.haze), 0.3).multiplyScalar(0.75);
     // precipitation
     const pk = { none: -1, snow: 0, rain: 1, embers: 2, fireflies: 3, leaves: 4, drizzle: 5 }[T.precip] ?? -1;
     const pm = this.precipMat.uniforms;
     this.precip.visible = pk >= 0;
     pm.uKind.value = Math.max(0, pk);
-    pm.uColor.value.set(pk === 0 ? '#ffffff' : pk === 1 || pk === 5 ? '#c3d2ec' : pk === 2 ? '#ff8a3d' : pk === 3 ? '#e9ff8a' : '#ffffff');
-    pm.uAlpha.value = pk === 0 ? 0.95 : pk === 1 ? 0.5 : pk === 5 ? 0.22 : pk === 2 ? 1.0 : pk === 3 ? 1.1 : 0.9;
+    pm.uColor.value.set(pk === 0 ? '#ffffff' : pk === 1 || pk === 5 ? '#c3d2ec' : pk === 2 ? '#ff8a3d' : pk === 3 ? '#b8ff3a' : '#ffffff');
+    pm.uAlpha.value = pk === 0 ? 0.95 : pk === 1 ? 0.5 : pk === 5 ? 0.22 : pk === 2 ? 1.0 : pk === 3 ? 0.75 : 0.9;
     pm.uWind.value = pk === 1 ? 4 : pk === 4 ? 5 : pk === 0 ? 1.5 : 0.6;
     pm.uAdd.value = pk === 2 || pk === 3 ? 1 : 0;
     this.precip.geometry.setDrawRange(0, pk === 1 ? MAX_PRECIP : pk === 3 ? 120 : pk === 5 ? 260 : pk === 4 ? 90 : pk === 2 ? 220 : 420);
@@ -3118,8 +3231,7 @@ export class GlideRenderer {
       const c = it.glow;
       const top = it.y + it.sy * 1.2;
       const s = 2.2 + it.sx;
-      this._glow(it.x, top, it.z + 1, s * 2.4 * p, c.r * 0.5 * p, c.g * 0.5 * p, c.b * 0.5 * p);
-      this._glow(it.x, it.y + it.sy * 0.5, it.z + 1, it.sx * 3, c.r * 0.1, c.g * 0.1, c.b * 0.1, it.sy * 0.7);
+      this._glow(it.x, top, it.z + 1, s * 1.1 * p, c.r * 0.22 * p, c.g * 0.22 * p, c.b * 0.22 * p);
     }
     if (this._flash > 0.05 && this._themeKey === 'storm') {
       const f = this._flash;
@@ -3155,6 +3267,7 @@ export class GlideRenderer {
     const tw = stage.tower;
     const show = !!(tw && tw.active);
     this.nextTower.visible = this.crown.visible = this.isle.visible = show;
+    this.palms.visible = show;
     if (!show) return;
     if (this._glowHex !== tw.glow) {
       this._glowHex = tw.glow;
@@ -3166,24 +3279,41 @@ export class GlideRenderer {
     const dpt = clamp(tw.depth || 0, 0, 1);
     const inv0 = 1 / (CAM_Z - TOWER_FAR_Z);
     const inv1 = 1 / (CAM_Z - TOWER_Z);
-    const z = CAM_Z - 1 / lerp(inv0, inv1, Math.pow(dpt, 1.35));
+    const z = CAM_Z - 1 / lerp(inv0, inv1, Math.pow(dpt, 2.4));
     const x = this._toWorld(tw.x, 0, z, v).x;
     const R = tw.r * this._pxw(TOWER_Z) * this._kx;
-    const height = 46;
+    const height = 24;
     const y0 = seaW + 0.55;
     this.nextTower.position.set(x, y0, z);
     this.nextTower.scale.set(R, height, R);
     this.crown.position.set(x, y0 + height, z);
-    this.crown.scale.set(R, R, R);
+    this.crown.scale.set(R, R * 0.75, R);
     const tile = (TAU * R) / 7;
     this.towerTex.repeat.set(7, height / tile);
     this.winTex.repeat.set(7, height / tile);
     // island: the landing beach top sits at the stage's landY on the gameplay plane
     const landW = this._toWorld(0, stage.landY ?? stage.seaY - 26, 0, this._v2).y;
     const isleH = Math.max(0.3, landW - seaW);
-    const isleR = Math.max(R * 2.2, (0 - TOWER_Z) + 2.2);
-    this.isle.position.set(x - R * 0.8, seaW - 0.05, z);
-    this.isle.scale.set(isleR * 1.45, isleH + 0.05, isleR);
+    const isleR = Math.max(R * 2.2, (0 - TOWER_Z) + 1.6);
+    const ix = x - R * 0.8;
+    this.isle.position.set(ix, seaW - 0.02, z);
+    this.isle.scale.set(isleR * 1.4, isleH, isleR);
+    this.palms.visible = true;
+    const parr = this.palms.instanceMatrix.array;
+    const d = this._dummy;
+    for (let i = 0; i < this.palmSpots.length; i++) {
+      const sp = this.palmSpots[i];
+      const nx = sp[0];
+      const nz = sp[1];
+      const sc = sp[2];
+      const ry = sp[3];
+      d.position.set(ix + nx * isleR * 1.4, seaW + isleH * 0.98, z + nz * isleR);
+      d.rotation.set(0, ry + Math.sin(time * 0.8 + i) * 0.03, Math.sin(time * 1.1 + i * 2) * 0.025);
+      d.scale.setScalar(sc * clamp(isleR / 8, 0.8, 1.6));
+      d.updateMatrix();
+      d.matrix.toArray(parr, i * 16);
+    }
+    this.palms.instanceMatrix.needsUpdate = true;
     const arrive = stage.phase === 'arrive' || stage.phase === 'done' ? clamp((stage.arriveT || 0) / 1.5, 0, 1) : 0;
     this.towerMat.emissiveIntensity = 1.8 + arrive * 1.6 + Math.sin(time * 2) * 0.2 + (1 - dpt) * 1.5;
     const g = this._glowColor;
@@ -3194,8 +3324,8 @@ export class GlideRenderer {
     // beacon on the crown, pulsing: "that's where we're going"
     const bp = 0.6 + 0.4 * Math.sin(time * 3.2);
     const by = y0 + height + R * 2.2;
-    this._glow(x, by, z + R, (R * 3 + dist * 0.05) * bp, g.r * 0.9 * bp, g.g * 0.9 * bp, g.b * 0.9 * bp);
-    this._star(x, by, z + R + 0.2, (R * 2.4 + dist * 0.04) * bp, time * 0.4, g.r * bp, g.g * bp, g.b * bp);
+    this._glow(x, by, z + R, (R * 2 + dist * 0.016) * bp, g.r * 0.45 * bp, g.g * 0.45 * bp, g.b * 0.45 * bp);
+    this._star(x, by, z + R + 0.2, (R * 1.3 + dist * 0.012) * bp, time * 0.4, g.r * 0.7 * bp, g.g * 0.7 * bp, g.b * 0.7 * bp);
     // a glow on the sea around the island
     this._glow(x, seaW + 0.1, z + isleR * 0.9, isleR * 3, g.r * 0.12, g.g * 0.12, g.b * 0.12, isleR * 0.4);
   }
@@ -3236,7 +3366,7 @@ export class GlideRenderer {
     this._flapAnim *= Math.exp(-4.2 * dt);
 
     const gw = this._toWorld(gs.x, gs.y, 0, this._v);
-    const sc = (gs.rx * pxw) / 1.05;
+    const sc = (gs.rx * pxw) / 0.64;
     this._gSc = sc;
     const launch = gs.launch ?? 1;
     const landed = gs.landed || 0;
@@ -3246,7 +3376,7 @@ export class GlideRenderer {
     const sp = (stage.scrollSpeed || 0) + Math.max(0, vx) + 40;
     // pitch: nose follows the flight path (dive = nose down), plus the flare when landing
     const path = Math.atan2(-vy, Math.max(60, sp));
-    let pitch = clamp(path * 0.75, -0.5, 0.42) + (gs.flare || 0) * 0.42 + this._flapAnim * 0.2;
+    let pitch = clamp(path * 0.55, -0.36, 0.28) + (gs.flare || 0) * 0.38 + this._flapAnim * 0.14;
     pitch = lerp(pitch, 0.12, grounded);
     const bob = Math.sin(time * 1.9) * 0.05 * sc * (1 - grounded);
     // anchor: the gameplay point is the middle of the rig; grounded = feet on the surface
@@ -3260,9 +3390,11 @@ export class GlideRenderer {
     outer.position.set(gw.x, oy + bob, 0);
     outer.scale.set(sc * (1 + sq * 0.1), sc * (1 - sq * 0.14), sc * (1 + sq * 0.06));
     // 3/4 view: rolled toward the camera so we see the top of the sail, slight yaw
-    const roll = lerp(0.42, 0.18, grounded) + clamp(vy * 0.0005, -0.1, 0.12) + Math.sin(time * 1.3) * 0.03 * (1 - grounded);
-    const yaw = -0.32 + clamp(vx * 0.0006, -0.12, 0.12);
+    const roll = Math.sin(time * 1.3) * 0.04 * (1 - grounded) + clamp(vy * 0.0002, -0.05, 0.05);
+    const yaw = -0.42 + clamp(vx * 0.0005, -0.1, 0.1);
     outer.rotation.set(roll, yaw, pitch);
+    // the wing banks to show its striped underside (less on the ground)
+    this.gWing.rotation.x = lerp(-0.4, -0.1, grounded) + clamp(vy * 0.0004, -0.08, 0.08);
     this.gInner.rotation.x = gs.spin || 0;
     // wing stroke: the flap billows and lifts the tips (scale on the body)
     const fl = this._flapAnim;
@@ -3295,15 +3427,15 @@ export class GlideRenderer {
     const p = this._v2;
     const body = this.gBody;
     const blink = Math.sin(time * 4.5) > 0.4 ? 1 : 0.15;
-    body.localToWorld(p.copy(this._tipNear));
+    this.gWing.localToWorld(p.copy(this._tipNear));
     this._glow(p.x, p.y, p.z + 0.2, sc * 0.55 * blink, 0.2 * blink, 1.0 * blink, 0.35 * blink);
-    body.localToWorld(p.copy(this._tipFar));
+    this.gWing.localToWorld(p.copy(this._tipFar));
     this._glow(p.x, p.y, p.z + 0.2, sc * 0.5 * blink, 1.0 * blink, 0.2 * blink, 0.2 * blink);
     const night = this._themeKey === 'night' || this._themeKey === 'storm' ? 1 : 0.4;
     this._glow(gw.x, gw.y, -0.6, sc * 4.2, 0.1 * night, 0.09 * night, 0.06 * night);
     if (lift > 0.05) {
       const lk = lift * (0.7 + 0.3 * Math.sin(time * 8));
-      this._glow(gw.x, gw.y - 0.3 * sc, 0.3, sc * 4, 0.45 * lk, 0.3 * lk, 0.08 * lk, sc * 3);
+      this._glow(gw.x, gw.y + 0.4 * sc, -0.8, sc * 3.4, 0.2 * lk, 0.13 * lk, 0.03 * lk, sc * 2.4);
     }
     this._shade(gw.x, gw.y, -0.5, sc * 5.4, sc * 3.6);
     this._speedK = clamp((dive * 0.8 + Math.max(0, (gs.speed || 1) - 1) * 1.6) * (1 - grounded), 0, 1);
@@ -3347,10 +3479,10 @@ export class GlideRenderer {
       mesh.setColorAt(n, c);
       glowA[n] = gold ? 0.8 + 0.4 * Math.sin(time * 6) : (l.pull || 0) * 0.6;
       // warm halo; brighter at night
-      const hk = (gold ? 0.6 : 0.2) * lk;
+      const hk = (gold ? 0.5 : 0.11) * lk;
       const fl = 0.85 + 0.15 * Math.sin(time * 9 + l.seed * 7);
       this._glow(v.x, v.y - s * 0.2, -0.2, s * (gold ? 6 : 4.2) * fl, c.r * hk * fl, c.g * hk * 0.75 * fl, c.b * hk * 0.5 * fl);
-      this._glow(v.x, v.y - s * 0.55, 0.3, s * 1.1, 1.0 * fl, 0.85 * fl, 0.5 * fl);
+      this._glow(v.x, v.y - s * 0.55, 0.3, s * 0.9, 0.8 * fl, 0.65 * fl, 0.35 * fl);
       if (gold) {
         for (let k = 0; k < 3; k++) {
           const a = time * (2.2 + k * 0.7) + k * 2.1 + l.seed;
@@ -3384,16 +3516,16 @@ export class GlideRenderer {
       const R = gt.r * pxw;
       let scale = R;
       let col = 1;
-      let cr = 0.35;
-      let cg = 0.9;
-      let cb = 1.0;
+      let cr = 1.0;
+      let cg = 0.68;
+      let cb = 0.18;
       if (gt.state === 'passed') {
         const t = clamp(gt.t / 0.7, 0, 1);
         scale = R * (1 + t * 0.8);
         col = 1 - t;
-        cr = 1.0;
-        cg = 0.95;
-        cb = 0.6;
+        cr = 1.6;
+        cg = 1.5;
+        cb = 1.1;
       } else if (gt.state === 'missed') {
         const t = clamp(gt.t / 1.2, 0, 1);
         col = (1 - t) * 0.5;
@@ -3409,7 +3541,7 @@ export class GlideRenderer {
       mesh.setColorAt(n, this._c);
       glow[n] = gt.state === 'open' ? 1 : 0.3;
       // halo + a glint at the top of the hoop
-      this._glow(v.x, v.y, -0.4, R * 3.2, cr * 0.18 * col, cg * 0.18 * col, cb * 0.18 * col, R * 3.6);
+      this._glow(v.x, v.y, -0.4, R * 2.6, 0.3 * col, 0.22 * col, 0.08 * col, R * 3.4);
       if (gt.state === 'open') this._star(v.x, v.y + R, 0.4, R * 0.7 * (0.6 + 0.4 * Math.sin(time * 5 + gt.seed)), time, 0.7, 1, 1);
       n++;
     }
@@ -3430,7 +3562,7 @@ export class GlideRenderer {
     for (let i = 0; i < list.length && n < MAX_THERMAL; i++) {
       const th = list[i];
       const x = this._toWorld(th.x, 0, 0, this._v).x;
-      const w = th.w * pxw * 2.2;
+      const w = th.w * pxw * 1.8;
       const h = topW - seaW;
       putMat(arr, n, x, seaW, -0.6, w, h, 1, 0);
       const f = (th.fade || 0) * (th.str || 1);
@@ -3480,14 +3612,12 @@ export class GlideRenderer {
       } else if (c.state === 'strike') {
         fl = 1.6 * (1 - c.t / 0.42);
       }
-      const puffs = [
-        [0, 0, 1.0, 0],
-        [-0.32, 0.06, 0.62, 1],
-        [0.34, 0.03, 0.68, 2],
-        [0.05, 0.22, 0.6, 3],
-      ];
-      for (let k = 0; k < puffs.length && n < MAX_STORM_PUFF; k++) {
-        const [ox, oy, s, cell] = puffs[k];
+      for (let k = 0; k < 4 && n < MAX_STORM_PUFF; k++) {
+        const o4 = k * 4;
+        const ox = STORM_PUFFS[o4];
+        const oy = STORM_PUFFS[o4 + 1];
+        const s = STORM_PUFFS[o4 + 2];
+        const cell = STORM_PUFFS[o4 + 3];
         const bob = Math.sin(time * 0.9 + c.seed + k) * 0.05;
         putMat(arr, n, v.x + ox * W, base + (oy + bob) * W * 0.5, 0.2 - k * 0.05, W * s * (k % 2 ? -1 : 1), W * s);
         ca[n * 4] = (cell + Math.floor(c.seed)) % 4;
@@ -3509,7 +3639,12 @@ export class GlideRenderer {
         const p = 0.5 + 0.5 * Math.sin(time * (14 + k * 26));
         const h = base - seaW;
         const a = (0.15 + 0.5 * k) * p;
-        this._glow(bx, (base + seaW) * 0.5, 0.3, 0.32 + k * 0.25, 0.75 * a, 0.82 * a, 1.0 * a, h);
+        this._glow(bx, (base + seaW) * 0.5, 0.3, 0.14 + k * 0.12, 0.8 * a, 0.86 * a, 1.0 * a, h);
+        // little sparks crawling down the strike line
+        for (let j = 0; j < 3; j++) {
+          const f = (time * (1.2 + j * 0.4) + j * 0.33 + c.seed) % 1;
+          this._star(bx + Math.sin(time * 30 + j * 2) * 0.15, base - f * h, 0.45, (0.25 + k * 0.35) * p, time * 9 + j, 0.7 * k, 0.8 * k, 1.0 * k);
+        }
         this._glow(bx, seaW + 0.1, 0.4, 1.4 + k * 2.2, 0.6 * a, 0.7 * a, 1.0 * a, 0.5 + k * 0.6);
         this._glow(bx, base, 0.5, W * 0.6 * (0.5 + k), 0.55 * k * p, 0.6 * k * p, 0.85 * k * p);
       }
@@ -3536,10 +3671,10 @@ export class GlideRenderer {
     for (let i = 0; i < list.length && n < MAX_GULL; i++) {
       const b = list[i];
       const v = this._toWorld(b.x, b.y, 0, this._v);
-      const s = b.r * pxw * 1.5;
+      const s = b.r * pxw * 2.1;
       const scatter = b.state === 'scatter';
       d.position.set(v.x, v.y, 0.3);
-      d.rotation.set(0.5 + (scatter ? Math.sin(time * 9 + b.seed) * 0.6 : 0), 0.25, clamp(-(b.vy || 0) * 0.003, -0.6, 0.6) + (scatter ? Math.sin(time * 7 + b.seed) * 0.5 : 0));
+      d.rotation.set(0.5 + (scatter ? Math.sin(time * 9 + b.seed) * 0.6 : 0), 0.3, clamp(-(b.vy || 0) * 0.003, -0.6, 0.6) + (scatter ? Math.sin(time * 7 + b.seed) * 0.5 : 0));
       d.scale.set(s, s, s);
       d.updateMatrix();
       mesh.setMatrixAt(n, d.matrix);
@@ -3553,7 +3688,7 @@ export class GlideRenderer {
     // distant ambient flocks: tiny silhouettes, tinted by the haze
     const T = this.theme || THEMES.day;
     if (T.birds > 0) {
-      this._c.set(T.isleFar).multiplyScalar(0.7);
+      this._c.copy(this._birdCol);
       for (let k = 0; k < this.ambFlocks.length; k++) {
         const F = this.ambFlocks[k];
         const span = 2 * this._halfW(F.z) + 30;
@@ -3569,7 +3704,7 @@ export class GlideRenderer {
           const by = cy + side * row * 0.8;
           d.position.set(bx, by, F.z);
           d.rotation.set(0.3, F.dir > 0 ? Math.PI : 0, 0);
-          d.scale.setScalar(0.9);
+          d.scale.setScalar(1.1);
           d.updateMatrix();
           mesh.setMatrixAt(n, d.matrix);
           mesh.setColorAt(n, this._c);
@@ -3612,12 +3747,21 @@ export class GlideRenderer {
   }
 
   // a jagged bolt from (x0, y0) down to (x1, y1) written as camera-facing quads
-  _writeBolt(seg, x0, y0, x1, y1, a, width, rng, steps) {
+  // deterministic per bolt / flicker frame (mulberry32 on this._boltState), no closures
+  _boltRand() {
+    this._boltState = (this._boltState + 0x6d2b79f5) >>> 0;
+    let q = this._boltState;
+    q = Math.imul(q ^ (q >>> 15), q | 1);
+    q ^= q + Math.imul(q ^ (q >>> 7), q | 61);
+    return ((q ^ (q >>> 14)) >>> 0) / 4294967296;
+  }
+
+  _writeBolt(seg, x0, y0, x1, y1, a, width, steps) {
     let px = x0;
     let py = y0;
     for (let k = 1; k <= steps && seg < MAX_BOLT_SEG; k++) {
       const t = k / steps;
-      const jit = k === steps ? 0 : (rng() - 0.5) * 0.9 * width * 6;
+      const jit = k === steps ? 0 : (this._boltRand() - 0.5) * 0.9 * width * 6;
       const nx = lerp(x0, x1, t) + jit;
       const ny = lerp(y0, y1, t);
       const dx = nx - px;
@@ -3643,7 +3787,7 @@ export class GlideRenderer {
       A[seg * 4] = A[seg * 4 + 1] = A[seg * 4 + 2] = A[seg * 4 + 3] = a;
       seg++;
       // occasional fork
-      if (steps > 6 && k > 2 && k < steps - 2 && rng() < 0.18) seg = this._writeBolt(seg, nx, ny, nx + (rng() - 0.5) * 4, ny - (y0 - y1) * 0.25, a * 0.6, width * 0.6, rng, 4);
+      if (steps > 6 && k > 2 && k < steps - 2 && this._boltRand() < 0.18) seg = this._writeBolt(seg, nx, ny, nx + (this._boltRand() - 0.5) * 4, ny - (y0 - y1) * 0.25, a * 0.6, width * 0.6, 4);
       px = nx;
       py = ny;
     }
@@ -3726,16 +3870,9 @@ export class GlideRenderer {
           // re-seed per event and per flicker frame so the shape crackles
           const fr = Math.floor(t * 9);
           this._boltState = (e.id * 2654435761 + fr * 97) >>> 0;
-          const r2 = () => {
-            this._boltState = (this._boltState + 0x6d2b79f5) >>> 0;
-            let q = this._boltState;
-            q = Math.imul(q ^ (q >>> 15), q | 1);
-            q ^= q + Math.imul(q ^ (q >>> 7), q | 61);
-            return ((q ^ (q >>> 14)) >>> 0) / 4294967296;
-          };
-          seg = this._writeBolt(seg, v.x, y0, v.x + (r2() - 0.5) * 0.6, y1, a, 0.09 + 0.04 * k, r2, 14);
-          this._glow(v.x, (y0 + y1) * 0.5, 0.5, 2.2 * a, 0.45 * a, 0.5 * a, 0.8 * a, (y0 - y1) * 1.1);
-          this._glow(v.x, y1 + 0.2, 0.7, 4 * a, 0.7 * a, 0.75 * a, 1.0 * a, 1.4 * a);
+          seg = this._writeBolt(seg, v.x, y0, v.x + (this._boltRand() - 0.5) * 0.6, y1, a, 0.12 + 0.05 * k, 14);
+          this._glow(v.x, (y0 + y1) * 0.5, 0.5, 1.3 * a, 0.22 * a, 0.22 * a, 0.45 * a, (y0 - y1) * 1.05);
+          this._glow(v.x, y1 + 0.15, 0.7, 2.6 * a, 0.45 * a, 0.45 * a, 0.8 * a, 0.9 * a);
           if (fresh) {
             for (let j = 0; j < 22; j++) {
               const ang = Math.PI * 0.5 + (Math.random() - 0.5) * 1.8;
@@ -3780,7 +3917,7 @@ export class GlideRenderer {
           break;
         }
         case 'gate': {
-          this._glow(v.x, v.y, 0.6, S * (2 + t * 4), rgb[0] * 0.6 * k, rgb[1] * 0.6 * k, rgb[2] * 0.6 * k);
+          this._glow(v.x, v.y, 0.6, S * (2 + t * 3), rgb[0] * 0.3 * k, rgb[1] * 0.3 * k, rgb[2] * 0.3 * k, S * (3 + t * 4));
           for (let j = 0; j < 8; j++) {
             const a = (j / 8) * TAU + time;
             const rr = S * (1 + t * 2.4);

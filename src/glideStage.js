@@ -26,12 +26,12 @@ const INTRO_TIME = 2.3; // run + leap off the summit, swoop down, level off
 const ARRIVE_TIME = 5.6; // approach, flare, touch down beside the next tower, tally
 const TOWER_LEAD = 5.4; // the next tower comes in from the horizon this long before the ride ends
 
-const LANTERN_POINTS = 25;
-const STRING_BONUS = 150; // a whole lantern string in one pass
+const LANTERN_POINTS = 10;
+const STRING_BONUS = 100; // a whole lantern string in one pass
 const KITE_POINTS = 200;
 const GOLD_POINTS = 800;
-const GATE_POINTS = 300;
-const GATE_CHAIN_BONUS = 100; // per gate in an unbroken chain
+const GATE_POINTS = 250;
+const GATE_CHAIN_BONUS = 50; // per gate in an unbroken chain
 const PERFECT_BONUS = 750;
 const HIT_PENALTY = 100;
 const NEAR_MISS_POINTS = 50;
@@ -810,7 +810,9 @@ export class GlideStage {
     }
     if (hazardOpen && t >= n.gull) {
       n.gull = t + this._gullEvery * rand(0.8, 1.25);
-      const y = rand(minY + 10 * s, maxY - 10 * s);
+      // most flocks come in at your altitude: you have to climb, dive or thread the V
+      const aimed = Math.random() < 0.65;
+      const y = clamp(aimed ? this.glider.y + rand(-35, 35) * s : rand(minY + 10 * s, maxY - 10 * s), minY, maxY);
       const count = 3 + Math.floor(Math.random() * (2 + this.difficulty * 3));
       const diag = this.difficulty > 0.25 && Math.random() < 0.35 ? rand(-40, 40) * s : 0;
       const warnT = 0.9;
@@ -977,7 +979,13 @@ export class GlideStage {
     const g = this.glider;
     const s = this.s;
     g.catches++;
-    const mult = this._comboHit();
+    // a lantern string is one combo step (its first lantern); the rest keep the combo alive
+    const pat = l.type === 'lantern' && l.pattern ? this._patterns?.get(l.pattern) : null;
+    let mult;
+    if (pat && pat.got > 0 && this.comboTimer > 0) {
+      this.comboTimer = COMBO_WINDOW;
+      mult = this.mult;
+    } else mult = this._comboHit();
     if (l.type === 'gold') {
       const pts = GOLD_POINTS * mult;
       this.goldCaught++;
@@ -1014,24 +1022,28 @@ export class GlideStage {
     this._vfx('pop', l.x, l.y, { life: 0.5, size: l.r * 1.4, color: col });
     this._vfx('collect', l.x, l.y, { life: 0.3, size: l.r, color: col, tx: g.x, ty: g.y });
     sound?.collect?.(Math.min(14, this.combo - 1));
-    // the whole string?
+    // strings only pop a label on the first lantern and on the whole string (no popup spam)
     let label = mult > 1 ? `+${pts} x${mult}` : `+${pts}`;
     let color = mult > 1 ? '#f472b6' : '#fde68a';
     const p = l.pattern ? this._patterns?.get(l.pattern) : null;
+    let show = true;
     if (p) {
       p.got++;
+      show = p.got === 1;
+      p.tally = (p.tally || 0) + pts;
       if (p.got === p.total && p.missed === 0 && p.total >= 4) {
+        show = true;
         const bonus = STRING_BONUS * mult;
         this.strings++;
         this._score(fx, bonus);
-        label = `STRING! +${pts + bonus}`;
+        label = `LANTERN STRING! +${p.tally + bonus}`;
         color = '#fde047';
         this._vfx('sparkle', l.x, l.y, { life: 0.75, size: 40 * s, color: '#fef3c7' });
         this._ring(l.x, l.y, l.r, l.r * 6, '#fde68a', 0.7);
         this._patterns.delete(l.pattern);
       }
     }
-    fx.popup?.(l.x, l.y - 18 * s, label, color);
+    if (show) fx.popup?.(l.x, l.y - 18 * s, label, color);
   }
 
   // ------------------------------------------------------------------ ring gates
@@ -1157,7 +1169,7 @@ export class GlideStage {
     this._score(fx, pts);
     fx.popup?.(g.x, g.y - 34 * this.s, mult > 1 ? `CLOSE CALL +${pts} x${mult}` : `CLOSE CALL +${pts}`, '#67e8f9');
     this._vfx('whoosh', g.x, g.y, { life: 0.45, size: g.rx, a: side });
-    (sound?.nearMiss || sound?.gust)?.call(sound);
+    (sound?.glideWhoosh || sound?.nearMiss || sound?.gust)?.call(sound);
   }
 
   _updateClouds(dt, fx, sound) {

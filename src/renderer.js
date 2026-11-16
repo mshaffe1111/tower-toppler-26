@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { TowerFx } from './towerFx.js';
-import { createPropMaterials, themeLedgeMaterials, buildTowerBody, buildDoor, buildLiftTrack, buildLiftPod, buildLedge, animateConveyorTextures, FH, setStepHeight, STEP_ORIGINAL, STEP_REBOOT, ORIGINAL_STEP_OPTS } from './props.js';
+import { createPropMaterials, themeLedgeMaterials, buildTowerBody, buildDoor, buildClue, buildLiftTrack, buildLiftPod, buildLedge, animateConveyorTextures, FH, setStepHeight, STEP_ORIGINAL, STEP_REBOOT, ORIGINAL_STEP_OPTS } from './props.js';
 import { PogoRig } from './pogo.js';
 import { Ocean } from './water.js';
 import { createTowerStoneMaterial, createLedgeStoneMaterial, setWaterlineY } from './materials.js';
@@ -939,6 +939,13 @@ export class GameRenderer {
       const d = buildDoor(door, pal, mats, this.softDotTex);
       group.add(d.group);
       updaters.push(d.update);
+    }
+
+    // A puzzle room's clue, painted on the wall a few floors from its rune door
+    if (tower.clue) {
+      const c = buildClue(tower.clue);
+      group.add(c.group);
+      updaters.push(c.update);
     }
 
     // Lifts: recessed track + hover platform

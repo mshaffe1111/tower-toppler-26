@@ -2505,6 +2505,47 @@ class SoundEngine {
     this._ov('sine', 98, 0, end, 1.2, 0.1, this.sfxGain, { atk: 0.01 });
     this._nv(end, 1.6, 0.025, 6000, 9000, 'highpass', 0.7, S, { atk: 0.3 });
   }
+
+  // ---- THE GLIDE (glideStage.js) ------------------------------------------------------------
+  /** Hang-glider wing flap: a soft whump of air under the sail plus a little upward lift tone. */
+  glideFlap() {
+    if (!this._ok()) return;
+    const t = this._t();
+    const D = this.sfxGain;
+    this._nv(t, 0.22, 0.09, 260, 900, 'bandpass', 0.9, D, { atk: 0.015, ft: 0.18 });
+    this._nv(t, 0.12, 0.05, 120, 70, 'lowpass', 0.7, D, { brown: true, atk: 0.005 });
+    this._ov('sine', this._vary(330, 0.04), 560, t + 0.02, 0.14, 0.035, D, { atk: 0.01 });
+  }
+
+  /** Flying through a ring gate: a bright bell sweep that climbs with the chain (i = 0..10). */
+  ringChime(i = 0) {
+    if (!this._ok()) return;
+    const t = this._t();
+    const k = Math.max(0, Math.min(12, Math.floor(finite(i, 0))));
+    const f = 659.25 * Math.pow(2, k / 12);
+    this._fv(f, 3.5, f * 0.6, t, 0.55, 0.04, this.sfxSpace);
+    this._fv(f * 1.5, 2, f * 0.3, t + 0.07, 0.5, 0.03, this.sfxSpace);
+    this._ov('sine', f * 2, f * 2.02, t + 0.12, 0.6, 0.014, this.sfxSpace);
+    this._nv(t, 0.3, 0.025, 2000, 7000, 'bandpass', 1.1, this.sfxGain, { atk: 0.06, ft: 0.25 });
+  }
+
+  /** A lightning strike right next to you: instant crack and a short rolling boom. */
+  thunderClap() {
+    if (!this._ok()) return;
+    const t = this._t();
+    const S = this.sfxSpace;
+    const D = this.sfxGain;
+    this._nv(t, 0.18, 0.15, 5000, 1200, 'lowpass', 0.7, D, { atk: 0.002 });
+    this._nv(t + 0.03, 1.3, 0.14, 700, 110, 'lowpass', 0.8, S, { brown: true, ft: 1.0, atk: 0.01 });
+    this._ov('sine', 70, 34, t, 0.9, 0.1, D, { atk: 0.005 });
+  }
+
+  /** Air rushing past when you squeeze by something (glide close calls). */
+  glideWhoosh() {
+    if (!this._ok()) return;
+    const t = this._t();
+    this._nv(t, 0.32, 0.07, 500, 2600, 'bandpass', 1.4, this.sfxGain, { atk: 0.05, ft: 0.28 });
+  }
 }
 
 export const sound = new SoundEngine();

@@ -451,8 +451,18 @@ export class TowerTopplerGame {
     this.secretsTotal = t.mechanic === 'vault' ? t.doors.filter((d) => d.vault).length : this.secrets.length;
     // a hidden puzzle room counts as one more secret (its puzzle is built from the tower's seed;
     // makePuzzle comes from puzzleRoom.js, loaded lazily by main.js)
-    this.puzzleData = t.puzzle && this.makePuzzle ? this.makePuzzle(t.puzzle) : null;
-    if (this.puzzleData && t.doors.some((d) => d.rune)) this.secretsTotal += 1;
+    // (the rune tiles' target and the bells' order are painted on the tower, not shown inside)
+    this.puzzleData = t.puzzle && this.makePuzzle ? this.makePuzzle({ ...t.puzzle, hideTarget: t.puzzle.type === 'lights' }) : null;
+    const rune = t.doors.find((d) => d.rune);
+    if (this.puzzleData && rune) {
+      this.secretsTotal += 1;
+      // the clue goes a few floors off, round the far side: read the tower to find it
+      if (this.puzzleData.clue) {
+        const span = Math.max(4, Math.min(8, Math.round(t.floors * 0.12)));
+        const up = rune.floor + span < this.exitFloor - 2;
+        t.clue = { ...this.puzzleData.clue, col: (rune.col + 6) % 16, floor: up ? rune.floor + span : Math.max(2, rune.floor - span) };
+      }
+    }
     this.secretsGot = 0;
 
     // Guardian of the final tower
@@ -3157,7 +3167,6 @@ export class TowerTopplerGame {
       worldIndex: this.tower.world ?? 0,
       palette: this.tower.palette,
     });
-    this.cb.onBanner?.('HIDDEN ROOM', { lights: 'Light the runes to match', bells: 'Ring the bells in order', beam: 'Guide the light to the crystal', blocks: 'Push the stone onto the plate' }[this.puzzleData.type] || 'Solve the puzzle');
     this._syncHud();
   }
 
@@ -3200,6 +3209,8 @@ export class TowerTopplerGame {
     this.puzzleRoom = null;
     this.puzzleDoor = null;
     this.mode = 'tower';
+    this.input.consumeJustPressed('jump');
+    this.input.consumeJustPressed('up');
     // back out of the rune door, standing in front of it
     if (door) {
       p.col = door.col + 0.5;
