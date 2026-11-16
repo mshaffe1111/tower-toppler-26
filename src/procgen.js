@@ -241,7 +241,12 @@ function runCells(start, dir, width) {
 }
 
 // Attempt to grow a complete route from floor 0 to the exit floor. Returns null if it gets stuck.
+// 'classic' = the 1987 feel: staircase-led climbing, lots of shootable barrier walls, few jump-ups
+// and mostly ground enemies. 'modern' = the original generator mix.
+let STYLE = 'modern';
+
 function buildRoute(rng, D, exitFloor, mech, idTag) {
+  const C = STYLE === 'classic';
   const L = new Layout();
   const runs = [];
   const moves = [];
@@ -296,10 +301,10 @@ function buildRoute(rng, D, exitFloor, mech, idTag) {
     // Encourage at least one lift or tunnel per tower for variety
     const shortcutBoost = lifts + tunnels === 0 && f > exitFloor * 0.4 ? 2.2 : 1;
     const options = rng.weightedOrder([
-      { m: MOVE.STEP, w: stairStreak >= 4 ? 0 : 1.0 - 0.35 * D },
-      { m: MOVE.JUMP_UP, w: 0.35 + 0.45 * D },
+      { m: MOVE.STEP, w: stairStreak >= (C ? 7 : 4) ? 0 : (1.0 - 0.35 * D) * (C ? 1.8 : 1) },
+      { m: MOVE.JUMP_UP, w: (0.35 + 0.45 * D) * (C ? 0.45 : 1) },
       { m: MOVE.JUMP_FLAT, w: flatLast || remaining < 2 ? 0 : 0.22 + 0.25 * D },
-      { m: MOVE.BOX, w: flatLast || remaining < 2 ? 0 : 0.06 + 0.2 * D },
+      { m: MOVE.BOX, w: flatLast || remaining < 2 ? 0 : (0.06 + 0.2 * D) * (C ? 3 : 1) },
       { m: MOVE.LIFT, w: lifts < maxLifts && remaining >= 3 && lastMove !== MOVE.LIFT ? (0.42 - 0.25 * D) * shortcutBoost : 0 },
       { m: MOVE.TUNNEL, w: tunnels < maxTunnels && lastMove !== MOVE.TUNNEL && cur.cells.length >= 2 ? (0.3 - 0.12 * D) * shortcutBoost : 0 },
     ]);
@@ -639,8 +644,8 @@ function placeDecoys(rng, R, D, exitFloor, cpFloors) {
 
 function placeEnemies(rng, R, D, floors) {
   const { L, runs } = R;
-  const total = Math.round(floors * lerp(0.24, 0.42, D));
-  const nGround = Math.round(total * 0.5);
+  const total = Math.round(floors * lerp(0.24, 0.42, D) * (STYLE === 'classic' ? 0.75 : 1));
+  const nGround = Math.round(total * (STYLE === 'classic' ? 0.78 : 0.5)); // classic: mostly on the ground
   const nFly = total - nGround;
   const enemies = [];
   // Ground patrols need a run >= 3 wide of standable cells, away from doors (tunnel exits) and spawn
@@ -792,14 +797,15 @@ function estimateRouteTime(R, enemies, specials, mech) {
  * @param {string} [o.name]           tower name; generated from the seed if null
  * @param {string} [o.mechanic]       one of MECHANICS; picked from the seed if null
  */
-export function generateTower({ seed, difficulty = 0.5, id = 100, name = null, mechanic = null } = {}) {
+export function generateTower({ seed, difficulty = 0.5, id = 100, name = null, mechanic = null, floors: wantFloors = null, style = 'modern' } = {}) {
+  STYLE = style === 'classic' ? 'classic' : 'modern';
   const D = clamp01(Number.isFinite(+difficulty) ? +difficulty : 0.5);
   const baseSeed = typeof seed === 'number' && Number.isFinite(seed) ? seed : hash32(String(seed ?? 0));
   const sub = (tag) => new Rng(hash32(baseSeed, tag, Math.round(D * 1000)));
 
   const metaRng = sub('meta');
   const mech = MECHANICS.includes(mechanic) ? mechanic : pickMechanic(metaRng, D);
-  const floors = Math.max(12, Math.min(28, Math.round(14 + 12 * D) + metaRng.int(-1, 1)));
+  const floors = wantFloors ? Math.max(12, Math.min(60, Math.round(wantFloors))) : Math.max(12, Math.min(28, Math.round(14 + 12 * D) + metaRng.int(-1, 1)));
   const exitFloor = floors - 2;
   const idTag = `p${id}`;
 

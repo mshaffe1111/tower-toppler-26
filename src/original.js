@@ -25,45 +25,45 @@ export const ORIGINAL_THEMES = {
   1: {
     enemies: { roller: 'bouncer', molecule: 'eye', bouncer: 'bouncer', eye: 'eye' },
     ledges: { ...SOLIDIFY, crumble: 'solid', ice: 'solid' },
-    boxes: 2,
+    boxes: 4,
   },
   2: {
     enemies: { roller: 'robot', molecule: 'bouncer', bouncer: 'robot', eye: 'bouncer' },
     ledges: { ...SOLIDIFY, ice: 'solid' },
-    boxes: 2,
+    boxes: 4,
   },
   3: {
     enemies: { roller: 'bouncer', molecule: 'molecule', bouncer: 'bouncer', eye: 'molecule' },
     ledges: { ...SOLIDIFY, ice: 'solid' },
-    boxes: 1,
+    boxes: 3,
   },
   4: {
     enemies: { roller: 'roller', molecule: 'eye', bouncer: 'bouncer', eye: 'eye' },
     ledges: { ...SOLIDIFY, crumble: 'ice' },
-    boxes: 1,
+    boxes: 3,
   },
   5: {
     enemies: { roller: 'bouncer', molecule: 'molecule', bouncer: 'bouncer', eye: 'eye' },
     ledges: { ...SOLIDIFY, ice: 'crumble' },
     crumbleChains: true,
-    boxes: 2,
+    boxes: 5,
   },
   6: {
     enemies: { roller: 'bouncer', molecule: 'eye', bouncer: 'bouncer', eye: 'eye' },
     ledges: { ...SOLIDIFY, ice: 'solid', crumble: 'solid' },
-    boxes: 1,
+    boxes: 3,
   },
   7: {
     enemies: { roller: 'roller', molecule: 'molecule', bouncer: 'robot', eye: 'eye' },
     ledges: { ...SOLIDIFY },
     speed: 1.25,
-    boxes: 2,
+    boxes: 5,
   },
   8: {
     enemies: { roller: 'roller', molecule: 'molecule', bouncer: 'robot', eye: 'eye' },
     ledges: { conveyorL: 'ice', conveyorR: 'ice' },
     speed: 1.15,
-    boxes: 1,
+    boxes: 5,
     summitDoors: true,
   },
 };
@@ -166,7 +166,7 @@ export function makeOriginalTower(raw) {
 
   // Edge of Doom: a four-door summit. Only the third door from where you arrive is the control
   // room; the decoys slam and knock you back down.
-  if (th.summitDoors && exitDoor && !raw.procedural) {
+  if (th.summitDoors && exitDoor && (!raw.procedural || raw.canonical)) {
     const f = exitDoor.floor;
     // you arrive on the summit by the lift that reaches it (else from the exit run's start)
     const lift = t.elevators.find((e) => e.maxFloor === f);

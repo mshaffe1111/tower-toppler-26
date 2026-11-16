@@ -42,7 +42,9 @@ const PHYS = {
   poundVy: -17,
 };
 const ENEMY_PACE = 0.62; // global enemy speed multiplier (classic, deliberate pace)
-const ICE_TOP = 0.62; // a frozen enemy's ice block top, in floors above its floor (matches the drawn block)
+const ICE_TOP = 1.6; // a frozen enemy's ice block top, in steps above its floor (matches the drawn block)
+// Sizes in steps (one step = props FH, ~one brick row): Pogo is ~1.8 steps tall, enemies ~1.6
+const POGO_H = 1.8;
 const REWIND_MAX = 3; // seconds of rewind in the meter
 const HISTORY_MAX = 240; // 4s of snapshots at 60fps
 const GHOST_HZ = 15;
@@ -388,10 +390,10 @@ export class TowerTopplerGame {
     this.player.landingFloor = this._computeLandingFloor(this.player.col, this.player.floor);
     this.camCol = this.player.col;
     this.camAnchor = this.player.floor;
-    this.camFloor = Math.max(0.6, this.player.floor + 0.75);
+    this.camFloor = Math.max(2, this.player.floor + 2.2);
 
     // Ghost of your best run on this tower
-    this.key = this.runMode === 'campaign' && t.procedural ? null : towerKey(this.original ? 'original' : this.runMode, t, settings.mirror);
+    this.key = this.runMode === 'campaign' && t.procedural && !t.canonical ? null : towerKey(this.original ? 'original' : this.runMode, t, settings.mirror);
     this.ghostData = settings.ghosts ? getGhost(this.key) : null;
     this.ghostRec = [];
     this.ghostRecT = 0;
@@ -532,19 +534,19 @@ export class TowerTopplerGame {
 
   // Classic "flying nasty": appears from around the curve of the tower at Pogo's height and
   // sweeps across toward him. Molecules can be shot; eyes are invulnerable and must be dodged.
-  _spawnFlyer() {
+  _spawnFlyer(forceType = null) {
     const p = this.player;
     const active = this.enemies.filter((e) => e.spawned && !e.dead && !e.fireball).length;
     if (active >= 2) return;
     const side = Math.random() < 0.5 ? -1 : 1;
     const lvl = this.runMode === 'campaign' ? (this.tower?.id || 1) - 1 : Math.min(7, this.towerIndex + 2);
-    const type = lvl >= 2 && Math.random() < 0.35 ? 'eye' : 'molecule';
+    const type = forceType || (lvl >= 2 && Math.random() < 0.35 ? 'eye' : 'molecule');
     const speed = 2.0 + lvl * 0.14;
     this.enemies.push(
       this._makeEnemy({
         type,
         col: wrapCol(p.col + side * 7.2),
-        floor: Math.max(0.35, p.floor + 0.35),
+        floor: Math.max(0.6, p.floor + 0.6),
         dir: -side,
         speed: speed / ENEMY_PACE,
         amp: 0.18,
@@ -1138,12 +1140,12 @@ export class TowerTopplerGame {
         if (el.autoDir === 1) {
           el.recallTarget = null;
           el.dir = 1;
-          el.floor = Math.min(el.maxFloor, el.floor + el.speed * 0.45 * dt);
+          el.floor = Math.min(el.maxFloor, el.floor + el.speed * 1.5 * dt);
           if (el.floor >= el.maxFloor) el.autoDir = 0;
         } else if (el.autoDir === -1) {
           el.recallTarget = null;
           el.dir = -1;
-          el.floor = Math.max(el.minFloor, el.floor - el.speed * 0.45 * dt);
+          el.floor = Math.max(el.minFloor, el.floor - el.speed * 1.5 * dt);
           if (el.floor <= el.minFloor) el.autoDir = 0;
         }
         p.floor = el.floor;
@@ -1398,7 +1400,7 @@ export class TowerTopplerGame {
     // Snowballs travel all the way round the tower — dodge your own if it comes back!
     this.snowballs.push({
       col: wrapCol(p.col + p.facing * 0.4),
-      floor: p.floor + 0.3,
+      floor: p.floor + 0.85, // from his hands
       dir: p.facing,
       life: power > 0 ? 2.4 : 2.05,
       dist: 0,
@@ -1488,7 +1490,8 @@ export class TowerTopplerGame {
       let consumed = false;
       for (const en of this.enemies) {
         if (en.dead || sb.hit.has(en)) continue;
-        if (Math.abs(en.floor - sb.floor) < 0.6 + sb.power * 0.25 && Math.abs(colDist(sb.col, en.col)) < 0.55 + sb.power * 0.2) {
+        const sdy = sb.floor - en.floor;
+        if (sdy > -0.4 - sb.power * 0.5 && sdy < 1.9 + sb.power * 0.5 && Math.abs(colDist(sb.col, en.col)) < 0.55 + sb.power * 0.2) {
           sb.hit.add(en);
           en.hitFlash = 0.18;
           const immune = en.type === 'robot' || (this.original && (en.type === 'eye' || en.type === 'molecule'));
@@ -1608,6 +1611,20 @@ export class TowerTopplerGame {
       this.flyerTimer = Math.max(4.5, 9 - lvl * 0.55) + Math.random() * 3;
       if ((p.floor > 0.5 || lvl > 0) && !this.original) this._spawnFlyer();
     }
+    // ORIGINAL: mutant molecules are anti-loitering pressure. Linger in one height zone for ~10s
+    // (8-12s) and one drifts in from round the tower toward your row.
+    if (this.original && this.mode === 'tower' && !p.hidden) {
+      const band = Math.floor(p.floor / 4);
+      if (band !== this._lingerBand) {
+        this._lingerBand = band;
+        this._lingerT = 0;
+        this._lingerLimit = 8 + Math.random() * 4;
+      } else if ((this._lingerT = (this._lingerT || 0) + dt) > (this._lingerLimit || 10)) {
+        this._lingerT = 0;
+        this._lingerLimit = 8 + Math.random() * 4;
+        this._spawnFlyer('molecule');
+      }
+    }
     const hz = this._hazardFloor();
 
     for (let ei = this.enemies.length - 1; ei >= 0; ei--) {
@@ -1633,7 +1650,7 @@ export class TowerTopplerGame {
 
       if (en.type === 'spiker') {
         // Hovers up and down over its step, guarding the staircase
-        en.floor = en.baseFloor + 0.25 + (Math.sin(this.time * 1.5 + en.phase) * 0.5 + 0.5) * (en.range || 1.2);
+        en.floor = en.baseFloor + 0.6 + (Math.sin(this.time * 1.5 + en.phase) * 0.5 + 0.5) * (en.range || 1.2) * 2.5;
         en.col = en.col + Math.sin(this.time * 2.3 + en.phase) * 0.002;
       } else if (['roller', 'bouncer', 'chaser', 'robot', 'shieldbug', 'puffer', 'splitter'].includes(en.type)) {
         const floorLvl = Math.round(en.baseFloor);
@@ -1697,11 +1714,11 @@ export class TowerTopplerGame {
         );
         if (blocked || !support(nextCol)) en.dir *= -1;
         else en.col = nextCol;
-        en.floor = en.type === 'bouncer' ? floorLvl + Math.abs(Math.sin(this.time * 3.2 + en.phase)) * 0.95 : floorLvl;
+        en.floor = en.type === 'bouncer' ? floorLvl + Math.abs(Math.sin(this.time * 3.2 + en.phase)) * 2.2 : floorLvl;
       } else {
         en.col = wrapCol(en.col + en.dir * en.speed * dt);
-        if (en.type === 'molecule') en.floor = en.baseFloor + Math.sin(this.time * 3 + en.phase) * (en.amp || 0.4);
-        else if (en.type === 'eye') en.floor = en.baseFloor + Math.sin(this.time * 1.7 + en.phase) * (en.amp || 0.3);
+        if (en.type === 'molecule') en.floor = en.baseFloor + Math.sin(this.time * 3 + en.phase) * (en.amp || 0.4) * 2.5;
+        else if (en.type === 'eye') en.floor = en.baseFloor + Math.sin(this.time * 1.7 + en.phase) * (en.amp || 0.3) * 2.5;
         else en.floor = en.baseFloor;
         if (en.spawned) {
           const target = p.floor + 0.35;
@@ -1716,7 +1733,7 @@ export class TowerTopplerGame {
 
       // Contact: knocked back down to the ledge below (into the sea if there's none)
       const dfl = en.floor - p.floor;
-      if (p.invuln <= 0 && !p.hidden && dfl > -0.45 && dfl < 0.6 && Math.abs(colDist(en.col, p.col)) < 0.5) {
+      if (p.invuln <= 0 && !p.hidden && dfl > -1.5 && dfl < POGO_H - 0.1 && Math.abs(colDist(en.col, p.col)) < 0.5) {
         this._knockDown(colDist(en.col, p.col) >= 0 ? 1 : -1);
         if (en.fireball) {
           en.dead = true;
@@ -2147,7 +2164,7 @@ export class TowerTopplerGame {
     let lookFloorGoal = 0;
     if (look && look.active) {
       lookColGoal = Math.max(-5, Math.min(5, (-look.dx / Math.max(1, look.w)) * 9));
-      lookFloorGoal = Math.max(-3, Math.min(6, (look.dy / Math.max(1, look.h)) * 10));
+      lookFloorGoal = Math.max(-8, Math.min(16, (look.dy / Math.max(1, look.h)) * 26));
       this._lookHold = 0.5;
     } else if (this._lookHold > 0) {
       this._lookHold -= dt;
@@ -2168,7 +2185,7 @@ export class TowerTopplerGame {
     const canPeek = p.onGround && !p.onElevator && !nearDoor && Math.abs(p.vx) < 0.2 && !(inp.left || inp.right);
     if (canPeek && (inp.up || inp.down)) this._peekHold = (this._peekHold || 0) + dt;
     else this._peekHold = 0;
-    const peekGoal = this._peekHold > 0.3 ? (inp.up ? 3.5 : -3) : 0;
+    const peekGoal = this._peekHold > 0.3 ? (inp.up ? 9 : -8) : 0;
     this.peek = (this.peek || 0) + (peekGoal - (this.peek || 0)) * Math.min(1, dt * 4);
     if (p.onGround || p.hidden || p.hang) this.camAnchor = p.floor;
     let focus = this.camAnchor;
@@ -2176,7 +2193,7 @@ export class TowerTopplerGame {
       if (p.floor < this.camAnchor) focus = p.floor;
       else focus = this.camAnchor + (p.floor - this.camAnchor) * 0.3;
     }
-    const targetFloor = Math.max(0.6, focus + 0.75 + (this.peek || 0) + (this.lookFloor || 0));
+    const targetFloor = Math.max(2, focus + 2.2 + (this.peek || 0) + (this.lookFloor || 0));
     const rate = look && look.active ? 10 : targetFloor < this.camFloor ? 12 : 9;
     this.camFloor += (targetFloor - this.camFloor) * Math.min(1, dt * rate);
   }
