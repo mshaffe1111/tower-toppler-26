@@ -34,15 +34,15 @@ function mulberry32(seed) {
 // Classic-paced movement tuning (deliberate like the 7800 original, but with modern assists)
 const PHYS = {
   walkSpeed: 2.8, // columns / second on the ground (~6s per lap: original feel, quick enough to dodge)
-  airSpeed: 3.3, // a running jump carries a little extra distance
-  gravity: 15,
-  jumpVy: 6.9, // ~1.6 floors high
-  stepVy: 5.7, // auto step-up hop onto the next stair
-  maxFall: 11,
-  poundVy: -14,
+  airSpeed: 4.0, // a running jump carries a little extra distance
+  gravity: 22, // snappy, arcade hop like the original (not floaty)
+  jumpVy: 7.3, // ~1.2 floors high, ~0.66s in the air
+  stepVy: 6.9, // auto step-up hop onto the next stair
+  maxFall: 13,
+  poundVy: -17,
 };
 const ENEMY_PACE = 0.62; // global enemy speed multiplier (classic, deliberate pace)
-const ICE_TOP = 0.95; // a frozen enemy's ice block top, in floors above its floor (matches the drawn block)
+const ICE_TOP = 0.62; // a frozen enemy's ice block top, in floors above its floor (matches the drawn block)
 const REWIND_MAX = 3; // seconds of rewind in the meter
 const HISTORY_MAX = 240; // 4s of snapshots at 60fps
 const GHOST_HZ = 15;
@@ -388,7 +388,7 @@ export class TowerTopplerGame {
     this.player.landingFloor = this._computeLandingFloor(this.player.col, this.player.floor);
     this.camCol = this.player.col;
     this.camAnchor = this.player.floor;
-    this.camFloor = Math.max(2, this.player.floor + 1.0);
+    this.camFloor = Math.max(0.6, this.player.floor + 0.75);
 
     // Ghost of your best run on this tower
     this.key = this.runMode === 'campaign' && t.procedural ? null : towerKey(this.original ? 'original' : this.runMode, t, settings.mirror);
@@ -458,8 +458,18 @@ export class TowerTopplerGame {
       } else if (r.cols.length >= 3) {
         const col = r.cols[1 + Math.floor(rand() * (r.cols.length - 2))];
         if (!safe(col, r.floor) || busy(col + 0.5, r.floor)) continue;
-        const type = diff > 0.12 && rand() < 0.55 ? 'chaser' : rand() < 0.5 ? 'bouncer' : 'roller';
-        this.enemies.push(this._makeEnemy({ type, col: col + 0.5, floor: r.floor, dir: rand() < 0.5 ? -1 : 1, speed: type === 'chaser' ? 1.3 : 1.6, extra: true }));
+        // Reboot cast grows tower by tower: robots & shield beetles from tower 2, splitters from
+        // 3, puffers from 4 (the newest arrival is the most likely in its debut tower)
+        const tid = this.tower.id || 1;
+        const pool = ['bouncer', 'roller'];
+        if (diff > 0.12) pool.push('chaser');
+        if (tid >= 2) pool.push('shieldbug', 'robot');
+        if (tid >= 3) pool.push('splitter');
+        if (tid >= 4) pool.push('puffer');
+        const debut = { 2: 'shieldbug', 3: 'splitter', 4: 'puffer' }[tid];
+        const type = debut && rand() < 0.45 ? debut : pool[Math.floor(rand() * pool.length)];
+        const speed = type === 'chaser' ? 1.3 : type === 'puffer' ? 0.9 : type === 'shieldbug' ? 1.2 : type === 'splitter' ? 1.4 : 1.6;
+        this.enemies.push(this._makeEnemy({ type, col: col + 0.5, floor: r.floor, dir: rand() < 0.5 ? -1 : 1, speed, extra: true }));
         placed++;
       }
     }
@@ -925,7 +935,7 @@ export class TowerTopplerGame {
     const g = this.mech.gust;
     const gustDrift = g.state === 'blow' ? g.dir * g.strength * (p.onGround ? 0.7 : 1) : 0;
 
-    const moveDelta = p.hang ? 0 : (p.vx + (p.onGround ? convPush : 0) + gustDrift) * dt;
+    const moveDelta = p.hang ? 0 : (p.vx + (p.onGround ? convPush : 0) + gustDrift + (this.pufferPush || 0)) * dt;
     let nextCol = wrapCol(p.col + moveDelta);
 
     // Edge guard: never walk (or get blown) off a solid ledge straight into the sea.
@@ -1087,7 +1097,7 @@ export class TowerTopplerGame {
 
     // Variable jump cut (real jumps only)
     if (p.onGround) p.autoHop = false;
-    if (!inp.jump && !p.autoHop && !p.onGround && !p.onElevator && !p.pound && p.vy > 3.2) {
+    if (!inp.jump && !p.autoHop && !p.onGround && !p.onElevator && !p.pound && p.vy > 3.4) {
       p.vy *= Math.pow(0.85, dt * 60);
     }
 
@@ -1267,6 +1277,10 @@ export class TowerTopplerGame {
     if (near) {
       if (this.original) this._hint('fire-orig', 'Snowballs pop cannonballs and break flashing blocks. Eyes, molecules and robots can\'t be hurt: time your way past.');
       else this._hint('fire', 'Tap FIRE to throw a snowball. Bouncers & molecules pop; rollers just freeze.');
+      if (near.type === 'shieldbug') this._hint('shieldbug', 'Shield beetle: its shield blocks shots. Jump over it and hit it from behind, or crack the shield with a charged shot.');
+      if (near.type === 'puffer') this._hint('puffer', 'Puffers puff up and blow you along the ledge. Freeze one with a snowball.');
+      if (near.type === 'splitter') this._hint('splitter', 'Splitters pop into two quick minis. Pop those too, or freeze the big one with a charged shot.');
+      if (near.type === 'robot') this._hint('robot', 'Robots can\'t be hurt. Jump over them, or go round by a lift or a door.');
       if (!this.original && (near.type === 'eye' || near.type === 'roller' || near.type === 'chaser')) this._hint('charge', 'Hold FIRE to pack a mega-snowball — it freezes anything into an ice block you can stand on!');
     }
     if (!p.onGround && p.floor - p.landingFloor > 1.6 && this.towerTime > 4) this._hint('pound', 'In mid-air, push ▼ to ground-pound: it stuns enemies and smashes blocks.');
@@ -1471,7 +1485,7 @@ export class TowerTopplerGame {
       let consumed = false;
       for (const en of this.enemies) {
         if (en.dead || sb.hit.has(en)) continue;
-        if (Math.abs(en.floor - sb.floor) < 0.72 + sb.power * 0.25 && Math.abs(colDist(sb.col, en.col)) < 0.62 + sb.power * 0.2) {
+        if (Math.abs(en.floor - sb.floor) < 0.6 + sb.power * 0.25 && Math.abs(colDist(sb.col, en.col)) < 0.55 + sb.power * 0.2) {
           sb.hit.add(en);
           en.hitFlash = 0.18;
           const immune = en.type === 'robot' || (this.original && (en.type === 'eye' || en.type === 'molecule'));
@@ -1480,6 +1494,33 @@ export class TowerTopplerGame {
             this._burstAt(en.col, en.floor + 0.3, '#e0f2fe', 6, 65);
             sound.stunEnemy();
             this.addPopup({ col: en.col, floor: en.floor + 0.9, text: 'IMMUNE', color: '#94a3b8' });
+          } else if (en.type === 'shieldbug' && !en.cracked && sb.dir === -en.dir) {
+            // Shield beetle, hit in the face: the shield deflects a normal shot; a charged shot cracks it
+            if (sb.power > 0) {
+              en.cracked = true;
+              en.stunTimer = this._freezeTime(2.2);
+              this._scoreComboHit(50, { col: en.col, floor: en.floor + 0.6 }, '#fde047');
+              this.addPopup({ col: en.col, floor: en.floor + 1.0, text: 'CRACKED!', color: '#fde047' });
+              sound.freeze?.();
+            } else {
+              en.shieldFlash = 0.18;
+              this._burstAt(en.col, en.floor + 0.35, '#fde68a', 7, 90);
+              sound.stunEnemy();
+              this.addPopup({ col: en.col, floor: en.floor + 1.0, text: 'BLOCKED', color: '#fde68a' });
+            }
+          } else if (en.type === 'shieldbug') {
+            this._popEnemy(en); // hit from behind, or the shield is cracked
+          } else if (en.type === 'splitter' && !sb.power) {
+            if (en.mini) this._popEnemy(en);
+            else this._splitEnemy(en);
+          } else if (en.type === 'puffer' && !sb.power) {
+            en.stunTimer = this._freezeTime(3.5);
+            en.puffT = 0; // deflates
+            en.puff = 0;
+            en.blowing = false;
+            this._scoreComboHit(25, { col: en.col, floor: en.floor + 0.5 }, '#a5f3fc');
+            this._burstAt(en.col, en.floor + 0.3, '#a5f3fc', 9, 80);
+            (sound.freeze || sound.stunEnemy).call(sound);
           } else if (!sb.power && (en.type === 'spiker' || en.type === 'chaser')) {
             en.hp -= 1;
             if (en.type === 'chaser') en.stunTimer = Math.max(en.stunTimer, 0.6);
@@ -1528,11 +1569,24 @@ export class TowerTopplerGame {
     }
   }
 
+  // Splitter: a normal hit splits the jelly into two quick minis that scatter
+  _splitEnemy(en) {
+    en.dead = true;
+    en.deathTimer = 0.3;
+    for (const d of [-1, 1]) {
+      this.enemies.push(this._makeEnemy({ type: 'splitter', mini: true, col: wrapCol(en.col + d * 0.45), floor: Math.round(en.baseFloor), dir: d, speed: 2.1, extra: true }));
+    }
+    this._scoreComboHit(50, { col: en.col, floor: en.floor + 0.6 }, '#67e8f9');
+    this._burstAt(en.col, en.floor + 0.3, '#67e8f9', 12, 120);
+    this.addShake(2.5);
+    sound.hitEnemy();
+  }
+
   _popEnemy(en) {
     if (!this.player.emote || this.player.emote.t <= 0) this.player.emote = { kind: 'smug', t: 0.7 };
     en.dead = true;
     en.deathTimer = 0.5;
-    const pts = en.fireball ? 75 : en.type === 'molecule' || en.type === 'spiker' ? 150 : en.type === 'chaser' ? 250 : 100;
+    const pts = en.fireball ? 75 : en.type === 'molecule' || en.type === 'spiker' ? 150 : en.type === 'chaser' || en.type === 'shieldbug' ? 250 : en.mini ? 75 : 100;
     const col = en.fireball ? '#fb923c' : en.type === 'molecule' ? '#f472b6' : en.type === 'spiker' ? '#fde047' : en.type === 'chaser' ? '#e2e8f0' : '#fca5a5';
     this._scoreComboHit(pts, { col: en.col, floor: en.floor + 0.5 }, col);
     this.addShake(4.0);
@@ -1544,6 +1598,7 @@ export class TowerTopplerGame {
 
   _updateEnemies(dt) {
     const p = this.player;
+    let pufferPush = 0;
     this.flyerTimer -= dt;
     if (this.flyerTimer <= 0) {
       const lvl = this.runMode === 'campaign' ? (this.tower?.id || 1) - 1 : this.towerIndex + 2;
@@ -1577,10 +1632,28 @@ export class TowerTopplerGame {
         // Hovers up and down over its step, guarding the staircase
         en.floor = en.baseFloor + 0.25 + (Math.sin(this.time * 1.5 + en.phase) * 0.5 + 0.5) * (en.range || 1.2);
         en.col = en.col + Math.sin(this.time * 2.3 + en.phase) * 0.002;
-      } else if (en.type === 'roller' || en.type === 'bouncer' || en.type === 'chaser' || en.type === 'robot') {
+      } else if (['roller', 'bouncer', 'chaser', 'robot', 'shieldbug', 'puffer', 'splitter'].includes(en.type)) {
         const floorLvl = Math.round(en.baseFloor);
+        if (en.shieldFlash > 0) en.shieldFlash = Math.max(0, en.shieldFlash - dt);
+        // Puffer: waddles, then puffs up and blows a gust along its ledge that shoves Pogo
+        if (en.type === 'puffer') {
+          en.puffT = (en.puffT ?? Math.random() * 3) + dt;
+          const cyc = en.puffT % 6.2; // walk 3s, inflate 0.8s, blow 1.8s, deflate 0.6s
+          en.puff = cyc < 3 ? 0 : cyc < 3.8 ? (cyc - 3) / 0.8 : cyc < 5.6 ? 1 : 1 - (cyc - 5.6) / 0.6;
+          en.blowing = cyc >= 3.8 && cyc < 5.6;
+          en.blowDir = en.dir;
+          if (en.puff > 0) {
+            if (en.blowing) {
+              const dc = colDist(en.col, p.col);
+              if (Math.abs(p.floor - floorLvl) < 0.6 && Math.sign(dc) === en.dir && Math.abs(dc) < 5.5 && !p.hidden) {
+                pufferPush += en.dir * 2.6 * (1 - Math.abs(dc) / 6.5);
+              }
+            }
+          }
+          en.speedMul = en.puff > 0 ? 0 : 1; // stands still while it puffs and blows
+        }
         // Robo-eye: spots Pogo on its floor and charges
-        let spd = en.speed;
+        let spd = en.speed * (en.speedMul ?? 1);
         if (en.type === 'chaser') {
           const dc = colDist(en.col, p.col);
           const sameFloor = Math.abs(p.floor - floorLvl) < 0.35 && !p.hidden;
@@ -1639,7 +1712,8 @@ export class TowerTopplerGame {
       }
 
       // Contact: knocked back down to the ledge below (into the sea if there's none)
-      if (p.invuln <= 0 && !p.hidden && Math.abs(en.floor - p.floor) < 0.6 && Math.abs(colDist(en.col, p.col)) < 0.56) {
+      const dfl = en.floor - p.floor;
+      if (p.invuln <= 0 && !p.hidden && dfl > -0.45 && dfl < 0.6 && Math.abs(colDist(en.col, p.col)) < 0.5) {
         this._knockDown(colDist(en.col, p.col) >= 0 ? 1 : -1);
         if (en.fireball) {
           en.dead = true;
@@ -1647,6 +1721,7 @@ export class TowerTopplerGame {
         }
       }
     }
+    this.pufferPush = pufferPush;
   }
 
   // Ice-block platforms made from frozen enemies
@@ -2062,7 +2137,7 @@ export class TowerTopplerGame {
 
   _updateCamera(dt) {
     const p = this.player;
-    const lead = Math.max(-0.6, Math.min(0.6, p.vx * 0.12));
+    const lead = Math.max(-0.25, Math.min(0.25, p.vx * 0.05)); // Pogo stays near the centre, like the original
     // Touch camera: drag the view round the tower (±5 columns) and up/down (−3..+6 floors)
     const look = this.input.look;
     let lookColGoal = 0;
@@ -2098,8 +2173,8 @@ export class TowerTopplerGame {
       if (p.floor < this.camAnchor) focus = p.floor;
       else focus = this.camAnchor + (p.floor - this.camAnchor) * 0.3;
     }
-    const targetFloor = Math.max(2, focus + 1.0 + (this.peek || 0) + (this.lookFloor || 0));
-    const rate = look && look.active ? 10 : targetFloor < this.camFloor ? 6.5 : 4.5;
+    const targetFloor = Math.max(0.6, focus + 0.75 + (this.peek || 0) + (this.lookFloor || 0));
+    const rate = look && look.active ? 10 : targetFloor < this.camFloor ? 12 : 9;
     this.camFloor += (targetFloor - this.camFloor) * Math.min(1, dt * rate);
   }
 
