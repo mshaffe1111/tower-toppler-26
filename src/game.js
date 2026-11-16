@@ -60,13 +60,46 @@ const ENEMY_PACE = 0.62; // global enemy speed multiplier (classic, deliberate p
 const ICE_TOP = 1.6; // a frozen enemy's ice block top, in steps above its floor (matches the drawn block)
 // Sizes in steps (one step = props FH, ~one brick row): Pogo is ~1.8 steps tall, enemies ~1.6
 const POGO_H = 1.8;
-// ORIGINAL enemy timing (PICO-8 port, RESEARCH.md 6): the molecule crosses the screen every
-// 600 ticks, slowly for 128 ticks and then twice as fast, gone after 202 (port ticks are 1/60 s)
-const MOLECULE_PERIOD = 10;
-const MOLECULE_SLOW = 128 / 60;
-const MOLECULE_LIFE = 202 / 60;
-const MOLECULE_SPAN = 6.5; // columns either side of the camera: just off-screen
+// ORIGINAL timing from the PICO-8 port, on the same clock as everything else: 32 port ticks a
+// second, the scale at which its walk and lift speeds match the 7800 footage (2.0 columns/s,
+// 4 rows/s). Port source: the molecule ("bonker") waits 600 ticks after the last one, then
+// crosses the 128-px screen moving 1 px every other tick for 128 ticks, then 1 px a tick, gone
+// after 202. Its tower is drawn 32 px in radius, so a column at the front is ~12.6 px: the
+// molecule drifts at ~64% of walking speed, then ~1.3x.
+const PORT_TICK = 1 / 32;
+// The port's arcs, in world units per tick (8 units = 1 row): pljdys[1] jump (24 ticks, peak 18,
+// a 4-tick hang at the top), pljdys[2] step hop (14 ticks, peak 10), pltumbledys (hit tumble,
+// then -4 a tick). Sideways speed during a jump or hop is the walk: 1 unit/tick.
+const ARC_JUMP = [3, 3, 2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, -1, -1, -1, -1, -2, -2, -2, -2, -3, -3];
+const ARC_CLIMB = [2, 2, 2, 2, 1, 1, 0, 0, -1, -1, -2, -2, -2, -2];
+const ARC_TUMBLE = [3, 3, 2, 2, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, -1, -1, -2, -2, -2, -2, -3, -3, -3, -3, -3, -3, -3, -3, -3, -3, -4, -4];
+// height in rows after tk ticks of an arc (linear between ticks; past the table, its last step)
+function arcRows(table, tk) {
+  let h = 0;
+  const whole = Math.floor(tk);
+  for (let i = 0; i < whole; i++) h += table[Math.min(i, table.length - 1)];
+  h += table[Math.min(whole, table.length - 1)] * (tk - whole);
+  return h / 8;
+}
+const makeArc = (kind, y0, vx, ticks, table) => ({ kind, t: 0, y0, vx, ticks, table, endVy: (table[table.length - 1] * 4) });
+const MOLECULE_PERIOD = 600 * PORT_TICK; // 18.75 s between molecules
+const MOLECULE_SLOW = 128 * PORT_TICK; // 4 s slow
+const MOLECULE_LIFE = 202 * PORT_TICK; // 6.3 s on screen
+const MOLECULE_SPAN = 5.5; // 138 px of travel = ~11 columns: from just off one side to the other
 const MAX_REAL_ENEMIES = 4;
+// ORIGINAL contact test: the PICO-8 port's Pogo-vs-enemy collision mask (collmask[3], from its
+// sprite shapes). Index = enemy base minus Pogo's feet in world units (8 per row) + 15; each
+// entry's bits are the column offsets (8 per column, offset by 3) that touch. A rounded diamond:
+// full width (about +-0.44 column) within a row of Pogo's feet, tapering to a point 1.875 rows
+// below them, which is what decides whether a jump clears an enemy.
+const PORT_POGO_MASK = [24, 24, 60, 60, 126, 126, 126, ...Array(16).fill(255), 126, 126, 126, 60, 60, 24];
+function portTouch(pCol, pFloor, eCol, eFloor) {
+  const dy = Math.round((eFloor - pFloor) * 8) + 15;
+  if (dy < 0 || dy >= PORT_POGO_MASK.length) return false;
+  let dx = Math.floor(pCol * 8) - Math.floor(eCol * 8);
+  dx = ((dx + 64) % 128 + 128) % 128 - 64 + 3;
+  return dx >= 0 && dx < 9 && ((PORT_POGO_MASK[dy] >> dx) & 1) === 1;
+}
 const REWIND_MAX = 3; // seconds of rewind in the meter
 const HISTORY_MAX = 240; // 4s of snapshots at 60fps
 const GHOST_HZ = 15;
@@ -915,7 +948,7 @@ export class TowerTopplerGame {
     for (const el of this.elevators) {
       if (this.original && this.player.onElevator !== el && el.floor > el.minFloor + 0.01 && el.recallTarget === null) {
         el.idleT = (el.idleT || 0) + dt;
-        if (el.idleT > 10) el.floor = Math.max(el.minFloor, el.floor - 16 * dt); // port: 600 ticks, then down fast
+        if (el.idleT > 600 * PORT_TICK) el.floor = Math.max(el.minFloor, el.floor - 16 * dt); // port: waits 600 ticks, then drops back fast
       }
       if (el.recallTarget !== null) {
         const diff = el.recallTarget - el.floor;
@@ -925,7 +958,9 @@ export class TowerTopplerGame {
         } else {
           el.floor += Math.sign(diff) * el.speed * 1.6 * dt;
         }
-      } else {
+      } else if (!this.original) {
+        // Reboot lifts shuttle up and down on their own. The Original's stay put until you ride
+        // them with UP / DOWN ("Enter a tunnel or take elevator up: move controller up", 7800)
         el.floor += el.dir * el.speed * dt;
         if (el.floor >= el.maxFloor) {
           el.floor = el.maxFloor;
@@ -967,7 +1002,7 @@ export class TowerTopplerGame {
       // ORIGINAL: no air control. A jump or step-hop keeps the sideways speed it took off with
       // for the length of its arc; walking off a ledge, an arc that ends over nothing, or a
       // knock-down drops you straight down (your angle locks)
-      p.vx = p.arc && p.arc.t < p.arc.T ? p.arc.vx : 0;
+      p.vx = p.arc && p.arc.t / PORT_TICK < p.arc.ticks ? p.arc.vx : 0;
     } else if ((p.knockbackTimer || 0) <= 0 && !p.hang) {
       let rate;
       if (isIce && p.onGround) rate = 5.5;
@@ -1002,8 +1037,7 @@ export class TowerTopplerGame {
       }
     }
 
-    // Shootable blocks stop you walking through them (and in the Original, so does a stunned
-    // sliding cannonball: stunning it only buys time, you still can't get past)
+    // Shootable blocks and pillars stop you walking through them
     const blockingBox =
       this.ledges.find(
         (l) =>
@@ -1012,17 +1046,7 @@ export class TowerTopplerGame {
           this._blocksBody(l, p.floor) &&
           Math.abs(colDist(nextCol, l.col + 0.5)) < 0.52 &&
           Math.abs(colDist(nextCol, l.col + 0.5)) < Math.abs(colDist(p.col, l.col + 0.5)) + 0.001
-      ) ||
-      (this.original &&
-        this.enemies.find(
-          (en) =>
-            !en.dead &&
-            en.type === 'roller' &&
-            en.stunTimer > 0 &&
-            Math.abs(en.floor - p.floor) < 0.6 &&
-            Math.abs(colDist(nextCol, en.col)) < 0.62 &&
-            Math.abs(colDist(nextCol, en.col)) < Math.abs(colDist(p.col, en.col))
-        ));
+      );
     if (!blockingBox) p.col = nextCol;
     else p.vx = 0;
 
@@ -1124,7 +1148,7 @@ export class TowerTopplerGame {
       if (this.original) {
         p.vy = PHYS.origJumpVy;
         p.vx = Math.sign(targetVx) * PHYS.origWalkSpeed;
-        p.arc = { t: 0, T: PHYS.origJumpT, vx: p.vx, g: PHYS.origJumpG };
+        p.arc = makeArc('jump', p.floor, p.vx, ARC_JUMP.length, ARC_JUMP);
       } else {
         p.vy = PHYS.jumpVy;
         if (targetVx !== 0) p.vx = Math.sign(targetVx) * Math.max(Math.abs(p.vx), PHYS.walkSpeed);
@@ -1172,7 +1196,7 @@ export class TowerTopplerGame {
             }));
         if (stepLedge) {
           p.vy = this.original ? PHYS.origClimbVy : PHYS.stepVy;
-          if (this.original) p.arc = { t: 0, T: PHYS.origClimbT, vx: p.facing * PHYS.origWalkSpeed, g: PHYS.origClimbG };
+          if (this.original) p.arc = makeArc('climb', p.floor, p.facing * PHYS.origWalkSpeed, ARC_CLIMB.length, ARC_CLIMB);
           p.onGround = false;
           p.onElevator = null;
           p.onIce = null;
@@ -1269,15 +1293,25 @@ export class TowerTopplerGame {
 
     if (!p.onElevator && !p.hang) {
       const prevFloor = p.floor;
-      let maxFall = p.pound ? -PHYS.poundVy : PHYS.maxFall;
-      let grav = PHYS.gravity;
-      if (this.original) {
-        if (p.arc) p.arc.t += dt;
-        grav = p.arc && p.arc.t < p.arc.T ? p.arc.g : PHYS.origFallG;
-        maxFall = PHYS.origMaxFall;
+      const maxFall = this.original ? PHYS.origMaxFall : p.pound ? -PHYS.poundVy : PHYS.maxFall;
+      const a = this.original ? p.arc : null;
+      if (a && !a.done && (a.t + dt) / PORT_TICK < a.ticks) {
+        // ORIGINAL: the port's arc tables drive the height tick by tick
+        a.t += dt;
+        const nf = a.y0 + arcRows(a.table, a.t / PORT_TICK);
+        p.vy = (nf - p.floor) / Math.max(dt, 1e-6);
+        p.floor = nf;
+      } else {
+        if (a && !a.done) {
+          // the arc is over: from here it's an ordinary fall (straight down)
+          a.done = true;
+          a.t = a.ticks * PORT_TICK;
+          p.vy = Math.min(p.vy, a.endVy);
+          if (a.kind === 'tumble') p.dropThrough = null; // the tumble passed through platforms; now land
+        }
+        p.vy = Math.max(-maxFall, p.vy - (this.original ? PHYS.origFallG : PHYS.gravity) * dt);
+        p.floor += p.vy * dt;
       }
-      p.vy = Math.max(-maxFall, p.vy - grav * dt);
-      p.floor += p.vy * dt;
       // ORIGINAL: ledges are solid blocks, so a jump bumps its head on one above instead of passing
       // through (our slabs are half a row thick, so the bump is at the slab's underside)
       if (this.original && p.vy > 0 && !p.tumbling) {
@@ -1290,6 +1324,10 @@ export class TowerTopplerGame {
           if (bottom > prevHead - 0.01 && bottom <= head) {
             p.floor = bottom - POGO_H - 0.001;
             p.vy = 0;
+            if (p.arc) {
+              p.arc.done = true;
+              p.arc.t = p.arc.ticks * PORT_TICK;
+            }
             break;
           }
         }
@@ -1724,7 +1762,7 @@ export class TowerTopplerGame {
             this._burstAt(en.col, en.floor + 0.3, '#a5f3fc', 12, 90);
             sound.freeze?.();
           } else if (en.type === 'roller') {
-            en.stunTimer = this._freezeTime(3.2);
+            en.stunTimer = this.original ? 180 * PORT_TICK : this._freezeTime(3.2); // port: 180 ticks
             if (!this.original) this._scoreComboHit(25, { col: en.col, floor: en.floor + 0.5 }, '#a5f3fc');
             this.addShake(2.0);
             this._burstAt(en.col, en.floor + 0.3, '#a5f3fc', 9, 80);
@@ -1801,7 +1839,7 @@ export class TowerTopplerGame {
         this.moleculeTimer = MOLECULE_PERIOD;
         this.moleculeDir = -this.moleculeDir;
         this.enemies.push(
-          this._makeEnemy({ type: 'molecule', kind: 'bonker', col: this.camCol, floor: p.floor + 0.2, dir: this.moleculeDir, kt: 0 })
+          this._makeEnemy({ type: 'molecule', kind: 'bonker', col: this.camCol, floor: p.floor, dir: this.moleculeDir, kt: 0 })
         );
       }
     }
@@ -1826,6 +1864,11 @@ export class TowerTopplerGame {
         const before = en.stunTimer;
         en.stunTimer = Math.max(0, en.stunTimer - dt);
         if (before > 0 && en.stunTimer === 0) sound.thaw?.();
+        // Original: a stunned ball still knocks you down if you touch it ("you can't get past
+        // them", 7800 manual), though a jump that clears it gets over
+        if (this.original && en.kind && p.invuln <= 0 && !p.hidden && portTouch(p.col, p.floor, en.col, en.floor)) {
+          this._knockDown(colDist(en.col, p.col) >= 0 ? 1 : -1);
+        }
         continue;
       }
 
@@ -1916,7 +1959,14 @@ export class TowerTopplerGame {
 
       // Contact: knocked back down to the ledge below (into the sea if there's none)
       const dfl = en.floor - p.floor;
-      if (p.invuln <= 0 && !p.hidden && dfl > -1.5 && dfl < POGO_H - 0.1 && Math.abs(colDist(en.col, p.col)) < 0.5) {
+      const touching = en.kind === 'bonker'
+        ? // the molecule is a screen sprite: +-10 px across (~0.8 column at the front), from 1.75 rows
+          // under Pogo's feet to 2 rows over them (port)
+          Math.abs(colDist(en.col, p.col)) < 0.8 && dfl > -1.75 && dfl <= 2
+        : this.original && en.kind
+          ? portTouch(p.col, p.floor, en.col, en.floor)
+          : dfl > -1.5 && dfl < POGO_H - 0.1 && Math.abs(colDist(en.col, p.col)) < 0.5;
+      if (p.invuln <= 0 && !p.hidden && touching) {
         this._knockDown(colDist(en.col, p.col) >= 0 ? 1 : -1, en.kind === 'bonker');
         if (en.fireball) {
           en.dead = true;
@@ -1993,7 +2043,7 @@ export class TowerTopplerGame {
       const slowSpeed = (MOLECULE_SPAN * 2) / (MOLECULE_SLOW + 2 * (MOLECULE_LIFE - MOLECULE_SLOW));
       const sx = en.kt < MOLECULE_SLOW ? slowSpeed * en.kt : slowSpeed * MOLECULE_SLOW + 2 * slowSpeed * (en.kt - MOLECULE_SLOW);
       en.col = wrapCol(this.camCol - en.dir * MOLECULE_SPAN + en.dir * sx);
-      en.floor = en.baseFloor + Math.sin(this.time * 3 + en.phase) * 0.15;
+      en.floor = en.baseFloor;
       if (en.kt > MOLECULE_LIFE) {
         this.enemies.splice(ei, 1);
         return true;
@@ -2439,9 +2489,10 @@ export class TowerTopplerGame {
       // ORIGINAL tumble: "you will tumble off the ledge and land a few levels down" (Hewson
       // manual). Port shape: a hop of ~2 rows, then a fall straight through platforms for ~8 rows
       // (3 for the small tumble), then a normal fall onto whatever is below.
-      const start = p.floor;
-      p.vy = 16; // ~2 rows up at the Original's falling gravity
-      p.dropThrough = start - (small ? 3 : 8) + 0.5;
+      // the port's tumble: 40 ticks (30 for the molecule or a lift into a block) along its table,
+      // passing through platforms, then an ordinary fall onto whatever is below
+      p.arc = makeArc('tumble', p.floor, 0, small ? 30 : 40, ARC_TUMBLE);
+      p.dropThrough = -1e9;
       p.tumbling = true;
       p.invuln = 99; // collisions are off for the whole tumble
       p.stunTimer = 99;
