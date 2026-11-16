@@ -110,27 +110,43 @@ export function getMedals(key) {
 }
 
 // Merges newly earned medals; returns which ones are new this run
+// Medals per tower. The Original has 5, built on its own end-of-climb tally (Time, Technique,
+// Extras); the Reboot has 5 for different play styles.
+export const MEDALS = {
+  original: [
+    { id: 'time', icon: '⏱️', name: 'SPEED', desc: 'Topple it with 40% of the clock left' },
+    { id: 'nohit', icon: '🛡️', name: 'UNTOUCHED', desc: 'Never get knocked down' },
+    { id: 'survivor', icon: '🐸', name: 'SURVIVOR', desc: "Don't lose a life on this tower" },
+    { id: 'marksman', icon: '🎯', name: 'MARKSMAN', desc: 'Destroy every flashing block and bouncing ball' },
+    { id: 'perfect', icon: '👑', name: 'PERFECT', desc: 'All four in a single climb' },
+  ],
+  reboot: [
+    { id: 'time', icon: '⏱️', name: 'SPEED', desc: 'Speedrunner: topple it with 40% of the clock left' },
+    { id: 'nohit', icon: '🛡️', name: 'NO HITS', desc: 'Careful: never get hit' },
+    { id: 'secrets', icon: '⭐', name: 'EXPLORER', desc: 'Explorer: find every hidden star-fish' },
+    { id: 'purist', icon: '⏪', name: 'PURIST', desc: 'Purist: never rewind' },
+    { id: 'combo', icon: '🔥', name: 'COMBO', desc: 'Aggressive: land a 4x combo' },
+  ],
+};
+
 export function awardMedals(key, earned, timeTaken) {
-  if (!key) return { time: false, nohit: false, secrets: false };
+  if (!key) return {};
   const prev = getMedals(key);
-  const fresh = {
-    time: earned.time && !prev.time,
-    nohit: earned.nohit && !prev.nohit,
-    secrets: earned.secrets && !prev.secrets,
-  };
-  progress.medals[key] = {
-    time: prev.time || earned.time,
-    nohit: prev.nohit || earned.nohit,
-    secrets: prev.secrets || earned.secrets,
-    bestTime: prev.bestTime == null ? timeTaken : Math.min(prev.bestTime, timeTaken),
-  };
+  const fresh = {};
+  const next = { ...prev };
+  for (const [id, got] of Object.entries(earned)) {
+    fresh[id] = Boolean(got) && !prev[id];
+    next[id] = Boolean(prev[id] || got);
+  }
+  next.bestTime = prev.bestTime == null ? timeTaken : Math.min(prev.bestTime, timeTaken);
+  progress.medals[key] = next;
   saveProgress();
   return fresh;
 }
 
 export function totalMedals() {
   let n = 0;
-  for (const m of Object.values(progress.medals)) n += (m.time ? 1 : 0) + (m.nohit ? 1 : 0) + (m.secrets ? 1 : 0);
+  for (const m of Object.values(progress.medals)) for (const [k, v] of Object.entries(m)) if (k !== 'bestTime' && v === true) n++;
   return n;
 }
 

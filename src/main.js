@@ -2,10 +2,11 @@ import { sound } from './audio.js';
 import { InputController } from './input.js';
 import { GameRenderer } from './renderer.js';
 import { TowerTopplerGame } from './game.js';
-import { settings, setSetting, progress, saveProgress, getMedals, totalMedals, SKINS, skinUnlocked, currentSkin } from './settings.js';
+import { settings, setSetting, progress, saveProgress, getMedals, totalMedals, SKINS, skinUnlocked, currentSkin, MEDALS } from './settings.js';
 import { applyControls, bindControlsInput, ControlEditor } from './controls.js';
 import { OptionsMenu } from './options.js';
 import { LEVELS, levelsFor, makeCampaignProvider, towerOfIndex } from './campaign.js';
+import { TROPHIES, TROPHY_GROUPS, trophyState, trophyCount, checkTrophies } from './trophies.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('game-canvas');
@@ -42,6 +43,7 @@ const overlays = {
   skins: $('overlay-skins'),
   howto: $('overlay-howto'),
   results: $('overlay-results'),
+  trophies: $('overlay-trophies'),
 };
 const show = (name) => overlays[name].classList.remove('hidden');
 const hide = (name) => overlays[name].classList.add('hidden');
@@ -149,6 +151,10 @@ const game = new TowerTopplerGame(renderer, input, {
     }
   },
   onBanner: showBanner,
+  onTrophies(list) {
+    trophyQueue.push(...list);
+    if (!trophyShowing) showNextTrophy();
+  },
   onHint(text) {
     hintText.textContent = text;
     hintEl.classList.remove('hidden');
@@ -160,19 +166,23 @@ const game = new TowerTopplerGame(renderer, input, {
   onTowerResults(r) {
     $('res-label').textContent = `${r.towerLabel} TOPPLED`;
     $('res-name').textContent = r.towerName;
-    const setMedal = (id, earned, fresh) => {
-      const el = $(id);
-      el.classList.toggle('earned', earned);
-      el.classList.remove('fresh');
-      if (fresh) requestAnimationFrame(() => el.classList.add('fresh'));
-    };
-    const prev = r.mode === 'endless' ? { time: false, nohit: false, secrets: false } : null;
-    setMedal('medal-time', r.earned.time, r.fresh.time || (prev && r.earned.time));
-    setMedal('medal-nohit', r.earned.nohit, r.fresh.nohit || (prev && r.earned.nohit));
-    setMedal('medal-secrets', r.earned.secrets, r.fresh.secrets || (prev && r.earned.secrets));
+    // this mode's 5 medals: lit if won this climb, pulsing if won for the first time
+    const row = $('medal-row');
+    row.innerHTML = '';
+    for (const md of MEDALS[r.original ? 'original' : 'reboot']) {
+      const el = document.createElement('div');
+      el.className = 'medal';
+      el.title = md.desc;
+      el.innerHTML = `<span class="medal-ico">${md.icon}</span><span class="medal-lbl">${md.name}</span>`;
+      const won = Boolean(r.earned[md.id]);
+      el.classList.toggle('earned', won);
+      if (won && (r.fresh[md.id] || r.mode === 'endless')) requestAnimationFrame(() => el.classList.add('fresh'));
+      row.appendChild(el);
+    }
     $('res-time').textContent = formatClock(r.timeTaken);
     $('res-bonus').textContent = `+${r.bonus.toLocaleString()}`;
-    $('res-secrets').textContent = `${r.secrets.got}/${r.secrets.total}`;
+    $('res-secrets-lbl').textContent = r.original ? 'TARGETS' : 'STAR-FISH';
+    $('res-secrets').textContent = r.original ? `${r.blocks.got}/${r.blocks.total}` : `${r.secrets.got}/${r.secrets.total}`;
     $('res-score').textContent = r.score.toLocaleString();
     let ghostTxt = '';
     if (r.newGhost && r.ghostTime) ghostTxt = `👻 New best run! Beat your ghost by ${(r.ghostTime - r.timeTaken).toFixed(1)}s`;
@@ -342,6 +352,86 @@ $('btn-skins-close').addEventListener('click', () => {
   show('title');
 });
 
+// ---------------- Trophy room ----------------
+function renderTrophyRoom() {
+  const medalsEl = $('tr-medals');
+  medalsEl.innerHTML = '';
+  for (const [label, prefix, list] of [
+    ['ORIGINAL', 'or', MEDALS.original],
+    ['REBOOT', 'c', MEDALS.reboot],
+  ]) {
+    const row = document.createElement('div');
+    row.className = 'tr-mrow';
+    const lab = document.createElement('div');
+    lab.className = 'tr-mlabel';
+    lab.textContent = label;
+    row.appendChild(lab);
+    game.campaignTowers.forEach((t, i) => {
+      const m = getMedals(`${prefix}${t.id}`);
+      const cell = document.createElement('div');
+      cell.className = 'tr-mcell';
+      cell.style.setProperty('--c', t.palette?.brickB || '#7dd3fc');
+      cell.title = `${i + 1}. ${titleCase(t.name)}`;
+      cell.innerHTML = `<span class="tr-mnum">${i + 1}</span><span class="tr-mdots">${list.map((md) => `<i class="${m[md.id] ? 'on' : ''}">${md.icon}</i>`).join('')}</span>`;
+      row.appendChild(cell);
+    });
+    medalsEl.appendChild(row);
+  }
+  const list = $('tr-list');
+  list.innerHTML = '';
+  let got = 0;
+  let group = null;
+  for (const t of TROPHIES) {
+    if (t.group !== group) {
+      group = t.group;
+      const h = document.createElement('div');
+      h.className = 'tr-group';
+      h.textContent = group;
+      list.appendChild(h);
+    }
+    const st = trophyState(t);
+    if (st.unlocked) got++;
+    const row = document.createElement('div');
+    row.className = `tr-item${st.unlocked ? ' on' : ''}`;
+    const pct = Math.round((st.value / st.goal) * 100);
+    row.innerHTML = `<span class="tr-icon">${t.icon}</span><span class="tr-body"><span class="tr-name">${t.name}</span><span class="tr-desc">${t.desc}</span>${
+      st.unlocked ? '' : t.goal > 1 ? `<span class="tr-bar"><i style="width:${pct}%"></i></span><span class="tr-prog">${st.value} / ${st.goal}</span>` : ''
+    }</span><span class="tr-check">${st.unlocked ? '✓' : ''}</span>`;
+    list.appendChild(row);
+  }
+  $('tr-count').textContent = `${got} / ${TROPHIES.length}`;
+}
+$('medal-summary').addEventListener('click', () => {
+  checkTrophies(); // pick up anything earned before trophies existed
+  renderTrophyRoom();
+  hide('title');
+  show('trophies');
+});
+$('btn-trophies-close').addEventListener('click', () => {
+  hide('trophies');
+  refreshMenu();
+  show('title');
+});
+const trophyQueue = [];
+let trophyShowing = false;
+function showNextTrophy() {
+  const t = trophyQueue.shift();
+  const el = $('trophy-toast');
+  if (!t) {
+    trophyShowing = false;
+    el.classList.add('hidden');
+    return;
+  }
+  trophyShowing = true;
+  el.querySelector('.tt-icon').textContent = t.icon;
+  el.querySelector('.tt-name').textContent = t.name;
+  el.classList.remove('hidden', 'show');
+  void el.offsetWidth;
+  el.classList.add('show');
+  sound.medal?.(3);
+  setTimeout(showNextTrophy, 3200);
+}
+
 // ---------------- Menu ----------------
 function refreshMenu() {
   const sel = $('start-tower');
@@ -384,7 +474,7 @@ function refreshMenu() {
     $('continue-sub').textContent = `${where.replace(/\s+/g, ' ').trim()} · ${(saved.score || 0).toLocaleString()} pts · ${lives}`;
   }
   const n = totalMedals();
-  $('medal-summary').textContent = `🏅 ${n} medal${n === 1 ? '' : 's'} · ${progress.towersCleared || 0} towers toppled`;
+  $('medal-summary').textContent = `🏆 ${trophyCount()}/${TROPHIES.length} trophies · 🏅 ${n} medal${n === 1 ? '' : 's'} ›`;
   const daily = $('btn-daily');
   const endless = $('btn-endless');
   daily.disabled = !procgen;
@@ -433,8 +523,11 @@ function showTowerPick(dir) {
   const t = towers[i];
   if (!t) return;
   $('tp-n').textContent = String(i + 1);
-  const m = getMedals(`c${t.id}${settings.mirror ? 'm' : ''}`);
-  const icons = `${m.time ? '⏱️' : ''}${m.nohit ? '🛡️' : ''}${m.secrets ? '⭐' : ''}`;
+  // medals won on this tower: Original and Reboot, out of 5 each
+  const won = (key, list) => list.filter((md) => getMedals(key)[md.id]).length;
+  const mo = won(`or${t.id}`, MEDALS.original);
+  const mr = won(`c${t.id}${settings.mirror ? 'm' : ''}`, MEDALS.reboot);
+  const icons = mo || mr ? `🏅 ${mo}·${mr}` : '';
   const name = $('tp-name');
   name.textContent = titleCase(t.name);
   if (icons) {

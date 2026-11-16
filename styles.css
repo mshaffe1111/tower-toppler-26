@@ -2072,3 +2072,125 @@ body.editing-controls .action-prompt { display: none !important; }
   .title-modes, .title-icons { margin-top: 8px; }
   .medal-summary { display: none; }
 }
+
+/* ===================== Trophy room ===================== */
+button.medal-summary {
+  background: none;
+  border: 0;
+  padding: 6px 4px;
+  width: 100%;
+  cursor: pointer;
+  font-family: inherit;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+button.medal-summary:active { color: #fff; }
+#overlay-trophies { align-items: stretch; padding: 0; background: rgba(2, 4, 12, 0.92); }
+.modal-card.trophy-room {
+  max-width: 560px;
+  width: 100%;
+  margin: 0 auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: calc(10px + var(--safe-top)) 16px calc(8px + var(--safe-bottom));
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  text-align: left;
+}
+.tr-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 2px 10px; }
+.tr-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  background: linear-gradient(180deg, #fff3c4 0%, #fbbf24 55%, #d97706 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.tr-scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; padding-bottom: 10px; }
+.tr-section {
+  margin: 14px 2px 8px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.28em;
+  color: rgba(157, 197, 255, 0.7);
+}
+.tr-count { color: #fde68a; margin-left: 6px; letter-spacing: 0.1em; }
+.tr-mrow { display: grid; grid-template-columns: 62px repeat(8, 1fr); gap: 4px; align-items: center; margin-bottom: 6px; }
+.tr-mlabel { font-family: var(--font-display); font-size: 9px; font-weight: 800; letter-spacing: 0.14em; color: rgba(214, 228, 255, 0.8); }
+.tr-mcell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0 3px;
+  border-top: 2px solid var(--c);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c) 22%, transparent), transparent);
+}
+.tr-mnum { font-family: var(--font-display); font-size: 10px; font-weight: 900; color: #fff; }
+.tr-mdots { display: flex; flex-direction: column; gap: 1px; font-size: 10px; line-height: 1.1; }
+.tr-mdots i { font-style: normal; opacity: 0.16; filter: grayscale(1); }
+.tr-mdots i.on { opacity: 1; filter: none; }
+.tr-legend { margin: 2px 2px 0; font-size: 11px; color: rgba(170, 190, 220, 0.6); }
+.tr-list { display: flex; flex-direction: column; }
+.tr-item {
+  display: grid;
+  grid-template-columns: 36px 1fr 20px;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 2px;
+  border-bottom: 1px solid rgba(157, 197, 255, 0.1);
+}
+.tr-icon { font-size: 24px; text-align: center; filter: grayscale(1) brightness(0.55); }
+.tr-item.on .tr-icon { filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.55)); }
+.tr-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tr-name { font-family: var(--font-display); font-size: 12px; font-weight: 800; letter-spacing: 0.08em; color: rgba(214, 228, 255, 0.62); }
+.tr-item.on .tr-name { color: #fde68a; }
+.tr-desc { font-size: 12.5px; color: rgba(170, 190, 220, 0.75); }
+.tr-bar { display: block; height: 3px; margin-top: 4px; background: rgba(157, 197, 255, 0.15); border-radius: 2px; overflow: hidden; }
+.tr-bar i { display: block; height: 100%; background: linear-gradient(90deg, #38bdf8, #fbbf24); }
+.tr-prog { font-size: 10.5px; color: rgba(170, 190, 220, 0.6); }
+.tr-check { color: #4ade80; font-weight: 900; font-size: 16px; text-align: center; }
+.trophy-toast {
+  position: fixed;
+  left: 50%;
+  top: calc(64px + var(--safe-top));
+  transform: translate(-50%, -20px);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px 9px 12px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(30, 20, 4, 0.92), rgba(12, 10, 4, 0.92));
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5), 0 0 22px rgba(251, 191, 36, 0.28);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.trophy-toast.show { opacity: 1; transform: translate(-50%, 0); }
+.tt-icon { font-size: 24px; }
+.tt-text { display: flex; flex-direction: column; }
+.tt-text b { font-family: var(--font-display); font-size: 9px; letter-spacing: 0.24em; color: #fbbf24; }
+.tt-name { font-family: var(--font-display); font-size: 13px; font-weight: 800; letter-spacing: 0.06em; color: #fff; }
+/* five medals per tower on the results card */
+#medal-row { gap: 4px; flex-wrap: nowrap; }
+#medal-row .medal { width: auto; flex: 1 1 0; min-width: 0; padding: 8px 2px 7px; border-radius: 12px; }
+#medal-row .medal-ico { font-size: 21px; }
+#medal-row .medal-lbl { font-size: 7.5px; letter-spacing: 0.04em; white-space: nowrap; }
+.tr-group {
+  margin: 16px 2px 2px;
+  font-family: var(--font-display);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.26em;
+  color: #fbbf24;
+}
+.tr-mdots { font-size: 9px; }
