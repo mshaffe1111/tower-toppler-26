@@ -1,7 +1,7 @@
 // Campaign sequences.
 // ORIGINAL: the 1987 game, the 8 real towers, one climb each (realTowers.js).
 // REBOOT: 10 worlds x 5 towers (worlds.js), every tower from the grid generator with a fixed seed.
-import { WORLDS, TOWERS_PER_WORLD, CAMPAIGN_TOWERS, worldTowerPlan, worldOfIndex } from './worlds.js';
+import { WORLDS, TOWERS_PER_WORLD, CAMPAIGN_TOWERS, worldTowerPlan, worldOfIndex, placeRuneDoor } from './worlds.js';
 export const LEVELS = TOWERS_PER_WORLD; // Reboot: towers per world (the old 8 x 3 layout is gone)
 export const levelsFor = (variant) => (variant === 'original' ? 1 : TOWERS_PER_WORLD);
 export const campaignLength = (variant) => (variant === 'original' ? 8 : CAMPAIGN_TOWERS);
@@ -61,6 +61,7 @@ export function makeCampaignProvider({ towers, procgen, runSeed, variant }) {
       t.scenery = plan.scenery;
       t.label = plan.label;
       t.world = plan.world;
+      t.worldName = WORLDS[plan.world].name.toUpperCase();
       t.level = plan.tower + 1;
       t.levels = TOWERS_PER_WORLD;
       t.canonical = true;
@@ -68,6 +69,14 @@ export function makeCampaignProvider({ towers, procgen, runSeed, variant }) {
       t.difficulty = plan.difficulty;
       // the very last tower keeps the storm and its guardian
       if (plan.final) t.mechanic = 'storm';
+      // a hidden puzzle room behind a rune door (towers II and IV of each world)
+      if (plan.puzzle && t.grid) {
+        const at = placeRuneDoor(t.grid, plan.seed);
+        if (at) {
+          t.puzzle = { type: plan.puzzle, seed: plan.seed ^ 0x9e37, difficulty: plan.difficulty };
+          t.doors.push({ id: `${plan.label}-rune`, col: at.col, floor: at.floor, rune: true, targetId: null });
+        }
+      }
       cache.set(i, t);
     }
     return cache.get(i);

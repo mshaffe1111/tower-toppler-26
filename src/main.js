@@ -93,9 +93,9 @@ const game = new TowerTopplerGame(renderer, input, {
     appEl.classList.toggle('classic-rules', Boolean(settings.classic) || game.original);
     timerEl.parentElement?.classList.toggle('clock-off', settings.clock === false);
     timerEl.classList.toggle('urgent', hud.timer <= 15 && hud.mode === 'tower');
-    towerBadgeEl.textContent = hud.mode === 'submarine' ? 'SUB' : hud.towerLabel;
+    towerBadgeEl.textContent = hud.mode === 'submarine' ? 'SUB' : hud.mode === 'puzzle' ? 'ROOM' : hud.mode === 'glide' ? 'GLIDE' : hud.towerLabel;
     dirArrowEl.textContent = hud.dirHint;
-    const playing = ['tower', 'summit', 'levelclear', 'topple', 'results', 'submarine'].includes(hud.mode);
+    const playing = ['tower', 'summit', 'levelclear', 'topple', 'results', 'submarine', 'puzzle', 'glide'].includes(hud.mode);
     sound.setMusicActive(playing);
 
     const lives = hud.lives === Infinity ? 1 : hud.lives;
@@ -232,6 +232,34 @@ Promise.all([import('./subStage.js'), import('./subRenderer.js')])
   })
   .catch(() => {});
 
+// THE GLIDE: the hang-glider ride between worlds (Reboot campaign)
+let glideRenderer = null;
+const GLIDE_ENABLED = false; // switched on once the glide stage is finished and reviewed
+(GLIDE_ENABLED ? Promise.all([import('./glideStage.js'), import('./glideRenderer.js')]) : Promise.reject(new Error('glide off')))
+  .then(([stageMod, rendMod]) => {
+    glideRenderer = new rendMod.GlideRenderer(renderer.webgl, { softDotTex: renderer.softDotTex });
+    glideRenderer.resize(renderer.width, renderer.height);
+    game.glideStageFactory = () => new stageMod.GlideStage();
+    renderer.renderGlideStage = (g) => {
+      glideRenderer.render(g.glideStage, { time: g.time, particles: g.particles, popups: g.popups, shake: g.shake });
+    };
+  })
+  .catch(() => {});
+
+// Hidden puzzle rooms behind rune doors (Reboot campaign)
+let puzzleRenderer = null;
+Promise.all([import('./puzzleRoom.js'), import('./puzzleRenderer.js')])
+  .then(([roomMod, rendMod]) => {
+    puzzleRenderer = new rendMod.PuzzleRenderer(renderer.webgl, { softDotTex: renderer.softDotTex });
+    puzzleRenderer.resize(renderer.width, renderer.height);
+    game.makePuzzle = roomMod.makePuzzle;
+    game.puzzleRoomFactory = () => new roomMod.PuzzleRoom();
+    renderer.renderPuzzleRoom = (g) => {
+      puzzleRenderer.render(g.puzzleRoom, { time: g.time, particles: g.particles, popups: g.popups, shake: g.shake });
+    };
+  })
+  .catch(() => {});
+
 import('./pwa.js')
   .then((m) => {
     m.registerPWA?.();
@@ -247,6 +275,10 @@ function handleResize() {
   renderer.resize(rect.width, rect.height, dpr);
   subRenderer?.resize(rect.width, rect.height);
   game.subStage?.resize?.(rect.width, rect.height);
+  puzzleRenderer?.resize(rect.width, rect.height);
+  glideRenderer?.resize(rect.width, rect.height);
+  game.glideStage?.resize?.(rect.width, rect.height);
+  game.puzzleRoom?.resize?.(rect.width, rect.height);
   applyControls();
   controlEditor?.onResize();
 }
@@ -799,7 +831,7 @@ function togglePause() {
     controlEditor.close(true);
     return;
   }
-  if (!['tower', 'submarine', 'summit', 'paused'].includes(game.mode)) return;
+  if (!['tower', 'submarine', 'summit', 'puzzle', 'glide', 'paused'].includes(game.mode)) return;
   input.releaseAll();
   const paused = game.togglePause();
   sound.setMusicActive(!paused);
@@ -815,7 +847,7 @@ function togglePause() {
 $('btn-pause').addEventListener('click', togglePause);
 input.onPause = togglePause;
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && ['tower', 'submarine', 'summit'].includes(game.mode)) togglePause();
+  if (document.hidden && ['tower', 'submarine', 'summit', 'puzzle', 'glide'].includes(game.mode)) togglePause();
 });
 $('btn-resume').addEventListener('click', () => {
   sound.unlock();

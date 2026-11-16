@@ -38,6 +38,21 @@ world map (REBOOT on the title).
   Reboot Cabinet (250 medals).
 - **Rides between towers:** the submarine stage runs between towers, as before.
 
+## Hidden puzzle rooms (built)
+- **Where:** towers II and IV of every world (20 rooms) have a rune door, marked by a glowing
+  carved rune. Inside is a torch-lit chamber (src/puzzleRoom.js logic, src/puzzleRenderer.js).
+- **The clock:** the tower's clock stops while you're inside.
+- **Four types, in rotation, all generated from the tower's seed and proven solvable:**
+  - **Rune tiles:** stomp tiles to light a target pattern. The pattern is carved on the tower
+    wall a few floors away, not shown inside.
+  - **Bells:** ring them in order. The order is a row of coloured banners on the tower, a few
+    floors away.
+  - **Light beam:** rotate mirrors to guide the beam to the crystal.
+  - **Stone blocks:** push the blocks onto the plates.
+- **Reward:** a star-fish (counts toward the ⭐ Explorer medal), a key (keys open bonus towers,
+  coming), +15 s and +1500. A solved door goes dim.
+- **Trophy:** Rune Reader (1/10/20 rooms).
+
 ## Next
-- Hidden puzzle rooms behind some doors (clues on the tower, keys to bonus towers).
-- New mini-games between worlds, built to the submarine stage's standard.
+- Keys open bonus towers.
+- The Glide (between worlds), in progress; switched off in main.js until it's finished.

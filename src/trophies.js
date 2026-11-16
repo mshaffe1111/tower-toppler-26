@@ -113,6 +113,7 @@ export const TROPHIES = [
   ...tiers('combo-r', '🔥', 'Combo Master', 'Win 🔥 Combo on {n} Reboot towers.', [10, 25, 50], () => rebootMedalCount('combo'), R),
   ...tiers('explorer-r', '🧭', 'Explorer', 'Win ⭐ Explorer on {n} Reboot towers.', [10, 25, 50], () => rebootMedalCount('secrets'), R),
   ...tiers('starfish', '⭐', 'Star-fish Hunter', 'Find {n} hidden star-fish.', [10, 50, 150], () => stats().starfish, R),
+  ...tiers('puzzles', '🧩', 'Rune Reader', 'Solve {n} hidden puzzle rooms.', [1, 10, 20], () => stats().puzzles || 0, R),
   ...tiers('freezes', '🧊', 'Ice Sculptor', 'Freeze {n} enemies with charged shots.', [10, 50, 200], () => stats().freezes, R),
 
   // --- Daily & Endless

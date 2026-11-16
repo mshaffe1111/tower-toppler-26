@@ -2388,6 +2388,164 @@ class SoundEngine {
     this._fv(1568, 2, 400, t + 0.2, 0.3, 0.02, this.sfxSpace);
     this._fv(2093, 2, 400, t + 0.26, 0.3, 0.016, this.sfxSpace);
   }
+
+  // =========================================================================
+  // Hidden puzzle chambers (src/puzzleRoom.js). Self-contained additions.
+  // =========================================================================
+  /** Tuned chamber bell. semis = semitones above the chamber root (BELL_NOTES), lower = bigger bell. */
+  puzzleBell(semis = 0) {
+    if (!this._ok()) return;
+    const t = this._t();
+    const S = this.sfxSpace;
+    const f = 392 * Math.pow(2, clamp(finite(semis, 0), -12, 24) / 12);
+    // inharmonic FM bell: bright strike that mellows, plus the hum and tierce partials
+    this._fv(f, 1.4, f * 1.6, t, 2.6, 0.05, S, { dd: 0.6 });
+    this._fv(f, 3.5, f * 0.9, t, 0.9, 0.022, this.sfxGain, { dd: 0.4 });
+    this._ov('sine', f * 0.5, 0, t, 2.2, 0.03, S, { atk: 0.004 });
+    this._ov('sine', f * 2.76, 0, t, 0.7, 0.012, S, { atk: 0.002 });
+    this._nv(t, 0.05, 0.03, 5200, 2600, 'bandpass', 1.6, this.sfxGain, { atk: 0.001 });
+  }
+
+  /** Wrong bell: a soft detuned hum sinking away (gentle, not a buzzer). */
+  puzzleWrong() {
+    if (!this._ok()) return;
+    const t = this._t();
+    const S = this.sfxSpace;
+    this._ov('sine', 233, 196, t + 0.05, 0.9, 0.05, S, { atk: 0.02 });
+    this._ov('sine', 246, 207, t + 0.05, 0.9, 0.035, S, { atk: 0.02 });
+    this._ov('triangle', 116, 98, t + 0.05, 0.7, 0.03, this.sfxGain, { lp: 600, atk: 0.02 });
+  }
+
+  /** Rune tile flips under a stomp. on = it lit up. */
+  puzzleTile(on = 1) {
+    if (!this._ok()) return;
+    const t = this._t();
+    const S = this.sfxSpace;
+    this._ov('sine', 140, 70, t, 0.16, 0.12, this.sfxGain, { glide: 0.1, atk: 0.002 });
+    this._nv(t, 0.12, 0.05, 900, 300, 'lowpass', 0.8, this.sfxGain, { brown: true });
+    const f = on ? 1046.5 : 659.25;
+    this._fv(f, 2, f * 0.4, t + 0.02, 0.5, 0.032, S, on ? { f1: f * 1.5, glide: 0.08 } : { f1: f * 0.75, glide: 0.12 });
+    this._fv(f * 1.5, 2, f * 0.2, t + 0.09, 0.4, 0.016, S);
+  }
+
+  /** Mirror pivot: a short stone grind and a click into place. */
+  puzzleMirror() {
+    if (!this._ok()) return;
+    const t = this._t();
+    this._nv(t, 0.2, 0.05, 500, 1600, 'bandpass', 2.2, this.sfxGain, { brown: true, atk: 0.02 });
+    this._ov('square', 1800, 0, t + 0.2, 0.03, 0.02, this.sfxGain, { lp: 3000, atk: 0.001 });
+    this._fv(1318.5, 2, 300, t + 0.21, 0.25, 0.018, this.sfxSpace);
+  }
+
+  /** Heavy rune block slides one tile. */
+  puzzleBlock() {
+    if (!this._ok()) return;
+    const t = this._t();
+    this._nv(t, 0.22, 0.09, 260, 520, 'lowpass', 1.2, this.sfxGain, { brown: true, atk: 0.03 });
+    this._ov('sine', 82, 60, t + 0.18, 0.18, 0.12, this.sfxGain, { atk: 0.003 });
+  }
+
+  /** A block settles on a pressure plate. */
+  puzzlePlate() {
+    if (!this._ok()) return;
+    const t = this._t();
+    const S = this.sfxSpace;
+    this._ov('sine', 98, 73, t, 0.3, 0.14, this.sfxGain, { atk: 0.003 });
+    for (let i = 0; i < 3; i++) this._fv(523.25 * Math.pow(2, [0, 7, 12][i] / 12), 2, 200, t + 0.05 + i * 0.07, 0.6, 0.025, S);
+  }
+
+  /** Undo a push: a reversed little swoosh. */
+  puzzleUndo() {
+    if (!this._ok()) return;
+    const t = this._t();
+    this._nv(t, 0.22, 0.05, 2400, 500, 'bandpass', 1.2, this.sfxGain, { atk: 0.15 });
+    this._ov('sine', 880, 440, t, 0.18, 0.025, this.sfxGain, { atk: 0.1 });
+  }
+
+  /** Walked into a wall / object. */
+  puzzleBump() {
+    if (!this._ok()) return;
+    const t = this._t();
+    this._ov('sine', 120, 80, t, 0.09, 0.08, this.sfxGain, { atk: 0.002 });
+    this._nv(t, 0.06, 0.03, 700, 300, 'lowpass', 0.8, this.sfxGain, { brown: true });
+  }
+
+  /** Stepping into a chamber: a stone door rumbles shut behind you, the air hums. */
+  puzzleEnter() {
+    if (!this._ok()) return;
+    const t = this._t();
+    const S = this.sfxSpace;
+    this._nv(t, 0.7, 0.07, 180, 420, 'lowpass', 1, this.sfxGain, { brown: true, atk: 0.1 });
+    this._ov('sine', 55, 45, t + 0.55, 0.5, 0.12, this.sfxGain, { atk: 0.01 });
+    const ch = [0, 7, 12, 16];
+    for (let i = 0; i < ch.length; i++) this._ov('triangle', 196 * Math.pow(2, ch[i] / 12), 0, t + 0.3 + i * 0.05, 1.8, 0.012, S, { atk: 0.6, lp: 1800 });
+  }
+
+  /** Leaving a chamber. */
+  puzzleLeave() {
+    if (!this._ok()) return;
+    const t = this._t();
+    this._nv(t, 0.5, 0.05, 300, 2200, 'bandpass', 0.9, this.sfxGain, { atk: 0.2 });
+    this._ov('sine', 392, 784, t + 0.1, 0.35, 0.02, this.sfxSpace, { atk: 0.05 });
+  }
+
+  /** Chamber solved: a cascade of chamber bells into a glowing chord. */
+  puzzleSolve() {
+    if (!this._ok()) return;
+    const t = this._t();
+    const S = this.sfxSpace;
+    const run = [0, 4, 7, 9, 12, 16, 19, 24];
+    for (let i = 0; i < run.length; i++) {
+      const f = 392 * Math.pow(2, run[i] / 12);
+      this._fv(f, 1.4, f * 0.8, t + i * 0.07, 1.2, 0.026, S, { dd: 0.5 });
+    }
+    const end = t + run.length * 0.07;
+    const ch = [0, 4, 7, 12, 16];
+    for (let i = 0; i < ch.length; i++) this._ov('triangle', 196 * Math.pow(2, ch[i] / 12), 0, end, 2.2, 0.02, S, { atk: 0.08, hold: 0.4, lp: 2600 });
+    this._ov('sine', 98, 0, end, 1.2, 0.1, this.sfxGain, { atk: 0.01 });
+    this._nv(end, 1.6, 0.025, 6000, 9000, 'highpass', 0.7, S, { atk: 0.3 });
+  }
+
+  // ---- THE GLIDE (glideStage.js) ------------------------------------------------------------
+  /** Hang-glider wing flap: a soft whump of air under the sail plus a little upward lift tone. */
+  glideFlap() {
+    if (!this._ok()) return;
+    const t = this._t();
+    const D = this.sfxGain;
+    this._nv(t, 0.22, 0.09, 260, 900, 'bandpass', 0.9, D, { atk: 0.015, ft: 0.18 });
+    this._nv(t, 0.12, 0.05, 120, 70, 'lowpass', 0.7, D, { brown: true, atk: 0.005 });
+    this._ov('sine', this._vary(330, 0.04), 560, t + 0.02, 0.14, 0.035, D, { atk: 0.01 });
+  }
+
+  /** Flying through a ring gate: a bright bell sweep that climbs with the chain (i = 0..10). */
+  ringChime(i = 0) {
+    if (!this._ok()) return;
+    const t = this._t();
+    const k = Math.max(0, Math.min(12, Math.floor(finite(i, 0))));
+    const f = 659.25 * Math.pow(2, k / 12);
+    this._fv(f, 3.5, f * 0.6, t, 0.55, 0.04, this.sfxSpace);
+    this._fv(f * 1.5, 2, f * 0.3, t + 0.07, 0.5, 0.03, this.sfxSpace);
+    this._ov('sine', f * 2, f * 2.02, t + 0.12, 0.6, 0.014, this.sfxSpace);
+    this._nv(t, 0.3, 0.025, 2000, 7000, 'bandpass', 1.1, this.sfxGain, { atk: 0.06, ft: 0.25 });
+  }
+
+  /** A lightning strike right next to you: instant crack and a short rolling boom. */
+  thunderClap() {
+    if (!this._ok()) return;
+    const t = this._t();
+    const S = this.sfxSpace;
+    const D = this.sfxGain;
+    this._nv(t, 0.18, 0.15, 5000, 1200, 'lowpass', 0.7, D, { atk: 0.002 });
+    this._nv(t + 0.03, 1.3, 0.14, 700, 110, 'lowpass', 0.8, S, { brown: true, ft: 1.0, atk: 0.01 });
+    this._ov('sine', 70, 34, t, 0.9, 0.1, D, { atk: 0.005 });
+  }
+
+  /** Air rushing past when you squeeze by something (glide close calls). */
+  glideWhoosh() {
+    if (!this._ok()) return;
+    const t = this._t();
+    this._nv(t, 0.32, 0.07, 500, 2600, 'bandpass', 1.4, this.sfxGain, { atk: 0.05, ft: 0.28 });
+  }
 }
 
 export const sound = new SoundEngine();
