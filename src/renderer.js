@@ -754,7 +754,7 @@ export class GameRenderer {
   _createEnemyMesh(type) {
     const model = type === 'robot' ? 'chaser' : type;
     const g = createEnemyModel(model, { chromeEnv: this.chromeEnv, softDotTex: this.softDotTex });
-    g.scale.setScalar(1.2); // read clearly at phone size
+    g.scale.setScalar(1.6); // about Pogo's size, like the 1987 sprites
     return g;
   }
 
@@ -1342,7 +1342,9 @@ export class GameRenderer {
       const er = TOWER_RADIUS + 0.4;
       // Ground enemies sit exactly on the ledge surface (measured from the model's own bounds)
       if (slot.groundOffset === undefined) slot.groundOffset = this._enemyGroundOffset(slot.mesh, en.type);
-      slot.mesh.position.set(er * Math.sin(eTheta), en.floor * FLOOR_HEIGHT + slot.groundOffset, er * Math.cos(eTheta));
+      // frozen: the ice block's top sits exactly where Pogo can stand on it (game ICE_TOP 0.95)
+      const yOff = en.stunTimer > 0 && !en.dead ? 0.95 - 0.367 * slot.mesh.scale.y : slot.groundOffset;
+      slot.mesh.position.set(er * Math.sin(eTheta), en.floor * FLOOR_HEIGHT + yOff, er * Math.cos(eTheta));
       const animEn = en.type === 'robot' ? { ...en, type: 'chaser', alert: 0 } : en;
       animateEnemy(slot.mesh, animEn, { time, dt: this._realDt || 1 / 60, eTheta, player: { col: player.col, floor: player.floor }, camCol, COLS });
 
