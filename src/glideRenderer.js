@@ -2925,6 +2925,10 @@ export class GlideRenderer {
     tint(this.midIsles, this._c2.set('#ffffff').lerp(this._c.set(T.haze), 0.35).multiplyScalar(dim), 1);
     tint(this.farTowers, this._c2.set(T.isleFar).multiplyScalar(0.85), 1);
     this._birdCol.set(T.isleFar).lerp(this._c2.set(T.haze), 0.3).multiplyScalar(0.75);
+    // the landing island (and its palms) follow the light of the sky
+    this.isleMat.color.set('#b8b8b8').multiplyScalar(dim < 1 ? 0.55 + dim * 0.4 : 1);
+    if (key === 'snow') this.isleMat.color.set('#d8dde6');
+    this.palms.material.color.setScalar(dim < 1 ? 0.6 : 1);
     // precipitation
     const pk = { none: -1, snow: 0, rain: 1, embers: 2, fireflies: 3, leaves: 4, drizzle: 5 }[T.precip] ?? -1;
     const pm = this.precipMat.uniforms;
