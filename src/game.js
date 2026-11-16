@@ -1270,7 +1270,10 @@ export class TowerTopplerGame {
 
   _checkHints(dt) {
     const p = this.player;
-    if (this.towerTime > 1.5) this._hint('walk', 'Push the stick to walk round the tower. Walk into a step to climb it.');
+    if (this.towerTime > 1.5) {
+      if (settings.controls?.scheme === 'slide') this._hint('walk-slide', 'Drag anywhere to walk · flick up to jump (or go through a door) · tap to fire.');
+      else this._hint('walk', 'Push the stick to walk round the tower. Walk into a step to climb it.');
+    }
     if (p.teeter > 0) this._hint('jump', 'Careful — that\'s the sea! Press JUMP to hop across gaps.');
     if (this.towerTime > 9) this._hint('peek', 'Drag anywhere on the screen to look around the tower and plan your route.');
     const near = this.enemies.find((e) => !e.dead && Math.abs(e.floor - p.floor) < 0.8 && Math.abs(colDist(e.col, p.col)) < 3.5);
