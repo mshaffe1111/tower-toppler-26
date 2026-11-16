@@ -65,8 +65,8 @@ const POGO_H = 1.8;
 // 0.28 row): heads bump on the slab's underside, so Pogo never pokes into a ledge above
 const POGO_VIS_H_REBOOT = 2.05;
 const POGO_VIS_H_ORIGINAL = 1.95;
-// drawn ledge thickness in steps (props.js: Original 0.8 of a row; Reboot 0.175 / 0.28)
-const SLAB_ROWS_ORIGINAL = 0.8;
+// drawn ledge thickness in steps (props.js: Original 0.65 of a row; Reboot 0.175 / 0.28)
+const SLAB_ROWS_ORIGINAL = 0.65;
 const SLAB_ROWS_REBOOT = 0.62;
 // ORIGINAL timing from the PICO-8 port, on the same clock as everything else: 32 port ticks a
 // second, the scale at which its walk and lift speeds match the 7800 footage (2.0 columns/s,

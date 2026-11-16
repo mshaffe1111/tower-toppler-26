@@ -99,7 +99,20 @@ Walk 2.0 columns/s; a stair step is 1 column × 1 brick row; Pogo is about 2 row
 - **Running tests:** Playwright with swiftshader. It draws only about 2 fps, so step the game by
   hand with `g.update(1/60)` in timing tests.
 
-## Proportions, lifts and solid ledges (measured from the player's 7800 clip)
+## Correction: the earlier clips were the NES version (Castelian)
+The player's Level 1 video (2026-11-16) is the real 7800 game: a magenta tower and cyan Pogo.
+The earlier j3/jm clips (grey tower, green frog Pogo, `060:2` timer) are the NES version.
+The Original is now measured from the 7800 video:
+- One big brick row per step, 0.43 of a column tall (54 px rows, 321 px tower radius).
+- Ledges are drawn 0.65 of a row thick (0.8 in the video; 0.65 keeps Tower 8's jump under a
+  ledge, which the real game allows).
+- Pogo is 2 rows tall, about as wide as tall (the 7800 sprite is squat; ours is still slimmer).
+- Lifts sit one step above their ledge (the player's correction). You walk into one and Pogo
+  steps up; you step off the same way. Lifts ride at 3.1 rows/s (12.4 rows in 4.0 s).
+- The video has no running jump, so the jump arc is still the port's table.
+The section below is kept for history; its 0.28 step was from the NES clip.
+
+## Proportions, lifts and solid ledges (measured from the NES clip, superseded above)
 - **Step height:** a 7800 step row is 0.28 of a column (21.5 px rows, tower radius 195 px).
   `FH` = 0.28 in both modes (was 0.36). Pogo is 2.1 rows tall (measured 2.05–2.2).
 - **Lens:** the 7800 is drawn flat. Our 46° camera magnified Pogo against the tower (0.30 of

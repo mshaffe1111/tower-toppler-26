@@ -497,7 +497,7 @@ export const DOOR_W = 0.68; // world units across the opening
 // (An earlier clip measured 0.28, but it was the NES version, Castelian.) REBOOT: its own look.
 export const STEP_ORIGINAL = 0.43;
 export const STEP_REBOOT = 0.28;
-export const ORIGINAL_STEP_OPTS = { courses: 1, ledgeRows: 0.8 };
+export const ORIGINAL_STEP_OPTS = { courses: 1, ledgeRows: 0.65 }; // (0.8 in the video; 0.65 keeps Tower 8's jump under a ledge, which the real game allows)
 export let FH = STEP_REBOOT;
 export let DOOR_H = FH * 2.78; // a doorway is ~2.8 steps tall: taller than Pogo
 let COURSE_H = FH / 2; // two brick courses per step

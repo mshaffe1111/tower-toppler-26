@@ -17,7 +17,7 @@
  *
  * Bump VERSION to force a fresh precache. Old "tt26-" caches are deleted on activate.
  */
-const VERSION = 'v10';
+const VERSION = 'v11';
 const PREFIX = 'tt26-';
 const SHELL_CACHE = `${PREFIX}shell-${VERSION}`;
 // three.js is pinned to 0.170.0, so its cache can outlive shell versions.
