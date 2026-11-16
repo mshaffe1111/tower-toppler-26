@@ -29,7 +29,7 @@ const TOWER_LEAD = 5.4; // the next tower comes in from the horizon this long be
 const LANTERN_POINTS = 10;
 const STRING_BONUS = 100; // a whole lantern string in one pass
 const KITE_POINTS = 200;
-const GOLD_POINTS = 800;
+const GOLD_POINTS = 600;
 const GATE_POINTS = 250;
 const GATE_CHAIN_BONUS = 50; // per gate in an unbroken chain
 const PERFECT_BONUS = 750;
@@ -394,6 +394,7 @@ export class GlideStage {
       if (this.arriveT >= ARRIVE_TIME) {
         this.phase = 'done';
         this._finished = true;
+        sound?.setWind?.(0);
         return true;
       }
     }
@@ -429,6 +430,14 @@ export class GlideStage {
     sm.x -= this.scrollSpeed * dt;
 
     this._updateGlider(dt, input, firePressed, fx, sound);
+    // wind bed: rushing air, louder in a dive or a gust, fading out after touch-down
+    if (sound?.setWind) {
+      let w = 0;
+      if (this.phase === 'intro') w = 0.12 + 0.3 * g.launch;
+      else if (this.phase === 'ride') w = 0.28 + 0.35 * g.dive + 0.25 * Math.abs(this.wind) + 0.25 * clamp(g.speed - 1, 0, 1);
+      else w = 0.3 * (1 - clamp(this.arriveT / 2.5, 0, 1));
+      sound.setWind(clamp(w, 0, 1));
+    }
     this._spawn(dt, fx, sound);
     this._updateLanterns(dt, fx, sound);
     this._updateGates(dt, fx, sound);
@@ -757,10 +766,10 @@ export class GlideStage {
       const x = W + w + 20 * s;
       this.thermals.push({ x, w, str: rand(0.75, 1.0), fade: 0, age: 0, seed: Math.random() * TAU });
       // half the thermals carry a rising string of lanterns: ride it up to collect them
-      if (goodOpen && Math.random() < 0.6) this._pattern('column', x, rand(this.height * 0.45, maxY));
+      if (goodOpen && Math.random() < 0.45) this._pattern('column', x, rand(this.height * 0.45, maxY));
     }
     if (goodOpen && t >= n.pattern) {
-      n.pattern = t + rand(2.4, 3.2) - this.healing * 0.3;
+      n.pattern = t + rand(2.9, 3.7) - this.healing * 0.3;
       const kinds = ['arc', 'valley', 'wave', 'line', 'line'];
       const kind = kinds[Math.floor(Math.random() * kinds.length)];
       const cy = rand(minY + 40 * s, maxY - 30 * s);

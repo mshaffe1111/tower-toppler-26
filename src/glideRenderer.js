@@ -1896,7 +1896,7 @@ export class GlideRenderer {
     this.streakMesh.renderOrder = 20;
     this.scene.add(this.streakMesh);
     this.streaks = [];
-    for (let i = 0; i < MAX_STREAK; i++) this.streaks.push({ x: 0, y: 0, z: 0, len: 1, life: 0, max: 1, v: 1, a: 0.5 });
+    for (let i = 0; i < MAX_STREAK; i++) this.streaks.push({ x: 0, y: 0, z: 0, len: 1, life: 0, max: 1, v: 1, a: 0.5, rz: 0, vy: 0 });
     this._streakIdx = 0;
 
     // additive glows (soft-dot quads) for everything that shines
@@ -2925,6 +2925,10 @@ export class GlideRenderer {
     tint(this.midIsles, this._c2.set('#ffffff').lerp(this._c.set(T.haze), 0.35).multiplyScalar(dim), 1);
     tint(this.farTowers, this._c2.set(T.isleFar).multiplyScalar(0.85), 1);
     this._birdCol.set(T.isleFar).lerp(this._c2.set(T.haze), 0.3).multiplyScalar(0.75);
+    // the landing island (and its palms) follow the light of the sky
+    this.isleMat.color.set('#b8b8b8').multiplyScalar(dim < 1 ? 0.55 + dim * 0.4 : 1);
+    if (key === 'snow') this.isleMat.color.set('#d8dde6');
+    this.palms.material.color.setScalar(dim < 1 ? 0.6 : 1);
     // precipitation
     const pk = { none: -1, snow: 0, rain: 1, embers: 2, fireflies: 3, leaves: 4, drizzle: 5 }[T.precip] ?? -1;
     const pm = this.precipMat.uniforms;
@@ -2996,9 +3000,11 @@ export class GlideRenderer {
     p.kind = kind;
   }
 
-  _spawnStreak(x, y, z, len, v, life, a) {
+  _spawnStreak(x, y, z, len, v, life, a, rz = 0, vy = 0) {
     const s = this.streaks[this._streakIdx];
     this._streakIdx = (this._streakIdx + 1) % MAX_STREAK;
+    s.rz = rz;
+    s.vy = vy;
     s.x = x;
     s.y = y;
     s.z = z;
@@ -3996,6 +4002,19 @@ export class GlideRenderer {
       }
       this._spawnStreak(hw * kz + 3, y, z, lerp(1.2, 4, Math.random()) * (1 + sk), 1.4 + sk * 1.2 + gust, 0.9 + Math.random() * 0.6, lerp(0.25, 0.6, Math.random()) * (0.5 + sk * 0.6 + gust * 0.5));
     }
+    // gust bands: a river of slanted streaks you can see coming (up or down draught)
+    const gusts = stage.gusts || EMPTY;
+    this._gustAcc = (this._gustAcc || 0) + dt * gusts.length * 26;
+    while (this._gustAcc > 1 && gusts.length) {
+      this._gustAcc -= 1;
+      const u = gusts[Math.floor(Math.random() * gusts.length)];
+      const gx = u.x + Math.random() * u.w;
+      const gy = u.y + (Math.random() - 0.5) * u.h;
+      const w = this._toWorld(gx, gy, 0, this._v3);
+      const slant = -(u.dir || 1) * 0.28;
+      this._spawnStreak(w.x, w.y, lerp(-1, 1.5, Math.random()), (u.w * pxw) * lerp(0.15, 0.35, Math.random()), 2.4, 0.55 + Math.random() * 0.3, lerp(0.45, 0.9, Math.random()), slant, -(u.dir || 1) * speed * 0.6);
+    }
+    if (!gusts.length) this._gustAcc = 0;
     const mesh = this.streakMesh;
     const arr = mesh.instanceMatrix.array;
     const col = mesh.instanceColor.array;
@@ -4007,8 +4026,9 @@ export class GlideRenderer {
       s.life -= dt;
       const kz = (CAM_Z - s.z) / CAM_Z;
       s.x -= (speed * s.v + 3) * dt;
+      s.y += s.vy * dt;
       const a = Math.min(1, s.life / s.max * 2.5) * Math.min(1, (s.max - s.life) * 6) * s.a * night;
-      putMat(arr, n, s.x, s.y, s.z, s.len, 0.035 * kz + 0.02, 1, 0);
+      putMat(arr, n, s.x, s.y, s.z, s.len, 0.035 * kz + 0.02, 1, s.rz);
       col[n * 3] = a;
       col[n * 3 + 1] = a;
       col[n * 3 + 2] = a;

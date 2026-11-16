@@ -3035,16 +3035,18 @@ export class TowerTopplerGame {
     this.comboCount = 0;
     this.comboTimer = 0;
     sound.stopAmbience?.();
+    sound.setTowerTheme?.('sub');
     this.glideStage = this.glideStageFactory();
+    // worldIndex: the world just finished (it sets the sky); the stage shows its own banners
     this.glideStage.start({
       width: this.renderer.width,
       height: this.renderer.height,
-      worldIndex: next.world,
+      worldIndex: this.tower.world ?? Math.max(0, next.world - 1),
       nextWorldName: next.worldName || next.name,
       nextGlow: next.palette?.glow || '#38bdf8',
+      fromGlow: this.tower.palette?.glow,
       healing: this.healing,
     });
-    this.cb.onBanner?.('THE GLIDE', `On to world ${next.world + 1}`);
     this._syncHud();
   }
 
@@ -3069,6 +3071,7 @@ export class TowerTopplerGame {
   }
 
   _endGlide() {
+    sound.setWind?.(0);
     if (this.glideStage?.collected) {
       bumpStat('glide', this.glideStage.collected);
       const fresh = checkTrophies();

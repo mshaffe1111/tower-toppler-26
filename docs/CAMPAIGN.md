@@ -38,6 +38,17 @@ world map (REBOOT on the title).
   Reboot Cabinet (250 medals).
 - **Rides between towers:** the submarine stage runs between towers, as before.
 
+## The Glide (between worlds)
+- **What:** after a world's summit, Pogo hang-glides from it to the next world's island, instead
+  of the sub (src/glideStage.js, src/glideRenderer.js).
+- **Flying:** about 22 s. Slide left/right for speed, push up or tap to flap and climb, push down
+  to dive. Thermals lift you.
+- **Pickups:** lantern strings, star kites, a rare golden lantern, and ring gates (combo up to x4).
+- **Hazards:** storm clouds that telegraph lightning, gull flocks, gust bands.
+- **Sky:** each world has its own (dawn, day, snow, sunset, night, after-rain, gale, storm,
+  ember).
+- **Arrival:** you land beside the next world's tower, then get the score tally.
+
 ## Hidden puzzle rooms (built)
 - **Where:** towers II and IV of every world (20 rooms) have a rune door, marked by a glowing
   carved rune. Inside is a torch-lit chamber (src/puzzleRoom.js logic, src/puzzleRenderer.js).
@@ -55,4 +66,4 @@ world map (REBOOT on the title).
 
 ## Next
 - Keys open bonus towers.
-- The Glide (between worlds), in progress; switched off in main.js until it's finished.
+- More mini-games: a topple rhythm finale; bonus towers opened by keys.
