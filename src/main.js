@@ -7,6 +7,7 @@ import { applyControls, bindControlsInput, ControlEditor } from './controls.js';
 import { OptionsMenu } from './options.js';
 import { LEVELS, levelsFor, makeCampaignProvider, towerOfIndex } from './campaign.js';
 import { TROPHIES, TROPHY_GROUPS, trophyState, trophyCount, checkTrophies } from './trophies.js';
+import { makeGeneratedTower, dailyPlan } from './towergen.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('game-canvas');
@@ -482,7 +483,8 @@ function refreshMenu() {
   if (procgen) {
     const seed = procgen.dailySeed();
     const best = progress.dailyBest[seed];
-    $('daily-sub').textContent = best ? `Today's best: ${best.toLocaleString()}` : 'New every day';
+    const plan = dailyPlan(seed);
+    $('daily-sub').textContent = best ? `Best ${best.toLocaleString()} · ${plan.label}` : `${plan.label} · ${plan.height} rows`;
     const eb = progress.endlessBestTower || 0;
     $('endless-sub').textContent = eb ? `Best: tower ${eb}` : 'How high can you go?';
   } else {
@@ -643,9 +645,13 @@ function startRun(cfg) {
   for (const k of Object.keys(overlays)) hide(k);
   let provider = null;
   if (cfg.mode === 'daily' && procgen) {
-    const seed = procgen.dailySeed();
-    const tower = procgen.generateTower({ seed, difficulty: 0.55, id: 900, name: null });
-    tower.seed = seed;
+    // the tower of the day, built from the original's pieces (towergen.js), the same for everyone
+    const plan = dailyPlan(procgen.dailySeed());
+    const base = game.campaignTowers[plan.weekday % game.campaignTowers.length];
+    const tower =
+      makeGeneratedTower({ seed: plan.seed, height: plan.height, difficulty: plan.difficulty, mechanic: plan.mechanic, palette: base.palette, name: `DAILY · ${plan.label.toUpperCase()}`, look: ['eye', 'robot', 'spiker'][plan.weekday % 3] }) ||
+      procgen.generateTower({ seed: plan.seed, difficulty: 0.55, id: 900, name: null });
+    tower.seed = plan.seed;
     provider = (i) => (i === 0 ? tower : null);
   } else if (cfg.mode === 'campaign') {
     // 8 towers x 3 levels: classic layout first, then two fresh generated levels per tower

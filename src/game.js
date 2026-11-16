@@ -399,8 +399,8 @@ export class TowerTopplerGame {
     this.flyerTimer = 5.5;
     // ORIGINAL real towers: enemies wait at fixed spots and appear as they come into view, never
     // more than 4 at once, molecule included (RESEARCH.md 6)
-    this.spawnPoints = t.real ? t.enemies.map((e) => ({ ...e, state: 'idle' })) : null;
-    if (t.real) this.enemies = [];
+    this.spawnPoints = t.real || t.generated ? t.enemies.map((e) => ({ ...e, state: 'idle' })) : null;
+    if (t.real || t.generated) this.enemies = [];
     this.moleculeTimer = MOLECULE_PERIOD;
     this.moleculeDir = 1;
     this.extras = 0;
@@ -969,7 +969,7 @@ export class TowerTopplerGame {
 
     // Elevators
     for (const el of this.elevators) {
-      if (this.original && this.player.onElevator !== el && el.floor > el.minFloor + 0.01 && el.recallTarget === null) {
+      if ((this.original || el.stops) && this.player.onElevator !== el && el.floor > el.minFloor + 0.01 && el.recallTarget === null) {
         el.idleT = (el.idleT || 0) + dt;
         if (el.idleT > 600 * PORT_TICK) el.floor = Math.max(el.minFloor, el.floor - 16 * dt); // port: waits 600 ticks, then drops back fast
       }
@@ -981,7 +981,7 @@ export class TowerTopplerGame {
         } else {
           el.floor += Math.sign(diff) * el.speed * 1.6 * dt;
         }
-      } else if (!this.original) {
+      } else if (!this.original && !el.stops) {
         // Reboot lifts shuttle up and down on their own. The Original's stay put until you ride
         // them with UP / DOWN ("Enter a tunnel or take elevator up: move controller up", 7800)
         el.floor += el.dir * el.speed * dt;
@@ -1212,8 +1212,8 @@ export class TowerTopplerGame {
             const dc = colDist(p.col, l.col + 0.5);
             return Math.sign(dc) === p.facing && Math.abs(dc) > 0.14 && Math.abs(dc) <= 0.62;
           }) ||
-          (this.original &&
-            this.elevators.find((el) => {
+          (this.elevators.find((el) => {
+              if (!el.stops) return false;
               if (Math.abs(el.floor - stepFloor) > 0.2) return false;
               const dc = colDist(p.col, el.col + 0.5);
               return Math.sign(dc) === p.facing && Math.abs(dc) > 0.14 && Math.abs(dc) <= 0.62;
