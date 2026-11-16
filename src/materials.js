@@ -447,12 +447,12 @@ function brickMaps() {
       const fine = n32(x, y) * 0.6 + n64(x, y) * 0.4;
       const grain = rand();
       // pits: sharp little dents
-      const pit = Math.max(0, n64(x + 31, y + 17) - 0.72) * 3.2;
-      h[i] = broad * 0.35 + mid * 0.25 + fine * 0.3 - pit * 0.6 + (grain - 0.5) * 0.06;
+      const pit = Math.max(0, n64(x + 31, y + 17) - 0.84) * 3.2;
+      h[i] = broad * 0.35 + mid * 0.2 + fine * 0.18 - pit * 0.35 + (grain - 0.5) * 0.04;
       // albedo: firing variation (darker clouds), sand grains, a few dark flecks
-      let v = 0.86 + (broad - 0.5) * 0.22 + (mid - 0.5) * 0.1 + (grain - 0.5) * 0.08;
-      if (grain > 0.992) v *= 0.55;
-      v *= 1 - pit * 0.35;
+      let v = 0.88 + (broad - 0.5) * 0.16 + (mid - 0.5) * 0.06 + (grain - 0.5) * 0.05;
+      if (grain > 0.996) v *= 0.7;
+      v *= 1 - pit * 0.15;
       const c = Math.max(0, Math.min(1, v));
       alb.data[i * 4] = c * 255;
       alb.data[i * 4 + 1] = c * 0.985 * 255;
@@ -491,7 +491,12 @@ function brickMaps() {
   return BRICK_MAPS;
 }
 
-export function createBrickMaterial(color = '#ffffff', { roughness = 1, emissive = '#000000', emissiveIntensity = 0, edgeDarken = 0.36 } = {}) {
+// hi: colour the lit (top/left) bevels shift toward; brickHalf: [half width, half height] of one
+// brick in its local space, for the per-brick face gradient
+export function createBrickMaterial(
+  color = '#ffffff',
+  { roughness = 1, emissive = '#000000', emissiveIntensity = 0, edgeDarken = 0.32, hi = '#ffffff', brickHalf = [0.24, 0.11] } = {}
+) {
   const M = brickMaps();
   // ~1 tile per 1.4 world units: grains ~5 mm at brick scale
   const rep = new THREE.Vector2(0.7, 0.7);
@@ -505,7 +510,7 @@ export function createBrickMaterial(color = '#ffffff', { roughness = 1, emissive
     color,
     map: tex(M.map),
     normalMap: tex(M.normalMap),
-    normalScale: new THREE.Vector2(0.75, 0.75),
+    normalScale: new THREE.Vector2(0.45, 0.45),
     roughnessMap: tex(M.orm),
     roughness,
     metalness: 0,
@@ -517,7 +522,17 @@ export function createBrickMaterial(color = '#ffffff', { roughness = 1, emissive
   mat.onBeforeCompile = (shader, r) => {
     wet(shader, r);
     shader.uniforms.edgeDarken = { value: edgeDarken };
-    shader.vertexShader = shader.vertexShader.replace(
+    shader.uniforms.brickHi = { value: new THREE.Color(hi) };
+    shader.uniforms.brickHalf = { value: new THREE.Vector2(brickHalf[0], brickHalf[1]) };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vBrickN;\nvarying vec2 vBrickP;')
+      .replace(
+        '#include <beginnormal_vertex>',
+        `#include <beginnormal_vertex>
+        vBrickN = objectNormal;
+        vBrickP = position.xy;`
+      )
+      .replace(
       '#include <uv_vertex>',
       `#include <uv_vertex>
       #ifdef USE_INSTANCING
@@ -534,7 +549,27 @@ export function createBrickMaterial(color = '#ffffff', { roughness = 1, emissive
       #endif`
     );
     shader.fragmentShader = shader.fragmentShader
-      .replace('uniform float waterY;', 'uniform float waterY;\nuniform float edgeDarken;')
+      .replace('uniform float waterY;', 'uniform float waterY;\nuniform float edgeDarken;\nuniform vec3 brickHi;\nuniform vec2 brickHalf;\nvarying vec3 vBrickN;\nvarying vec2 vBrickP;')
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        #ifdef USE_INSTANCING
+        {
+          // Every brick reads on its own, like the 1987 bricks: the top and left bevels catch a
+          // bright warm highlight, the bottom and right bevels fall into shadow, and the face
+          // itself is a touch lighter toward its top-left corner.
+          vec3 bn = normalize(vBrickN);
+          float hiK = clamp(smoothstep(0.25, 0.8, bn.y) + 0.65 * smoothstep(0.25, 0.8, -bn.x), 0.0, 1.0);
+          float loK = clamp(smoothstep(0.25, 0.8, -bn.y) + 0.65 * smoothstep(0.25, 0.8, bn.x), 0.0, 1.0);
+          vec2 fp = clamp(vec2(vBrickP.x / brickHalf.x, (vBrickP.y - brickHalf.y) / brickHalf.y), -1.0, 1.0);
+          float grad = fp.y * 0.6 - fp.x * 0.4;
+          diffuseColor.rgb *= 1.0 + grad * 0.1;
+          vec3 lum = vec3(dot(diffuseColor.rgb, vec3(0.3, 0.55, 0.15)));
+          diffuseColor.rgb = mix(diffuseColor.rgb, brickHi * max(lum * 2.4, vec3(0.4)), hiK * 0.75);
+          diffuseColor.rgb *= 1.0 - loK * 0.65;
+        }
+        #endif`
+      )
       .replace(
         '#include <opaque_fragment>',
         `{

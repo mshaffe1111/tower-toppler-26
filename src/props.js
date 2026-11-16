@@ -9,6 +9,7 @@
 //  * lifts run in a track recessed into the wall, on a metal hover platform with thrusters
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { COLS } from './levels.js';
 import { createLedgeStoneMaterial, createBrickMaterial } from './materials.js';
 
@@ -16,15 +17,33 @@ export const TOWER_RADIUS = 2.55;
 const TWO_PI = Math.PI * 2;
 const COL_ANGLE = TWO_PI / COLS;
 
-// Curved slab hugging the tower: annular sector centred on +Z, top face at y = 0
-export function arcSlab(r0, r1, span, height, bevel = 0.025, curveSegments = 6, bevelSegments = 3) {
+// Curved slab hugging the tower: annular sector centred on +Z, top face at y = 0, spanning
+// y = -height..0. NOTE: the bevel grows the footprint by `bevel` on every side. `corner` rounds the
+// four vertical edges (world units) so the ends catch light too.
+export function arcSlab(r0, r1, span, height, bevel = 0.025, curveSegments = 6, bevelSegments = 3, corner = 0) {
   const a0 = -span / 2 - Math.PI / 2;
   const a1 = span / 2 - Math.PI / 2;
   const shape = new THREE.Shape();
-  shape.moveTo(r1 * Math.cos(a0), r1 * Math.sin(a0));
-  shape.absarc(0, 0, r1, a0, a1, false);
-  shape.lineTo(r0 * Math.cos(a1), r0 * Math.sin(a1));
-  shape.absarc(0, 0, r0, a1, a0, true);
+  const P = (r, a) => [r * Math.cos(a), r * Math.sin(a)];
+  if (corner > 0) {
+    const c = Math.min(corner, (r1 - r0) * 0.45, ((r0 * span) / 2) * 0.9);
+    const o0 = c / r1;
+    const i0 = c / r0;
+    shape.moveTo(...P(r1, a0 + o0));
+    shape.absarc(0, 0, r1, a0 + o0, a1 - o0, false);
+    shape.quadraticCurveTo(...P(r1, a1), ...P(r1 - c, a1));
+    shape.lineTo(...P(r0 + c, a1));
+    shape.quadraticCurveTo(...P(r0, a1), ...P(r0, a1 - i0));
+    shape.absarc(0, 0, r0, a1 - i0, a0 + i0, true);
+    shape.quadraticCurveTo(...P(r0, a0), ...P(r0 + c, a0));
+    shape.lineTo(...P(r1 - c, a0));
+    shape.quadraticCurveTo(...P(r1, a0), ...P(r1, a0 + o0));
+  } else {
+    shape.moveTo(r1 * Math.cos(a0), r1 * Math.sin(a0));
+    shape.absarc(0, 0, r1, a0, a1, false);
+    shape.lineTo(r0 * Math.cos(a1), r0 * Math.sin(a1));
+    shape.absarc(0, 0, r0, a1, a0, true);
+  }
   shape.closePath();
   const geo = new THREE.ExtrudeGeometry(shape, {
     depth: Math.max(0.001, height - bevel * 2),
@@ -164,7 +183,54 @@ function textures() {
     g.lineTo(w - 26, h / 2);
     g.stroke();
   });
-  TEX = { cracks, frost, treadR: tread(1), treadL: tread(-1), hazard, runes };
+  // Limestone: pale stone with soft mottling and a dotted speckle (the classic ledge stone)
+  const limestoneDraw = (g, w, h) => {
+    g.fillStyle = '#f1ede4';
+    g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 90; i++) {
+      const x = rnd() * w;
+      const y = rnd() * h;
+      const r = 10 + rnd() * 34;
+      const gr = g.createRadialGradient(x, y, 0, x, y, r);
+      const dark = rnd() < 0.55;
+      gr.addColorStop(0, dark ? `rgba(120,108,86,${0.08 + rnd() * 0.1})` : `rgba(255,252,244,${0.1 + rnd() * 0.15})`);
+      gr.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = gr;
+      for (const ox of [-w, 0, w]) for (const oy of [-h, 0, h]) g.fillRect(x - r + ox, y - r + oy, r * 2, r * 2);
+    }
+    for (let i = 0; i < 2600; i++) {
+      const d = rnd();
+      g.fillStyle = d < 0.75 ? `rgba(78,68,52,${0.25 + rnd() * 0.45})` : `rgba(255,255,250,${0.4 + rnd() * 0.5})`;
+      const sz = rnd() < 0.85 ? 1 : 2;
+      g.fillRect(Math.floor(rnd() * w), Math.floor(rnd() * h), sz, sz);
+    }
+  };
+  const limestone = canvasTex(256, 256, limestoneDraw, { repeat: [2.2, 2.2] });
+  const crackedStone = canvasTex(
+    256,
+    256,
+    (g, w, h) => {
+      limestoneDraw(g, w, h);
+      g.strokeStyle = 'rgba(40,30,20,0.85)';
+      g.lineCap = 'round';
+      for (let k = 0; k < 9; k++) {
+        let x = rnd() * w;
+        let y = rnd() * h;
+        g.lineWidth = 1.2 + rnd() * 2;
+        g.beginPath();
+        g.moveTo(x, y);
+        for (let s2 = 0; s2 < 8; s2++) {
+          x += (rnd() - 0.5) * 50;
+          y += (rnd() - 0.3) * 36;
+          g.lineTo(x, y);
+        }
+        g.stroke();
+      }
+    },
+    { repeat: [2.2, 2.2] }
+  );
+  for (const t of [cracks]) t.repeat.set(2.2, 2.2);
+  TEX = { cracks, frost, treadR: tread(1), treadL: tread(-1), hazard, runes, limestone, crackedStone };
   return TEX;
 }
 
@@ -184,6 +250,7 @@ function createPortalMaterial(glow, glow2) {
       glow: { value: new THREE.Color(glow) },
       glow2: { value: new THREE.Color(glow2) },
       pull: { value: 1 },
+      aspect: { value: DOOR_H / DOOR_W },
     },
     vertexShader: /* glsl */ `
       varying vec2 vUv;
@@ -194,10 +261,12 @@ function createPortalMaterial(glow, glow2) {
       uniform vec3 glow;
       uniform vec3 glow2;
       uniform float pull;
+      uniform float aspect;
       varying vec2 vUv;
       float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       void main() {
-        vec2 p = (vUv - vec2(0.5, 0.44)) * vec2(1.0, 0.82);
+        // the opening is DOOR_W wide x DOOR_H tall: scale y so the vortex is round in the world
+        vec2 p = (vUv - vec2(0.5, 0.47)) * vec2(1.0, aspect);
         float r = length(p);
         float a = atan(p.y, p.x);
         // spiral arms wound tighter toward the centre, rotating inward
@@ -211,13 +280,13 @@ function createPortalMaterial(glow, glow2) {
         // sparkles being pulled in
         vec2 sp = vec2(swirl * 1.3, r * 18.0);
         float spark = step(0.985, hash(floor(sp))) * smoothstep(0.5, 0.18, r);
-        vec3 col = glow * disk * (0.25 + 0.75 * pow(arms, 3.0)) * 1.6;
-        col += glow2 * disk * pow(arms2, 6.0) * 0.8;
-        col += mix(glow, vec3(1.0), 0.5) * ring * 2.2;
+        vec3 col = glow * disk * (0.06 + 0.7 * pow(arms, 4.0)) * 1.25;
+        col += glow2 * disk * pow(arms2, 8.0) * 0.55;
+        col += mix(glow, vec3(1.0), 0.5) * ring * 2.0;
         col += vec3(1.0) * spark * 1.5;
         col *= 1.0 - core;
-        // dark rim toward the arch edge so it reads as a hole in the wall
-        float edge = smoothstep(0.62, 0.42, r);
+        // fades to pure black well inside the opening so it reads as a hole in the wall
+        float edge = smoothstep(0.5, 0.32, r);
         col *= edge;
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
@@ -227,43 +296,18 @@ function createPortalMaterial(glow, glow2) {
   });
 }
 
-// Arch-shaped geometry (rectangle with a semicircular top), UVs normalised to the bounding box
-function archGeometry(w, h) {
-  const r = w / 2;
-  const s = new THREE.Shape();
-  s.moveTo(-r, 0);
-  s.lineTo(r, 0);
-  s.lineTo(r, h - r);
-  s.absarc(0, h - r, r, 0, Math.PI, false);
-  s.lineTo(-r, 0);
-  const g = new THREE.ShapeGeometry(s, 24);
-  const pos = g.attributes.position;
-  const uv = g.attributes.uv;
-  for (let i = 0; i < pos.count; i++) uv.setXY(i, (pos.getX(i) + r) / w, pos.getY(i) / h);
-  uv.needsUpdate = true;
-  return g;
-}
-
 // ---------------------------------------------------------------------------------------------
 // Shared materials per tower palette
 // ---------------------------------------------------------------------------------------------
 export function createPropMaterials(pal, chromeEnv) {
   const T = textures();
-  // Ledges: the same bright polished-steel step on every tower, so they pop against any brick
+  // Ledges & lift discs: the same pale limestone on every tower (light cream tops, darker greige
+  // speckled fronts), so they always stand out from the coloured brick
   const mats = {
-    ledgeSteel: new THREE.MeshStandardMaterial({ color: '#dfe4ec', metalness: 0.82, roughness: 0.24, envMap: chromeEnv, envMapIntensity: 1.15 }),
-    ledgeGroove: new THREE.MeshStandardMaterial({ color: '#2a2f38', metalness: 0.7, roughness: 0.45, envMap: chromeEnv, envMapIntensity: 0.6 }),
-    corbel: new THREE.MeshStandardMaterial({ color: '#8b929e', metalness: 0.8, roughness: 0.38, envMap: chromeEnv, envMapIntensity: 0.9 }),
-    // Crumbling ledge: rusted, cracked steel with heat glowing through the cracks
-    crumble: new THREE.MeshStandardMaterial({
-      color: '#a8603a',
-      metalness: 0.45,
-      roughness: 0.72,
-      envMap: chromeEnv,
-      envMapIntensity: 0.5,
-      emissive: '#ff7a1a',
-      emissiveIntensity: 0.9,
-    }),
+    ledgeTop: new THREE.MeshStandardMaterial({ color: '#f3e9cf', map: T.limestone, roughness: 0.82, envMapIntensity: 0.55 }),
+    ledgeFront: new THREE.MeshStandardMaterial({ color: '#bfb39b', map: T.limestone, roughness: 0.9, envMapIntensity: 0.55 }),
+    // Crumbling ledge: the same stone, cracked through, heat glowing in the cracks
+    crumble: new THREE.MeshStandardMaterial({ color: '#e2d3b0', map: T.crackedStone, roughness: 0.9, emissive: '#ff7a1a', emissiveIntensity: 0.9 }),
     ice: new THREE.MeshPhysicalMaterial({
       color: '#cdefff',
       map: T.frost,
@@ -283,36 +327,48 @@ export function createPropMaterials(pal, chromeEnv) {
     treadL: new THREE.MeshStandardMaterial({ map: T.treadL, metalness: 0.4, roughness: 0.6 }),
     hazard: new THREE.MeshStandardMaterial({ map: T.hazard, roughness: 0.5 }),
     gold: new THREE.MeshStandardMaterial({ color: '#f5c542', metalness: 1, roughness: 0.25, envMap: chromeEnv, emissive: '#7c4a03', emissiveIntensity: 0.25 }),
-    violet: new THREE.MeshStandardMaterial({ color: '#a78bfa', metalness: 0.6, roughness: 0.3, envMap: chromeEnv, emissive: '#6d28d9', emissiveIntensity: 0.6 }),
-    archBrick: createBrickMaterial('#ffffff', {}), // coloured by buildTowerBody (the tower's own brick)
-    sillStone: createLedgeStoneMaterial(new THREE.Color('#c9c4bb').multiplyScalar(1.5), {}),
-    recess: new THREE.MeshBasicMaterial({ color: '#020308' }),
-    liftDeck: new THREE.MeshStandardMaterial({ color: '#94a3b8', metalness: 0.9, roughness: 0.28, envMap: chromeEnv }),
-    liftGlow: new THREE.MeshStandardMaterial({ color: '#86efac', emissive: '#22c55e', emissiveIntensity: 2.0 }),
-    spring: new THREE.MeshStandardMaterial({ color: '#4ade80', metalness: 0.55, roughness: 0.3, envMap: chromeEnv, envMapIntensity: 0.9, emissive: '#14532d', emissiveIntensity: 0.4 }),
-    thrusterGlow: new THREE.MeshBasicMaterial({ color: '#bbf7d0', transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }),
+    recess: new THREE.MeshBasicMaterial({ color: '#010205' }),
+    liftDisc: new THREE.MeshStandardMaterial({ color: '#e6dcc2', map: T.limestone, roughness: 0.85, envMapIntensity: 0.55 }),
+    liftTop: new THREE.MeshStandardMaterial({ color: '#f6eed8', map: T.limestone, roughness: 0.8, envMapIntensity: 0.55 }),
   };
   mats.crumble.emissiveMap = T.cracks;
   mats.crumble.needsUpdate = true;
-  mats.stoneList = [mats.archBrick, mats.sillStone];
+  mats.stoneList = [];
   return mats;
 }
 
 // ---------------------------------------------------------------------------------------------
-// Ledges
+// Ledges: stacked limestone slabs protruding from the wall (a lighter top course of three
+// slabs over a darker course of four, laid like bricks)
 // ---------------------------------------------------------------------------------------------
 let LGEO = null;
+function slabCourse(r0, r1, count, height, bevel, gapA, offset = 0) {
+  const pieceA = (COL_ANGLE * 0.94 - gapA * (count - 1)) / count;
+  const parts = [];
+  for (let i = 0; i < count; i++) {
+    const g = arcSlab(r0, r1, pieceA, height, bevel, 5, 2);
+    g.rotateY(-COL_ANGLE * 0.47 + pieceA / 2 + i * (pieceA + gapA) + offset);
+    parts.push(g);
+  }
+  return mergeGeometries(parts);
+}
 function ledgeGeos() {
   if (LGEO) return LGEO;
   const R = TOWER_RADIUS;
   const span = COL_ANGLE * 0.93;
   LGEO = {
-    // rounded "drum" step: big bevel = rolled front edge that catches a bright highlight
-    slab: arcSlab(R - 0.02, R + 0.73, COL_ANGLE * 0.8, 0.26, 0.085, 12, 4),
-    groove: arcSlab(R + 0.2, R + 0.825, COL_ANGLE * 0.86, 0.022, 0.006, 12, 1),
-    corbel: arcSlab(R - 0.06, R + 0.3, COL_ANGLE * 0.34, 0.2, 0.03, 4),
-    corbel2: arcSlab(R - 0.06, R + 0.16, COL_ANGLE * 0.24, 0.12, 0.022, 4),
-    crumbleSeg: arcSlab(R - 0.06, R + 0.8, span * 0.31, 0.26, 0.045, 4),
+    top: slabCourse(R - 0.03, R + 0.78, 3, 0.11, 0.025, -0.004),
+    body: (() => {
+      const g = slabCourse(R - 0.03, R + 0.72, 4, 0.15, 0.022, -0.004);
+      g.translate(0, -0.11, 0);
+      return g;
+    })(),
+    crumbleTop: arcSlab(R - 0.03, R + 0.8, span * 0.31, 0.11, 0.025, 4, 2),
+    crumbleBody: (() => {
+      const g = arcSlab(R - 0.03, R + 0.74, span * 0.31, 0.15, 0.022, 4, 2);
+      g.translate(0, -0.11, 0);
+      return g;
+    })(),
     iceSlab: arcSlab(R - 0.06, R + 0.82, span, 0.22, 0.06, 10),
     iceTop: arcSlab(R - 0.02, R + 0.8, span * 0.97, 0.05, 0.02, 10),
     convBase: arcSlab(R - 0.06, R + 0.82, span, 0.22, 0.03, 10),
@@ -342,10 +398,6 @@ export function buildLedge(l, pal, mats) {
     node.add(m);
     return m;
   };
-  const corbels = () => {
-    add(G.corbel, mats.corbel, -0.26);
-    add(G.corbel2, mats.corbel, -0.46);
-  };
   node.userData = { baseY: l.floor, type: l.type };
 
   if (l.type === 'box') {
@@ -364,13 +416,16 @@ export function buildLedge(l, pal, mats) {
     node.add(crate);
     node.userData.mainMat = boxMat;
   } else if (l.type === 'crumble') {
-    // Three cracked stones with molten light leaking through the fissures
+    // Three cracked limestone slabs with heat glowing through the fissures
     for (const k of [-1, 0, 1]) {
-      const seg = add(G.crumbleSeg, mats.crumble, 0);
-      seg.rotation.y = k * COL_ANGLE * 0.31;
-      seg.rotation.z = k * 0.02;
+      const a = k * COL_ANGLE * 0.31;
+      const top = add(G.crumbleTop, mats.crumble, 0);
+      top.rotation.y = a;
+      top.rotation.z = k * 0.02;
+      const body = add(G.crumbleBody, mats.crumble, 0);
+      body.rotation.y = a;
+      body.rotation.z = k * 0.02;
     }
-    corbels();
     node.userData.mainMat = mats.crumble;
   } else if (l.type === 'ice') {
     add(G.iceSlab, mats.ice, -0.02);
@@ -387,7 +442,6 @@ export function buildLedge(l, pal, mats) {
     add(G.convBase, mats.steelDark, -0.02);
     add(G.convTread, dir > 0 ? mats.treadR : mats.treadL, 0.015, false);
     add(G.convHazard, mats.hazard, -0.08, false);
-    // end rollers
     for (const k of [-0.47, 0.47]) {
       const holder = new THREE.Group();
       holder.rotation.y = k * COL_ANGLE * 0.93;
@@ -397,31 +451,25 @@ export function buildLedge(l, pal, mats) {
       holder.add(rol);
       node.add(holder);
     }
-    corbels();
   } else {
-    // Solid: polished steel drum step with a dark seam round its middle, steel bracket below
-    add(G.slab, mats.ledgeSteel, 0);
-    add(G.groove, mats.ledgeGroove, -0.118, false);
-    corbels();
+    // Solid: limestone slabs, pale top course over a darker speckled course
+    add(G.top, mats.ledgeTop, 0);
+    add(G.body, mats.ledgeFront, 0);
   }
   return node;
 }
 
 // ---------------------------------------------------------------------------------------------
-// Doors: carved stone archway + black-hole portal
+// Doors: a plain tall black opening in the brickwork with the black-hole vortex inside.
+// (The opening itself is cut by buildTowerBody; this adds the vortex, motes and exit emblem.)
 // ---------------------------------------------------------------------------------------------
+export const DOOR_W = 0.68; // world units across the opening
+export const DOOR_H = 1.0; // floor to the top of the 4th brick course
 let DGEO = null;
 function doorGeos() {
   if (DGEO) return DGEO;
-  DGEO = {
-    pillar: new RoundedBoxGeometry(0.17, 0.27, 0.2, 2, 0.035),
-    voussoir: new RoundedBoxGeometry(0.15, 0.13, 0.2, 2, 0.03),
-    keystone: new RoundedBoxGeometry(0.17, 0.2, 0.24, 2, 0.04),
-    sill: new RoundedBoxGeometry(0.86, 0.08, 0.3, 2, 0.03),
-    portal: archGeometry(0.56, 0.84),
-    recess: archGeometry(0.62, 0.9),
-    mote: new THREE.OctahedronGeometry(0.03, 0),
-  };
+  DGEO = { portal: new THREE.PlaneGeometry(DOOR_W * 0.96, DOOR_H * 0.96) };
+  DGEO.portal.translate(0, (DOOR_H * 0.96) / 2 + 0.02, 0);
   for (const geo of Object.values(DGEO)) geo.userData.shared = true;
   return DGEO;
 }
@@ -435,62 +483,25 @@ export function buildDoor(door, pal, mats, softDotTex) {
   const kind = door.isExit ? 'exit' : door.vault ? 'vault' : 'tunnel';
   const glow = kind === 'exit' ? '#ffb020' : kind === 'vault' ? '#b26bff' : pal.glow;
   const glow2 = kind === 'exit' ? '#fff3b0' : kind === 'vault' ? '#ff7ad9' : '#ffffff';
-  const frameMat = mats.archBrick;
 
-  const z = R + 0.02;
-  const recess = new THREE.Mesh(G.recess, mats.recess);
-  recess.position.set(0, 0.02, z - 0.01);
+  // set just behind the brick faces so the opening's edges are the bricks themselves
+  const z = R - 0.012;
   const portalMat = createPortalMaterial(glow, glow2);
   const portal = new THREE.Mesh(G.portal, portalMat);
-  portal.position.set(0, 0.04, z);
-  g.add(recess, portal);
+  portal.position.set(0, 0, z);
+  g.add(portal);
 
-  // Pillars
-  for (const side of [-1, 1]) {
-    for (let k = 0; k < 3; k++) {
-      const st = new THREE.Mesh(G.pillar, frameMat);
-      st.position.set(side * 0.37, 0.14 + k * 0.28, z + 0.06);
-      st.rotation.y = side * 0.04;
-      st.castShadow = true;
-      g.add(st);
-    }
-  }
-  // Arch voussoirs around the semicircle + keystone
-  const archR = 0.37;
-  const archY = 0.84 - 0.28;
-  const n = 7;
-  for (let i = 0; i < n; i++) {
-    const a = (i / (n - 1)) * Math.PI;
-    const isKey = i === (n - 1) / 2;
-    const st = new THREE.Mesh(isKey ? G.keystone : G.voussoir, isKey ? mats.sillStone : frameMat);
-    st.position.set(Math.cos(a) * archR, archY + Math.sin(a) * archR, z + 0.06);
-    st.rotation.z = a - Math.PI / 2;
-    st.castShadow = true;
-    g.add(st);
-  }
-  const sill = new THREE.Mesh(G.sill, mats.sillStone);
-  sill.position.set(0, -0.02, z + 0.08);
-  sill.receiveShadow = true;
-  g.add(sill);
-  // Keystone gem
-  const gem = new THREE.Mesh(
-    new THREE.OctahedronGeometry(0.05, 0),
-    new THREE.MeshStandardMaterial({ color: glow, emissive: glow, emissiveIntensity: 2.4 })
-  );
-  gem.position.set(0, archY + archR, z + 0.19);
-  g.add(gem);
-
-  // Motes drifting into the portal
+  // Motes drifting into the vortex
   const motes = [];
   const moteMat = new THREE.SpriteMaterial({ map: softDotTex, color: glow, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
   for (let i = 0; i < (kind === 'exit' ? 10 : 6); i++) {
     const m = new THREE.Sprite(moteMat);
     m.scale.setScalar(0.07);
-    m.userData = { a: Math.random() * TWO_PI, r: 0.35 + Math.random() * 0.25, sp: 0.6 + Math.random() * 0.8 };
+    m.userData = { a: Math.random() * TWO_PI, r: 0.22 + Math.random() * 0.12, sp: 0.6 + Math.random() * 0.8 };
     g.add(m);
     motes.push(m);
   }
-  // Exit crown emblem floating above the arch
+  // Exit crown emblem floating above the opening
   let crown = null;
   if (kind === 'exit') {
     crown = new THREE.Group();
@@ -502,18 +513,17 @@ export function buildDoor(door, pal, mats, softDotTex) {
       sp.position.set(Math.cos(a) * 0.12, 0.07, Math.sin(a) * 0.12);
       crown.add(sp);
     }
-    crown.position.set(0, 1.25, z + 0.15);
+    crown.position.set(0, 1.25, R + 0.2);
     g.add(crown);
   }
 
   const update = (time) => {
     portalMat.uniforms.time.value = time;
-    gem.rotation.y = time * 1.5;
     for (const m of motes) {
       const u = m.userData;
       const k = (time * u.sp * 0.35 + u.a) % 1;
       const rr = u.r * (1 - k);
-      m.position.set(Math.cos(u.a + k * 6) * rr, 0.48 + Math.sin(u.a + k * 6) * rr * 0.9, z + 0.04 + (1 - k) * 0.08);
+      m.position.set(Math.cos(u.a + k * 6) * rr, 0.5 + Math.sin(u.a + k * 6) * rr, z + 0.03 + (1 - k) * 0.08);
       m.material.opacity = Math.sin(k * Math.PI);
     }
     if (crown) {
@@ -525,114 +535,112 @@ export function buildDoor(door, pal, mats, softDotTex) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Lifts: recessed wall track + metal hover platform
+// Lifts: a column of stacked limestone discs standing against the wall, with a wider disc
+// platform on top that Pogo rides. The column grows and shrinks as the lift moves.
 // ---------------------------------------------------------------------------------------------
+const DISC_H = 0.16;
+let LIFTGEO = null;
+function liftGeos() {
+  if (LIFTGEO) return LIFTGEO;
+  // drum profile with rounded rims so a seam shows between stacked discs
+  const prof = (r, h, e) => [
+    new THREE.Vector2(0, 0),
+    new THREE.Vector2(r - e, 0),
+    new THREE.Vector2(r - e * 0.3, e * 0.3),
+    new THREE.Vector2(r, e),
+    new THREE.Vector2(r, h - e),
+    new THREE.Vector2(r - e * 0.3, h - e * 0.3),
+    new THREE.Vector2(r - e, h),
+    new THREE.Vector2(0, h),
+  ];
+  LIFTGEO = {
+    disc: new THREE.LatheGeometry(prof(0.3, DISC_H, 0.03), 28),
+    top: new THREE.LatheGeometry(prof(0.4, 0.13, 0.035), 32),
+    base: new THREE.LatheGeometry(prof(0.38, 0.12, 0.03), 28),
+  };
+  for (const geo of Object.values(LIFTGEO)) geo.userData.shared = true;
+  return LIFTGEO;
+}
+
 export function buildLiftTrack(el, pal, mats) {
+  // The column's footing: a wider disc where it stands
   const R = TOWER_RADIUS;
+  const G = liftGeos();
   const g = new THREE.Group();
   g.rotation.y = (el.col + 0.5) * COL_ANGLE;
-  const y0 = el.minFloor - 0.45;
-  const y1 = el.maxFloor + 0.95;
-  const h = y1 - y0;
-  // dark channel
-  const channel = new THREE.Mesh(new THREE.BoxGeometry(0.62, h, 0.05), mats.recess);
-  channel.position.set(0, y0 + h / 2, R - 0.01);
-  g.add(channel);
-  // rails
-  for (const x of [-0.24, 0.24]) {
-    const rail = new THREE.Mesh(new RoundedBoxGeometry(0.06, h, 0.07, 2, 0.02), mats.steel);
-    rail.position.set(x, y0 + h / 2, R + 0.04);
-    rail.castShadow = true;
-    g.add(rail);
-  }
-  // guide lights every half floor
-  const lightGeo = new THREE.BoxGeometry(0.05, 0.05, 0.02);
-  for (let y = y0 + 0.25; y < y1; y += 0.5) {
-    for (const x of [-0.24, 0.24]) {
-      const l = new THREE.Mesh(lightGeo, mats.liftGlow);
-      l.position.set(x, y, R + 0.08);
-      g.add(l);
-    }
-  }
-  // stone end caps
-  for (const y of [y0, y1]) {
-    const cap = new THREE.Mesh(new RoundedBoxGeometry(0.78, 0.14, 0.22, 2, 0.04), mats.steel);
-    cap.position.set(0, y, R + 0.06);
-    cap.castShadow = true;
-    g.add(cap);
-  }
+  const base = new THREE.Mesh(G.base, mats.liftDisc);
+  base.position.set(0, el.minFloor - 0.45, R + 0.42);
+  base.castShadow = true;
+  base.receiveShadow = true;
+  g.add(base);
   return g;
 }
 
-export function buildLiftPod(el, pal, mats, softDotTex) {
+export function buildLiftPod(el, pal, mats) {
   const R = TOWER_RADIUS;
+  const G = liftGeos();
   const pod = new THREE.Group();
   pod.rotation.y = (el.col + 0.5) * COL_ANGLE;
-  const span = COL_ANGLE * 0.92;
-  const deck = new THREE.Mesh(arcSlab(R + 0.02, R + 0.8, span * 0.92, 0.14, 0.05, 10, 3), mats.ledgeSteel);
-  deck.castShadow = true;
-  deck.receiveShadow = true;
-  const rim = new THREE.Mesh(arcSlab(R + 0.8, R + 0.85, span * 0.96, 0.04, 0.01, 10), mats.liftGlow);
-  rim.position.y = -0.04;
-  const under = new THREE.Mesh(arcSlab(R + 0.1, R + 0.7, span * 0.8, 0.08, 0.02, 8), mats.steelDark);
-  under.position.y = -0.12;
-  // bracket into the track
-  const bracket = new THREE.Mesh(new RoundedBoxGeometry(0.42, 0.18, 0.2, 2, 0.03), mats.steelDark);
-  bracket.position.set(0, -0.06, R + 0.04);
-  pod.add(deck, rim, under, bracket);
-  // chevrons on the deck
-  const chevMat = new THREE.MeshStandardMaterial({ color: '#86efac', emissive: '#22c55e', emissiveIntensity: 1.6 });
-  for (const dy of [-0.1, 0.1]) {
-    const ch = new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.012, 4, 3, Math.PI), chevMat);
-    ch.rotation.set(-Math.PI / 2, 0, Math.PI / 2);
-    ch.position.set(0, 0.006, R + 0.45 + dy);
-    pod.add(ch);
-  }
-  // hover thrusters
-  const glows = [];
-  for (const k of [-0.25, 0.25]) {
-    const [x, z] = polar(k * span, R + 0.42);
-    const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.08, 12), mats.steel);
-    nozzle.position.set(x, -0.2, z);
-    const flame = new THREE.Sprite(
-      new THREE.SpriteMaterial({ map: softDotTex, color: '#86efac', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending })
-    );
-    flame.position.set(x, -0.3, z);
-    flame.scale.set(0.22, 0.34, 1);
-    pod.add(nozzle, flame);
-    glows.push(flame);
-  }
+  // Every shaft has a landing ledge at its top floor: the platform sits a hair below the ledge
+  // top and inside its footprint, so at the top stop it docks into the ledge (no z-fighting)
+  const top = new THREE.Mesh(G.top, mats.liftTop);
+  top.position.set(0, -0.13 - 0.012, R + 0.42);
+  top.castShadow = true;
+  top.receiveShadow = true;
+  pod.add(top);
+
+  const bottom = el.minFloor - 0.45 + 0.12; // top of the footing disc
+  const maxDiscs = Math.ceil((el.maxFloor - el.minFloor + 0.45) / DISC_H) + 1;
+  const column = new THREE.InstancedMesh(G.disc, mats.liftDisc, maxDiscs);
+  column.castShadow = true;
+  column.receiveShadow = true;
+  column.frustumCulled = false;
+  pod.add(column);
+  const m4 = new THREE.Matrix4();
+  const layout = () => {
+    // stack whole discs down from just under the platform to the footing
+    const topY = pod.position.y - 0.13 - 0.012;
+    const len = Math.max(0, topY - bottom);
+    const count = Math.min(maxDiscs, Math.ceil(len / DISC_H));
+    for (let i = 0; i < count; i++) {
+      const y = topY - (i + 1) * DISC_H;
+      m4.makeTranslation(0, Math.max(bottom, y) - pod.position.y, R + 0.42);
+      column.setMatrixAt(i, m4);
+    }
+    column.count = count;
+    column.instanceMatrix.needsUpdate = true;
+  };
+  let lastY = null;
   pod.userData = {
-    update(time) {
-      const p = 0.8 + Math.sin(time * 30) * 0.15;
-      for (const f of glows) {
-        f.scale.set(0.2 * p, 0.34 * p, 1);
-        f.material.opacity = 0.7 + Math.sin(time * 41) * 0.15;
+    update() {
+      if (pod.position.y !== lastY) {
+        lastY = pod.position.y;
+        layout();
       }
-      chevMat.emissiveIntensity = 1.2 + Math.sin(time * 4) * 0.6;
     },
   };
   return pod;
 }
 
 // ---------------------------------------------------------------------------------------------
-// Tower body: a brick tower. Every tower is a bold single-colour brick cylinder (the colour is the
-// tower's identity, like the classic): running bond, four courses per floor, real bevelled bricks
-// with per-brick colour variation, recessed mortar, steel ledges, black openings, battlements.
+// Tower body: a brick tower, true to the 1987 original. Every tower is one bold, saturated brick
+// colour (the colour IS the tower's identity), running bond, four courses per floor, each brick
+// bevelled with a bright top-left edge and a dark bottom-right edge so it reads on its own.
+// Openings are plain black rectangles; the crown is brick battlements.
 // ---------------------------------------------------------------------------------------------
-// brick / alt: the two clay colours a tower's bricks vary between; vary: ±value variation;
-// burnt: share of over-fired darker bricks; mortar: joint colour; seamGlow: light in the joints
+// brick / alt: the two clay colours bricks vary between; hi: the warm highlight tint on the lit
+// bevels; vary: ±value variation per brick; burnt: share of over-fired darker bricks
 export const TOWER_STYLES = {
-  redbrick: { brick: '#b23a22', alt: '#9a2f1c', mortar: '#4a2c26', vary: 0.09, burnt: 0.06 },
-  royal: { brick: '#2d48c4', alt: '#3a37b0', mortar: '#1a1f4a', vary: 0.08, burnt: 0.04, ironBands: true },
-  moss: { brick: '#4f8a3a', alt: '#6b8536', mortar: '#26321e', vary: 0.09, burnt: 0.05, moss: true },
-  ice: { brick: '#9fcde9', alt: '#c4e4f5', mortar: '#5d84a0', vary: 0.06, frosted: true, seamGlow: 0.08, seamColor: '#7dd3fc' },
-  terracotta: { brick: '#cf6a2e', alt: '#b9552a', mortar: '#5c3622', vary: 0.09, burnt: 0.07, missing: 0.03 },
-  seabrick: { brick: '#23857f', alt: '#1e6f7a', mortar: '#173d3c', vary: 0.08, burnt: 0.04, barnacles: true },
-  charcoal: { brick: '#45414a', alt: '#35323a', mortar: '#2b1a12', vary: 0.1, burnt: 0.08, seamGlow: 0.2, seamColor: '#ff5a14' },
-  amethyst: { brick: '#62329a', alt: '#7440a8', mortar: '#2a1838', vary: 0.08, burnt: 0.04, crystals: true, seamGlow: 0.24, seamColor: '#f5c542' },
+  red: { brick: '#e2401c', alt: '#d03018', hi: '#ffc24d', mortar: '#3a120c', vary: 0.07, burnt: 0.03 },
+  green: { brick: '#2fb43a', alt: '#27a232', hi: '#c8ff7a', mortar: '#0c2e10', vary: 0.07, burnt: 0.03 },
+  blue: { brick: '#2c4fd6', alt: '#3341c4', hi: '#9fc4ff', mortar: '#0d1440', vary: 0.07, burnt: 0.03 },
+  ice: { brick: '#a9d6f2', alt: '#c9e8fa', hi: '#ffffff', mortar: '#4f7590', vary: 0.05, burnt: 0, frosted: true },
+  orange: { brick: '#e0702a', alt: '#cf5f22', hi: '#ffd27a', mortar: '#3d1a0a', vary: 0.07, burnt: 0.03 },
+  teal: { brick: '#1f9e96', alt: '#1a8a8a', hi: '#9ff5e6', mortar: '#0a2a2a', vary: 0.07, burnt: 0.03, barnacles: true },
+  magenta: { brick: '#a3207f', alt: '#8c1c78', hi: '#ff8ad8', mortar: '#2a0822', vary: 0.07, burnt: 0.03 },
+  gold: { brick: '#d6a21e', alt: '#c48f18', hi: '#fff1a8', mortar: '#3a2a06', vary: 0.07, burnt: 0.02 },
 };
-const STYLE_BY_TOWER = { 1: 'redbrick', 2: 'royal', 3: 'moss', 4: 'ice', 5: 'terracotta', 6: 'seabrick', 7: 'charcoal', 8: 'amethyst' };
+const STYLE_BY_TOWER = { 1: 'red', 2: 'green', 3: 'blue', 4: 'ice', 5: 'orange', 6: 'teal', 7: 'magenta', 8: 'gold' };
 export function towerStyleName(tower) {
   if (tower.style && TOWER_STYLES[tower.style]) return tower.style;
   if (STYLE_BY_TOWER[tower.id]) return STYLE_BY_TOWER[tower.id];
@@ -643,7 +651,7 @@ export function towerStyleName(tower) {
 const BRICKS_AROUND = 32; // ~0.5 wide
 const COURSE_H = 0.25; // 4 courses per floor
 const BRICK_PROUD = 0.055; // how far a brick face stands out from the mortar
-const BRICK_GAIN = 1.2; // instance colour gain (the clay texture is ~0.85 albedo)
+const BRICK_GAIN = 1.22; // instance colour gain (the clay texture is ~0.85 albedo)
 const MERLONS = 16;
 
 export function buildTowerBody(tower, pal, mats, softDotTex, chromeEnv = null) {
@@ -656,217 +664,169 @@ export function buildTowerBody(tower, pal, mats, softDotTex, chromeEnv = null) {
   const brickCol = new THREE.Color(S.brick);
   const altCol = new THREE.Color(S.alt);
 
-  // Mortar core: the joints between bricks (recessed, darker; on some towers lit from within).
-  // The renderer drives emissiveIntensity (0.35 normally), so the glow strength lives in the colour.
-  const seamEm = S.seamGlow ? new THREE.Color(S.seamColor).multiplyScalar(S.seamGlow / 0.35) : new THREE.Color('#000000');
-  const coreMat = createLedgeStoneMaterial(new THREE.Color(S.mortar).multiplyScalar(1.5), { emissive: seamEm, emissiveIntensity: 0.35 });
+  // Mortar core: the thin dark joints between bricks
+  const coreMat = createLedgeStoneMaterial(new THREE.Color(S.mortar).multiplyScalar(1.6), {});
   const core = new THREE.Mesh(new THREE.CylinderGeometry(R - 0.035, R - 0.035, totalH + 0.2, 64, 1, false), coreMat);
   core.position.y = totalH / 2;
   core.receiveShadow = true;
   core.castShadow = true; // the tower's shadow comes from the core (bricks skip the shadow pass)
   g.add(core);
 
-  // Openings (door arches, lift tracks): w = half-width in radians
-  const holes = [];
-  for (const d of tower.doors) holes.push({ a: (d.col + 0.5) * COL_ANGLE, w: 0.185, y0: d.floor - 0.02, y1: d.floor + 1.0 });
-  for (const el of tower.elevators) holes.push({ a: (el.col + 0.5) * COL_ANGLE, w: 0.16, y0: el.minFloor - 0.45, y1: el.maxFloor + 0.95 });
+  // Door openings: straight-sided black rectangles, four courses tall
+  const halfW = DOOR_W / 2 / (R + BRICK_PROUD); // half-width in radians at the brick face
+  const holes = tower.doors.map((d) => ({ a: (d.col + 0.5) * COL_ANGLE, w: halfW, y0: d.floor + 0.01, y1: d.floor + DOOR_H - 0.01 }));
   const angDist = (a, b) => {
     let d = (a - b) % TWO_PI;
     if (d > Math.PI) d -= TWO_PI;
     if (d < -Math.PI) d += TWO_PI;
-    return Math.abs(d);
+    return d;
   };
+  for (const h of holes) {
+    // the black interior: a box-shaped void set into the wall
+    const back = new THREE.Mesh(arcSlab(R - 0.3, R - 0.02, h.w * 2.4, DOOR_H + 0.08, 0.0, 6), mats.recess);
+    back.rotation.y = h.a;
+    back.position.y = h.y0 - 0.05 + DOOR_H + 0.08;
+    g.add(back);
+  }
 
   const N = BRICKS_AROUND;
   const blockA = TWO_PI / N;
-  // Behind each opening: a recessed panel of dark brick (shadowed niche, never a hole to the core)
-  const plateMat = createBrickMaterial(brickCol.clone().multiplyScalar(0.42), { edgeDarken: 0.2 });
-  for (const h of holes) {
-    const span = 2 * (h.w + blockA * 0.5);
-    const plate = new THREE.Mesh(arcSlab(R - 0.034, R + 0.008, span, h.y1 - h.y0 + 0.1, 0.01, 8), plateMat);
-    plate.rotation.y = h.a;
-    plate.position.y = h.y1 + 0.05;
-    plate.receiveShadow = true;
-    g.add(plate);
-  }
-
-  const brickGeo = arcSlab(R - 0.04, R + BRICK_PROUD, blockA * 0.94, COURSE_H - 0.03, 0.016, 3, 2);
-  brickGeo.translate(0, COURSE_H - 0.03, 0); // bottom at y = 0
-  const halfGeo = arcSlab(R - 0.04, R + BRICK_PROUD, blockA * 0.44, COURSE_H - 0.03, 0.016, 2, 2);
-  halfGeo.translate(0, COURSE_H - 0.03, 0);
+  const BRICK_HT = COURSE_H - 0.035;
+  const CAP_A = blockA * 0.8;
+  const brickGeo = arcSlab(R - 0.02, R + BRICK_PROUD - 0.03, CAP_A, BRICK_HT, 0.03, 3, 2, 0.03);
+  brickGeo.translate(0, BRICK_HT, 0); // spans y = 0 .. BRICK_HT
   const courses = Math.ceil(totalH / COURSE_H);
-  const brickMat = createBrickMaterial('#ffffff', {});
-  const inst = new THREE.InstancedMesh(brickGeo, brickMat, courses * N);
-  const halfInst = new THREE.InstancedMesh(halfGeo, brickMat, courses * 8);
-  inst.receiveShadow = halfInst.receiveShadow = true;
-  inst.castShadow = halfInst.castShadow = false;
+  const brickMat = createBrickMaterial('#ffffff', { hi: S.hi, brickHalf: [(CAP_A * (R + BRICK_PROUD - 0.03)) / 2 + 0.03, BRICK_HT / 2] });
+  const inst = new THREE.InstancedMesh(brickGeo, brickMat, courses * N + 64);
+  inst.receiveShadow = true;
+  inst.castShadow = false;
 
   const m4 = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const e = new THREE.Euler();
   const pos = new THREE.Vector3();
   const scl = new THREE.Vector3();
-  const moss = new THREE.Color('#5d8f2c');
   const frost = new THREE.Color('#f2faff');
   const col = new THREE.Color();
   const hsl = { h: 0, s: 0, l: 0 };
   let seed = (tower.id || 1) * 7717 + 3 + ((tower.seed | 0) % 9973);
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  const brickColour = (y) => {
+  const brickColour = () => {
     col.copy(brickCol).lerp(altCol, rnd() * rnd());
     col.multiplyScalar(BRICK_GAIN * (1 + (rnd() - 0.5) * 2 * S.vary));
-    if (rnd() < (S.burnt || 0)) {
-      col.multiplyScalar(0.68);
-      col.getHSL(hsl);
-      col.setHSL(hsl.h, hsl.s * 0.8, hsl.l);
-    }
+    if (rnd() < (S.burnt || 0)) col.multiplyScalar(0.78);
     col.getHSL(hsl);
-    col.setHSL(hsl.h + (rnd() - 0.5) * 0.012, hsl.s, hsl.l);
-    if (S.moss && rnd() < 0.1 + 0.22 * (1 - y / totalH)) col.lerp(moss, 0.25 + rnd() * 0.3);
-    if (S.frosted) col.lerp(frost, 0.08 + rnd() * 0.22);
+    col.setHSL(hsl.h + (rnd() - 0.5) * 0.01, hsl.s, hsl.l);
+    if (S.frosted) col.lerp(frost, 0.05 + rnd() * 0.15);
     return col;
   };
-  const deco = []; // {kind, a, y}
+  const deco = [];
   let n = 0;
-  let hn = 0;
+  // a brick's full half-span including its bevel (the rest of the pitch is the joint)
+  const half = (CAP_A * (R + BRICK_PROUD - 0.03) + 0.06) / 2 / (R + BRICK_PROUD);
+  const joint = blockA * 0.08;
+  const place = (a0, a1, y0) => {
+    // a (possibly cut) brick covering angles a0..a1
+    const span = a1 - a0;
+    if (span < blockA * 0.12 || n >= inst.count) return;
+    q.setFromEuler(e.set(0, (a0 + a1) / 2, 0));
+    m4.compose(pos.set(0, y0 + 0.0175, 0), q, scl.set(Math.max(0.1, span / (half * 2)), 1, 1));
+    inst.setMatrixAt(n, m4);
+    inst.setColorAt(n, brickColour());
+    n++;
+  };
   for (let c = 0; c < courses; c++) {
     const y0 = c * COURSE_H;
     const yc = y0 + COURSE_H / 2;
     const stagger = (c % 2) * 0.5; // running bond
-    const inHole = (a, halfSpan) => holes.some((h) => y0 + COURSE_H > h.y0 && y0 < h.y1 && angDist(a, h.a) < halfSpan + h.w);
+    const rowHoles = holes.filter((h) => y0 + COURSE_H > h.y0 && y0 < h.y1);
     for (let b = 0; b < N; b++) {
-      const a = (b + stagger) * blockA + (rnd() - 0.5) * 0.006;
-      if (inHole(a, blockA * 0.47)) {
-        // this brick would cut into an opening: lay the outer half-brick instead, if it fits
-        for (const side of [-1, 1]) {
-          const ha = a + side * blockA * 0.25;
-          if (inHole(ha, blockA * 0.22) || hn >= courses * 8) continue;
-          q.setFromEuler(e.set(0, ha, 0));
-          m4.compose(pos.set(0, y0 + 0.015, 0), q, scl.set(1, 1, 1));
-          halfInst.setMatrixAt(hn, m4);
-          halfInst.setColorAt(hn, brickColour(yc));
-          hn++;
+      const a = (b + stagger) * blockA;
+      let a0 = a - half;
+      let a1 = a + half;
+      // cut bricks to the door opening so its sides are straight
+      let skip = false;
+      for (const h of rowHoles) {
+        const d0 = angDist(a0, h.a);
+        const d1 = angDist(a1, h.a);
+        if (d0 >= h.w || d1 <= -h.w) continue; // no overlap
+        if (d0 >= -h.w && d1 <= h.w) {
+          skip = true; // fully inside the opening
+          break;
         }
+        if (d0 < -h.w && d1 > h.w) {
+          // opening in the middle of this brick: two cut pieces
+          place(a0, h.a - h.w - joint / 2, y0);
+          place(h.a + h.w + joint / 2, a1, y0);
+          skip = true;
+          break;
+        }
+        if (d0 < -h.w) a1 = h.a - h.w - joint / 2;
+        else a0 = h.a + h.w + joint / 2;
+      }
+      if (skip) continue;
+      if (a1 - a0 < half * 1.99) {
+        place(a0, a1, y0);
         continue;
       }
-      if (S.missing && c > 4 && rnd() < S.missing) continue; // a few knocked-out bricks
-      const out = 1 + (rnd() - 0.5) * 0.006;
-      q.setFromEuler(e.set((rnd() - 0.5) * 0.008, a, (rnd() - 0.5) * 0.008));
-      m4.compose(pos.set(0, y0 + 0.015, 0), q, scl.set(out, 1, out));
+      q.setFromEuler(e.set((rnd() - 0.5) * 0.006, a + (rnd() - 0.5) * 0.004, (rnd() - 0.5) * 0.006));
+      const out = 1 + (rnd() - 0.5) * 0.005;
+      m4.compose(pos.set(0, y0 + 0.0175, 0), q, scl.set(out, 1, out));
       inst.setMatrixAt(n, m4);
-      inst.setColorAt(n, brickColour(yc));
+      inst.setColorAt(n, brickColour());
       n++;
-      if (S.moss && rnd() < 0.05 + 0.08 * (1 - yc / totalH)) deco.push({ kind: 'moss', a: a + (rnd() - 0.5) * blockA * 0.5, y: y0 + COURSE_H - 0.01 });
-      if (S.barnacles && yc < Math.min(4.5, totalH * 0.3) && rnd() < 0.3 + 0.5 * (1 - yc / 4.5)) {
-        deco.push({ kind: 'barnacle', a: a + (rnd() - 0.5) * blockA * 0.7, y: yc + (rnd() - 0.5) * COURSE_H * 0.6 });
+      if (S.barnacles && yc < Math.min(3.5, totalH * 0.25) && rnd() < 0.25 + 0.5 * (1 - yc / 3.5)) {
+        deco.push({ a: a + (rnd() - 0.5) * blockA * 0.7, y: yc + (rnd() - 0.5) * COURSE_H * 0.6 });
       }
-      if (S.crystals && rnd() < 0.025) deco.push({ kind: 'crystal', a: a + blockA * 0.5, y: y0 + COURSE_H });
     }
   }
   inst.count = n;
-  halfInst.count = hn;
-  for (const im of [inst, halfInst]) {
-    im.instanceMatrix.needsUpdate = true;
-    if (im.instanceColor) im.instanceColor.needsUpdate = true;
-  }
+  inst.instanceMatrix.needsUpdate = true;
+  if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
   g.add(inst);
-  if (hn) g.add(halfInst);
 
-  // Door arches are laid in the tower's own brick
-  if (mats.archBrick) mats.archBrick.color.copy(brickCol).multiplyScalar(BRICK_GAIN * 0.92);
-
-  // Style decorations (instanced)
-  const decoKinds = {
-    moss: { geo: new THREE.SphereGeometry(0.06, 8, 5), mat: new THREE.MeshStandardMaterial({ color: '#4f8a2a', roughness: 1 }) },
-    barnacle: { geo: new THREE.ConeGeometry(0.03, 0.045, 7, 1, true), mat: new THREE.MeshStandardMaterial({ color: '#d9d4c2', roughness: 0.9 }) },
-    crystal: { geo: new THREE.OctahedronGeometry(0.07, 0), mat: new THREE.MeshStandardMaterial({ color: '#f0abfc', emissive: '#c026d3', emissiveIntensity: 1.4, roughness: 0.15, metalness: 0.2 }) },
-  };
-  for (const [kind, K] of Object.entries(decoKinds)) {
-    const list = deco.filter((d) => d.kind === kind);
-    if (!list.length) continue;
-    const im = new THREE.InstancedMesh(K.geo, K.mat, list.length);
-    let k = 0;
-    for (const d of list) {
-      const r = R + BRICK_PROUD + (kind === 'moss' ? -0.01 : 0.004);
-      e.set(kind === 'barnacle' ? Math.PI / 2 : rnd() * 0.6, d.a, kind === 'crystal' ? (rnd() - 0.5) * 1.2 : 0);
-      q.setFromEuler(e);
-      const s = 0.7 + rnd() * 0.8;
-      scl.set(s * (kind === 'moss' ? 1.8 : 1), s * (kind === 'moss' ? 0.4 : kind === 'crystal' ? 2.2 : 1), s);
-      m4.compose(pos.set(Math.sin(d.a) * r, d.y, Math.cos(d.a) * r), q, scl);
-      im.setMatrixAt(k++, m4);
-    }
-    im.count = k;
-    im.castShadow = false;
+  // Barnacles low on the sea tower
+  if (deco.length) {
+    const bGeo = new THREE.ConeGeometry(0.028, 0.04, 7, 1, true);
+    const im = new THREE.InstancedMesh(bGeo, new THREE.MeshStandardMaterial({ color: '#d9d4c2', roughness: 0.9 }), deco.length);
+    deco.forEach((d, k) => {
+      const r = R + BRICK_PROUD + 0.004;
+      q.setFromEuler(e.set(Math.PI / 2, d.a, 0));
+      const s2 = 0.7 + rnd() * 0.8;
+      m4.compose(pos.set(Math.sin(d.a) * r, d.y, Math.cos(d.a) * r), q, scl.set(s2, s2, s2));
+      im.setMatrixAt(k, m4);
+    });
     im.receiveShadow = true;
     g.add(im);
   }
 
-  // Iron bands (royal tower): riveted iron hoops every 2 floors
-  if (S.ironBands) {
-    const ironMat = new THREE.MeshStandardMaterial({ color: '#4a4f58', metalness: 0.85, roughness: 0.4, envMap: chromeEnv, envMapIntensity: 0.8 });
-    const segA = TWO_PI / 16;
-    const hoopGeo = arcSlab(R + BRICK_PROUD - 0.01, R + BRICK_PROUD + 0.05, segA * 1.002, 0.12, 0.015, 6);
-    const rivetGeo = new THREE.SphereGeometry(0.022, 8, 6);
-    const rivetMat = new THREE.MeshStandardMaterial({ color: '#b8b2aa', metalness: 0.9, roughness: 0.3, envMap: chromeEnv });
-    const ys = [];
-    for (let f = 2; f < floors; f += 2) ys.push(f - 0.5);
-    const hoops = new THREE.InstancedMesh(hoopGeo, ironMat, ys.length * 16);
-    const rivets = new THREE.InstancedMesh(rivetGeo, rivetMat, ys.length * 16 * 2);
-    let hc = 0;
-    let rc = 0;
-    for (const y of ys) {
-      for (let b = 0; b < 16; b++) {
-        const a = (b + 0.5) * segA;
-        if (holes.some((h) => y + 0.06 > h.y0 && y - 0.06 < h.y1 && angDist(a, h.a) < segA * 0.5 + h.w)) continue;
-        q.setFromEuler(e.set(0, a, 0));
-        m4.compose(pos.set(0, y + 0.06, 0), q, scl.set(1, 1, 1));
-        hoops.setMatrixAt(hc++, m4);
-        for (const da of [-0.3, 0.3]) {
-          const aa = a + da * segA;
-          const rr = R + BRICK_PROUD + 0.052;
-          m4.compose(pos.set(Math.sin(aa) * rr, y, Math.cos(aa) * rr), q.identity(), scl.set(1, 1, 1));
-          rivets.setMatrixAt(rc++, m4);
-        }
-      }
-    }
-    hoops.count = hc;
-    rivets.count = rc;
-    hoops.receiveShadow = true;
-    g.add(hoops, rivets);
-  }
-
-  // Crown: stone coping, brick parapet and battlements (merlons), and a brazier
-  const copingMat = createLedgeStoneMaterial(new THREE.Color('#c9c4bb').multiplyScalar(1.5), {});
-  const crownBrickMat = createBrickMaterial(brickCol.clone().multiplyScalar(BRICK_GAIN * 0.95), {});
-  const cap = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.11, R + 0.02, 0.14, 64), copingMat);
-  cap.position.y = totalH + 0.07;
+  // Crown: brick battlements in the tower's colour
+  const crownMat = createBrickMaterial(brickCol.clone().multiplyScalar(BRICK_GAIN), { hi: S.hi });
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.09, R + 0.03, 0.12, 64), crownMat);
+  cap.position.y = totalH + 0.06;
   cap.castShadow = true;
   cap.receiveShadow = true;
   g.add(cap);
   const segA = TWO_PI / MERLONS;
-  const parapetGeo = arcSlab(R - 0.12, R + 0.1, segA * 0.995, 0.34, 0.02, 6);
-  const merlonGeo = arcSlab(R - 0.12, R + 0.1, segA * 0.56, 0.32, 0.025, 4);
-  const merlonCapGeo = arcSlab(R - 0.14, R + 0.13, segA * 0.62, 0.06, 0.015, 4);
-  const parapetInst = new THREE.InstancedMesh(parapetGeo, crownBrickMat, MERLONS);
-  const merlonInst = new THREE.InstancedMesh(merlonGeo, crownBrickMat, MERLONS);
-  const merlonCapInst = new THREE.InstancedMesh(merlonCapGeo, copingMat, MERLONS);
+  const parapetGeo = arcSlab(R - 0.12, R + 0.1, segA * 0.99, 0.3, 0.025, 6, 2);
+  const merlonGeo = arcSlab(R - 0.12, R + 0.1, segA * 0.54, 0.34, 0.03, 4, 2);
+  const parapetInst = new THREE.InstancedMesh(parapetGeo, crownMat, MERLONS);
+  const merlonInst = new THREE.InstancedMesh(merlonGeo, crownMat, MERLONS);
   for (let b = 0; b < MERLONS; b++) {
     q.setFromEuler(e.set(0, b * segA, 0));
-    m4.compose(pos.set(0, totalH + 0.14 + 0.34, 0), q, scl.set(1, 1, 1));
+    m4.compose(pos.set(0, totalH + 0.12 + 0.3, 0), q, scl.set(1, 1, 1));
     parapetInst.setMatrixAt(b, m4);
-    m4.compose(pos.set(0, totalH + 0.48 + 0.32, 0), q, scl);
+    m4.compose(pos.set(0, totalH + 0.42 + 0.34, 0), q, scl);
     merlonInst.setMatrixAt(b, m4);
-    m4.compose(pos.set(0, totalH + 0.8 + 0.06, 0), q, scl);
-    merlonCapInst.setMatrixAt(b, m4);
   }
-  for (const im of [parapetInst, merlonInst, merlonCapInst]) {
+  for (const im of [parapetInst, merlonInst]) {
     im.castShadow = true;
     im.receiveShadow = true;
   }
-  g.add(parapetInst, merlonInst, merlonCapInst);
+  g.add(parapetInst, merlonInst);
   // Brazier
   const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.3, 0.3, 20), mats.steelDark);
-  bowl.position.y = totalH + 0.3;
+  bowl.position.y = totalH + 0.27;
   g.add(bowl);
   const flames = [];
   for (let i = 0; i < 4; i++) {
@@ -900,6 +860,6 @@ export function buildTowerBody(tower, pal, mats, softDotTex, chromeEnv = null) {
     update,
     coreMat,
     styleName,
-    stoneMats: [coreMat, copingMat, plinth.material, brickMat, plateMat, crownBrickMat],
+    stoneMats: [coreMat, plinth.material, brickMat, crownMat],
   };
 }

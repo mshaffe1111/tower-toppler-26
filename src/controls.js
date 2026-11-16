@@ -270,15 +270,25 @@ export class ControlEditor {
   }
 
   _hit(x, y) {
-    // Buttons first (they sit above), then the split handle, then the stick
+    // 1) a button's own circle, 2) the split line, 3) a button's finger margin, 4) the stick
     const scheme = settings.controls.scheme;
-    for (const b of ['rewind', 'fire', 'jump']) {
-      if (scheme === 'gesture' && b !== 'rewind') continue;
-      const r = $(`btn-${b}`)?.getBoundingClientRect();
-      if (r && x >= r.left - 8 && x <= r.right + 8 && y >= r.top - 8 && y <= r.bottom + 8) return b;
-    }
+    const buttons = ['rewind', 'fire', 'jump'].filter((b) => scheme !== 'gesture' || b === 'rewind');
+    const inButton = (pad) => {
+      for (const b of buttons) {
+        const r = $(`btn-${b}`)?.getBoundingClientRect();
+        if (!r || !r.width) continue;
+        const cx = r.left + r.width / 2;
+        const cy = r.top + r.height / 2;
+        if (Math.hypot(x - cx, y - cy) <= r.width / 2 + pad) return b;
+      }
+      return null;
+    };
+    const direct = inButton(0);
+    if (direct) return direct;
     const h = $('ctl-split')?.getBoundingClientRect();
-    if (h && x >= h.left - 18 && x <= h.right + 18 && y >= h.top && y <= h.bottom) return 'split';
+    if (h && Math.abs(x - h.left) <= 14 && y >= h.top && y <= h.bottom) return 'split';
+    const near = inButton(10);
+    if (near) return near;
     const s = $('stick-base')?.getBoundingClientRect();
     if (s && x >= s.left - 8 && x <= s.right + 8 && y >= s.top - 8 && y <= s.bottom + 8) return 'stick';
     // Anywhere else in the stick zone also grabs the stick

@@ -706,7 +706,9 @@ function rollerYokeSDF(x, y, z) {
   // hub bolt
   for (const s of [-1, 1]) d = smin(d, sdCyl(x, y, z, 'x', s * (ROLL_R + 0.058), 0, 0, 0.035, 0.012, 0.006), 0.008);
   // visor plate
-  d = smin(d, sdEllipsoid(x, v, w, 0, ROLL_VC, 0.004, 0.19, 0.05, 0.105), 0.035);
+  d = smin(d, sdEllipsoid(x, v, w, 0, ROLL_VC - 0.004, 0.01, 0.165, 0.055, 0.125), 0.035);
+  // chin guard below the slit
+  d = smin(d, sdEllipsoid(x, v, w, 0, ROLL_VC - 0.012, -0.085, 0.07, 0.04, 0.05), 0.03);
   // swept-back brow horns
   for (const s of [-1, 1]) d = smin(d, sdRoundCone(x, v, w, s * 0.09, ROLL_VC + 0.004, 0.07, s * 0.175, ROLL_VC - 0.05, 0.19, 0.034, 0.007), 0.024);
   // angry V scanner slit
@@ -751,16 +753,18 @@ function buildRoller(g, body, ud, env) {
     const [sd, cd] = ROLL_D;
     const v = y * sd + z * cd;
     const w = y * cd - z * sd;
-    const visor = smooth(0.13, 0.08, Math.hypot(x / 1.45, (w - 0.004) / 0.75)) * smooth(ROLL_RM - 0.03, ROLL_RM, v);
+    const visor = smooth(0.15, 0.1, Math.hypot(x / 1.3, (w - 0.0) / 1.0)) * smooth(ROLL_RM - 0.03, ROLL_RM, v);
     c.set('#3b4659');
     if (Math.abs(x) > ROLL_R + 0.045 && Math.hypot(y, z) < 0.04) {
       c.set('#fbbf24');
       return 1;
     }
     if (Math.abs(x) > ROLL_R + 0.04 && Math.hypot(y, z) > 0.062) c.set('#b91c1c');
+    c.lerp(C('#1a1f2e'), visor);
     // gold rivets
     if (Math.abs(Math.abs(w) - 0.042) < 0.014 && Math.hypot(x, y, z) > ROLL_R + 0.05 && visor < 0.3) c.set('#fbbf24');
-    c.lerp(C('#b91c1c'), visor);
+    // red war-paint stripe down the middle of the mask
+    if (visor > 0.5 && Math.abs(x) < 0.016 && w > 0.03) c.set('#dc2626');
     // slit interior
     const slitD = Math.min(
       sdCapsule(x, v, w, 0, ROLL_VC + 0.055, -0.014, 0.115, ROLL_VC + 0.052, 0.022, 0.022),
@@ -772,7 +776,7 @@ function buildRoller(g, body, ud, env) {
     }
     // horn tips lighter
     if (w > 0.13) c.lerp(C('#e2e8f0'), smooth(0.13, 0.18, w));
-    return visor > 0.5 ? 0.15 : 1;
+    return 1;
   });
   const chrome = physical(
     ud,
@@ -1070,8 +1074,11 @@ const SPK_DIRS = (() => {
 })();
 function spikerSDF(x, y, z) {
   const ax = Math.abs(x);
-  let d = sdSphere(x, y, z, 0, 0, 0, 0.158);
+  const l = Math.hypot(x, y, z);
+  let d = l - 0.158;
   for (const { d: v, len } of SPK_DIRS) {
+    const along = x * v[0] + y * v[1] + z * v[2];
+    if (along < 0 || l * l - along * along > 0.0133) continue;
     d = smin(d, sdRoundCone(x, y, z, v[0] * 0.1, v[1] * 0.1, v[2] * 0.1, v[0] * len, v[1] * len, v[2] * len, 0.062, 0.017), 0.05);
   }
   // fuzz
@@ -1339,8 +1346,12 @@ function buildChaser(g, body, ud, env) {
   const metal = { vertexColors: true, metalness: 1, roughness: 0.18, envMap: env.chromeEnv, envMapIntensity: 1.2, clearcoat: 0.7, clearcoatRoughness: 0.1 };
   const headMat = physical(ud, metal, { metalMask: true, paintRough: 0.3, rimStrength: 0.3 });
   const legMat = physical(ud, { ...metal, roughness: 0.3 }, { metalMask: true, paintRough: 0.45, rimStrength: 0.2 });
+  const scaler = new THREE.Group(); // 12% larger, scaled about the feet
+  scaler.scale.setScalar(1.12);
+  scaler.position.y = GROUND * (1 - 1.12);
+  body.add(scaler);
   const hip = new THREE.Group(); // bobbing chassis (legs stay planted)
-  body.add(hip);
+  scaler.add(hip);
   const head = new THREE.Group();
   head.position.set(0, 0.035, 0);
   hip.add(head);
@@ -1350,7 +1361,7 @@ function buildChaser(g, body, ud, env) {
   const legs = legGeo.map((lg) => {
     const m = new THREE.Mesh(lg, legMat);
     m.position.y = GROUND + 0.104;
-    body.add(m);
+    scaler.add(m);
     return m;
   });
   // the lens
@@ -1399,7 +1410,7 @@ function buildChaser(g, body, ud, env) {
   ant.add(bulb);
   const alert = new THREE.Sprite(new THREE.SpriteMaterial({ map: exclaimTex(), transparent: true, depthWrite: false }));
   alert.scale.setScalar(0.2);
-  alert.position.set(0, 0.48, 0);
+  alert.position.set(0, 0.5, 0);
   alert.visible = false;
   g.add(alert);
   const halo = additiveSprite(env.dot, '#22d3ee', 0.42, 0.35);
@@ -1426,8 +1437,8 @@ function animChaser(g, ud, en, st, ctx, f) {
   ud.head.rotation.y = f.frozen ? ud.head.rotation.y : damp(ud.head.rotation.y, yaw, 8, f.dt);
   ud.head.rotation.x = f.frozen ? ud.head.rotation.x : damp(ud.head.rotation.x, -clamp(f.look.pitch, -0.3, 0.3) * 0.5, 8, f.dt);
   // iris: cyan idle -> red alert, aperture dilates
-  const glow = f.frozen ? 0.35 : 1.25 + A * 0.6 + Math.sin(st.t * 7) * 0.1;
-  ud.irisMat.color.copy(CYAN).lerp(RED, A).multiplyScalar(glow);
+  const glow = f.frozen ? 0.35 : 1.15 + A * 0.25 + Math.sin(st.t * 7) * 0.08;
+  ud.irisMat.color.copy(CYAN).lerp(RED, Math.sqrt(A)).multiplyScalar(glow);
   const dil = 1 + A * 0.75 + Math.sin(st.t * 3.1) * 0.06 * (1 - A);
   ud.pupil.scale.setScalar(dil);
   ud.iris.rotation.z = st.t * (0.4 + A * 3);
@@ -1436,14 +1447,14 @@ function animChaser(g, ud, en, st, ctx, f) {
   ud.ant.rotation.z = f.frozen ? ud.ant.rotation.z : Math.cos(ph) * 0.12;
   const blinkOn = A > 0.3 ? Math.sin(st.t * 22) > 0 : Math.sin(st.t * 3) > 0.6;
   const spark = en.hp <= 1 && Math.sin(st.t * 37) * Math.sin(st.t * 13) > 0.4;
-  ud.bulbMat.color.copy(CYAN).lerp(RED, A).multiplyScalar(f.frozen ? 0.3 : blinkOn || spark ? 2.2 : 0.5);
-  ud.halo.material.color.copy(CYAN).lerp(RED, A);
+  ud.bulbMat.color.copy(CYAN).lerp(RED, Math.sqrt(A)).multiplyScalar(f.frozen ? 0.3 : blinkOn || spark ? 2.2 : 0.5);
+  ud.halo.material.color.copy(CYAN).lerp(RED, Math.sqrt(A));
   ud.halo.material.opacity = f.frozen ? 0 : 0.25 + A * 0.4;
   ud.alert.visible = A > 0.3 && !f.frozen;
   if (ud.alert.visible) {
     const pop = smooth(0.3, 0.6, A);
     ud.alert.scale.setScalar(0.2 * pop * (1 + Math.sin(st.t * 14) * 0.08));
-    ud.alert.position.y = 0.46 + Math.sin(st.t * 10) * 0.015;
+    ud.alert.position.y = 0.5 + Math.sin(st.t * 10) * 0.015;
   }
 }
 
@@ -1577,7 +1588,7 @@ function energyMat(kind, uniforms, { additive = false, side = THREE.FrontSide } 
 //    corona, and three charged atoms (magenta / cyan / gold) on tilted orbits, tethered by
 //    flickering electric bonds. Pops when shot.
 // ================================================================================================
-const MOL_ORBIT = 0.215;
+const MOL_ORBIT = 0.24;
 const MOL_ORBITS = [0, 1, 2].map((i) => {
   const o = new THREE.Object3D();
   o.rotation.set(1.15, 0, (i * TWO_PI) / 3, 'ZXY');
@@ -1589,10 +1600,10 @@ function buildMolecule(g, body, ud, env) {
   body.add(spin);
   const sph = (r, w = 32, h = 20) => cached('geo:sph:' + r + ':' + w, () => new THREE.SphereGeometry(r, w, h));
   const nucMat = energyMat('plasma', { uA: { value: C('#fff1fb') }, uB: { value: C('#e11d8f') }, uScale: { value: 16 }, uI: { value: 1.05 } });
-  const nucleus = new THREE.Mesh(sph(0.105), nucMat);
+  const nucleus = new THREE.Mesh(sph(0.118), nucMat);
   body.add(nucleus);
   const corMat = energyMat('corona', { uA: { value: C('#ff2fa0') }, uB: { value: C('#8b5cf6') }, uScale: { value: 11 }, uI: { value: 1.5 } }, { additive: true });
-  const corona = new THREE.Mesh(sph(0.15), corMat);
+  const corona = new THREE.Mesh(sph(0.165), corMat);
   corona.userData.noShadow = true;
   body.add(corona);
   // scowling eyes on the nucleus
@@ -1602,16 +1613,16 @@ function buildMolecule(g, body, ud, env) {
       const e = new THREE.SphereGeometry(0.024, 14, 10);
       e.scale(1.25, 0.66, 0.5);
       e.rotateZ(s * 0.4);
-      e.translate(s * 0.036, 0.016, 0.098);
+      e.translate(s * 0.04, 0.018, 0.111);
       parts.push(e);
       const b = new THREE.CapsuleGeometry(0.008, 0.03, 3, 6);
       b.rotateZ(Math.PI / 2 + s * 0.55);
-      b.translate(s * 0.034, 0.05, 0.088);
+      b.translate(s * 0.038, 0.056, 0.1);
       parts.push(b);
     }
     const m = new THREE.TorusGeometry(0.024, 0.006, 5, 12, Math.PI * 0.8);
     m.rotateZ(Math.PI * 0.1);
-    m.translate(0, -0.042, 0.096);
+    m.translate(0, -0.047, 0.108);
     parts.push(m);
     return mergeGeometries(parts.map((p) => p.toNonIndexed()));
   });
@@ -1647,7 +1658,7 @@ function buildMolecule(g, body, ud, env) {
     orbit.matrix.copy(MOL_ORBITS[i]);
     spin.add(orbit);
     const atom = new THREE.Mesh(
-      sph(0.058, 24, 16),
+      sph(0.064, 24, 16),
       energyMat('plasma', { uA: { value: C(cols[i][0]) }, uB: { value: C(cols[i][1]) }, uScale: { value: 22 }, uI: { value: 1.0 } })
     );
     const beam = new THREE.Mesh(beamGeo, energyMat('beam', { uA: { value: C('#ff7ad1') }, uB: { value: C(cols[i][0]) }, uI: { value: 1.6 } }, { additive: true }));
@@ -2234,7 +2245,7 @@ function buildShieldbug(g, body, ud, env) {
     physical(ud, { vertexColors: true, roughness: 0.35, clearcoat: 0.6, sheen: 0.3, sheenColor: C('#ecfccb'), emissive: '#a3e635', emissiveIntensity: 0.6 }, { rim: '#ecfccb', rimStrength: 0.25 })
   );
   const legGeos = cached('geo:sbLegs', () => {
-    const one = sculpt('sbLeg', sbLegSDF, [-0.03, -0.13, -0.03], [0.16, 0.07, 0.07], 0.0095, (x, y, z, c) => {
+    const one = sculpt('sbLeg', sbLegSDF, [-0.03, -0.13, -0.03], [0.16, 0.07, 0.07], 0.012, (x, y, z, c) => {
       c.set(y < -0.09 ? '#0f172a' : '#1e1b4b');
       return 0.3;
     }, { hullCell: 0 });
@@ -2683,8 +2694,8 @@ function jellySDF(x, y, z) {
   return d;
 }
 const JELLY = {
-  big: { body: '#2dd4bf', deep: '#0f766e', nucA: '#ffe4f3', nucB: '#ff2d95' },
-  mini: { body: '#60a5fa', deep: '#1d4ed8', nucA: '#fff7d6', nucB: '#ffb000' },
+  big: { body: '#2dd4bf', deep: '#0b4f4a', nucA: '#ffe4f3', nucB: '#ff2d95' },
+  mini: { body: '#60a5fa', deep: '#172f7a', nucA: '#fff7d6', nucB: '#ffb000' },
 };
 function buildSplitter(g, body, ud, env) {
   const geo = sculpt('jelly', jellySDF, [-0.25, -0.22, -0.24], [0.25, 0.24, 0.24], 0.0135, (x, y, z, c) => {
@@ -2700,7 +2711,7 @@ function buildSplitter(g, body, ud, env) {
     clearcoat: 1,
     clearcoatRoughness: 0.04,
     transparent: true,
-    opacity: 0.6,
+    opacity: 0.66,
     depthWrite: false,
     envMapIntensity: 1.3,
     emissive: JELLY.big.body,
@@ -2708,7 +2719,7 @@ function buildSplitter(g, body, ud, env) {
     sheen: 0.6,
     sheenColor: C('#ffffff'),
   });
-  const ju = { uWob: { value: 0 }, uTime: { value: 0 }, uJig: { value: new THREE.Vector2() } };
+  const ju = { uWob: { value: 0 }, uTime: { value: 0 }, uJig: { value: new THREE.Vector2() }, uDeep: { value: C(JELLY.big.deep) } };
   fxHook(jelly, { rim: '#ccfbf1', rimStrength: 0.5 });
   const prev = jelly.onBeforeCompile;
   jelly.onBeforeCompile = (sh, r) => {
@@ -2725,13 +2736,17 @@ function buildSplitter(g, body, ud, env) {
         transformed.x += uJig.x * jh * jh;
         transformed.z += uJig.y * jh * jh;`
       );
-    sh.fragmentShader = sh.fragmentShader.replace(
-      '#include <opaque_fragment>',
-      `float jF = pow(1.0 - clamp(abs(dot(normal, normalize(vViewPosition))), 0.0, 1.0), 2.0);
-      float jS = dot(reflectedLight.directSpecular + reflectedLight.indirectSpecular, vec3(0.333));
-      diffuseColor.a = clamp(diffuseColor.a + jF * 0.5 + jS * 0.8, 0.0, 1.0);
-      #include <opaque_fragment>`
-    );
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 uDeep;')
+      .replace(
+        '#include <opaque_fragment>',
+        `float jF = pow(1.0 - clamp(abs(dot(normal, normalize(vViewPosition))), 0.0, 1.0), 2.0);
+        float jS = dot(reflectedLight.directSpecular + reflectedLight.indirectSpecular, vec3(0.333));
+        float jEdge = smoothstep(0.25, 0.8, jF);
+        outgoingLight = mix(outgoingLight, uDeep * 0.5, jEdge * 0.85);
+        diffuseColor.a = clamp(diffuseColor.a + jF * 0.5 + jEdge * 0.4 + jS * 0.8, 0.0, 1.0);
+        #include <opaque_fragment>`
+      );
   };
   jelly.customProgramCacheKey = () => 'enm-jelly';
   reg(ud, jelly);
@@ -2747,7 +2762,7 @@ function buildSplitter(g, body, ud, env) {
   shadowProxy.userData.shadowOnly = true;
   squash.add(shadowProxy);
   const nucMat = energyMat('plasma', { uA: { value: C(JELLY.big.nucA) }, uB: { value: C(JELLY.big.nucB) }, uScale: { value: 18 }, uI: { value: 1.0 } });
-  const nucleus = new THREE.Mesh(cached('geo:sph:jn', () => new THREE.SphereGeometry(0.062, 24, 16)), nucMat);
+  const nucleus = new THREE.Mesh(cached('geo:sph:jn', () => new THREE.SphereGeometry(0.072, 24, 16)), nucMat);
   nucleus.position.set(0, -0.06, -0.02);
   nucleus.userData.noShadow = true;
   squash.add(nucleus);
@@ -2835,7 +2850,7 @@ function buildSplitter(g, body, ud, env) {
   const mouth = new THREE.Mesh(mouthGeo, basic('#ffffff', { vertexColors: true, side: THREE.DoubleSide }));
   mouth.userData.noShadow = true;
   squash.add(mouth);
-  const halo = additiveSprite(env.dot, JELLY.big.nucB, 0.5, 0.3);
+  const halo = additiveSprite(env.dot, JELLY.big.nucB, 0.55, 0.45);
   halo.position.copy(nucleus.position);
   squash.add(halo);
   Object.assign(ud, { squash, blob, jelly, ju, nucleus, nucMat, bubbles, eyes, halo, popColor: JELLY.big.body, ownsBodyScale: false, mini: null });
@@ -2848,6 +2863,7 @@ function animSplitter(g, ud, en, st, ctx, f) {
     const pal = mini ? JELLY.mini : JELLY.big;
     ud.jelly.color.set(pal.body);
     ud.jelly.emissive.set(pal.body);
+    ud.ju.uDeep.value.set(pal.deep);
     ud.nucMat.uniforms.uA.value.set(pal.nucA);
     ud.nucMat.uniforms.uB.value.set(pal.nucB);
     ud.halo.material.color.set(pal.nucB);
@@ -2874,7 +2890,7 @@ function animSplitter(g, ud, en, st, ctx, f) {
   }
   const wob = Math.exp(-(st.wobT ?? 9) * 4) * Math.sin((st.wobT ?? 9) * 26) * 0.12;
   const stretch = f.frozen ? 0 : clamp(Math.abs(st.vy || 0) * 0.02, 0, 0.12) * smooth(0.15, 0.4, h);
-  const sq = contact * 0.28;
+  const sq = contact * 0.22;
   const sy = 1 - sq + stretch + wob + (f.frozen ? 0 : Math.sin(t * 4) * 0.02);
   const sxz = 1 + sq * 0.8 - stretch * 0.45 - wob * 0.6;
   ud.squash.scale.set(sxz * sc, sy * sc, sxz * sc);
@@ -2890,7 +2906,7 @@ function animSplitter(g, ud, en, st, ctx, f) {
   ud.bubbles.rotation.y = t * 0.6;
   ud.bubbles.position.y = ((t * 0.05) % 0.04) - 0.02;
   ud.halo.position.copy(ud.nucleus.position);
-  ud.halo.material.opacity = f.frozen ? 0.05 : 0.25 + Math.sin(t * 5) * 0.08;
+  ud.halo.material.opacity = f.frozen ? 0.05 : 0.4 + Math.sin(t * 5) * 0.1;
   const blink = blinkAmount(st, f.dt, f.frozen);
   for (const e of ud.eyes) e.eg.scale.set(1, Math.max(0.12, 1 - blink - contact * 0.25), 1);
   lookEyes(ud.eyes, st, f, 0.5, 0.4);
@@ -2983,9 +2999,13 @@ export function createEnemyModel(type, { chromeEnv = null, softDotTex = null } =
   return g;
 }
 
+const _look = { yaw: 0, pitch: 0, dist: 99, tx: 0, ty: 0 };
 function lookAtPogo(en, ctx, faceOff, eyeHeight = 0.28) {
   const p = ctx.player;
-  if (!p) return { yaw: 0, pitch: 0, dist: 99 };
+  _look.yaw = 0;
+  _look.pitch = 0;
+  _look.dist = 99;
+  if (!p) return _look;
   const cols = ctx.COLS || 16;
   const colW = (TWO_PI * RING_R) / cols;
   const tx = colDist(en.col, p.col, cols) * colW;
@@ -2995,7 +3015,12 @@ function lookAtPogo(en, ctx, faceOff, eyeHeight = 0.28) {
   const s = Math.sin(-faceOff);
   const lx = tx * c + tz * s;
   const lz = -tx * s + tz * c;
-  return { yaw: Math.atan2(lx, lz), pitch: Math.atan2(ty, Math.hypot(lx, lz)), dist: Math.hypot(tx, ty), tx, ty };
+  _look.yaw = Math.atan2(lx, lz);
+  _look.pitch = Math.atan2(ty, Math.hypot(lx, lz));
+  _look.dist = Math.hypot(tx, ty);
+  _look.tx = tx;
+  _look.ty = ty;
+  return _look;
 }
 
 export function animateEnemy(group, en, ctx = {}) {
@@ -3036,7 +3061,10 @@ export function animateEnemy(group, en, ctx = {}) {
     if (ud.halo) {
       ud.halo.material.opacity = Math.max(0, 1 - k) * 0.9;
     }
-    if (ud.onDeath) ud.onDeath(k, dt);
+    if (ud.shaderMats) for (const m of ud.shaderMats) m.uniforms.uFlash.value = clamp(k * 3, 0, 1) * 0.8;
+    if (ud.alert) ud.alert.visible = false;
+    if (ud.wind) ud.wind.visible = false;
+    if (ud.trail) for (const sp of ud.trail) sp.material.opacity *= 0.8;
     return;
   }
   group.visible = true;
@@ -3053,7 +3081,7 @@ export function animateEnemy(group, en, ctx = {}) {
   const flash = en.hitFlash > 0 ? clamp(en.hitFlash / 0.12, 0, 1) : 0;
   st.freeze = damp(st.freeze, frozen ? 1 : 0, frozen ? 16 : 5, dt);
   for (const u of ud.fx) {
-    u.uFlash.value = flash * 0.85;
+    u.uFlash.value = flash * 0.72;
     u.uFreeze.value = st.freeze * 0.8;
   }
   const look = lookAtPogo(en, ctx, st.face, ud.eyeHeight ?? 0.28);
@@ -3117,7 +3145,7 @@ function gLidSDF(x, y, z) {
     d = ssub(d, Math.max(Math.abs(y - ry) - 0.009, G_LID_R + 0.012 - l), 0.008);
   }
   // crest ridge over the top
-  d = smin(d, smax(Math.abs(x) - 0.03, Math.abs(l - G_LID_R - 0.03) - 0.03, 0.02), 0.02);
+  d = smin(d, smax(smax(Math.abs(x) - 0.03, Math.abs(l - G_LID_R - 0.03) - 0.03, 0.02), 0.7 * l - y, 0.03), 0.02);
   // crest horns, raking back
   for (const [th, len] of [
     [0.88, 0.24],
@@ -3132,7 +3160,7 @@ function gLidSDF(x, y, z) {
     d = smin(d, sdRoundCone(x, y, z, px, py, pz, px, py + ux * len, pz + uz * len - 0.09, 0.058, 0.008), 0.03);
   }
   // rivets along the edge
-  for (let i = -4; i <= 4; i++) {
+  if (Math.abs(y - 0.052) < 0.05) for (let i = -4; i <= 4; i++) {
     const a = (i / 4) * 1.2;
     d = smin(d, sdSphere(x, y, z, Math.sin(a) * (G_LID_R + 0.036), 0.052, Math.cos(a) * (G_LID_R + 0.036), 0.015), 0.008);
   }
@@ -3150,7 +3178,8 @@ function gRingSDF(x, y, z) {
 }
 function gSpikeSDF(x, y, z) {
   let d = 1e9;
-  for (let i = 0; i < 8; i++) {
+  const k0 = Math.round(((Math.PI / 2 - Math.atan2(y, x)) / TWO_PI) * 8 - 0.5);
+  for (let i = k0 - 1; i <= k0 + 1; i++) {
     const a = Math.PI / 2 - ((i + 0.5) / 8) * TWO_PI;
     const c = Math.cos(a);
     const s = Math.sin(a);
@@ -3356,6 +3385,8 @@ export function createGuardianModel({ chromeEnv = null, softDotTex = null } = {}
   return g;
 }
 
+const G_HALO_SLEEP = C('#7c2d12');
+const G_HALO_AWAKE = C('#ff3d2e');
 export function animateGuardian(group, boss, ctx = {}) {
   const ud = group.userData;
   const st = ud.st;
@@ -3426,7 +3457,7 @@ export function animateGuardian(group, boss, ctx = {}) {
   ud.seam.visible = seamOn > 0.02;
   ud.seamMat.opacity = seamOn;
   ud.halo.material.opacity = asleep ? 0.12 + pulse * 0.06 : 0.35 + o * 0.2 + pulse * 0.1 + hit * 0.5;
-  ud.halo.material.color.set(asleep ? '#7c2d12' : '#ff3d2e');
+  ud.halo.material.color.copy(asleep ? G_HALO_SLEEP : G_HALO_AWAKE);
 
   // HP gems: lit while remaining, dark when spent; the next to go flickers
   const hp = boss.hp ?? 8;
@@ -3484,4 +3515,24 @@ export function animateGuardian(group, boss, ctx = {}) {
 export function warmEnemyModels(opts = {}) {
   for (const type of Object.keys(BUILD)) createEnemyModel(type, opts);
   createGuardianModel(opts);
+}
+// Same, but one model per frame/idle slot so a menu or loading screen keeps animating.
+// Resolves when everything is cached. `types` limits it (e.g. to the next tower's roster).
+export function warmEnemyModelsAsync(opts = {}, types = [...Object.keys(BUILD), 'guardian']) {
+  const queue = [...types];
+  const later = (fn) => (typeof requestIdleCallback === 'function' ? requestIdleCallback(fn, { timeout: 120 }) : setTimeout(fn, 16));
+  return new Promise((resolve) => {
+    const step = () => {
+      const t = queue.shift();
+      if (!t) return resolve();
+      try {
+        if (t === 'guardian') createGuardianModel(opts);
+        else createEnemyModel(t, opts);
+      } catch (e) {
+        console.warn('enemy warm-up failed for', t, e);
+      }
+      later(step);
+    };
+    later(step);
+  });
 }

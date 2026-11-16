@@ -84,6 +84,7 @@ const game = new TowerTopplerGame(renderer, input, {
     scoreEl.textContent = formatScore(hud.score);
     hiScoreEl.textContent = formatScore(hud.hiScore);
     timerEl.textContent = formatTimer(hud.timer);
+    timerEl.parentElement?.classList.toggle('clock-off', settings.clock === false);
     timerEl.classList.toggle('urgent', hud.timer <= 15 && hud.mode === 'tower');
     towerBadgeEl.textContent = hud.mode === 'submarine' ? 'SUB' : hud.towerLabel;
     dirArrowEl.textContent = hud.dirHint;
@@ -353,6 +354,16 @@ function refreshMenu() {
     sel.appendChild(opt);
   });
   if (prevVal) sel.value = prevVal;
+  // Continue a saved campaign / endless run
+  const saved = progress.savedRun;
+  const contBtn = $('btn-continue-run');
+  const canContinue = saved && (saved.mode === 'campaign' ? saved.towerIndex < game.campaignTowers.length : Boolean(procgen));
+  contBtn.classList.toggle('hidden', !canContinue);
+  if (canContinue) {
+    const where = saved.mode === 'campaign' ? `Tower ${saved.towerIndex + 1} · ${titleCase(saved.towerName || game.campaignTowers[saved.towerIndex]?.name || '')}` : `Endless · tower ${saved.towerIndex + 1}`;
+    const lives = '♥'.repeat(Math.min(6, saved.lives || 1));
+    $('continue-sub').textContent = `${where} · ${(saved.score || 0).toLocaleString()} pts · ${lives}`;
+  }
   const n = totalMedals();
   $('medal-summary').textContent = `🏅 ${n} medal${n === 1 ? '' : 's'} · ${progress.towersCleared || 0} towers toppled`;
   const daily = $('btn-daily');
@@ -370,8 +381,13 @@ function refreshMenu() {
     $('endless-sub').textContent = 'Loading…';
   }
 }
+const SMALL_WORDS = new Set(['of', 'the', 'a', 'an', 'and', 'in', 'on', 'to']);
 function titleCase(s) {
-  return s.toLowerCase().replace(/(^|\s|')\S/g, (c) => c.toUpperCase());
+  return s
+    .toLowerCase()
+    .split(' ')
+    .map((w, i) => (i > 0 && SMALL_WORDS.has(w) ? w : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(' ');
 }
 refreshMenu();
 $('start-tower').addEventListener('change', () => {
@@ -389,7 +405,8 @@ function startRun(cfg) {
     tower.seed = seed;
     provider = (i) => (i === 0 ? tower : null);
   } else if (cfg.mode === 'endless' && procgen) {
-    const runSeed = (Date.now() & 0xffffff) ^ 0x5bd1e9;
+    const runSeed = cfg.runSeed ?? (Date.now() & 0xffffff) ^ 0x5bd1e9;
+    cfg.runSeed = runSeed;
     const cache = new Map();
     provider = (i) => {
       if (!cache.has(i)) {
@@ -400,11 +417,19 @@ function startRun(cfg) {
       return cache.get(i);
     };
   }
-  game.startNewGame({ mode: cfg.mode, startTower: cfg.startTower || 0, provider });
+  game.startNewGame({ mode: cfg.mode, startTower: cfg.startTower || 0, provider, runSeed: cfg.runSeed ?? null, resume: cfg.resume || null });
 }
 
 $('btn-start').addEventListener('click', () => startRun({ mode: 'campaign', startTower: Number($('start-tower').value) || 0 }));
 $('btn-daily').addEventListener('click', () => procgen && startRun({ mode: 'daily' }));
+$('btn-continue-run').addEventListener('click', () => {
+  const saved = progress.savedRun;
+  if (!saved) return;
+  if (saved.mode === 'endless' && !procgen) return;
+  // A run continues with the mirror setting it was started with
+  if (Boolean(settings.mirror) !== Boolean(saved.mirror)) setSetting('mirror', Boolean(saved.mirror));
+  startRun({ mode: saved.mode, startTower: saved.towerIndex, runSeed: saved.runSeed, resume: saved });
+});
 $('btn-endless').addEventListener('click', () => procgen && startRun({ mode: 'endless' }));
 
 // ---------------- Pause ----------------

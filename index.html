@@ -105,6 +105,10 @@
             Eight towers are poisoning the seas of Nebulus. Climb each one, reach the summit, and topple it — and watch the ocean come back to life.
           </p>
 
+          <button id="btn-continue-run" class="btn-continue hidden" type="button">
+            <span class="cont-title">▶ CONTINUE</span>
+            <span id="continue-sub" class="cont-sub"></span>
+          </button>
           <button id="btn-start" class="btn-primary btn-launch" type="button">
             <span class="btn-glow"></span>
             <span class="btn-text">CAMPAIGN</span>
@@ -236,10 +240,10 @@
       <div class="action-cluster">
         <div id="gesture-pad" class="gesture-pad" aria-label="Gesture pad: swipe up to jump, tap to fire, hold to charge, swipe down to pound">
           <div class="gp-legend" aria-hidden="true">
-            <span><b>↑</b> SWIPE · JUMP</span>
-            <span><b>●</b> TAP · FIRE</span>
-            <span><b>◉</b> HOLD · CHARGE</span>
-            <span><b>↓</b> SWIPE · POUND</span>
+            <span><b>↑</b>JUMP<i>swipe up</i></span>
+            <span><b>•</b>FIRE<i>tap</i></span>
+            <span><b>◉</b>CHARGE<i>hold</i></span>
+            <span><b>↓</b>POUND<i>swipe down</i></span>
           </div>
         </div>
         <button id="btn-rewind" class="action-btn action-rewind" type="button" aria-label="Hold to rewind time">

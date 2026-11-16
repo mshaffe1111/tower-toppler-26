@@ -1300,14 +1300,24 @@ html, body {
   gap: 5px 8px;
   padding: 0 14px;
   font-family: var(--font-display);
-  font-size: 8.5px;
+  font-size: 9.5px;
   font-weight: 800;
   letter-spacing: 0.08em;
-  color: rgba(207, 227, 255, calc(0.55 * var(--ctl-opacity)));
+  line-height: 1.15;
+  color: rgba(207, 227, 255, calc(0.62 * var(--ctl-opacity)));
   pointer-events: none;
   white-space: nowrap;
 }
-.gp-legend b { display: inline-block; width: 12px; color: #7dd3fc; font-weight: 900; }
+.gp-legend span { display: grid; grid-template-columns: 14px 1fr; align-items: center; column-gap: 3px; min-width: 0; }
+.gp-legend b { grid-row: span 2; color: #7dd3fc; font-size: 12px; font-weight: 900; text-align: center; }
+.gp-legend i {
+  font-family: var(--font-ui);
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(207, 227, 255, calc(0.45 * var(--ctl-opacity)));
+}
 .gp-ring {
   position: absolute;
   width: 58px;
@@ -1692,3 +1702,28 @@ body.editing-controls #game-canvas { opacity: 0.62; }
 body.editing-controls #hud { opacity: 0.3; pointer-events: none; }
 body.editing-controls .hint-card,
 body.editing-controls .action-prompt { display: none !important; }
+
+/* CONTINUE a saved run (title screen) */
+.btn-continue {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 14px 9px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  border-radius: 14px;
+  border: 1px solid rgba(134, 239, 172, 0.75);
+  background: linear-gradient(135deg, #22c55e 0%, #059669 55%, #047857 100%);
+  color: #fff;
+  cursor: pointer;
+  touch-action: manipulation;
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+.btn-continue:active { transform: scale(0.98); }
+.cont-title { font-family: var(--font-display); font-size: 14px; font-weight: 900; letter-spacing: 0.14em; }
+.cont-sub { font-size: 12.5px; font-weight: 700; color: rgba(236, 253, 245, 0.92); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.btn-continue:not(.hidden) + .btn-launch { margin-top: 8px; animation: none; }
+
+/* Clock switched off in Options > Gameplay */
+.timer-shell.clock-off { display: none; }

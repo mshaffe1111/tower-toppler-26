@@ -359,9 +359,9 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
     grid-template-areas:
-      'pill  launch'
+      'pill  cont'
+      'title launch'
       'title select'
-      'title modes'
       'tag   modes'
       'tag   menu'
       'medal menu';
@@ -399,6 +399,11 @@
 
   .modal-hero .btn-launch {
     grid-area: launch;
+  }
+
+  .modal-hero .btn-continue {
+    grid-area: cont;
+    margin-top: 0;
   }
 
   .modal-hero .tower-select-row {

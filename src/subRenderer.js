@@ -370,7 +370,7 @@ function patchStd(mat, U, opts = {}) {
           float cDepth = mix(0.3, 1.0, clamp((vCW.y - uSeabedY) / max(uSurfY - uSeabedY, 0.001), 0.0, 1.0));
           float cUp = clamp(normal.y * 0.65 + 0.45, 0.0, 1.0);
           float cWet = 1.0 - smoothstep(uSurfY - 0.05, uSurfY + 0.05, vCW.y);
-          totalEmissiveRadiance += diffuseColor.rgb * uCausticCol * (cK * uCausticStr * cDepth * cUp * cWet * ${caustic.toFixed(3)});
+          totalEmissiveRadiance += diffuseColor.rgb * uCausticCol * min(cK * uCausticStr * cDepth * cUp * cWet * ${caustic.toFixed(3)}, 0.75);
         }
       `;
     }
@@ -1267,9 +1267,11 @@ export class SubRenderer {
     this.scene.add(this.seabed);
 
     // ---- water surface seen from below: rippling, sky glowing through, shattered sun
-    const surfGeo = new THREE.PlaneGeometry(300, 140, 1, 1);
+    // spans from behind the camera (so a rising camera never sees past its near edge) to beyond
+    // the backdrop (so no sliver of sky shows at the horizon)
+    const surfGeo = new THREE.PlaneGeometry(300, 156, 1, 1);
     surfGeo.rotateX(Math.PI / 2);
-    surfGeo.translate(0, 0, -60);
+    surfGeo.translate(0, 0, -52);
     this.surfMat = new THREE.ShaderMaterial({
       uniforms: {
         uTime: U.uTime,
@@ -1971,7 +1973,7 @@ export class SubRenderer {
     this.subLit = { value: 0.04 };
     const paintMat = patchStd(new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.22, roughness: 0.32 }), U, {
       rim: { color: new THREE.Color('#ffe7a0'), str: this.hullRim },
-      caustic: 1.5,
+      caustic: 1.1,
       selfLit: this.subLit,
       key: 'subpaint',
     });
@@ -2832,6 +2834,7 @@ export class SubRenderer {
     this.overlay.add(this.card);
     this._cardForW = 0;
     this._cardShown = -1;
+    this._cardT0 = -1;
   }
 
   _font(weight, px) {
@@ -3392,6 +3395,7 @@ export class SubRenderer {
     this._camFX = 0;
     this._camFY = 0;
     this._cardShown = -1;
+    this._cardT0 = -1;
     this._comboAlpha = 0;
   }
 
@@ -4443,7 +4447,7 @@ export class SubRenderer {
     const active = mult > 1 && (stage.comboTimer || 0) > 0 && hudA > 0.5;
     this._comboAlpha = clamp(this._comboAlpha + (active ? dt * 8 : -dt * 4), 0, 1);
     if (active) this._comboShown = mult;
-    const ca = this._comboAlpha;
+    const ca = this._comboAlpha * hudA;
     this.comboRing.visible = this.comboText.visible = ca > 0.01;
     if (ca > 0.01) {
       const m = this._comboShown || 2;
@@ -4489,25 +4493,33 @@ export class SubRenderer {
       this.waterMat.uniforms.uLineY.value = (1 - p.y) * 0.5 * H;
       this.waterMat.uniforms.uAlpha.value = wa;
     }
-    // ride-complete card with a counting bonus
+    // ride-complete card with a counting bonus, once the sub has broken the surface
     const at = stage.phase === 'arrive' || stage.phase === 'done' ? stage.arriveT || 0 : -1;
-    const show = at > 2.1;
+    if (at < 0) this._cardT0 = -1;
+    else if (this._cardT0 < 0 && ((stage.sub && stage.sub.surfaced > 0.45) || at > 3.4)) this._cardT0 = Math.max(at, 1.9);
+    const show = this._cardT0 >= 0 && at >= this._cardT0;
     this.card.visible = show;
     if (!show) {
       this._cardShown = -1;
       return;
     }
-    const e = clamp((at - 2.1) / 0.45, 0, 1);
-    const cnt = smooth01((at - 2.35) / 1.0);
+    const ct = at - this._cardT0;
+    const e = clamp(ct / 0.45, 0, 1);
+    const cnt = smooth01((ct - 0.25) / 1.0);
     const shown = Math.round((stage.bonus || 0) * cnt);
     if (shown !== this._cardShown || this._cardForW !== W) {
       this._cardShown = shown;
       this._cardForW = W;
       this._drawCard(stage, shown);
     }
-    const s = 0.85 + 0.15 * easeOutBack(e);
+    // portrait: under the banner, in the sky; landscape: tucked into the sky on the left
+    const wide = W > H * 1.15;
+    const fit = wide ? Math.min(1, (H * 0.44) / this._cardH) : 1;
+    const s = (0.85 + 0.15 * easeOutBack(e)) * fit;
+    const cx = wide ? Math.max((this._cardW * fit) / 2 + 14, W * 0.24) : W / 2;
+    const cy = wide ? H * 0.1 + (this._cardH * fit) / 2 : H * 0.17 + this._cardH / 2;
     this.card.scale.set(this._cardW * s, this._cardH * s, 1);
-    this.card.position.set(W / 2, -(H * 0.17 + this._cardH / 2) + (1 - e) * 16, 0);
+    this.card.position.set(cx, -cy + (1 - e) * 16, 0);
     this.card.material.opacity = e;
   }
 

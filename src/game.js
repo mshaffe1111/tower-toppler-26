@@ -183,8 +183,10 @@ export class TowerTopplerGame {
   // ---------------------------------------------------------------------------------------
 
   // mode: 'campaign' | 'daily' | 'endless'; provider(index) -> tower | null
-  startNewGame({ mode = 'campaign', startTower = 0, provider = null } = {}) {
+  // resume: a saved run ({score, lives, nextExtraLife, toppled, healing}) to continue from
+  startNewGame({ mode = 'campaign', startTower = 0, provider = null, runSeed = null, resume = null } = {}) {
     this.runMode = mode;
+    this.runSeed = runSeed;
     this.towerProvider = provider || ((i) => this.campaignTowers[i] || null);
     this.score = 0;
     this.nextExtraLife = 5000;
@@ -192,9 +194,44 @@ export class TowerTopplerGame {
     this.towerIndex = startTower;
     this.toppledThisRun = 0;
     this.healing = mode === 'campaign' ? Math.min(1, startTower / 8) : 0;
+    if (resume) {
+      this.score = resume.score || 0;
+      this.nextExtraLife = resume.nextExtraLife || 5000;
+      this.lives = Math.max(1, resume.lives || 3);
+      this.toppledThisRun = resume.toppled || 0;
+      this.healing = resume.healing ?? this.healing;
+    }
     this.loadTower(this.towerIndex);
     this.mode = 'tower';
+    this._saveRun();
     this._syncHud();
+  }
+
+  // Save/continue: a run is saved at the start of every campaign / endless tower, so CONTINUE
+  // on the title resumes from the start of that tower with the same score and lives.
+  _saveRun() {
+    if (this.runMode !== 'campaign' && this.runMode !== 'endless') return;
+    progress.savedRun = {
+      mode: this.runMode,
+      towerIndex: this.towerIndex,
+      towerName: this.tower?.name || '',
+      score: this.score,
+      lives: Number.isFinite(this.lives) ? this.lives : 3,
+      nextExtraLife: this.nextExtraLife,
+      toppled: this.toppledThisRun || 0,
+      healing: this.healing || 0,
+      runSeed: this.runSeed ?? null,
+      mirror: Boolean(settings.mirror),
+      at: Date.now(),
+    };
+    saveProgress();
+  }
+
+  _clearSavedRun() {
+    if (this.runMode !== 'campaign' && this.runMode !== 'endless') return;
+    if (progress.savedRun?.mode !== this.runMode) return;
+    progress.savedRun = null;
+    saveProgress();
   }
 
   _prepareTower(raw) {
@@ -739,15 +776,19 @@ export class TowerTopplerGame {
     const inp = this.input.state;
     this.towerTime += dt;
 
-    // Countdown timer (in flood/collapse towers the timer *is* the rising hazard)
+    // Countdown timer (in flood/collapse towers the timer *is* the rising hazard). With the clock
+    // switched off (Options > Gameplay) it still runs internally to pace those hazards, but it never
+    // ends a life on its own and isn't shown.
+    const clockOn = settings.clock !== false;
     this.timer = Math.max(0, this.timer - dt);
-    if (this.timer <= 15 && !this.mech.lowTimeWarned) {
+    if (clockOn && this.timer <= 15 && !this.mech.lowTimeWarned) {
       this.mech.lowTimeWarned = true;
       sound.lowTimeWhistle?.();
     }
     if (this.timer > 20) this.mech.lowTimeWarned = false;
-    if (this.timer <= 0) {
-      this._loseLife(this.mech.kind === 'flood' ? 'SWALLOWED BY THE SEA!' : 'TIME UP!');
+    const hazardClock = this.mech.kind === 'flood' || this.mech.kind === 'collapse';
+    if (this.timer <= 0 && (clockOn || hazardClock)) {
+      this._loseLife(this.mech.kind === 'flood' ? 'SWALLOWED BY THE SEA!' : this.mech.kind === 'collapse' && !clockOn ? 'THE TOWER CAVED IN!' : 'TIME UP!');
       return;
     }
 
@@ -2023,6 +2064,7 @@ export class TowerTopplerGame {
     if (this.lives <= 0) {
       this.mode = 'gameover';
       sound.stopAmbience?.();
+      this._clearSavedRun();
       this._syncHud();
       this._recordBest();
       this.cb.onGameOver?.(false, this.score, this.hiScore, this._runSummary());
@@ -2095,7 +2137,7 @@ export class TowerTopplerGame {
   _triggerTowerTopple() {
     this.mode = 'topple';
     this.topple = { active: true, progress: 0, duration: 2.8 };
-    const timeBonus = Math.ceil(this.timer) * 10;
+    const timeBonus = settings.clock !== false ? Math.ceil(this.timer) * 10 : 0;
     this.towerBonus = 500 + timeBonus;
     this.addScore(this.towerBonus);
     this.addShake(12);
@@ -2122,7 +2164,8 @@ export class TowerTopplerGame {
   _finishTower() {
     const timeTaken = this.towerTime;
     const earned = {
-      time: this.timer / Math.max(1, this.tower.timeLimit) >= 0.4,
+      // Speed medal: climbed within 60% of the tower's time limit (works with the clock off too)
+      time: this.towerTime <= this.tower.timeLimit * 0.6,
       nohit: this.hitsTaken === 0 && this.deathsHere === 0,
       secrets: this.secretsTotal > 0 && this.secretsGot >= this.secretsTotal,
     };
@@ -2161,6 +2204,7 @@ export class TowerTopplerGame {
     if (!this.towerProvider(this.towerIndex + 1)) {
       this.mode = 'victory';
       sound.stopAmbience?.();
+      this._clearSavedRun();
       this._recordBest();
       this.cb.onGameOver?.(true, this.score, this.hiScore, this._runSummary());
       return;
@@ -2226,6 +2270,7 @@ export class TowerTopplerGame {
     this.towerIndex += 1;
     this.loadTower(this.towerIndex);
     this.mode = 'tower';
+    this._saveRun();
   }
 
   _updateSubmarine(dt) {

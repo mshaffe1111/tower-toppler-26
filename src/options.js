@@ -91,6 +91,15 @@ export const OPTION_TABS = [
           [1, '100%'],
         ],
       },
+      {
+        key: 'clock',
+        label: 'Clock',
+        desc: 'Off: no countdown and no time bonus. Flood and collapsing towers still rise',
+        options: [
+          [true, 'On'],
+          [false, 'Off'],
+        ],
+      },
       { key: 'mirror', label: 'Mirror mode', desc: 'Every tower flipped left-to-right', options: ONOFF },
       { key: 'ghosts', label: 'Ghost runs', desc: 'Race a replay of your best climb', options: ONOFF },
       { action: 'reset-hints', label: 'Tutorial hints', desc: 'Show the first-time tips again', button: '💡 REPLAY HINTS' },

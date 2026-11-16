@@ -7,7 +7,7 @@
 const TAU = Math.PI * 2;
 const RIDE_TIME = 20; // seconds of auto-scrolling (progress bar 0 -> 1)
 const INTRO_TIME = 1.1; // sub glides in from the left
-const ARRIVE_TIME = 4.6; // surfacing next to the next tower
+const ARRIVE_TIME = 5.0; // surfacing next to the next tower (cinematic over/under shot + tally)
 const TOWER_LEAD = 5.2; // the next tower starts scrolling in this long before the ride ends
 
 const FISH_POINTS = { small: 25, big: 200, gold: 800 };
@@ -398,9 +398,9 @@ export class SubStage {
       const ty = this.surfaceY - sub.ry * 0.2;
       const dx = tx - sub.x;
       const dy = ty - sub.y;
-      const maxV = 190 * s;
+      const maxV = 240 * s;
       const wantVx = clamp(dx * 2.2, -maxV, maxV);
-      const wantVy = clamp(dy * 2.0, -maxV, maxV);
+      const wantVy = clamp(dy * 2.4, -maxV, maxV);
       const a = Math.min(1, dt * 4);
       sub.vx += (wantVx - sub.vx) * a;
       sub.vy += (wantVy - sub.vy) * a;

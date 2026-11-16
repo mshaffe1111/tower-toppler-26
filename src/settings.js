@@ -20,6 +20,7 @@ const DEFAULT_SETTINGS = {
   classic: false, // original rules: no edge guard, no rewind, no checkpoints
   assist: false, // infinite lives + unlimited rewind
   gameSpeed: 1, // 0.6 .. 1
+  clock: true, // false = no countdown (relaxed); flood / collapse towers still rise
   reducedMotion: false, // no screen shake / flashes / camera punch
   mirror: false, // mirror every tower
   quality: 'auto', // 'auto' | 'low' | 'medium' | 'high'
