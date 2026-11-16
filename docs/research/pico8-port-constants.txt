@@ -1,0 +1,31 @@
+PICO-8 Nebulus (carlc27843, gameplay studied from the Amstrad CPC original) - constants read from
+https://github.com/carlc27843/nebulus-public out/nebulus-source.lua + out/nebulus-expanded.lua (line 1795 data blob parsed with scripts/p8val.py)
+Units: 256 angle units per lap, 16 per column (16 columns); 8 world units per step-row; game runs _update60 (60 ticks/s).
+
+levels = [{"tile": 146, "sky": 154, "plt": 100, "ofs": 1, "name": "TOWER OF EYES", "midx": 12, "h": 47, "glh": 11, "glc": 1409, "cyclelo": 1, "cyclehi": 2, "aiskippal": 32, "aipceli": 83}, {"tile": 147, "sky": 154, "plt": 120, "ofs": 753, "name": "REALM OF ROBOTS", "midx": 4, "h": 71, "glh": 15, "glc": 161, "cyclelo": 3, "cyclehi": 6, "aiskippal": 32, "aipceli": 91}, {"tile": 148, "sky": 156, "plt": 140, "ofs": 1889, "name": "TRAP OF TRICKS", "midx": 8, "h": 49, "glh": 13, "glc": 449, "cyclelo": 7, "cyclehi": 8, "aiskippal": 0, "aipceli": 99}, {"tile": 149, "sky": 155, "plt": 160, "ofs": 2673, "name": "SLIPPERY SLIDE", "midx": 8, "h": 66, "glh": 15, "glc": 225, "cyclelo": 9, "cyclehi": 10, "aiskippal": 6, "aipceli": 107}, {"tile": 150, "sky": 154, "plt": 180, "ofs": 3729, "name": "BROKEN PATH", "midx": 20, "h": 96, "glh": 17, "glc": 1217, "cyclelo": 11, "cyclehi": 12, "aiskippal": 36, "aipceli": 83}, {"tile": 151, "sky": 155, "plt": 200, "ofs": 5265, "name": "SWIMMERS DELIGHT", "midx": 0, "h": 64, "glh": 15, "glc": 385, "cyclelo": 13, "cyclehi": 15, "aiskippal": 6, "aipceli": 91}, {"tile": 152, "sky": 154, "plt": 220, "ofs": 6289, "name": "NASTY ONE", "midx": 28, "h": 80, "glh": 17, "glc": 321, "cyclelo": 16, "cyclehi": 17, "aiskippal": 232, "aipceli": 99}, {"tile": 153, "sky": 154, "plt": 240, "ofs": 7569, "name": "EDGE OF DOOM", "midx": 16, "h": 96, "glh": 19, "glc": 289, "cyclelo": 18, "cyclehi": 23, "aiskippal": 160, "aipceli": 107}]
+pljdys = [[3, 3, 2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, -1, -1, -1, -1, -2, -2, -2, -2, -3, -3], [2, 2, 2, 2, 1, 1, 0, 0, -1, -1, -2, -2, -2, -2]]
+plshotdys = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0]
+pltumbledys = [3, 3, 2, 2, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, -1, -1, -2, -2, -2, -2, -3, -3, -3, -3, -3, -3, -3, -3, -3, -3, -4, -4]
+aispawnt = {"33": [2, 1, 0], "34": [1, 1], "35": [1, 0], "36": [8, 1], "37": [8, 2], "38": [9, 1], "39": [9, 2]}
+aibouncedys = [2, 2, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, -1, -1, -1, -1, -2, -2, -2, -2, -4]
+
+Resolved constants (expanded source line refs):
+ walk: plmovex(plvx) 1 angle unit/tick  -> 16 ticks per column
+ jump: pljvx=plvx (same as walk), pljdys[1] 24 ticks, peak +18 units (2.25 rows), lands same level after 1.5 columns
+ climb (walk into a 1-row step): pljdys[2] 14 ticks, peak +10 units
+ fall: speed +1 every 2 ticks, max 4 units/tick; after a jump: straight down; off an edge: topple fwd/back/down by sub-cell position
+ shot: va=2 units/tick for 24 ticks (=48 units = 3 columns), one shot at a time, rises +8 units over flight (plshotdys)
+ shot hits: flashing block -> removed, +50 score, +2 extras; bouncing ball -> destroyed +100, +5 extras; rolling ball -> stunned 180 ticks; vertical/horizontal patrollers absorb shot; molecule ("bonker") ignores shots
+ lift: 1 unit/tick (8 ticks per row); holding Up/Down passes middle stops; left at a top/middle stop it waits 600 ticks then drops 1 row/tick to its bottom stop
+ hit: tumble 40 ticks (map enemy) or 30 ticks (bonker / ridden into a tile on a lift), arc pltumbledys ignores platforms, then falls until landing; on a lift the hit waits until the lift reaches a row boundary and the lift parks there
+ technique: starts 100 each tower, -1 per tumble, paid x10;  extras: capped 500, paid x10;  time: 10 per second left (rounded up)
+ height: +10 points per new row of max height reached
+ lives: +1 per 5000 points, max 8
+ enemies: max 4 at once (#ais>=4); spawn from map cells as the view scrolls up; despawn when >96 units (12 rows) below Pogo
+ bonker (molecule): every 600 ticks (when nothing else is spawning), flies across the SCREEN (not the tower) at Pogo's height, 0.5 px/tick for 128 ticks then 1 px/tick, gone after 202 ticks, alternates direction
+ rolling ball: 1 unit/tick, reverses at ledge ends / lifts, falls if it rolls off with no platform near
+ bouncing ball: 1 unit/tick (or 0 = parked), bounce arc aibouncedys (+12 units up), terminal fall 4/tick; parked ball starts rolling at Pogo when he walks on its row within a quarter lap
+ crumbling cell: removed the first tick Pogo is in walk state on it (plbreak); no regrowth until tower restarts
+ slippery cell: when Pogo is idle (or shooting) moves him +1 unit/tick (one fixed direction)
+ door: 145 ticks total, 180-degree turn (64 ticks x 2 units), drops on exit if no floor
+ fish stage: max 6 fish, one stun bubble at a time (4 px/tick), stunned fish +50 when touched

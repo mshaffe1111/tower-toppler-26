@@ -1,0 +1,177 @@
+diff --git a/src/subRenderer.js b/src/subRenderer.js
+index c48b862..4c1e375 100644
+--- a/src/subRenderer.js
++++ b/src/subRenderer.js
+@@ -1058,6 +1058,31 @@ export class SubRenderer {
+     this._buildTowers();
+     this._buildOverlay();
+     this.resize(390, 620);
++    this._precompile();
++  }
++
++  // Compile every shader program up front (hidden / not-yet-spawned things included) so the first
++  // sparkle, the next tower or the arrival shot never hitch mid-ride. With
++  // KHR_parallel_shader_compile this happens in the background right away; without it, it is done
++  // synchronously just before the first frame of the ride (where most programs compiled anyway).
++  _precompile() {
++    const gl = this.gl;
++    this._needsCompile = false;
++    if (!gl || typeof gl.compile !== 'function') return;
++    let parallel = false;
++    try {
++      parallel = !!(gl.extensions && gl.extensions.has && gl.extensions.has('KHR_parallel_shader_compile'));
++    } catch (_) {
++      parallel = false;
++    }
++    if (parallel && typeof gl.compileAsync === 'function') {
++      try {
++        gl.compileAsync(this.scene, this.camera).catch(() => {});
++        gl.compileAsync(this.overlay, this.oCam).catch(() => {});
++      } catch (_) {
++        this._needsCompile = true;
++      }
++    } else this._needsCompile = true;
+   }
+ 
+   // ------------------------------------------------------------------ mapping
+@@ -1397,7 +1422,7 @@ export class SubRenderer {
+     const sp = new Float32Array(NS * 3);
+     const ss = new Float32Array(NS);
+     for (let i = 0; i < NS; i++) {
+-      const fg = i < NS * 0.12;
++      const fg = i < NS * 0.08;
+       sp[i * 3] = (rng() - 0.5) * 60;
+       sp[i * 3 + 1] = rng() * 16 - 8;
+       sp[i * 3 + 2] = fg ? lerp(5, 11, rng()) : lerp(-16, 4, Math.pow(rng(), 0.8));
+@@ -1442,7 +1467,7 @@ export class SubRenderer {
+           vec4 mv = modelViewMatrix * vec4(p, 1.0);
+           float d = -mv.z;
+           float coc = clamp(abs(d - uFocus) / max(d, 0.5) * 2.4, 0.0, 2.6);
+-          gl_PointSize = (0.045 + fract(aSeed * 13.0) * 0.08) * uPx / max(d, 0.5) * (1.0 + coc * 3.2);
++          gl_PointSize = min((0.045 + fract(aSeed * 13.0) * 0.08) * uPx / max(d, 0.5) * (1.0 + coc * 1.8), uPx * 0.075);
+           float tw = 1.0 - uTwinkle + uTwinkle * sin(uTime * (1.0 + aSeed * 3.0) + aSeed * 20.0);
+           float near = smoothstep(1.2, 3.5, d);
+           vA = (0.35 + 0.65 * fract(aSeed * 3.7)) * (1.0 - smoothstep(uFogNear, uFogFar, d)) * tw * near / (1.0 + coc * coc * 3.5);
+@@ -1795,7 +1820,6 @@ export class SubRenderer {
+       const u = clamp((x - L0) / (L1 - L0), 0, 1);
+       return R * Math.pow(Math.max(0, Math.sin(Math.PI * Math.pow(u, 1.36))), 0.55);
+     };
+-    this._hr = hr;
+     const C = (h) => new THREE.Color(h);
+     const YEL = C('#ffc21a');
+     const RED = C('#e5322d');
+@@ -2432,7 +2456,8 @@ export class SubRenderer {
+     wg.setAttribute('aAlpha', new THREE.BufferAttribute(this.wakeAlpha, 1).setUsage(THREE.DynamicDrawUsage));
+     wg.setAttribute('aBio', new THREE.BufferAttribute(this.wakeBio, 1).setUsage(THREE.DynamicDrawUsage));
+     // premultiplied blending: aBio = 0 draws a normal see-through bubble, aBio = 1 an additive
+-    // bioluminescent spark (dinoflagellates lighting up in the prop wash of a dark sea)
++    // bioluminescent spark (dinoflagellates lighting up in the prop wash of a dark sea), aBio = 2
++    // a bright spray droplet (surfacing splash)
+     this.wakeMat = new THREE.ShaderMaterial({
+       uniforms: { uMap: { value: bubbleTex }, uGlow: { value: this.softDot }, uPx: { value: 600 }, uColor: { value: new THREE.Color('#e6fbff') }, uBioCol: U.uBioCol },
+       transparent: true,
+@@ -2442,15 +2467,17 @@ export class SubRenderer {
+       blendDst: THREE.OneMinusSrcAlphaFactor,
+       vertexShader: /* glsl */ `
+         uniform float uPx; attribute float aSize; attribute float aAlpha; attribute float aBio; varying float vA; varying float vB;
+-        void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = aSize * uPx / -mv.z * (1.0 + aBio * 0.8); vA = aAlpha; vB = aBio; gl_Position = projectionMatrix * mv; }`,
++        void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = aSize * uPx / -mv.z * (1.0 + min(aBio, 1.0) * 0.8); vA = aAlpha; vB = aBio; gl_Position = projectionMatrix * mv; }`,
+       fragmentShader: /* glsl */ `
+         uniform sampler2D uMap; uniform sampler2D uGlow; uniform vec3 uColor; uniform vec3 uBioCol; varying float vA; varying float vB;
+         void main(){
+           float ta = texture2D(uMap, gl_PointCoord).a;
+           float ga = texture2D(uGlow, gl_PointCoord).a;
+-          vec3 bubble = uColor * ta;
+-          vec3 spark = uBioCol * ga * 1.3;
+-          gl_FragColor = vec4(mix(bubble, spark, vB) * vA, ta * vA * (1.0 - vB));
++          float isSpray = step(1.5, vB);
++          float isBio = step(0.5, vB) - isSpray;
++          float isBub = 1.0 - isBio - isSpray;
++          vec3 col = uColor * ta * isBub + uBioCol * ga * 1.3 * isBio + vec3(0.95, 0.98, 1.0) * ga * isSpray;
++          gl_FragColor = vec4(col * vA, (ta * isBub + ga * 0.85 * isSpray) * vA);
+           #include <colorspace_fragment>
+         }`,
+     });
+@@ -2697,7 +2724,7 @@ export class SubRenderer {
+     this._popFrame = 0;
+     this.popPool = [];
+     for (let i = 0; i < MAX_POP; i++) {
+-      const m = new THREE.Mesh(quad, basic());
++      const m = new THREE.Mesh(quad, basic({ map: this.softDot }));
+       m.visible = false;
+       m.renderOrder = 3;
+       this.fxGroup.add(m);
+@@ -2807,7 +2834,7 @@ export class SubRenderer {
+     });
+     this.comboRing = new THREE.Mesh(quad, this.comboMat);
+     this.comboRing.renderOrder = 6;
+-    this.comboText = new THREE.Mesh(quad, basic());
++    this.comboText = new THREE.Mesh(quad, basic({ map: this.softDot }));
+     this.comboText.renderOrder = 7;
+     this.comboRing.visible = false;
+     this.comboText.visible = false;
+@@ -3402,6 +3429,15 @@ export class SubRenderer {
+   render(stage, { time = 0, particles = null, popups = null, shake = 0 } = {}) {
+     if (!stage) return;
+     const gl = this.gl;
++    if (this._needsCompile) {
++      this._needsCompile = false;
++      try {
++        gl.compile(this.scene, this.camera);
++        gl.compile(this.overlay, this.oCam);
++      } catch (_) {
++        // not fatal: programs then compile lazily on first use
++      }
++    }
+     const dt = this._lastTime === null ? 1 / 60 : clamp(time - this._lastTime, 0, 0.05);
+     this._lastTime = time;
+     this._kx = stage.width ? this.width / stage.width : 1;
+@@ -4310,19 +4346,19 @@ export class SubRenderer {
+         }
+         case 'splash': {
+           if (fresh) {
+-            for (let j = 0; j < 46; j++) {
+-              const a = Math.PI * 0.5 + (Math.random() - 0.5) * 1.6;
+-              const sp = 2.5 + Math.random() * 4.5;
++            for (let j = 0; j < 64; j++) {
++              const a = Math.PI * 0.5 + (Math.random() - 0.5) * 1.7;
++              const sp = 2.2 + Math.random() * 4.8;
+               this._spawnWake(
+-                v.x + (Math.random() - 0.5) * sc * 2.4,
++                v.x + (Math.random() - 0.5) * sc * 2.6,
+                 this._surfW + 0.02,
+-                (Math.random() - 0.5) * 0.8,
++                (Math.random() - 0.5) * 0.8 + 0.3,
+                 Math.cos(a) * sp * 0.6,
+                 Math.sin(a) * sp,
+-                0.06 + Math.random() * 0.1,
++                0.025 + Math.random() * 0.06,
+                 1.0 + Math.random() * 0.6,
+                 -9.5,
+-                0
++                2
+               );
+             }
+           }
+@@ -4411,7 +4447,7 @@ export class SubRenderer {
+       this.wakePos[i * 3 + 1] = w.y;
+       this.wakePos[i * 3 + 2] = w.z;
+       this.wakeSize[i] = w.size;
+-      this.wakeAlpha[i] = a * (w.bio ? 0.9 : 0.85);
++      this.wakeAlpha[i] = a * (w.bio === 1 ? 0.9 : 0.85);
+       this.wakeBio[i] = w.bio;
+     }
+     const g = this.wakePoints.geometry;
+diff --git a/src/subStage.js b/src/subStage.js
+index 236e885..ec2104c 100644
+--- a/src/subStage.js
++++ b/src/subStage.js
+@@ -236,6 +236,8 @@ export class SubStage {
+       gold: this.goldCaught,
+       hits: this.hits,
+       perfect: this.perfect,
++      nearMisses: this.nearMisses,
++      bestCombo: this.bestCombo,
+     };
+   }
+ 
