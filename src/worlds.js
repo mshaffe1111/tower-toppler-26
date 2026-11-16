@@ -103,6 +103,34 @@ export const WORLDS = [
 ];
 
 export const CAMPAIGN_TOWERS = WORLDS.length * TOWERS_PER_WORLD;
+export const PUZZLE_TYPES = ['lights', 'bells', 'beam'];
+
+// A rune door for a puzzle room: a quiet ledge cell in the middle part of the tower with room for
+// a 3-row doorway above it, away from other doors. `rows` is the tower grid, top row first.
+export function placeRuneDoor(rows, seed) {
+  const g = rows.slice().reverse();
+  const H = g.length;
+  const at = (c, r) => (r >= 0 && r < H ? g[r][((c % 16) + 16) % 16] : ' ');
+  const find = (lo, hi, dcs) => {
+    const out = [];
+    for (let r = Math.floor(H * lo); r < Math.floor(H * hi); r++) {
+      for (let c = 0; c < 16; c++) {
+        if (!'-'.includes(at(c, r))) continue;
+        if (at(c, r + 1) !== ' ' || at(c, r + 2) !== ' ' || at(c, r + 3) !== ' ') continue;
+        let near = false;
+        for (let dr = -3; dr <= 3; dr++) for (const dc of dcs) if ('#T^v!'.includes(at(c + dc, r + 1 + dr))) near = true;
+        if (!near) out.push([c, r]);
+      }
+    }
+    return out;
+  };
+  // first choice: the middle half, clear of other doors and lifts nearby; then anywhere sensible
+  let cands = find(0.25, 0.75, [-1, 0, 1, 8]);
+  if (!cands.length) cands = find(0.12, 0.88, [0, 8]);
+  if (!cands.length) return null;
+  const k = Math.abs(Math.imul(seed | 0, 2654435761) >>> 7) % cands.length;
+  return { col: cands[k][0], floor: cands[k][1] };
+}
 const ROMAN = ['I', 'II', 'III', 'IV', 'V'];
 
 
@@ -139,5 +167,7 @@ export function worldTowerPlan(i) {
     summit,
     seed: (0x5eed00 + w * 97 + t * 13) >>> 0,
     final: i === CAMPAIGN_TOWERS - 1,
+    // towers II and IV hide a rune door to a puzzle room (20 rooms; the types take turns)
+    puzzle: t === 1 || t === 3 ? PUZZLE_TYPES[(w * 2 + (t === 3 ? 1 : 0)) % PUZZLE_TYPES.length] : null,
   };
 }

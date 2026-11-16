@@ -449,6 +449,10 @@ export class TowerTopplerGame {
     }
     if (!this.original) this._populateExtras(rand);
     this.secretsTotal = t.mechanic === 'vault' ? t.doors.filter((d) => d.vault).length : this.secrets.length;
+    // a hidden puzzle room counts as one more secret (its puzzle is built from the tower's seed;
+    // makePuzzle comes from puzzleRoom.js, loaded lazily by main.js)
+    this.puzzleData = t.puzzle && this.makePuzzle ? this.makePuzzle(t.puzzle) : null;
+    if (this.puzzleData && t.doors.some((d) => d.rune)) this.secretsTotal += 1;
     this.secretsGot = 0;
 
     // Guardian of the final tower
@@ -653,7 +657,7 @@ export class TowerTopplerGame {
   }
 
   togglePause() {
-    if (this.mode === 'tower' || this.mode === 'submarine' || this.mode === 'summit') {
+    if (this.mode === 'tower' || this.mode === 'submarine' || this.mode === 'summit' || this.mode === 'puzzle' || this.mode === 'glide') {
       this.pausedFrom = this.mode;
       this.mode = 'paused';
       this.rewinding = false;
@@ -687,7 +691,7 @@ export class TowerTopplerGame {
       this.nextExtraLife += 5000;
       this._stat('extraLives');
       sound.extraLife();
-      if (this.mode === 'submarine') {
+      if (this.mode === 'submarine' || this.mode === 'glide' || this.mode === 'puzzle') {
         this.addPopup({ x: this.renderer.width * 0.5, y: this.renderer.height * 0.4, text: 'EXTRA LIFE!', color: '#f472b6', maxLife: 1.35 });
       } else {
         this.addPopup({ col: this.player.col, floor: this.player.floor + 1.1, text: 'EXTRA LIFE!', color: '#f472b6', maxLife: 1.35 });
@@ -792,6 +796,7 @@ export class TowerTopplerGame {
         if (nearDoor) {
           if (nearDoor.isExit) actionPrompt = this.boss && !this.boss.dead ? '🔒 DEFEAT THE GUARDIAN' : '▲ EXIT TOWER!';
           else if (nearDoor.vault) actionPrompt = nearDoor.used ? null : '▲ TRICK DOOR?';
+          else if (nearDoor.rune) actionPrompt = nearDoor.solved ? null : '▲ RUNE DOOR';
           else actionPrompt = '▲ ENTER PORTAL';
         } else if (p.onElevator) {
           actionPrompt = '▲▼ RIDE LIFT';
@@ -890,6 +895,10 @@ export class TowerTopplerGame {
       this._updateTopple(clampedDt);
     } else if (this.mode === 'submarine') {
       this._updateSubmarine(clampedDt);
+    } else if (this.mode === 'puzzle') {
+      this._updatePuzzle(clampedDt);
+    } else if (this.mode === 'glide') {
+      this._updateGlide(clampedDt);
     }
 
     this.input.clearFrame();
@@ -1103,7 +1112,7 @@ export class TowerTopplerGame {
       (p.onGround || p.coyoteTimer > 0) &&
       this.tower.doors.find(
         (d) =>
-          (d.isExit || d.decoy || d.targetId || (d.vault && !d.used)) &&
+          (d.isExit || d.decoy || d.targetId || (d.vault && !d.used) || (d.rune && !d.solved)) &&
           Math.abs(d.floor - p.floor) < 0.5 &&
           Math.abs(colDist(p.col, d.col + 0.5)) < doorReach
       );
@@ -1126,6 +1135,13 @@ export class TowerTopplerGame {
             }
           } else {
             this._reachSummit();
+            return;
+          }
+        } else if (door.rune) {
+          // a hidden puzzle room (clock paused while you're inside)
+          if (!door.solved && this.puzzleRoomFactory && this.puzzleData) {
+            p.doorLock = true;
+            this._enterPuzzleRoom(door);
             return;
           }
         } else if (door.vault) {
@@ -2991,7 +3007,68 @@ export class TowerTopplerGame {
       this.cb.onGameOver?.(true, this.score, this.hiScore, this._runSummary());
       return;
     }
+    // between worlds of the Reboot campaign: the glide to the next world's island
+    const next = this.towerProvider(this.towerIndex + 1);
+    if (this.runMode === 'campaign' && !this.original && next?.world != null && next.world !== this.tower.world && this.glideStageFactory) {
+      this.startGlideStage(next);
+      return;
+    }
     this.startSubmarineStage();
+  }
+
+  // THE GLIDE (src/glideStage.js + src/glideRenderer.js): the hang-glider ride between worlds
+  startGlideStage(next) {
+    this.mode = 'glide';
+    this.particles = [];
+    this.popups = [];
+    this.shake = 0;
+    this.comboCount = 0;
+    this.comboTimer = 0;
+    sound.stopAmbience?.();
+    this.glideStage = this.glideStageFactory();
+    this.glideStage.start({
+      width: this.renderer.width,
+      height: this.renderer.height,
+      worldIndex: next.world,
+      nextWorldName: next.worldName || next.name,
+      nextGlow: next.palette?.glow || '#38bdf8',
+      healing: this.healing,
+    });
+    this.cb.onBanner?.('THE GLIDE', `On to world ${next.world + 1}`);
+    this._syncHud();
+  }
+
+  _updateGlide(dt) {
+    const st = this.glideStage;
+    if (!st) {
+      this._endGlide();
+      return;
+    }
+    const firePressed = this.input.consumeJustPressed('fire') || this.input.consumeJustPressed('jump');
+    const fx = {
+      addScore: (pts) => this.addScore(pts),
+      popup: (x, y, text, color) => this.addPopup({ x, y, text, color }),
+      particles: (x, y, color, count, spd) => this._spawnParticles(x, y, color, count, spd),
+      shake: (a) => this.addShake(a),
+      banner: (sub, title) => this.cb.onBanner?.(sub, title),
+      sound,
+    };
+    const done = st.update(dt, this.input.state, firePressed, fx);
+    this._syncHud();
+    if (done) this._endGlide();
+  }
+
+  _endGlide() {
+    if (this.glideStage?.collected) {
+      bumpStat('glide', this.glideStage.collected);
+      const fresh = checkTrophies();
+      if (fresh.length) this.cb.onTrophies?.(fresh);
+    }
+    this.glideStage = null;
+    this.towerIndex += 1;
+    this.loadTower(this.towerIndex);
+    this.mode = 'tower';
+    this._saveRun();
   }
 
   _recordBest() {
@@ -3059,6 +3136,80 @@ export class TowerTopplerGame {
     this.loadTower(this.towerIndex);
     this.mode = 'tower';
     this._saveRun();
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // Hidden puzzle rooms (src/puzzleRoom.js + src/puzzleRenderer.js): behind a rune door; the
+  // tower's clock stops while you're inside. Solve it for a star-fish, a key and time.
+  // ---------------------------------------------------------------------------------------
+  _enterPuzzleRoom(door) {
+    this.puzzleDoor = door;
+    this.mode = 'puzzle';
+    this.particles = [];
+    this.popups = [];
+    this.shake = 0;
+    sound.door();
+    this.puzzleRoom = this.puzzleRoomFactory();
+    this.puzzleRoom.start({
+      width: this.renderer.width,
+      height: this.renderer.height,
+      puzzle: this.puzzleData,
+      worldIndex: this.tower.world ?? 0,
+      palette: this.tower.palette,
+    });
+    this.cb.onBanner?.('HIDDEN ROOM', { lights: 'Light the runes to match', bells: 'Ring the bells in order', beam: 'Guide the light to the crystal', blocks: 'Push the stone onto the plate' }[this.puzzleData.type] || 'Solve the puzzle');
+    this._syncHud();
+  }
+
+  _updatePuzzle(dt) {
+    const room = this.puzzleRoom;
+    if (!room) {
+      this.mode = 'tower';
+      return;
+    }
+    const firePressed = this.input.consumeJustPressed('fire') || this.input.consumeJustPressed('jump');
+    const fx = {
+      addScore: (pts) => this.addScore(pts),
+      popup: (x, y, text, color) => this.addPopup({ x, y, text, color }),
+      particles: (x, y, color, count, spd) => this._spawnParticles(x, y, color, count, spd),
+      shake: (a) => this.addShake(a),
+      banner: (sub, title) => this.cb.onBanner?.(sub, title),
+      sound,
+    };
+    const done = room.update(dt, this.input.state, firePressed, fx);
+    if (done) this._leavePuzzleRoom();
+  }
+
+  _leavePuzzleRoom() {
+    const room = this.puzzleRoom;
+    const door = this.puzzleDoor;
+    const p = this.player;
+    if (room && room.solved && door && !door.solved) {
+      door.solved = true;
+      this.secretsGot += 1;
+      this.timer += 15;
+      this.addScore(1500);
+      progress.keys = progress.keys || {};
+      progress.keys[this.tower.label || this.tower.id] = 1;
+      saveProgress();
+      this._stat('puzzles');
+      p.emote = { kind: 'joy', t: 1.8 };
+      sound.secret?.();
+      this.cb.onBanner?.('ROOM SOLVED!', `★ ${this.secretsGot}/${this.secretsTotal} · 🗝️ key · +1500 · +15s`);
+    }
+    this.puzzleRoom = null;
+    this.puzzleDoor = null;
+    this.mode = 'tower';
+    // back out of the rune door, standing in front of it
+    if (door) {
+      p.col = door.col + 0.5;
+      p.floor = door.floor;
+      p.onGround = true;
+      p.vx = 0;
+      p.vy = 0;
+      p.doorLock = true;
+    }
+    this._syncHud();
   }
 
   _updateSubmarine(dt) {
@@ -3143,7 +3294,13 @@ export class TowerTopplerGame {
 
   render() {
     const inSub = this.mode === 'submarine' || (this.mode === 'paused' && this.pausedFrom === 'submarine');
-    if (inSub) {
+    const inPuzzle = this.mode === 'puzzle' || (this.mode === 'paused' && this.pausedFrom === 'puzzle');
+    const inGlide = this.mode === 'glide' || (this.mode === 'paused' && this.pausedFrom === 'glide');
+    if (inGlide && this.glideStage && this.renderer.renderGlideStage) {
+      this.renderer.renderGlideStage(this);
+    } else if (inPuzzle && this.puzzleRoom && this.renderer.renderPuzzleRoom) {
+      this.renderer.renderPuzzleRoom(this);
+    } else if (inSub) {
       if (this.subStage && this.renderer.renderSubStage) this.renderer.renderSubStage(this);
       else this.renderer.renderSubmarineScene(this);
     } else if (this.tower) {

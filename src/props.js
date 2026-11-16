@@ -521,15 +521,48 @@ function doorGeos() {
   return DGEO;
 }
 
+// A carved rune glyph (canvas), shared by every rune door
+let RUNE_TEX = null;
+function runeTexture() {
+  if (RUNE_TEX) return RUNE_TEX;
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 128;
+  const x = c.getContext('2d');
+  x.strokeStyle = '#ffffff';
+  x.lineCap = 'round';
+  x.lineJoin = 'round';
+  x.shadowColor = '#ffffff';
+  x.shadowBlur = 12;
+  x.lineWidth = 9;
+  x.beginPath();
+  x.arc(64, 64, 44, 0, Math.PI * 2);
+  x.stroke();
+  x.lineWidth = 8;
+  x.beginPath();
+  x.moveTo(64, 28);
+  x.lineTo(64, 100);
+  x.moveTo(64, 44);
+  x.lineTo(40, 66);
+  x.moveTo(64, 44);
+  x.lineTo(88, 66);
+  x.moveTo(46, 84);
+  x.lineTo(82, 84);
+  x.stroke();
+  RUNE_TEX = new THREE.CanvasTexture(c);
+  RUNE_TEX.colorSpace = THREE.SRGBColorSpace;
+  return RUNE_TEX;
+}
+
 export function buildDoor(door, pal, mats, softDotTex) {
   const G = doorGeos();
   const R = TOWER_RADIUS;
   const g = new THREE.Group();
   g.rotation.y = (door.col + 0.5) * COL_ANGLE;
   g.position.y = door.floor * FH;
-  const kind = door.isExit ? 'exit' : door.vault ? 'vault' : 'tunnel';
-  const glow = kind === 'exit' ? '#ffb020' : kind === 'vault' ? '#b26bff' : pal.glow;
-  const glow2 = kind === 'exit' ? '#fff3b0' : kind === 'vault' ? '#ff7ad9' : '#ffffff';
+  const kind = door.isExit ? 'exit' : door.rune ? 'rune' : door.vault ? 'vault' : 'tunnel';
+  const glow = kind === 'exit' ? '#ffb020' : kind === 'rune' ? '#2dd4bf' : kind === 'vault' ? '#b26bff' : pal.glow;
+  const glow2 = kind === 'exit' ? '#fff3b0' : kind === 'rune' ? '#fde68a' : kind === 'vault' ? '#ff7ad9' : '#ffffff';
 
   // set just behind the brick faces so the opening's edges are the bricks themselves
   const z = R - 0.012;
@@ -564,8 +597,23 @@ export function buildDoor(door, pal, mats, softDotTex) {
     g.add(crown);
   }
 
+  // Rune door (a hidden puzzle room): a glowing carved rune hangs above the opening
+  let rune = null;
+  if (kind === 'rune') {
+    rune = new THREE.Sprite(new THREE.SpriteMaterial({ map: runeTexture(), color: '#5eead4', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    rune.scale.setScalar(0.42);
+    rune.position.set(0, DOOR_H + 0.22, R + 0.12);
+    g.add(rune);
+  }
+
   const update = (time) => {
     portalMat.uniforms.time.value = time;
+    if (rune) {
+      const solved = door.solved;
+      rune.material.opacity = solved ? 0.35 : 0.65 + 0.35 * Math.sin(time * 2.6);
+      rune.material.color.set(solved ? '#fde68a' : '#5eead4');
+      rune.position.y = DOOR_H + 0.22 + Math.sin(time * 1.7) * 0.03;
+    }
     for (const m of motes) {
       const u = m.userData;
       const k = (time * u.sp * 0.35 + u.a) % 1;
