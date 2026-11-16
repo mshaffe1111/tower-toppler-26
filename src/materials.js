@@ -573,6 +573,8 @@ export function createBrickMaterial(
       .replace(
         '#include <opaque_fragment>',
         `{
+          // a little bounce light so bricks in a ledge's shadow still read as coloured brick
+          outgoingLight += diffuseColor.rgb * 0.07;
           float ndv = abs(dot(normalize(vNormal), normalize(vViewPosition)));
           outgoingLight *= mix(1.0 - edgeDarken, 1.0, smoothstep(0.08, 0.75, ndv));
         }

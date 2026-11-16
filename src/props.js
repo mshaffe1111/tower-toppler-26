@@ -229,7 +229,8 @@ function textures() {
     },
     { repeat: [2.2, 2.2] }
   );
-  for (const t of [cracks]) t.repeat.set(2.2, 2.2);
+  // heat glow: one sparse set of fissures per slab (not tiled), over the dark cracks in the stone
+  cracks.repeat.set(1, 1);
   TEX = { cracks, frost, treadR: tread(1), treadL: tread(-1), hazard, runes, limestone, crackedStone };
   return TEX;
 }
@@ -304,10 +305,10 @@ export function createPropMaterials(pal, chromeEnv) {
   // Ledges & lift discs: the same pale limestone on every tower (light cream tops, darker greige
   // speckled fronts), so they always stand out from the coloured brick
   const mats = {
-    ledgeTop: new THREE.MeshStandardMaterial({ color: '#f3e9cf', map: T.limestone, roughness: 0.82, envMapIntensity: 0.55 }),
-    ledgeFront: new THREE.MeshStandardMaterial({ color: '#bfb39b', map: T.limestone, roughness: 0.9, envMapIntensity: 0.55 }),
+    ledgeTop: new THREE.MeshStandardMaterial({ color: '#f3e9cf', map: T.limestone, roughness: 0.82, envMapIntensity: 0.45, emissive: '#3a3020', emissiveIntensity: 0.55 }),
+    ledgeFront: new THREE.MeshStandardMaterial({ color: '#bfb39b', map: T.limestone, roughness: 0.9, envMapIntensity: 0.45, emissive: '#2a2216', emissiveIntensity: 0.55 }),
     // Crumbling ledge: the same stone, cracked through, heat glowing in the cracks
-    crumble: new THREE.MeshStandardMaterial({ color: '#e2d3b0', map: T.crackedStone, roughness: 0.9, emissive: '#ff7a1a', emissiveIntensity: 0.9 }),
+    crumble: new THREE.MeshStandardMaterial({ color: '#e6d8b8', map: T.crackedStone, roughness: 0.9, envMapIntensity: 0.45, emissive: '#ff6a10', emissiveIntensity: 0.45 }),
     ice: new THREE.MeshPhysicalMaterial({
       color: '#cdefff',
       map: T.frost,
@@ -328,8 +329,8 @@ export function createPropMaterials(pal, chromeEnv) {
     hazard: new THREE.MeshStandardMaterial({ map: T.hazard, roughness: 0.5 }),
     gold: new THREE.MeshStandardMaterial({ color: '#f5c542', metalness: 1, roughness: 0.25, envMap: chromeEnv, emissive: '#7c4a03', emissiveIntensity: 0.25 }),
     recess: new THREE.MeshBasicMaterial({ color: '#010205' }),
-    liftDisc: new THREE.MeshStandardMaterial({ color: '#e6dcc2', map: T.limestone, roughness: 0.85, envMapIntensity: 0.55 }),
-    liftTop: new THREE.MeshStandardMaterial({ color: '#f6eed8', map: T.limestone, roughness: 0.8, envMapIntensity: 0.55 }),
+    liftDisc: new THREE.MeshStandardMaterial({ color: '#e6dcc2', map: T.limestone, roughness: 0.85, envMapIntensity: 0.45, emissive: '#2a2216', emissiveIntensity: 0.55 }),
+    liftTop: new THREE.MeshStandardMaterial({ color: '#f6eed8', map: T.limestone, roughness: 0.8, envMapIntensity: 0.45, emissive: '#3a3020', emissiveIntensity: 0.55 }),
   };
   mats.crumble.emissiveMap = T.cracks;
   mats.crumble.needsUpdate = true;
@@ -341,12 +342,13 @@ export function createPropMaterials(pal, chromeEnv) {
 // Ledges: stacked limestone slabs protruding from the wall (a lighter top course of three
 // slabs over a darker course of four, laid like bricks)
 // ---------------------------------------------------------------------------------------------
+const LEDGE_T = 0.175; // ledge thickness: one brick row
 let LGEO = null;
 function slabCourse(r0, r1, count, height, bevel, gapA, offset = 0) {
   const pieceA = (COL_ANGLE * 0.94 - gapA * (count - 1)) / count;
   const parts = [];
   for (let i = 0; i < count; i++) {
-    const g = arcSlab(r0, r1, pieceA, height, bevel, 5, 2);
+    const g = arcSlab(r0, r1, pieceA, height, bevel, 5, 2, 0.03);
     g.rotateY(-COL_ANGLE * 0.47 + pieceA / 2 + i * (pieceA + gapA) + offset);
     parts.push(g);
   }
@@ -357,24 +359,26 @@ function ledgeGeos() {
   const R = TOWER_RADIUS;
   const span = COL_ANGLE * 0.93;
   LGEO = {
-    top: slabCourse(R - 0.03, R + 0.78, 3, 0.11, 0.025, -0.004),
+    // caps sit a hair apart (a fine seam); the bevels overlap underneath, so nothing shows through
+    // one brick row thick (measured ~0.17), reaching ~0.4 of the radius past the wall
+    top: slabCourse(R - 0.03, R + 0.98, 3, 0.075, 0.02, 0.004),
     body: (() => {
-      const g = slabCourse(R - 0.03, R + 0.72, 4, 0.15, 0.022, -0.004);
-      g.translate(0, -0.11, 0);
+      const g = slabCourse(R - 0.03, R + 0.93, 4, 0.1, 0.018, 0.004);
+      g.translate(0, -0.075, 0);
       return g;
     })(),
-    crumbleTop: arcSlab(R - 0.03, R + 0.8, span * 0.31, 0.11, 0.025, 4, 2),
+    crumbleTop: arcSlab(R - 0.03, R + 0.98, span * 0.31, 0.075, 0.02, 4, 2),
     crumbleBody: (() => {
-      const g = arcSlab(R - 0.03, R + 0.74, span * 0.31, 0.15, 0.022, 4, 2);
-      g.translate(0, -0.11, 0);
+      const g = arcSlab(R - 0.03, R + 0.93, span * 0.31, 0.1, 0.018, 4, 2);
+      g.translate(0, -0.075, 0);
       return g;
     })(),
-    iceSlab: arcSlab(R - 0.06, R + 0.82, span, 0.22, 0.06, 10),
-    iceTop: arcSlab(R - 0.02, R + 0.8, span * 0.97, 0.05, 0.02, 10),
-    convBase: arcSlab(R - 0.06, R + 0.82, span, 0.22, 0.03, 10),
-    convTread: arcSlab(R + 0.02, R + 0.74, span * 0.98, 0.035, 0.008, 10),
-    convHazard: arcSlab(R + 0.8, R + 0.835, span * 0.9, 0.08, 0.008, 10),
-    roller: new THREE.CylinderGeometry(0.05, 0.05, 0.74, 10),
+    iceSlab: arcSlab(R - 0.06, R + 0.98, span, 0.17, 0.05, 10),
+    iceTop: arcSlab(R - 0.02, R + 0.96, span * 0.97, 0.04, 0.015, 10),
+    convBase: arcSlab(R - 0.06, R + 0.98, span, 0.17, 0.03, 10),
+    convTread: arcSlab(R + 0.02, R + 0.9, span * 0.98, 0.035, 0.008, 10),
+    convHazard: arcSlab(R + 0.96, R + 0.995, span * 0.9, 0.07, 0.008, 10),
+    roller: new THREE.CylinderGeometry(0.05, 0.05, 0.9, 10),
     icicle: new THREE.ConeGeometry(0.035, 0.24, 6),
     box: new RoundedBoxGeometry(0.72, 0.56, 0.6, 3, 0.07),
   };
@@ -432,8 +436,8 @@ export function buildLedge(l, pal, mats) {
     add(G.iceTop, mats.iceTop, 0.015);
     for (const k of [-0.34, -0.1, 0.12, 0.33]) {
       const ic = new THREE.Mesh(G.icicle, mats.ice);
-      const [x, z] = polar(k * COL_ANGLE, R + 0.62 + (k > 0 ? 0.05 : 0));
-      ic.position.set(x, -0.24, z);
+      const [x, z] = polar(k * COL_ANGLE, R + 0.78 + (k > 0 ? 0.06 : 0));
+      ic.position.set(x, -0.19, z);
       ic.scale.setScalar(0.7 + Math.abs(k) * 1.2);
       node.add(ic);
     }
@@ -447,7 +451,7 @@ export function buildLedge(l, pal, mats) {
       holder.rotation.y = k * COL_ANGLE * 0.93;
       const rol = new THREE.Mesh(G.roller, mats.steel);
       rol.rotation.x = Math.PI / 2;
-      rol.position.set(0, -0.08, R + 0.38);
+      rol.position.set(0, -0.07, R + 0.47);
       holder.add(rol);
       node.add(holder);
     }
@@ -568,11 +572,20 @@ export function buildLiftTrack(el, pal, mats) {
   const G = liftGeos();
   const g = new THREE.Group();
   g.rotation.y = (el.col + 0.5) * COL_ANGLE;
+  const baseY = el.minFloor - LEDGE_T - 0.12; // just under a boarding ledge's slab
   const base = new THREE.Mesh(G.base, mats.liftDisc);
-  base.position.set(0, el.minFloor - 0.45, R + 0.42);
+  base.position.set(0, baseY, R + 0.42);
   base.castShadow = true;
   base.receiveShadow = true;
   g.add(base);
+  // stepped stone bracket into the wall, so the column is visibly carried
+  for (const [r1, h, y] of [[R + 0.42, 0.12, baseY], [R + 0.26, 0.1, baseY - 0.12]]) {
+    const b = new THREE.Mesh(arcSlab(R - 0.03, r1, COL_ANGLE * 0.32, h, 0.02, 4, 1, 0.02), mats.ledgeFront);
+    b.position.y = y;
+    b.castShadow = true;
+    b.receiveShadow = true;
+    g.add(b);
+  }
   return g;
 }
 
@@ -589,7 +602,7 @@ export function buildLiftPod(el, pal, mats) {
   top.receiveShadow = true;
   pod.add(top);
 
-  const bottom = el.minFloor - 0.45 + 0.12; // top of the footing disc
+  const bottom = el.minFloor - LEDGE_T; // top of the footing disc
   const maxDiscs = Math.ceil((el.maxFloor - el.minFloor + 0.45) / DISC_H) + 1;
   const column = new THREE.InstancedMesh(G.disc, mats.liftDisc, maxDiscs);
   column.castShadow = true;
@@ -648,11 +661,13 @@ export function towerStyleName(tower) {
   return keys[Math.abs((tower.seed ?? tower.id ?? 0) | 0) % keys.length];
 }
 
-const BRICKS_AROUND = 32; // ~0.5 wide
-const COURSE_H = 0.25; // 4 courses per floor
+// Measured from the originals: 5 brick rows per floor (a ledge takes the place of one), ~8-9
+// bricks across the visible face = 22 around (each ~0.74 wide, ~4:1), thin dark mortar
+const BRICKS_AROUND = 22;
+const COURSE_H = 0.2;
 const BRICK_PROUD = 0.055; // how far a brick face stands out from the mortar
 const BRICK_GAIN = 1.22; // instance colour gain (the clay texture is ~0.85 albedo)
-const MERLONS = 16;
+const MERLONS = 12;
 
 export function buildTowerBody(tower, pal, mats, softDotTex, chromeEnv = null) {
   const R = TOWER_RADIUS;
@@ -664,8 +679,8 @@ export function buildTowerBody(tower, pal, mats, softDotTex, chromeEnv = null) {
   const brickCol = new THREE.Color(S.brick);
   const altCol = new THREE.Color(S.alt);
 
-  // Mortar core: the thin dark joints between bricks
-  const coreMat = createLedgeStoneMaterial(new THREE.Color(S.mortar).multiplyScalar(1.6), {});
+  // Mortar core: the thin dark joints between bricks (plain and matte, so a joint never lights up)
+  const coreMat = new THREE.MeshStandardMaterial({ color: S.mortar, roughness: 1, metalness: 0, envMapIntensity: 0.3 });
   const core = new THREE.Mesh(new THREE.CylinderGeometry(R - 0.035, R - 0.035, totalH + 0.2, 64, 1, false), coreMat);
   core.position.y = totalH / 2;
   core.receiveShadow = true;
@@ -691,12 +706,17 @@ export function buildTowerBody(tower, pal, mats, softDotTex, chromeEnv = null) {
 
   const N = BRICKS_AROUND;
   const blockA = TWO_PI / N;
-  const BRICK_HT = COURSE_H - 0.035;
-  const CAP_A = blockA * 0.8;
-  const brickGeo = arcSlab(R - 0.02, R + BRICK_PROUD - 0.03, CAP_A, BRICK_HT, 0.03, 3, 2, 0.03);
+  // chamfered (one-segment) bevel: reads exactly like the classic bricks and keeps the
+  // whole tower around 120 triangles a brick
+  const BEV = 0.022;
+  const BRICK_HT = COURSE_H - 0.028; // ~1 px of mortar between rows
+  const JOINT_W = 0.05; // ~2 px between bricks
+  const R1 = R + BRICK_PROUD - BEV; // the cap's outer radius (the bevel adds BEV all round)
+  const CAP_A = (blockA * (R + BRICK_PROUD) - JOINT_W - 2 * BEV) / R1;
+  const brickGeo = arcSlab(R - 0.02, R1, CAP_A, BRICK_HT, BEV, 2, 1, 0.025);
   brickGeo.translate(0, BRICK_HT, 0); // spans y = 0 .. BRICK_HT
   const courses = Math.ceil(totalH / COURSE_H);
-  const brickMat = createBrickMaterial('#ffffff', { hi: S.hi, brickHalf: [(CAP_A * (R + BRICK_PROUD - 0.03)) / 2 + 0.03, BRICK_HT / 2] });
+  const brickMat = createBrickMaterial('#ffffff', { hi: S.hi, brickHalf: [(CAP_A * R1) / 2 + BEV, BRICK_HT / 2] });
   const inst = new THREE.InstancedMesh(brickGeo, brickMat, courses * N + 64);
   inst.receiveShadow = true;
   inst.castShadow = false;
@@ -723,14 +743,14 @@ export function buildTowerBody(tower, pal, mats, softDotTex, chromeEnv = null) {
   const deco = [];
   let n = 0;
   // a brick's full half-span including its bevel (the rest of the pitch is the joint)
-  const half = (CAP_A * (R + BRICK_PROUD - 0.03) + 0.06) / 2 / (R + BRICK_PROUD);
-  const joint = blockA * 0.08;
+  const half = (CAP_A * R1 + 2 * BEV) / 2 / (R + BRICK_PROUD);
+  const joint = JOINT_W / (R + BRICK_PROUD);
   const place = (a0, a1, y0) => {
     // a (possibly cut) brick covering angles a0..a1
     const span = a1 - a0;
     if (span < blockA * 0.12 || n >= inst.count) return;
     q.setFromEuler(e.set(0, (a0 + a1) / 2, 0));
-    m4.compose(pos.set(0, y0 + 0.0175, 0), q, scl.set(Math.max(0.1, span / (half * 2)), 1, 1));
+    m4.compose(pos.set(0, y0 + 0.014, 0), q, scl.set(Math.max(0.1, span / (half * 2)), 1, 1));
     inst.setMatrixAt(n, m4);
     inst.setColorAt(n, brickColour());
     n++;
@@ -771,7 +791,7 @@ export function buildTowerBody(tower, pal, mats, softDotTex, chromeEnv = null) {
       }
       q.setFromEuler(e.set((rnd() - 0.5) * 0.006, a + (rnd() - 0.5) * 0.004, (rnd() - 0.5) * 0.006));
       const out = 1 + (rnd() - 0.5) * 0.005;
-      m4.compose(pos.set(0, y0 + 0.0175, 0), q, scl.set(out, 1, out));
+      m4.compose(pos.set(0, y0 + 0.014, 0), q, scl.set(out, 1, out));
       inst.setMatrixAt(n, m4);
       inst.setColorAt(n, brickColour());
       n++;
@@ -860,6 +880,6 @@ export function buildTowerBody(tower, pal, mats, softDotTex, chromeEnv = null) {
     update,
     coreMat,
     styleName,
-    stoneMats: [coreMat, plinth.material, brickMat, crownMat],
+    stoneMats: [plinth.material, brickMat, crownMat],
   };
 }
