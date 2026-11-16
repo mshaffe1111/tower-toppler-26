@@ -1,6 +1,7 @@
 import { COLS, createTowers } from './levels.js';
 import { sound } from './audio.js';
 import { makeOriginalTower } from './original.js';
+import { bumpStat, getStats, checkTrophies, maxStat } from './trophies.js';
 import { settings, towerKey, awardMedals, getGhost, saveGhostIfBest, progress, saveProgress } from './settings.js';
 
 function wrapCol(c) {
@@ -257,6 +258,9 @@ export class TowerTopplerGame {
     this.lives = 3;
     this.towerIndex = startTower;
     this.toppledThisRun = 0;
+    this.runLivesLost = resume ? resume.livesLost || 0 : 0;
+    this.runRewindUsed = resume ? Boolean(resume.rewindUsed) : false;
+    this.runFromStart = resume ? Boolean(resume.fromStart) : startTower === 0;
     this.healing = mode === 'campaign' ? Math.min(1, startTower / 8) : 0;
     if (resume) {
       this.score = resume.score || 0;
@@ -285,6 +289,9 @@ export class TowerTopplerGame {
       lives: Number.isFinite(this.lives) ? this.lives : 3,
       nextExtraLife: this.nextExtraLife,
       toppled: this.toppledThisRun || 0,
+      livesLost: this.runLivesLost || 0,
+      rewindUsed: Boolean(this.runRewindUsed),
+      fromStart: Boolean(this.runFromStart),
       healing: this.healing || 0,
       runSeed: this.runSeed ?? null,
       mirror: Boolean(settings.mirror),
@@ -397,6 +404,11 @@ export class TowerTopplerGame {
     this.moleculeTimer = MOLECULE_PERIOD;
     this.moleculeDir = 1;
     this.extras = 0;
+    this.blocksShot = 0;
+    this.blocksTotal = t.ledges.filter((l) => l.type === 'box').length;
+    this.ballsTotal = t.real ? t.enemies.filter((e) => e.type === 'bouncer').length : 0;
+    this.rewindUsedHere = false;
+    this.maxComboHere = 0;
 
     // Checkpoint flags roughly every 5 floors on a solid ledge
     this.checkpoints = [];
@@ -639,6 +651,13 @@ export class TowerTopplerGame {
   // Score, effects, HUD
   // ---------------------------------------------------------------------------------------
 
+  // count something for the trophies and announce any it unlocks right away
+  _stat(key, n = 1) {
+    bumpStat(key, n);
+    const fresh = checkTrophies();
+    if (fresh.length) this.cb.onTrophies?.(fresh);
+  }
+
   addScore(pts) {
     this.score += pts;
     if (this.score > this.hiScore) {
@@ -648,6 +667,7 @@ export class TowerTopplerGame {
     if (this.score >= this.nextExtraLife) {
       this.lives = Math.min(6, this.lives + 1);
       this.nextExtraLife += 5000;
+      this._stat('extraLives');
       sound.extraLife();
       if (this.mode === 'submarine') {
         this.addPopup({ x: this.renderer.width * 0.5, y: this.renderer.height * 0.4, text: 'EXTRA LIFE!', color: '#f472b6', maxLife: 1.35 });
@@ -664,6 +684,7 @@ export class TowerTopplerGame {
 
   _scoreComboHit(basePts, popupPos, baseColor) {
     this.comboCount = Math.min(4, (this.comboCount || 0) + 1);
+    this.maxComboHere = Math.max(this.maxComboHere || 0, this.original ? 1 : this.comboCount);
     this.comboTimer = 3.2;
     const mult = this.original ? 1 : this.comboCount; // the 7800 pays flat: 100 a ball, 50 a block
     const pts = basePts * mult;
@@ -832,6 +853,8 @@ export class TowerTopplerGame {
       if (wantRewind) {
         if (!this.rewinding) sound.rewindStart?.();
         this.rewinding = true;
+        this.rewindUsedHere = true;
+        this.runRewindUsed = true;
         this._stepRewind(clampedDt);
       } else {
         if (this.rewinding) sound.rewindStop?.();
@@ -1119,6 +1142,7 @@ export class TowerTopplerGame {
             p.doorLock = true;
             p.tunnelTimer = 0.35;
             p.tunnelTarget = target;
+            this._stat('doors');
             sound.door();
             return;
           }
@@ -1248,8 +1272,10 @@ export class TowerTopplerGame {
       } else {
         // Lifts ride on their own once started: one press / flick of UP (or jump) carries you to
         // the top stop, DOWN to the bottom; holding still works, and the other way reverses it
+        const wasRiding = el.autoDir;
         if (this.input.justPressed.up || this.input.justPressed.jump || inp.up || inp.jump) el.autoDir = 1;
         else if (this.input.justPressed.down || inp.down) el.autoDir = -1;
+        if (!wasRiding && el.autoDir) this._stat('lifts');
         // Original lifts ride at 4 rows/s and stop at middle stops unless you keep holding the
         // direction (RESEARCH.md 3)
         const rate = el.rowsPerSec || el.speed * 1.5;
@@ -1687,6 +1713,8 @@ export class TowerTopplerGame {
         box.respawnTimer = 999;
         this._scoreComboHit(50, { col: box.col + 0.5, floor: box.floor + 0.5 }, '#fde047');
         if (this.original) this.extras = (this.extras || 0) + 2;
+        this.blocksShot = (this.blocksShot || 0) + 1;
+        this._stat('blocks');
         this.addShake(3.5);
         this._burstAt(box.col + 0.5, box.floor + 0.3, '#bae6fd', 8, 95);
         sound.hitEnemy();
@@ -1758,6 +1786,7 @@ export class TowerTopplerGame {
             this._popEnemy(en);
           } else if (sb.power > 0) {
             en.stunTimer = this._freezeTime(3 + sb.power * 3);
+            this._stat('freezes');
             this._scoreComboHit(40, { col: en.col, floor: en.floor + 0.5 }, '#a5f3fc');
             this._burstAt(en.col, en.floor + 0.3, '#a5f3fc', 12, 90);
             sound.freeze?.();
@@ -1811,6 +1840,7 @@ export class TowerTopplerGame {
     en.dead = true;
     en.deathTimer = 0.5;
     if (this.original && en.type === 'bouncer') this.extras = (this.extras || 0) + 5;
+    if (en.type === 'bouncer') this._stat('balls');
     const pts = en.fireball ? 75 : en.type === 'molecule' || en.type === 'spiker' ? 150 : en.type === 'chaser' || en.type === 'shieldbug' ? 250 : en.mini ? 75 : 100;
     const col = en.fireball ? '#fb923c' : en.type === 'molecule' ? '#f472b6' : en.type === 'spiker' ? '#fde047' : en.type === 'chaser' ? '#e2e8f0' : '#fca5a5';
     this._scoreComboHit(pts, { col: en.col, floor: en.floor + 0.5 }, col);
@@ -1967,6 +1997,7 @@ export class TowerTopplerGame {
           ? portTouch(p.col, p.floor, en.col, en.floor)
           : dfl > -1.5 && dfl < POGO_H - 0.1 && Math.abs(colDist(en.col, p.col)) < 0.5;
       if (p.invuln <= 0 && !p.hidden && touching) {
+        en.hitPogo = true;
         this._knockDown(colDist(en.col, p.col) >= 0 ? 1 : -1, en.kind === 'bonker');
         if (en.fireball) {
           en.dead = true;
@@ -2046,6 +2077,7 @@ export class TowerTopplerGame {
       en.floor = en.baseFloor;
       if (en.kt > MOLECULE_LIFE) {
         this.enemies.splice(ei, 1);
+        if (!en.hitPogo) this._stat('molecules');
         return true;
       }
       return false;
@@ -2216,6 +2248,7 @@ export class TowerTopplerGame {
       if (Math.abs(colDist(p.col, s.col)) < 0.5 && Math.abs(p.floor - s.floor) < 0.7) {
         s.got = true;
         this.secretsGot += 1;
+        this._stat('starfish');
         this.addScore(300);
         this.addPopup({ col: s.col, floor: s.floor + 1.2, text: `★ ${this.secretsGot}/${this.secretsTotal}`, color: '#fde047', maxLife: 1.2 });
         if (sound.collect) sound.collect(this.secretsGot);
@@ -2510,6 +2543,7 @@ export class TowerTopplerGame {
       const gained = f - (p.bestFloor || 0);
       p.bestFloor = f;
       if (this.mode === 'tower') {
+        this._stat('steps', gained);
         // the 7800 pays 40 per new stair step climbed (first ascent only)
         const pts = (this.original ? 40 : 25) * gained;
         this.addScore(pts);
@@ -2638,6 +2672,7 @@ export class TowerTopplerGame {
 
   _loseLife(reason) {
     if (!settings.assist) this.lives -= 1;
+    this.runLivesLost = (this.runLivesLost || 0) + 1;
     this.deathsHere += 1;
     this.input.haptic(60);
     if (this.lives <= 0) {
@@ -2686,6 +2721,7 @@ export class TowerTopplerGame {
       this.enemies = this.enemies.filter((e) => !e.kind && !e.spawnKey);
       if (this.spawnPoints) for (const sp of this.spawnPoints) sp.state = 'idle';
       this.moleculeTimer = MOLECULE_PERIOD;
+      this.blocksShot = 0;
       for (const el of this.elevators) {
         el.floor = el.startFloor;
         el.autoDir = 0;
@@ -2824,13 +2860,38 @@ export class TowerTopplerGame {
 
   _finishTower() {
     const timeTaken = this.towerTime;
-    const earned = {
-      // Speed medal: climbed within 60% of the tower's time limit (works with the clock off too)
-      time: this.towerTime <= this.tower.timeLimit * 0.6,
-      nohit: this.hitsTaken === 0 && this.deathsHere === 0,
-      secrets: this.secretsTotal > 0 && this.secretsGot >= this.secretsTotal,
-    };
+    // Speed: climbed within 60% of the tower's time limit (works with the clock off too)
+    const speed = this.towerTime <= this.tower.timeLimit * 0.6;
+    let earned;
+    const ballsDestroyed = (this.spawnPoints || []).filter((sp) => sp.type === 'bouncer' && sp.state === 'destroyed').length;
+    if (this.original) {
+      const marksman = this.blocksShot >= this.blocksTotal && ballsDestroyed >= (this.ballsTotal || 0);
+      const nohit = this.hitsTaken === 0;
+      const survivor = this.deathsHere === 0;
+      earned = { time: speed, nohit, survivor, marksman, perfect: speed && nohit && survivor && marksman };
+    } else {
+      earned = {
+        time: speed,
+        nohit: this.hitsTaken === 0 && this.deathsHere === 0,
+        secrets: this.secretsTotal > 0 && this.secretsGot >= this.secretsTotal,
+        purist: !this.rewindUsedHere,
+        combo: (this.maxComboHere || 0) >= 4,
+      };
+    }
     const fresh = awardMedals(this.key, earned, timeTaken);
+    // trophy stats
+    const st = getStats();
+    if (this.runMode === 'campaign') (this.original ? st.toppledO : st.toppledR)[this.tower.id] = 1;
+    if (this.hitsTaken === 0 && this.deathsHere === 0) st.flawless = 1;
+    if (settings.clock !== false && this.timer >= this.tower.timeLimit * 0.5) st.beatClock = 1;
+    if (this.original && earned.marksman) st.marksman = 1;
+    if (this.original && earned.perfect) st.perfect = 1;
+    if (settings.clock !== false && this.timer < 10) st.closeShave = 1;
+    if (this.deathsHere >= 2) st.comeback = 1;
+    if (this.runMode === 'daily') {
+      const d = new Date();
+      st.dailyDays.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+    }
     let newGhost = false;
     if (this.key) newGhost = saveGhostIfBest(this.key, timeTaken, this.ghostRec);
     this.toppledThisRun = (this.toppledThisRun || 0) + 1;
@@ -2838,7 +2899,9 @@ export class TowerTopplerGame {
     if (this.runMode === 'endless') progress.endlessBestTower = Math.max(progress.endlessBestTower || 0, this.towerIndex + 1);
     saveProgress();
     this.healing = Math.min(1, this.runMode === 'campaign' ? this.tower.id / 8 : (this.towerIndex + 1) / 8);
-    sound.medal?.((earned.time ? 1 : 0) + (earned.nohit ? 1 : 0) + (earned.secrets ? 1 : 0));
+    sound.medal?.(Math.min(3, Object.values(earned).filter(Boolean).length));
+    const newTrophies = checkTrophies();
+    if (newTrophies.length) this.cb.onTrophies?.(newTrophies);
 
     this.mode = 'results';
     this.cb.onTowerResults?.({
@@ -2852,6 +2915,9 @@ export class TowerTopplerGame {
       earned,
       fresh,
       secrets: { got: this.secretsGot, total: this.secretsTotal },
+      original: this.original,
+      // Marksman targets: flashing blocks + bouncing balls
+      blocks: { got: (this.blocksShot || 0) + ballsDestroyed, total: (this.blocksTotal || 0) + (this.ballsTotal || 0) },
       hits: this.hitsTaken,
       newGhost,
       ghostTime: this.ghostData ? this.ghostData.t : null,
@@ -2863,6 +2929,14 @@ export class TowerTopplerGame {
   continueAfterResults() {
     if (this.mode !== 'results') return;
     if (!this.towerProvider(this.towerIndex + 1)) {
+      if (this.runMode === 'campaign') {
+        const st = getStats();
+        if (this.original && this.runFromStart && !this.runLivesLost) st.ironFrog = 1;
+        if (!this.original) st.rebootDone = 1;
+        if (!this.original && this.runFromStart && !this.runRewindUsed) st.rebootPurist = 1;
+        const fresh = checkTrophies();
+        if (fresh.length) this.cb.onTrophies?.(fresh);
+      }
       this.mode = 'victory';
       sound.stopAmbience?.();
       this._clearSavedRun();
@@ -2876,6 +2950,7 @@ export class TowerTopplerGame {
   _recordBest() {
     const key = this.runMode;
     progress.bestScores[key] = Math.max(progress.bestScores[key] || 0, this.score);
+    maxStat('bestScore', this.score);
     if (this.runMode === 'daily' && this.tower) {
       const s = this.tower.seed ?? 0;
       progress.dailyBest[s] = Math.max(progress.dailyBest[s] || 0, this.score);
@@ -2927,6 +3002,11 @@ export class TowerTopplerGame {
 
   _endSubmarine() {
     sound.setUnderwater?.(false);
+    if (this.subStage && this.subStage.fishCaught) {
+      bumpStat('fish', this.subStage.fishCaught);
+      const fresh = checkTrophies();
+      if (fresh.length) this.cb.onTrophies?.(fresh);
+    }
     this.subStage = null;
     this.towerIndex += 1;
     this.loadTower(this.towerIndex);

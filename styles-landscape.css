@@ -390,7 +390,7 @@
   #overlay-title .tl-sub { display: none; }
   #overlay-title .title-icons { margin-top: 4px; }
   #overlay-title .ti-btn { padding: 3px 0; }
-  #overlay-title .medal-summary { display: none; }
+  #overlay-title .medal-summary { font-size: 11px; padding: 2px; margin-top: 2px; }
 
   /* Long lists use the extra width instead of scrolling */
   .overlay > .modal-card.modal-scroll {
