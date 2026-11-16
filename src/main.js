@@ -261,6 +261,7 @@ const optionsMenu = new OptionsMenu({
     if (key === 'classic' && value && settings.assist) setSetting('assist', false);
     if (key === 'assist' && value && settings.classic) setSetting('classic', false);
     applySettings();
+    if (key === 'controls.scheme') handleResize(); // the control deck changes height
     if (key === 'mirror' && game.mode === 'title') game.loadTower(Number($('start-tower').value) || 0);
   },
   onAction(action, btn) {
@@ -394,12 +395,25 @@ function titleCase(s) {
     .join(' ');
 }
 refreshMenu();
+// Title: hide the in-game HUD and replay the logo's '26 stamp each time the menu opens
+function replayLogo() {
+  const logo = document.querySelector('.logo');
+  if (!logo) return;
+  logo.classList.remove('stamp');
+  void logo.offsetWidth; // restart the CSS animations
+  logo.classList.add('stamp');
+}
+appEl.classList.add('on-title');
+handleResize();
+replayLogo();
 $('start-tower').addEventListener('change', () => {
   if (game.mode === 'title') game.loadTower(Number($('start-tower').value) || 0);
 });
 
 function startRun(cfg) {
   lastRunConfig = cfg;
+  appEl.classList.remove('on-title');
+  handleResize(); // the HUD is back, so the playfield is shorter
   sound.unlock();
   for (const k of Object.keys(overlays)) hide(k);
   let provider = null;
@@ -475,6 +489,9 @@ function toMenu() {
   statusStrip.classList.add('hidden');
   stageWrap.classList.remove('rewinding');
   game.mode = 'title';
+  appEl.classList.add('on-title');
+  handleResize();
+  replayLogo();
   game.subStage = null;
   sound.setMusicActive(false);
   sound.stopAmbience?.();

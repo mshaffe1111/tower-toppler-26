@@ -15,6 +15,25 @@ const LABEL = { jump: 'JUMP', fire: 'FIRE', rewind: 'REWIND', stick: 'JOYSTICK' 
 const SIZE_RANGE = { jump: [0.7, 1.5], fire: [0.7, 1.5], rewind: [0.7, 1.6], stick: [0.75, 1.35] };
 
 const LANDSCAPE_QUERY = '(orientation: landscape) and (max-height: 540px)';
+// Slide controls only have FIRE and REWIND: big FIRE where the thumb rests, REWIND above it
+const SLIDE_LAYOUTS = {
+  portrait: {
+    split: 0.5,
+    jump: { x: 0.3, y: 0.7, s: 1 },
+    fire: { x: 0.34, y: 0.6, s: 1.2 },
+    rewind: { x: 0.78, y: 0.42, s: 1.1 },
+    stick: { x: 0.5, y: 0.62, s: 1 },
+  },
+  landscape: {
+    split: 0.28,
+    jump: { x: 0.24, y: 0.84, s: 1 },
+    fire: { x: 0.3, y: 0.82, s: 1.2 },
+    rewind: { x: 0.3, y: 0.56, s: 1.1 },
+    stick: { x: 0.55, y: 0.7, s: 1 },
+  },
+};
+// Layouts are saved per orientation and per control style
+const layoutId = (key) => (settings.controls.scheme === 'slide' ? `${key}-slide` : key);
 
 export const DEFAULT_LAYOUTS = {
   portrait: {
@@ -52,15 +71,15 @@ function basePx(key) {
 }
 
 export function getLayout(key = orientKey()) {
-  const saved = settings.controls.layout?.[key] || {};
-  const d = DEFAULT_LAYOUTS[key];
+  const saved = settings.controls.layout?.[layoutId(key)] || {};
+  const d = settings.controls.scheme === 'slide' ? SLIDE_LAYOUTS[key] : DEFAULT_LAYOUTS[key];
   const out = { split: saved.split ?? d.split };
   for (const k of ITEMS) out[k] = { ...d[k], ...(saved[k] || {}) };
   return out;
 }
 
 function saveLayout(key, layout) {
-  setControl('layout', { ...(settings.controls.layout || {}), [key]: layout });
+  setControl('layout', { ...(settings.controls.layout || {}), [layoutId(key)]: layout });
 }
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -91,6 +110,7 @@ export function applyControls(layout = null) {
   const swapped = settings.stickSide === 'left';
   tc.classList.toggle('swapped', swapped);
   tc.classList.toggle('scheme-gesture', c.scheme === 'gesture');
+  tc.classList.toggle('scheme-slide', c.scheme === 'slide');
   tc.classList.toggle('stick-fixed', c.stickMode === 'fixed');
   tc.dataset.orient = key;
   tc.style.setProperty('--split', String(L.split));
@@ -167,6 +187,11 @@ export class ControlEditor {
     this.L = structuredClone(getLayout(this.key));
     this.opacity = settings.controls.opacity ?? 1;
     this.open_ = true;
+    // only the controls that exist in this control style can be edited
+    const sch = settings.controls.scheme;
+    const editable = sch === 'slide' ? ['fire', 'rewind'] : sch === 'gesture' ? ['rewind', 'stick'] : ['jump', 'fire', 'rewind', 'stick'];
+    for (const chip of document.querySelectorAll('[data-ed-select]')) chip.hidden = !editable.includes(chip.dataset.edSelect);
+    if (!editable.includes(this.sel)) this.sel = editable[0];
     this.input.releaseAll();
     $('touch-controls').classList.add('editing');
     document.body.classList.add('editing-controls');
@@ -212,7 +237,8 @@ export class ControlEditor {
     tc.style.setProperty('--ctl-opacity', String(this.opacity));
     // Overlap warning: two buttons closer than a finger-width apart get mashed together
     const tooClose = new Set();
-    const bs = BUTTONS.filter((b) => !(settings.controls.scheme === 'gesture' && b !== 'rewind'));
+    const sch = settings.controls.scheme;
+    const bs = BUTTONS.filter((b) => (sch === 'gesture' ? b === 'rewind' : sch === 'slide' ? b !== 'jump' : true));
     for (let i = 0; i < bs.length; i++) {
       for (let j = i + 1; j < bs.length; j++) {
         const a = placed[bs[i]];
@@ -272,7 +298,7 @@ export class ControlEditor {
   _hit(x, y) {
     // 1) a button's own circle, 2) the split line, 3) a button's finger margin, 4) the stick
     const scheme = settings.controls.scheme;
-    const buttons = ['rewind', 'fire', 'jump'].filter((b) => scheme !== 'gesture' || b === 'rewind');
+    const buttons = ['rewind', 'fire', 'jump'].filter((b) => (scheme === 'gesture' ? b === 'rewind' : scheme === 'slide' ? b !== 'jump' : true));
     const inButton = (pad) => {
       for (const b of buttons) {
         const r = $(`btn-${b}`)?.getBoundingClientRect();
@@ -365,7 +391,7 @@ export class ControlEditor {
     });
     $('ctl-ed-reset')?.addEventListener('click', () => {
       this.tap();
-      this.L = structuredClone(DEFAULT_LAYOUTS[this.key]);
+      this.L = structuredClone(settings.controls.scheme === 'slide' ? SLIDE_LAYOUTS[this.key] : DEFAULT_LAYOUTS[this.key]);
       this.opacity = 1;
       this._refresh();
     });

@@ -8,7 +8,7 @@ const PROGRESS_KEY = 'tt26_progress_v2';
 const DEFAULT_SETTINGS = {
   stickSide: 'right', // 'right' | 'left'
   controls: {
-    scheme: 'buttons', // 'buttons' | 'gesture' (swipe up = jump, tap = fire, hold = charge, swipe down = pound)
+    scheme: 'slide', // 'slide' (one thumb anywhere: move + slide up to jump) | 'buttons' | 'gesture'
     stickMode: 'floating', // 'floating' (appears under your thumb) | 'fixed'
     sensitivity: 'medium', // 'low' | 'medium' | 'high' — how far you push for full speed
     upThreshold: 0.55, // how far up/down the stick must go for doors & lifts (0.4 .. 0.75)
@@ -57,6 +57,12 @@ function save(key, value) {
 
 export const settings = load(SETTINGS_KEY, DEFAULT_SETTINGS);
 settings.controls = { ...structuredClone(DEFAULT_SETTINGS.controls), ...(settings.controls || {}) };
+// One-time move to the Slide controls (the player's preferred style); Options can switch back
+if (!settings.controls.slideIntro) {
+  settings.controls.scheme = 'slide';
+  settings.controls.slideIntro = true;
+  save(SETTINGS_KEY, settings);
+}
 
 export function setControl(key, value) {
   settings.controls = { ...settings.controls, [key]: value };
