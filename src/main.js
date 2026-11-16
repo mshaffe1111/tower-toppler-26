@@ -5,6 +5,7 @@ import { TowerTopplerGame } from './game.js';
 import { settings, setSetting, progress, saveProgress, getMedals, totalMedals, SKINS, skinUnlocked, currentSkin } from './settings.js';
 import { applyControls, bindControlsInput, ControlEditor } from './controls.js';
 import { OptionsMenu } from './options.js';
+import { LEVELS, makeCampaignProvider, towerOfIndex } from './campaign.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('game-canvas');
@@ -89,7 +90,7 @@ const game = new TowerTopplerGame(renderer, input, {
     timerEl.classList.toggle('urgent', hud.timer <= 15 && hud.mode === 'tower');
     towerBadgeEl.textContent = hud.mode === 'submarine' ? 'SUB' : hud.towerLabel;
     dirArrowEl.textContent = hud.dirHint;
-    const playing = ['tower', 'summit', 'topple', 'results', 'submarine'].includes(hud.mode);
+    const playing = ['tower', 'summit', 'levelclear', 'topple', 'results', 'submarine'].includes(hud.mode);
     sound.setMusicActive(playing);
 
     const lives = hud.lives === Infinity ? 1 : hud.lives;
@@ -359,15 +360,22 @@ function refreshMenu() {
   // Continue a saved campaign / endless run
   const saved = progress.savedRun;
   const contBtn = $('btn-continue-run');
-  const canContinue = saved && (saved.mode === 'campaign' ? saved.towerIndex < game.campaignTowers.length : Boolean(procgen));
+  // saves from before towers had 3 levels stored the tower number: convert once
+  if (saved && saved.mode === 'campaign' && !saved.levels) {
+    saved.towerIndex *= LEVELS;
+    saved.levels = LEVELS;
+    saveProgress();
+  }
+  const canContinue =
+    saved && Boolean(procgen) && (saved.mode !== 'campaign' || saved.towerIndex < game.campaignTowers.length * LEVELS);
   contBtn.classList.toggle('hidden', !canContinue);
   if (canContinue) {
     const where =
       saved.mode === 'campaign'
-        ? `${saved.variant === 'original' ? 'Original' : 'Reboot'} · T${saved.towerIndex + 1} ${titleCase(saved.towerName || game.campaignTowers[saved.towerIndex]?.name || '')}`
+        ? `${saved.variant === 'original' ? 'Original' : 'Reboot'} · T${towerOfIndex(saved.towerIndex).tower + 1}-${towerOfIndex(saved.towerIndex).level} ${titleCase(saved.towerName || '')}`
         : `Endless · tower ${saved.towerIndex + 1}`;
     const lives = '♥'.repeat(Math.min(6, saved.lives || 1));
-    $('continue-sub').textContent = `${where} · ${(saved.score || 0).toLocaleString()} pts · ${lives}`;
+    $('continue-sub').textContent = `${where.replace(/\s+/g, ' ').trim()} · ${(saved.score || 0).toLocaleString()} pts · ${lives}`;
   }
   const n = totalMedals();
   $('medal-summary').textContent = `🏅 ${n} medal${n === 1 ? '' : 's'} · ${progress.towersCleared || 0} towers toppled`;
@@ -422,6 +430,11 @@ function startRun(cfg) {
     const tower = procgen.generateTower({ seed, difficulty: 0.55, id: 900, name: null });
     tower.seed = seed;
     provider = (i) => (i === 0 ? tower : null);
+  } else if (cfg.mode === 'campaign') {
+    // 8 towers x 3 levels: classic layout first, then two fresh generated levels per tower
+    const runSeed = cfg.runSeed ?? ((Date.now() & 0xffffff) ^ 0x2f1a3b);
+    cfg.runSeed = runSeed;
+    provider = makeCampaignProvider({ towers: game.campaignTowers, procgen, runSeed, variant: cfg.variant || 'reboot' });
   } else if (cfg.mode === 'endless' && procgen) {
     const runSeed = cfg.runSeed ?? (Date.now() & 0xffffff) ^ 0x5bd1e9;
     cfg.runSeed = runSeed;
@@ -438,8 +451,9 @@ function startRun(cfg) {
   game.startNewGame({ mode: cfg.mode, startTower: cfg.startTower || 0, provider, runSeed: cfg.runSeed ?? null, resume: cfg.resume || null, variant: cfg.variant || 'reboot' });
 }
 
-$('btn-start').addEventListener('click', () => startRun({ mode: 'campaign', variant: 'reboot', startTower: Number($('start-tower').value) || 0 }));
-$('btn-original').addEventListener('click', () => startRun({ mode: 'campaign', variant: 'original', startTower: Number($('start-tower').value) || 0 }));
+const campaignStart = () => (Number($('start-tower').value) || 0) * (procgen ? LEVELS : 1);
+$('btn-start').addEventListener('click', () => startRun({ mode: 'campaign', variant: 'reboot', startTower: campaignStart() }));
+$('btn-original').addEventListener('click', () => startRun({ mode: 'campaign', variant: 'original', startTower: campaignStart() }));
 $('btn-daily').addEventListener('click', () => procgen && startRun({ mode: 'daily' }));
 $('btn-continue-run').addEventListener('click', () => {
   const saved = progress.savedRun;

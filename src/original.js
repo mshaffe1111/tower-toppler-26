@@ -16,6 +16,10 @@
 import { COLS } from './levels.js';
 
 const SOLIDIFY = { conveyorL: 'solid', conveyorR: 'solid' };
+// the 1987 cast; anything else a generated level places is mapped onto it
+const ORIGINAL_CAST = new Set(['bouncer', 'roller', 'eye', 'molecule', 'robot']);
+const GROUND = new Set(['bouncer', 'roller', 'robot', 'chaser', 'spiker', 'shieldbug', 'puffer', 'splitter']);
+const toCast = (type, mapped) => (ORIGINAL_CAST.has(mapped) ? mapped : GROUND.has(type) ? 'bouncer' : 'eye');
 
 export const ORIGINAL_THEMES = {
   1: {
@@ -102,13 +106,16 @@ export function makeOriginalTower(raw) {
     ledges: raw.ledges.map((l) => ({ ...l, type: th.ledges[l.type] || l.type })),
     elevators: raw.elevators.map((e) => ({ ...e })),
     doors: raw.doors.map((d) => ({ ...d, vault: false })),
-    enemies: raw.enemies.map((e) => ({
-      ...e,
-      type: th.enemies[e.type] || e.type,
-      speed: (e.speed || 2.4) * (th.speed || 1),
-      // ground walkers sit on their ledge; fliers keep their hover height
-      floor: ['robot', 'bouncer', 'roller'].includes(th.enemies[e.type] || e.type) ? Math.round(e.floor) : e.floor,
-    })),
+    enemies: raw.enemies.map((e) => {
+      const type = toCast(e.type, th.enemies[e.type] || e.type);
+      return {
+        ...e,
+        type,
+        speed: (e.speed || 2.4) * (th.speed || 1),
+        // ground walkers sit on their ledge; fliers keep their hover height
+        floor: ['robot', 'bouncer', 'roller'].includes(type) ? Math.round(e.floor) : e.floor,
+      };
+    }),
     spawn: { ...raw.spawn },
     secrets: raw.secrets ? raw.secrets.map((s) => ({ ...s })) : raw.secrets,
   };
@@ -159,7 +166,7 @@ export function makeOriginalTower(raw) {
 
   // Edge of Doom: a four-door summit. Only the third door from where you arrive is the control
   // room; the decoys slam and knock you back down.
-  if (th.summitDoors && exitDoor) {
+  if (th.summitDoors && exitDoor && !raw.procedural) {
     const f = exitDoor.floor;
     // you arrive on the summit by the lift that reaches it (else from the exit run's start)
     const lift = t.elevators.find((e) => e.maxFloor === f);
