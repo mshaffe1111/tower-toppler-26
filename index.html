@@ -11,6 +11,17 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles-landscape.css" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="64x64" href="icons/favicon-64.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Toppler '26" />
+  <meta name="application-name" content="Tower Toppler '26" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="description" content="Guide Pogo up rotating 3D towers rising out of the sea: a 2026 reimagining of the Atari 7800 classic Tower Toppler (Nebulus)." />
 </head>
 <body>
   <div id="app">
@@ -36,9 +47,7 @@
         <div class="hud-label">HIGH SCORE</div>
         <div id="hi-score-display" class="hud-score">00000000</div>
         <div class="hud-actions">
-          <button id="btn-music" class="hud-icon-btn" type="button" aria-label="Toggle Music">🎵</button>
-          <button id="btn-sound" class="hud-icon-btn" type="button" aria-label="Toggle Sound">🔊</button>
-          <button id="btn-pause" class="hud-icon-btn" type="button" aria-label="Pause Game">⏸</button>
+          <button id="btn-pause" class="hud-icon-btn hud-menu-btn" type="button" aria-label="Pause and open the menu"><span class="hud-menu-bars" aria-hidden="true"></span></button>
         </div>
       </div>
     </header>
@@ -46,6 +55,7 @@
     <!-- Main 60fps Cylindrical Tower / Submarine Canvas -->
     <main id="stage-wrap">
       <canvas id="game-canvas"></canvas>
+      <div id="hit-flash" class="hit-flash" aria-hidden="true"></div>
 
       <!-- Vertical Tower Altitude Meter -->
       <div id="altitude-meter" class="altitude-meter" aria-label="Tower Altitude">
@@ -54,6 +64,24 @@
           <div id="alt-fill" class="alt-fill"></div>
           <div id="alt-pip" class="alt-pip"></div>
         </div>
+      </div>
+
+      <!-- Status strip: secrets, rewind meter, rising hazard, guardian health -->
+      <div id="status-strip" class="status-strip hidden">
+        <div id="st-secrets" class="st-chip" title="Secret star-fish">★ 0/3</div>
+        <div id="st-rewind" class="st-chip st-rewind" title="Rewind (hold ⏪ / R)">
+          <span class="st-ico">⏪</span><span class="st-bar"><span id="st-rewind-fill"></span></span>
+        </div>
+        <div id="st-hazard" class="st-chip st-hazard hidden">🌊 +3.0</div>
+      </div>
+      <div id="boss-bar" class="boss-bar hidden" aria-label="Guardian health">
+        <div class="boss-name">GUARDIAN OF DOOM</div>
+        <div class="boss-track"><div id="boss-fill" class="boss-fill"></div></div>
+      </div>
+
+      <!-- First-time hint card -->
+      <div id="hint-card" class="hint-card hidden" role="status" aria-live="polite">
+        <span class="hint-ico">💡</span><span id="hint-text">Hint</span>
       </div>
 
       <!-- Contextual Action Prompt Pill -->
@@ -65,42 +93,96 @@
         <div id="banner-title" class="banner-title">THE TOWER OF EYES</div>
       </div>
 
-      <!-- Hero Title / Start Overlay -->
+      <!-- Main Menu -->
       <div id="overlay-title" class="overlay overlay-hero">
         <div class="modal-card modal-hero">
-          <div class="retro-pill">ATARI 7800 CLASSIC • 2026 EDITION</div>
+          <div class="retro-pill">A NEBULUS REBOOT • 2026</div>
           <h1 class="game-title">
             <span class="title-top">TOWER</span>
             <span class="title-bot">TOPPLER <span class="title-yr">'26</span></span>
           </h1>
           <p class="game-tagline">
-            Scale 8 rotating 3D towers on planet Nebulus, dodge mutant molecules, fire your snowball gun, and pilot the MK.7 Mini-Submarine!
+            Eight towers are poisoning the seas of Nebulus. Climb each one, reach the summit, and topple it — and watch the ocean come back to life.
           </p>
 
-          <div class="controls-preview">
-            <div class="ctrl-item"><span class="ctrl-badge">🕹️</span> <strong>D-Pad / Drag</strong> Walk, Doors &amp; Lifts</div>
-            <div class="ctrl-item"><span class="ctrl-badge">▲</span> <strong>JUMP / Swipe</strong> Hop Gaps &amp; Ledges</div>
-            <div class="ctrl-item"><span class="ctrl-badge">❄️</span> <strong>FIRE / Tap</strong> Snowball &amp; Call Lift</div>
-          </div>
-
-          <button id="btn-start" class="btn-primary btn-launch" type="button">
-            <span class="btn-glow"></span>
-            <span class="btn-text">LAUNCH MISSION</span>
+          <button id="btn-continue-run" class="btn-continue hidden" type="button">
+            <span class="cont-title">▶ CONTINUE</span>
+            <span id="continue-sub" class="cont-sub"></span>
           </button>
-
-          <div class="tower-select-row">
-            <label for="start-tower">DROP ZONE</label>
-            <select id="start-tower">
-              <option value="0">1. The Tower of Eyes</option>
-              <option value="1">2. The Realm of Robots</option>
-              <option value="2">3. Trap of Tricks</option>
-              <option value="3">4. Slippery Slide</option>
-              <option value="4">5. Broken Path</option>
-              <option value="5">6. Swimmer's Delight</option>
-              <option value="6">7. Nasty One</option>
-              <option value="7">8. Edge of Doom</option>
-            </select>
+          <div class="campaign-row">
+            <button id="btn-original" class="btn-campaign btn-campaign-orig" type="button">
+              <span class="camp-name">ORIGINAL</span>
+              <span class="camp-sub">The 1987 towers &amp; rules</span>
+            </button>
+            <button id="btn-start" class="btn-campaign btn-campaign-reboot" type="button">
+              <span class="camp-name">REBOOT</span>
+              <span class="camp-sub">Twists, new foes, rewind</span>
+            </button>
           </div>
+          <div class="tower-select-row">
+            <label for="start-tower">TOWER</label>
+            <select id="start-tower"></select>
+          </div>
+
+          <div class="mode-row">
+            <button id="btn-daily" class="btn-mode" type="button">
+              <span class="mode-ico">📅</span><span class="mode-name">DAILY TOWER</span><span id="daily-sub" class="mode-sub">New every day</span>
+            </button>
+            <button id="btn-endless" class="btn-mode" type="button">
+              <span class="mode-ico">♾️</span><span class="mode-name">ENDLESS</span><span id="endless-sub" class="mode-sub">How high can you go?</span>
+            </button>
+          </div>
+
+          <div class="menu-row">
+            <button id="btn-settings" class="btn-chip" type="button">⚙ OPTIONS</button>
+            <button id="btn-skins" class="btn-chip" type="button">🎨 POGO</button>
+            <button id="btn-howto" class="btn-chip" type="button">❔ HOW TO</button>
+            <button id="btn-install" class="btn-chip hidden" type="button">⬇ INSTALL</button>
+          </div>
+          <div id="medal-summary" class="medal-summary">🏅 0 medals</div>
+        </div>
+      </div>
+
+      <!-- How to play -->
+      <div id="overlay-howto" class="overlay hidden">
+        <div class="modal-card modal-scroll">
+          <div class="retro-pill">FIELD MANUAL</div>
+          <h2 class="modal-heading">HOW TO TOPPLE</h2>
+          <div class="controls-preview">
+            <div class="ctrl-item"><span class="ctrl-badge">🕹️</span> <strong>Stick</strong> Walk · push ▲ at doors · ▲▼ ride lifts</div>
+            <div class="ctrl-item"><span class="ctrl-badge">▲</span> <strong>Jump</strong> Hop gaps. Grab ledge lips automatically.</div>
+            <div class="ctrl-item"><span class="ctrl-badge">▼</span> <strong>Ground pound</strong> Push ▼ in mid-air: stuns enemies, smashes blocks.</div>
+            <div class="ctrl-item"><span class="ctrl-badge">❄️</span> <strong>Fire</strong> Tap to shoot. Hold to charge a mega-snowball that freezes anything.</div>
+            <div class="ctrl-item"><span class="ctrl-badge">🧊</span> <strong>Ice blocks</strong> Frozen enemies are platforms — climb on them!</div>
+            <div class="ctrl-item"><span class="ctrl-badge">🔄</span> <strong>Wrap-around</strong> Snowballs circle the tower… and can come back to hit you.</div>
+            <div class="ctrl-item"><span class="ctrl-badge">⏪</span> <strong>Rewind</strong> Hold ⏪ REWIND (R / LB) to turn back time a few seconds.</div>
+            <div class="ctrl-item"><span class="ctrl-badge">💥</span> <strong>Hit</strong> You drop to the ledge below. No ledge? Splash.</div>
+            <div class="ctrl-item"><span class="ctrl-badge">🏅</span> <strong>Medals</strong> Fast clear · no hits · all 3 hidden ★ star-fish.</div>
+          </div>
+          <button id="btn-howto-close" class="btn-primary" type="button">GOT IT</button>
+        </div>
+      </div>
+
+      <!-- Settings -->
+      <div id="overlay-settings" class="overlay hidden">
+        <div class="modal-card modal-options">
+          <div class="opt-head">
+            <div class="retro-pill">OPTIONS</div>
+            <button id="btn-settings-close" class="opt-close" type="button" aria-label="Close options">DONE</button>
+          </div>
+          <div id="opt-tabs" class="opt-tabs" role="tablist"></div>
+          <div id="opt-body" class="opt-body"></div>
+        </div>
+      </div>
+
+      <!-- Skins -->
+      <div id="overlay-skins" class="overlay hidden">
+        <div class="modal-card modal-scroll">
+          <div class="retro-pill">WARDROBE</div>
+          <h2 class="modal-heading">POGO</h2>
+          <p class="modal-sub">Earn medals to unlock new looks.</p>
+          <div id="skin-grid" class="skin-grid"></div>
+          <button id="btn-skins-close" class="btn-primary" type="button">DONE</button>
         </div>
       </div>
 
@@ -111,7 +193,29 @@
           <h2 class="modal-heading">PAUSED</h2>
           <p id="pause-tower-name" class="modal-sub">Tower 1: The Tower of Eyes</p>
           <button id="btn-resume" class="btn-primary" type="button">RESUME</button>
-          <button id="btn-restart" class="btn-secondary" type="button">RESTART MISSION</button>
+          <button id="btn-pause-settings" class="btn-secondary" type="button">⚙ OPTIONS</button>
+          <button id="btn-restart" class="btn-secondary" type="button">QUIT TO MENU</button>
+        </div>
+      </div>
+
+      <!-- Tower Results -->
+      <div id="overlay-results" class="overlay hidden">
+        <div class="modal-card">
+          <div id="res-label" class="retro-pill">TOWER 1 TOPPLED</div>
+          <h2 id="res-name" class="modal-heading res-name">THE TOWER OF EYES</h2>
+          <div class="medal-row">
+            <div id="medal-time" class="medal"><span class="medal-ico">⏱️</span><span class="medal-lbl">SPEED</span></div>
+            <div id="medal-nohit" class="medal"><span class="medal-ico">🛡️</span><span class="medal-lbl">NO HITS</span></div>
+            <div id="medal-secrets" class="medal"><span class="medal-ico">⭐</span><span class="medal-lbl">SECRETS</span></div>
+          </div>
+          <div class="final-stats res-stats">
+            <div class="stat-box"><span class="stat-lbl">TIME</span><span id="res-time" class="stat-val">0:00</span></div>
+            <div class="stat-box"><span class="stat-lbl">BONUS</span><span id="res-bonus" class="stat-val">0</span></div>
+            <div class="stat-box"><span class="stat-lbl">STAR-FISH</span><span id="res-secrets" class="stat-val">0/3</span></div>
+            <div class="stat-box"><span class="stat-lbl">SCORE</span><span id="res-score" class="stat-val">0</span></div>
+          </div>
+          <p id="res-ghost" class="modal-sub"></p>
+          <button id="btn-continue" class="btn-primary" type="button">CONTINUE ▸</button>
         </div>
       </div>
 
@@ -131,27 +235,28 @@
             </div>
           </div>
           <button id="btn-play-again" class="btn-primary" type="button">PLAY AGAIN</button>
+          <button id="btn-share" class="btn-secondary" type="button">📤 SHARE SCORE CARD</button>
+          <button id="btn-menu" class="btn-secondary" type="button">MAIN MENU</button>
         </div>
       </div>
     </main>
 
-    <!-- Pro Mobile Touch Controls -->
+    <!-- Touch Controls: action buttons + floating analog thumbstick (stick on the right by default; swappable) -->
     <footer id="touch-controls" aria-label="Touch Controls">
-      <div class="touch-left">
-        <div id="dpad" class="dpad" role="group" aria-label="Directional Pad">
-          <div class="dpad-ring" aria-hidden="true"></div>
-          <button class="dpad-btn dpad-up" data-dir="up" type="button" aria-label="Up">▲</button>
-          <button class="dpad-btn dpad-left" data-dir="left" type="button" aria-label="Left">◀</button>
-          <div class="dpad-center" aria-hidden="true">
-            <div id="dpad-puck" class="dpad-puck"></div>
+      <div class="action-cluster">
+        <div id="gesture-pad" class="gesture-pad" aria-label="Gesture pad: swipe up to jump, tap to fire, hold to charge, swipe down to pound">
+          <div class="gp-legend" aria-hidden="true">
+            <span><b>↑</b>JUMP<i>swipe up</i></span>
+            <span><b>•</b>FIRE<i>tap</i></span>
+            <span><b>◉</b>CHARGE<i>hold</i></span>
+            <span><b>↓</b>POUND<i>swipe down</i></span>
           </div>
-          <button class="dpad-btn dpad-right" data-dir="right" type="button" aria-label="Right">▶</button>
-          <button class="dpad-btn dpad-down" data-dir="down" type="button" aria-label="Down">▼</button>
         </div>
-      </div>
-
-      <div class="touch-right">
-        <button id="btn-fire" class="action-btn action-fire" type="button" aria-label="Fire Snowball">
+        <button id="btn-rewind" class="action-btn action-rewind" type="button" aria-label="Hold to rewind time">
+          <span class="action-icon">⏪</span>
+          <span class="action-lbl">REWIND</span>
+        </button>
+        <button id="btn-fire" class="action-btn action-fire" type="button" aria-label="Fire Snowball (hold to charge)">
           <span class="action-icon">❄️</span>
           <span class="action-lbl">FIRE</span>
         </button>
@@ -160,7 +265,42 @@
           <span class="action-lbl">JUMP</span>
         </button>
       </div>
+
+      <div id="stick-zone" class="stick-zone" role="group" aria-label="Movement Thumbstick">
+        <div id="stick-base" class="stick-base">
+          <span class="stick-arrow stick-up" data-dir="up">▲</span>
+          <span class="stick-arrow stick-down" data-dir="down">▼</span>
+          <span class="stick-arrow stick-left" data-dir="left">◀</span>
+          <span class="stick-arrow stick-right" data-dir="right">▶</span>
+          <div class="stick-gate" aria-hidden="true"></div>
+          <div id="stick-knob" class="stick-knob"></div>
+        </div>
+      </div>
+      <div id="ctl-split" class="ctl-split" aria-hidden="true"><span></span></div>
+      <div id="ctl-edit-layer" class="ctl-edit-layer hidden" aria-hidden="true"></div>
     </footer>
+
+    <!-- Control layout editor (Options > Controls > Edit layout) -->
+    <div id="ctl-editor" class="ctl-editor hidden" role="dialog" aria-label="Edit control layout">
+      <div class="ctl-ed-top">
+        <div>
+          <div class="ctl-ed-title">EDIT LAYOUT</div>
+          <div id="ctl-ed-orient" class="ctl-ed-orient">PORTRAIT LAYOUT</div>
+        </div>
+        <button id="ctl-ed-done" class="ctl-ed-done" type="button">DONE</button>
+      </div>
+      <p class="ctl-ed-help">Drag any control to move it. Drag the dashed line to resize the joystick area.</p>
+      <div class="ctl-ed-chips" role="radiogroup" aria-label="Selected control">
+        <button type="button" data-ed-select="jump">JUMP</button>
+        <button type="button" data-ed-select="fire">FIRE</button>
+        <button type="button" data-ed-select="rewind">REWIND</button>
+        <button type="button" data-ed-select="stick">JOYSTICK</button>
+      </div>
+      <label class="ctl-ed-row"><span><span id="ctl-ed-sel">JUMP</span> size</span><input id="ctl-ed-size" type="range" min="70" max="150" step="5" /><output id="ctl-ed-size-val">100%</output></label>
+      <label class="ctl-ed-row"><span>Opacity</span><input id="ctl-ed-opacity" type="range" min="35" max="100" step="5" /><output id="ctl-ed-opacity-val">100%</output></label>
+      <div id="ctl-ed-warn" class="ctl-ed-warn">⚠ Buttons this close get pressed together by accident</div>
+      <button id="ctl-ed-reset" class="ctl-ed-reset" type="button">↺ RESET TO DEFAULT</button>
+    </div>
   </div>
 
   <script type="importmap">
@@ -171,6 +311,6 @@
     }
   }
   </script>
-  <script type="module" src="src/main.js?v=6"></script>
+  <script type="module" src="src/main.js?v=11"></script>
 </body>
 </html>
