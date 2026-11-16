@@ -20,16 +20,44 @@ manual, a walkthrough or FAQ, the tower maps, or a measurement from real footage
 unsourced gets marked UNVERIFIED in docs/ORIGINAL-RULES.md.
 
 ## Research
-- **docs/RESEARCH.md:** findings from the research pass, with a source and CONFIRMED / UNCERTAIN
-  on each fact. It may be partial: the pass was cut short when the session ended. Its "Still
-  unknown" list is the next research to-do.
-- **docs/ORIGINAL-RULES.md:** the player's write-up, plus what was measured from their 7800 clips.
-  - Measured: walk 2.0 columns/s, stair step = 1 column × 1 brick row, Pogo about 2 rows tall.
-  - The jump's sideways speed is UNVERIFIED.
-- **docs/SPEC.md:** the player's design brief and the remaining gap list.
-- **Tower maps:** full maps of all 8 towers exist (NES *Castelian* on vgmaps.com). The biggest
-  next fidelity win is to build each Original tower's level 1 from the real map instead of a
-  generated look-alike.
+- **docs/RESEARCH.md:** findings with a source and CONFIRMED / UNCERTAIN on every fact. Sources:
+  - the 7800 manual and the Hewson C64/ZX manual;
+  - ZX and NES maps;
+  - an open-source remake (Toppler) and a PICO-8 port.
+
+  Its "Still unknown" list is the next research to-do.
+- **docs/research/original-towers-grid.txt:** a cell-by-cell grid of all 8 real towers, from the
+  GPL Toppler remake. Its doors, lifts and exits match the hand-drawn ZX maps column for column on
+  Towers 1, 3 and 8. **Build the Original towers from this.**
+- **docs/research/pico8-port-constants.txt:** physics and scoring values pulled from the PICO-8
+  port. Treat them as UNCERTAIN until 7800 footage agrees.
+- The map images (ZX hand-drawn, NES Castelian) are not in the repo; RESEARCH.md lists their URLs.
+
+### Confirmed findings that change the Original (not yet applied)
+- **Tower size:** heights are 47, 71, 49, 66, 96, 64, 80, 96 rows. Ours follow SPEC's 24–46, so
+  they're about half as tall. The 16 columns are right.
+- **Time limits:** 100, 120, 140 … 240 (+20 per tower). SPEC has 85–165.
+- **Doors:** 1 column by 3 rows, always in pairs at column c and c+8. Tower 7 has no tunnels.
+- **Enemies:** at most 4 at once, at fixed spots. The molecule is a timed flyer that crosses at
+  Pogo's height about every 10 s; it doesn't spawn when you linger.
+- **Slippery ledges:** they push you left or right, not "slide with your momentum".
+- **Getting hit:** you "land a few levels down", falling through platforms (about 8 rows in the
+  port).
+- **Scoring:**
+  - Lift points depend on the length of the ride (7800 manual).
+  - The technique bonus is paid ×10 and skipped on Tower 1 (C64).
+  - There's a third "Extras" tally: +5 per ball and +2 per block shot, paid ×10.
+- **Tower 8 summit:** doors at columns 9–12, exit at 10.
+
+### Strong leads from the port (check against footage before using)
+- **Jump:** sideways speed equals the walk, about 1.5 columns long, peak 2.25 rows. Ours is
+  2.6 columns/s and 1.15 rows.
+- **Snowball:** about 3 columns of range, one on screen at a time. Ours is 6.
+- **Crumbling ledges:** vanish as soon as you stand on one and don't regrow during that attempt.
+- **Stairs:** no source supports Pogo sliding back down when he stops.
+
+### Measured from the player's 7800 clips
+Walk 2.0 columns/s; a stair step is 1 column × 1 brick row; Pogo is about 2 rows tall.
 
 ## Original mode: what's in
 - **Jump:** a committed arc, sideways speed fixed at takeoff (2.6 columns/s, UNVERIFIED), no
@@ -70,17 +98,23 @@ unsourced gets marked UNVERIFIED in docs/ORIGINAL-RULES.md.
   hand with `g.update(1/60)` in timing tests.
 
 ## Next, in order
-1. **Apply RESEARCH.md:** replace unverified values (jump distance, technique multiplier, timers,
-   enemy speeds) with sourced ones.
-2. **Real tower layouts:** transcribe each Original tower's level 1 from the real maps.
-3. **Remaining Original gaps:**
-   - walls capping lift shafts;
-   - the stair slide-back, if sources confirm it;
+1. **Real towers:** build each Original tower from docs/research/original-towers-grid.txt, using
+   its real heights, doors, lifts, blocks, crumbling and slippery ledges, and enemy spots. Use the
+   real time limits (100–240). Check the result against the ZX maps.
+2. **Confirmed rules from RESEARCH.md:**
+   - molecule timing, enemy cap and fixed spots;
+   - slippery push;
+   - the hit fall;
+   - lift ride-length points, technique ×10, the Extras tally.
+3. **Port values:** check the jump (speed = walk, ~1.5 columns, 2.25-row peak) and the snowball
+   (~3 columns) against footage before adopting them.
+4. **Remaining presentation:**
    - the seven-segment clock with a facing arrow;
    - the ring-by-ring topple;
    - the two-step catch in the sub stage;
-   - on Tower 8, making the real summit door look identical to the decoys.
-4. **Reboot:** the twists in docs/TWISTS.md, then the 10 worlds in docs/WORLDS.md.
+   - Tower 8's identical-looking real door.
+5. **Reboot:** the twists in docs/TWISTS.md, then the 10 worlds in docs/WORLDS.md. It can keep
+   generated towers.
 
 ## Work in progress, not applied
 - **docs/wip/sub-stage-upgrade.patch:** sub-stage visual polish (shader precompile, depth-of-field
