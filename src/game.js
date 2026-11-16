@@ -33,8 +33,8 @@ function mulberry32(seed) {
 
 // Classic-paced movement tuning (deliberate like the 7800 original, but with modern assists)
 const PHYS = {
-  walkSpeed: 2.3, // columns / second on the ground (~7s per lap of the tower, like the original)
-  airSpeed: 2.9, // a running jump carries a little extra distance
+  walkSpeed: 2.8, // columns / second on the ground (~6s per lap: original feel, quick enough to dodge)
+  airSpeed: 3.3, // a running jump carries a little extra distance
   gravity: 15,
   jumpVy: 6.9, // ~1.6 floors high
   stepVy: 5.7, // auto step-up hop onto the next stair
@@ -896,7 +896,7 @@ export class TowerTopplerGame {
     const axis = typeof inp.axisX === 'number' && inp.axisX !== 0 ? inp.axisX : (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
     let targetVx = 0;
     if (!stunned && !p.hang && !p.pound && Math.abs(axis) > 0.05) {
-      const mag = Math.min(1, Math.max(0.35, Math.abs(axis)));
+      const mag = Math.min(1, Math.max(0.55, Math.abs(axis))); // no slow crawl from a light push
       targetVx = Math.sign(axis) * maxSpeed * mag;
       p.facing = Math.sign(axis);
     }

@@ -7,9 +7,9 @@ const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'fire', 'rewind'];
 
 // Stick feel presets: dead = centre deadzone, full = how far (fraction of the rim) gives full speed
 const SENSITIVITY = {
-  low: { dead: 0.22, full: 0.95 },
-  medium: { dead: 0.18, full: 0.8 },
-  high: { dead: 0.13, full: 0.62 },
+  low: { dead: 0.2, full: 0.85 },
+  medium: { dead: 0.15, full: 0.62 },
+  high: { dead: 0.12, full: 0.48 },
 };
 // Gesture pad tuning
 const SWIPE_PX = 22; // movement that turns a touch into a swipe
@@ -283,7 +283,7 @@ export class InputController {
   _updateSlide(entry, x, y) {
     const c = settings.controls || {};
     // how far you slide for full speed (px): shorter = more sensitive
-    const R = c.sensitivity === 'high' ? 40 : c.sensitivity === 'low' ? 66 : 52;
+    const R = c.sensitivity === 'high' ? 34 : c.sensitivity === 'low' ? 56 : 44;
     let dx = x - entry.ox;
     let dy = y - entry.oy;
     // the centre follows the thumb, so a drifting thumb never runs out of room
@@ -298,7 +298,8 @@ export class InputController {
     }
     const { dead } = SENSITIVITY[c.sensitivity] || SENSITIVITY.medium;
     const nx = dx / R;
-    const ax = Math.abs(nx) < dead ? 0 : Math.sign(nx) * Math.min(1, (Math.abs(nx) - dead) / (1 - dead));
+    // full speed by ~75% of the slide, so a quick flick of the thumb is a full-speed dodge
+    const ax = Math.abs(nx) < dead ? 0 : Math.sign(nx) * Math.min(1, (Math.abs(nx) - dead) / (0.75 - dead));
     this.state.axisX = ax;
     const dirs = [];
     if (ax > 0) dirs.push('right');
