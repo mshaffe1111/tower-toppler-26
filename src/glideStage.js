@@ -394,6 +394,7 @@ export class GlideStage {
       if (this.arriveT >= ARRIVE_TIME) {
         this.phase = 'done';
         this._finished = true;
+        sound?.setWind?.(0);
         return true;
       }
     }
@@ -429,6 +430,14 @@ export class GlideStage {
     sm.x -= this.scrollSpeed * dt;
 
     this._updateGlider(dt, input, firePressed, fx, sound);
+    // wind bed: rushing air, louder in a dive or a gust, fading out after touch-down
+    if (sound?.setWind) {
+      let w = 0;
+      if (this.phase === 'intro') w = 0.12 + 0.3 * g.launch;
+      else if (this.phase === 'ride') w = 0.28 + 0.35 * g.dive + 0.25 * Math.abs(this.wind) + 0.25 * clamp(g.speed - 1, 0, 1);
+      else w = 0.3 * (1 - clamp(this.arriveT / 2.5, 0, 1));
+      sound.setWind(clamp(w, 0, 1));
+    }
     this._spawn(dt, fx, sound);
     this._updateLanterns(dt, fx, sound);
     this._updateGates(dt, fx, sound);

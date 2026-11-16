@@ -234,7 +234,7 @@ Promise.all([import('./subStage.js'), import('./subRenderer.js')])
 
 // THE GLIDE: the hang-glider ride between worlds (Reboot campaign)
 let glideRenderer = null;
-const GLIDE_ENABLED = false; // switched on once the glide stage is finished and reviewed
+const GLIDE_ENABLED = true; // the hang-glider ride between worlds
 (GLIDE_ENABLED ? Promise.all([import('./glideStage.js'), import('./glideRenderer.js')]) : Promise.reject(new Error('glide off')))
   .then(([stageMod, rendMod]) => {
     glideRenderer = new rendMod.GlideRenderer(renderer.webgl, { softDotTex: renderer.softDotTex });
