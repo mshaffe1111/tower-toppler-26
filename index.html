@@ -46,6 +46,7 @@
     <!-- Main 60fps Cylindrical Tower / Submarine Canvas -->
     <main id="stage-wrap">
       <canvas id="game-canvas"></canvas>
+      <div id="hit-flash" class="hit-flash" aria-hidden="true"></div>
 
       <!-- Vertical Tower Altitude Meter -->
       <div id="altitude-meter" class="altitude-meter" aria-label="Tower Altitude">
@@ -78,9 +79,10 @@
           </p>
 
           <div class="controls-preview">
-            <div class="ctrl-item"><span class="ctrl-badge">🕹️</span> <strong>D-Pad / Drag</strong> Walk, Doors &amp; Lifts</div>
-            <div class="ctrl-item"><span class="ctrl-badge">▲</span> <strong>JUMP / Swipe</strong> Hop Gaps &amp; Ledges</div>
-            <div class="ctrl-item"><span class="ctrl-badge">❄️</span> <strong>FIRE / Tap</strong> Snowball &amp; Call Lift</div>
+            <div class="ctrl-item"><span class="ctrl-badge">🕹️</span> <strong>Thumbstick</strong> Walk · push ▲ for doors &amp; lifts</div>
+            <div class="ctrl-item"><span class="ctrl-badge">▲</span> <strong>JUMP</strong> Hop gaps — hit by a nasty and you drop a ledge!</div>
+            <div class="ctrl-item"><span class="ctrl-badge">❄️</span> <strong>FIRE</strong> Pop balls &amp; molecules, freeze rollers, call lifts</div>
+            <div class="ctrl-item ctrl-keys"><strong>Keys</strong> ←→↑↓ / WASD · Space jump · X fire · P pause · Gamepad ✓</div>
           </div>
 
           <button id="btn-start" class="btn-primary btn-launch" type="button">
@@ -112,6 +114,7 @@
           <p id="pause-tower-name" class="modal-sub">Tower 1: The Tower of Eyes</p>
           <button id="btn-resume" class="btn-primary" type="button">RESUME</button>
           <button id="btn-restart" class="btn-secondary" type="button">RESTART MISSION</button>
+          <button id="btn-swap" class="btn-secondary" type="button">⇄ STICK ON LEFT</button>
         </div>
       </div>
 
@@ -135,22 +138,9 @@
       </div>
     </main>
 
-    <!-- Pro Mobile Touch Controls -->
+    <!-- Touch Controls: action buttons + floating analog thumbstick (stick on the right by default; swappable) -->
     <footer id="touch-controls" aria-label="Touch Controls">
-      <div class="touch-left">
-        <div id="dpad" class="dpad" role="group" aria-label="Directional Pad">
-          <div class="dpad-ring" aria-hidden="true"></div>
-          <button class="dpad-btn dpad-up" data-dir="up" type="button" aria-label="Up">▲</button>
-          <button class="dpad-btn dpad-left" data-dir="left" type="button" aria-label="Left">◀</button>
-          <div class="dpad-center" aria-hidden="true">
-            <div id="dpad-puck" class="dpad-puck"></div>
-          </div>
-          <button class="dpad-btn dpad-right" data-dir="right" type="button" aria-label="Right">▶</button>
-          <button class="dpad-btn dpad-down" data-dir="down" type="button" aria-label="Down">▼</button>
-        </div>
-      </div>
-
-      <div class="touch-right">
+      <div class="action-cluster">
         <button id="btn-fire" class="action-btn action-fire" type="button" aria-label="Fire Snowball">
           <span class="action-icon">❄️</span>
           <span class="action-lbl">FIRE</span>
@@ -159,6 +149,17 @@
           <span class="action-icon">▲</span>
           <span class="action-lbl">JUMP</span>
         </button>
+      </div>
+
+      <div id="stick-zone" class="stick-zone" role="group" aria-label="Movement Thumbstick">
+        <div id="stick-base" class="stick-base">
+          <span class="stick-arrow stick-up" data-dir="up">▲</span>
+          <span class="stick-arrow stick-down" data-dir="down">▼</span>
+          <span class="stick-arrow stick-left" data-dir="left">◀</span>
+          <span class="stick-arrow stick-right" data-dir="right">▶</span>
+          <div class="stick-gate" aria-hidden="true"></div>
+          <div id="stick-knob" class="stick-knob"></div>
+        </div>
       </div>
     </footer>
   </div>
@@ -171,6 +172,6 @@
     }
   }
   </script>
-  <script type="module" src="src/main.js?v=6"></script>
+  <script type="module" src="src/main.js?v=8"></script>
 </body>
 </html>

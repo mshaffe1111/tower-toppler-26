@@ -5,12 +5,30 @@ function wrapCol(c) {
   return ((c % COLS) + COLS) % COLS;
 }
 
+function approach(v, target, delta) {
+  if (v < target) return Math.min(target, v + delta);
+  if (v > target) return Math.max(target, v - delta);
+  return v;
+}
+
 function colDist(a, b) {
   let d = wrapCol(b) - wrapCol(a);
   if (d > COLS / 2) d -= COLS;
   if (d < -COLS / 2) d += COLS;
   return d;
 }
+
+// Classic-paced movement tuning (deliberate like the 7800 original, but with modern assists)
+const PHYS = {
+  walkSpeed: 2.9, // columns / second on the ground
+  airSpeed: 3.3, // a running jump carries a little extra distance
+  gravity: 15,
+  jumpVy: 6.9, // ~1.6 floors high
+  stepVy: 5.7, // auto step-up hop onto the next stair
+  maxFall: 11,
+};
+// Global enemy pace multiplier
+const ENEMY_PACE = 0.72;
 
 export class TowerTopplerGame {
   constructor(renderer, input, callbacks) {
@@ -63,10 +81,16 @@ export class TowerTopplerGame {
       jumpBufferTimer: 0,
       knockbackTimer: 0,
       landingFloor: 0,
+      doorLock: false,
+      teeter: 0,
+      stunTimer: 0,
+      dropThrough: null,
+      bestFloor: 0,
     };
 
     this.camCol = 0;
     this.camFloor = 2;
+    this.camAnchor = 0;
 
     this.topple = {
       active: false,
@@ -126,13 +150,10 @@ export class TowerTopplerGame {
       recallTarget: null,
     }));
 
-    this.enemies = t.enemies.map((e) => ({
-      ...e,
-      baseFloor: e.floor,
-      phase: Math.random() * Math.PI * 2,
-      stunTimer: 0,
-      dead: false,
-    }));
+    this.enemies = t.enemies.map((e) => this._makeEnemy(e));
+    this.flyerTimer = 5.5;
+    this.hitStop = 0;
+    this.flash = 0;
 
     this.player = {
       col: t.spawn.col + 0.5,
@@ -157,13 +178,57 @@ export class TowerTopplerGame {
       jumpBufferTimer: 0,
       knockbackTimer: 0,
       landingFloor: t.spawn.floor,
+      doorLock: false,
+      teeter: 0,
+      stunTimer: 0,
+      dropThrough: null,
+      bestFloor: t.spawn.floor,
     };
 
     this.player.landingFloor = this._computeLandingFloor(this.player.col, this.player.floor);
     this.camCol = this.player.col;
-    this.camFloor = Math.max(2, this.player.floor + 1.5);
+    this.camAnchor = this.player.floor;
+    this.camFloor = Math.max(2, this.player.floor + 1.0);
     this.cb.onBanner?.(`TOWER ${t.id}`, t.name);
     this._syncHud();
+  }
+
+  _makeEnemy(e) {
+    return {
+      ...e,
+      speed: (e.speed || 1.5) * ENEMY_PACE,
+      baseFloor: e.floor,
+      phase: Math.random() * Math.PI * 2,
+      stunTimer: 0,
+      dead: false,
+      deathTimer: 0,
+      fallVy: 0,
+      hitFlash: 0,
+    };
+  }
+
+  // Classic "flying nasty": appears from around the curve of the tower at Pogo's height and
+  // sweeps across toward him. Molecules can be shot; eyes are invulnerable and must be dodged.
+  _spawnFlyer() {
+    const p = this.player;
+    const active = this.enemies.filter((e) => e.spawned && !e.dead).length;
+    if (active >= 2) return;
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const type = this.towerIndex >= 2 && Math.random() < 0.35 ? 'eye' : 'molecule';
+    const speed = 2.4 + this.towerIndex * 0.12;
+    this.enemies.push(
+      this._makeEnemy({
+        type,
+        col: wrapCol(p.col + side * 7.2),
+        floor: Math.max(0.35, p.floor + 0.35),
+        dir: -side,
+        speed: speed / ENEMY_PACE,
+        amp: 0.18,
+        spawned: true,
+        travel: 0,
+      })
+    );
+    sound.flyerWarn?.();
   }
 
   startSubmarineStage() {
@@ -252,6 +317,9 @@ export class TowerTopplerGame {
   }
 
   _colFloorToScreen(col, floor, radiusOffset = 14) {
+    if (this.renderer.projectColFloor) {
+      return this.renderer.projectColFloor(col, floor, this.camCol, radiusOffset / 40);
+    }
     const width = this.renderer.width;
     const height = this.renderer.height;
     const centerX = width * 0.5;
@@ -354,6 +422,14 @@ export class TowerTopplerGame {
   update(dt) {
     const clampedDt = Math.min(0.05, dt);
     this.time += clampedDt;
+    if (this.flash > 0) this.flash = Math.max(0, this.flash - clampedDt * 3.5);
+
+    // Hit-stop: freeze the simulation for a few frames on big impacts for extra punch
+    if (this.hitStop > 0) {
+      this.hitStop = Math.max(0, this.hitStop - clampedDt);
+      this.input.clearFrame();
+      return;
+    }
 
     // Decay screen shake
     if (this.shake > 0) {
@@ -419,6 +495,8 @@ export class TowerTopplerGame {
     if (p.knockbackTimer > 0) p.knockbackTimer = Math.max(0, p.knockbackTimer - dt);
     if (p.muzzleFlash > 0) p.muzzleFlash = Math.max(0, p.muzzleFlash - dt);
     if (p.stepUpCooldown > 0) p.stepUpCooldown = Math.max(0, p.stepUpCooldown - dt);
+    if (p.stunTimer > 0) p.stunTimer = Math.max(0, p.stunTimer - dt);
+    const stunned = p.stunTimer > 0;
 
     // Spring squash & stretch back to 1.0
     const springRate = Math.min(1, dt * 14);
@@ -501,26 +579,49 @@ export class TowerTopplerGame {
         : 0
       : 0;
 
-    // Horizontal movement
-    const moveSpeed = 4.4;
+    // Horizontal movement: quick acceleration ramp instead of instant full speed so taps give
+    // precise small steps, while holding still reaches full speed in ~0.1s.
+    const maxSpeed = p.onGround ? PHYS.walkSpeed : PHYS.airSpeed;
+    // Analog stick gives proportional speed (min 35% so a light push still walks); digital = full speed
+    const axis = typeof inp.axisX === 'number' && inp.axisX !== 0 ? inp.axisX : (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
     let targetVx = 0;
-    if (inp.left) {
-      targetVx = -moveSpeed;
-      p.facing = -1;
-    } else if (inp.right) {
-      targetVx = moveSpeed;
-      p.facing = 1;
+    if (!stunned && Math.abs(axis) > 0.05) {
+      const mag = Math.min(1, Math.max(0.35, Math.abs(axis)));
+      targetVx = Math.sign(axis) * maxSpeed * mag;
+      p.facing = Math.sign(axis);
     }
 
     if ((p.knockbackTimer || 0) <= 0) {
+      let rate;
       if (isIce && p.onGround) {
-        p.vx = p.vx * 0.94 + targetVx * 0.08;
+        rate = 5.5; // slippery
+      } else if (!p.onGround) {
+        rate = targetVx === 0 ? 10 : 24; // a little air control damping
+      } else if (targetVx === 0) {
+        rate = 34; // stop quickly
+      } else if (Math.sign(targetVx) !== Math.sign(p.vx) && Math.abs(p.vx) > 0.2) {
+        rate = 52; // snappy turn-around
       } else {
-        p.vx = targetVx + convPush;
+        rate = 26;
+      }
+      p.vx = approach(p.vx, targetVx, rate * dt);
+    }
+
+    const moveDelta = (p.vx + (p.onGround ? convPush : 0)) * dt;
+    let nextCol = wrapCol(p.col + moveDelta);
+
+    // Edge guard: never *walk* off a solid ledge straight into the toxic sea. Deliberate drops onto
+    // a lower ledge and all jumps are unaffected; ice and conveyors keep their classic danger.
+    p.teeter = Math.max(0, (p.teeter || 0) - dt);
+    if (p.onGround && !p.onElevator && underLedge && !isIce && !convPush && moveDelta !== 0) {
+      const stillSupported = this._findLedgeAt(nextCol, p.floor);
+      if (!stillSupported && this._computeLandingFloor(nextCol, p.floor) <= -0.5) {
+        nextCol = p.col;
+        p.vx = 0;
+        p.teeter = 0.25;
       }
     }
 
-    const nextCol = wrapCol(p.col + p.vx * dt);
     // Check horizontal block ('box' type)
     const blockingBox = this.ledges.find(
       (l) => !l.gone && l.type === 'box' && Math.abs(l.floor - p.floor) < 0.6 && Math.abs(colDist(nextCol, l.col + 0.5)) < 0.52
@@ -531,8 +632,11 @@ export class TowerTopplerGame {
       p.vx = 0;
     }
 
-    // Door / Exit interaction with UP
-    if (this.input.consumeJustPressed('up') && (p.onGround || p.coyoteTimer > 0)) {
+    // Door / Exit interaction with UP (held or tapped). After popping out of a tunnel, UP must be
+    // released first so holding it doesn't bounce you straight back through the linked door.
+    const upTapped = this.input.consumeJustPressed('up');
+    if (!inp.up) p.doorLock = false;
+    if (!stunned && (upTapped || (inp.up && !p.doorLock)) && (p.onGround || p.coyoteTimer > 0)) {
       const door = this.tower.doors.find(
         (d) => Math.abs(d.floor - p.floor) < 0.5 && Math.abs(colDist(p.col, d.col + 0.5)) < 0.72
       );
@@ -544,6 +648,7 @@ export class TowerTopplerGame {
           const target = this.tower.doors.find((d) => d.id === door.targetId);
           if (target) {
             p.hidden = true;
+            p.doorLock = true;
             p.tunnelTimer = 0.35;
             p.tunnelTarget = target;
             sound.door();
@@ -555,24 +660,27 @@ export class TowerTopplerGame {
 
     // Coyote time (0.12s) & Jump buffering (0.12s)
     if (p.onGround) {
-      p.coyoteTimer = 0.12;
+      p.coyoteTimer = 0.14;
     } else {
       p.coyoteTimer = Math.max(0, p.coyoteTimer - dt);
     }
 
     if (this.input.consumeJustPressed('jump')) {
-      p.jumpBufferTimer = 0.12;
+      p.jumpBufferTimer = 0.15;
     } else {
       p.jumpBufferTimer = Math.max(0, p.jumpBufferTimer - dt);
     }
 
     // Jump
-    if (p.jumpBufferTimer > 0 && (p.onGround || p.coyoteTimer > 0)) {
-      p.vy = 7.6;
+    if (!stunned && p.jumpBufferTimer > 0 && (p.onGround || p.coyoteTimer > 0)) {
+      p.vy = PHYS.jumpVy;
+      // A jump launches at full air speed in the held direction (classic fixed-arc feel)
+      if (targetVx !== 0) p.vx = Math.sign(targetVx) * Math.max(Math.abs(p.vx), PHYS.walkSpeed);
       p.onGround = false;
       p.onElevator = null;
       p.coyoteTimer = 0;
       p.jumpBufferTimer = 0;
+      p.autoHop = false;
       p.squashX = 0.76;
       p.squashY = 1.28;
       sound.jump();
@@ -591,11 +699,12 @@ export class TowerTopplerGame {
           return Math.sign(dc) === p.facing && Math.abs(dc) > 0.14 && Math.abs(dc) <= 0.62;
         });
         if (stepLedge) {
-          p.vy = 5.8;
+          p.vy = PHYS.stepVy;
           p.onGround = false;
           p.onElevator = null;
           p.coyoteTimer = 0;
           p.stepUpCooldown = 0.22;
+          p.autoHop = true; // full-height hop: not subject to the short-hop jump cut
           p.squashX = 0.82;
           p.squashY = 1.2;
           sound.stepUp();
@@ -603,14 +712,16 @@ export class TowerTopplerGame {
       }
     }
 
-    // Variable jump cut for crisp short hops vs full jumps
-    if (!inp.jump && !p.onGround && !p.onElevator && p.vy > 3.2) {
+    // Variable jump cut for crisp short hops vs full jumps (only for real jumps, never auto step-ups)
+    if (p.onGround) p.autoHop = false;
+    if (!inp.jump && !p.autoHop && !p.onGround && !p.onElevator && p.vy > 3.2) {
       p.vy *= Math.pow(0.85, dt * 60);
     }
 
     // Fire Snowball (or recall nearby elevator!)
-    if (this.input.consumeJustPressed('fire') && p.fireCooldown <= 0) {
-      p.fireCooldown = 0.25;
+    const fireTapped = this.input.consumeJustPressed('fire');
+    if (!stunned && (fireTapped || inp.fire) && p.fireCooldown <= 0) {
+      p.fireCooldown = fireTapped ? 0.22 : 0.3;
       p.muzzleFlash = 0.14;
       // Recall elevator if standing near a shaft
       const nearEl = this.elevators.find((el) => Math.abs(colDist(p.col, el.col + 0.5)) < 1.15);
@@ -654,17 +765,20 @@ export class TowerTopplerGame {
 
     if (!p.onElevator) {
       const prevFloor = p.floor;
-      p.vy -= 16.5 * dt;
+      p.vy = Math.max(-PHYS.maxFall, p.vy - PHYS.gravity * dt);
       p.floor += p.vy * dt;
       p.onGround = false;
 
       // Landing on ledges (when falling)
+      if (p.dropThrough != null && p.floor < p.dropThrough - 0.3) p.dropThrough = null;
       if (p.vy <= 0) {
-        const landed = this._findLedgeLanding(p.col, prevFloor, p.floor);
+        const landed = this._findLedgeLanding(p.col, prevFloor, p.floor, p.dropThrough);
         if (landed) {
           p.floor = landed.floor;
           p.vy = 0;
           p.onGround = true;
+          p.dropThrough = null;
+          this._onReachFloor(landed.floor);
           if (!wasOnGround && prevVy < -1.2) {
             const impact = Math.min(1, Math.abs(prevVy) / 10);
             p.squashX = 1 + 0.28 * Math.max(0.45, impact);
@@ -684,6 +798,7 @@ export class TowerTopplerGame {
           // Check elevator platform landing
           for (const el of this.elevators) {
             if (
+              (p.dropThrough == null || el.floor < p.dropThrough - 0.05) &&
               Math.abs(colDist(p.col, el.col + 0.5)) < 0.62 &&
               prevFloor >= el.floor - 0.45 &&
               p.floor <= el.floor + 0.35
@@ -704,12 +819,12 @@ export class TowerTopplerGame {
         }
       }
 
-      // Forgiving ledge-edge mantle (snap onto ledge top if within 0.18 floor below while moving toward it)
-      if (!p.onGround && p.vy <= 1.6 && Math.abs(p.vx) > 0.3) {
+      // Forgiving ledge-edge mantle (snap onto ledge top if within 0.3 floor below while moving toward it)
+      if (!p.onGround && p.dropThrough == null && !stunned && p.vy <= 1.6 && Math.abs(p.vx) > 0.3) {
         const mantleLedge = this.ledges.find((l) => {
           if (l.gone || l.type === 'box') return false;
           const floorGap = l.floor - p.floor;
-          if (floorGap <= 0 || floorGap > 0.18) return false;
+          if (floorGap <= 0 || floorGap > 0.3) return false;
           const dc = colDist(p.col, l.col + 0.5);
           return Math.abs(dc) < 0.72 && Math.sign(p.vx) === Math.sign(dc);
         });
@@ -717,6 +832,7 @@ export class TowerTopplerGame {
           p.floor = mantleLedge.floor;
           p.vy = 0;
           p.onGround = true;
+          this._onReachFloor(mantleLedge.floor);
           p.squashX = 1.14;
           p.squashY = 0.88;
           sound.stepUp();
@@ -789,29 +905,36 @@ export class TowerTopplerGame {
         continue;
       }
 
-      // Check enemy hit
+      // Check enemy hit (classic rules: bouncing balls & molecules pop, silver rollers only freeze, eyes are immune)
       let hit = false;
       for (const en of this.enemies) {
         if (en.dead) continue;
         if (Math.abs(en.floor - sb.floor) < 0.65 && Math.abs(colDist(sb.col, en.col)) < 0.55) {
           hit = true;
           const pos = this._colFloorToScreen(en.col, en.floor + 0.3, 14);
-          if (en.type === 'roller') {
+          en.hitFlash = 0.18;
+          if (en.type === 'bouncer' || en.type === 'molecule') {
             en.dead = true;
-            this._scoreComboHit(100, { col: en.col, floor: en.floor + 0.5 }, '#38bdf8');
+            en.deathTimer = 0.5;
+            const pts = en.type === 'molecule' ? 150 : 100;
+            this._scoreComboHit(pts, { col: en.col, floor: en.floor + 0.5 }, en.type === 'molecule' ? '#f472b6' : '#fca5a5');
             this.addShake(4.0);
-            if (pos) this._spawnParticles(pos.x, pos.y, '#67e8f9', 10, 110);
+            this.hitStop = 0.045;
+            if (pos) {
+              this._spawnParticles(pos.x, pos.y, en.type === 'molecule' ? '#f472b6' : '#f87171', 14, 140);
+              this._spawnParticles(pos.x, pos.y, '#e0f2fe', 8, 90);
+            }
             sound.hitEnemy();
-          } else if (en.type === 'bouncer') {
-            en.stunTimer = 3.0;
-            this._scoreComboHit(50, { col: en.col, floor: en.floor + 0.5 }, '#a7f3d0');
-            this.addShake(2.2);
-            if (pos) this._spawnParticles(pos.x, pos.y, '#a7f3d0', 7, 80);
+          } else if (en.type === 'roller') {
+            en.stunTimer = 3.2;
+            this._scoreComboHit(25, { col: en.col, floor: en.floor + 0.5 }, '#a5f3fc');
+            this.addShake(2.0);
+            if (pos) this._spawnParticles(pos.x, pos.y, '#a5f3fc', 9, 80);
             sound.stunEnemy();
           } else {
-            // Indestructible molecule / eye
-            this.addShake(1.5);
-            if (pos) this._spawnParticles(pos.x, pos.y, '#e0f2fe', 5, 65);
+            // Invulnerable eye: snowball shatters harmlessly
+            this.addShake(1.0);
+            if (pos) this._spawnParticles(pos.x, pos.y, '#e0f2fe', 6, 65);
             sound.stunEnemy();
           }
           break;
@@ -823,44 +946,129 @@ export class TowerTopplerGame {
     }
 
     // Update Enemies
-    for (const en of this.enemies) {
-      if (en.dead) continue;
+    this.flyerTimer -= dt;
+    if (this.flyerTimer <= 0) {
+      this.flyerTimer = Math.max(4.5, 9 - this.towerIndex * 0.55) + Math.random() * 3;
+      if (p.floor > 0.5 || this.towerIndex > 0) this._spawnFlyer();
+    }
+    for (let ei = this.enemies.length - 1; ei >= 0; ei--) {
+      const en = this.enemies[ei];
+      if (en.hitFlash > 0) en.hitFlash = Math.max(0, en.hitFlash - dt);
+      if (en.dead) {
+        if (en.deathTimer > 0) en.deathTimer = Math.max(0, en.deathTimer - dt);
+        if (en.spawned && en.deathTimer <= 0) this.enemies.splice(ei, 1);
+        continue;
+      }
       if (en.stunTimer > 0) {
         en.stunTimer = Math.max(0, en.stunTimer - dt);
         continue;
       }
 
-      en.col = wrapCol(en.col + en.dir * en.speed * dt);
-      if (en.type === 'molecule') {
-        en.floor = en.baseFloor + Math.sin(this.time * 3 + en.phase) * (en.amp || 0.4);
-      } else if (en.type === 'bouncer') {
-        en.floor = en.baseFloor + Math.abs(Math.sin(this.time * 4.5 + en.phase)) * 0.65;
+      if (en.type === 'roller' || en.type === 'bouncer') {
+        // Ground enemies patrol their ledge run, turning around at edges and solid blocks.
+        const floorLvl = Math.round(en.baseFloor);
+        const support = (c) =>
+          this.ledges.find(
+            (l) => !l.gone && l.type !== 'box' && l.floor === floorLvl && Math.abs(colDist(c, l.col + 0.5)) <= 0.52
+          );
+        if (en.falling || !support(en.col)) {
+          // Ledge crumbled away underneath: tumble into the sea
+          en.falling = true;
+          en.fallVy -= PHYS.gravity * dt;
+          en.baseFloor += en.fallVy * dt;
+          en.floor = en.baseFloor;
+          if (en.floor < -0.6) {
+            en.dead = true;
+            const pos = this._colFloorToScreen(en.col, 0, 14);
+            if (pos) this._spawnSplashDroplets(pos.x, pos.y);
+          }
+          continue;
+        }
+        const nextCol = wrapCol(en.col + en.dir * en.speed * dt);
+        const blocked = this.ledges.some(
+          (l) => !l.gone && l.type === 'box' && l.floor === floorLvl && Math.abs(colDist(nextCol, l.col + 0.5)) < 0.75
+        );
+        if (blocked || !support(nextCol)) {
+          en.dir *= -1;
+        } else {
+          en.col = nextCol;
+        }
+        if (en.type === 'bouncer') {
+          // Real ballistic-looking bounce (abs-sine arc), peaking a little over head height
+          en.floor = floorLvl + Math.abs(Math.sin(this.time * 3.2 + en.phase)) * 0.95;
+        } else {
+          en.floor = floorLvl;
+        }
+      } else {
+        en.col = wrapCol(en.col + en.dir * en.speed * dt);
+        if (en.type === 'molecule') {
+          en.floor = en.baseFloor + Math.sin(this.time * 3 + en.phase) * (en.amp || 0.4);
+        } else if (en.type === 'eye') {
+          en.floor = en.baseFloor + Math.sin(this.time * 1.7 + en.phase) * (en.amp || 0.3);
+        }
+        if (en.spawned) {
+          // Homing flyers drift toward Pogo's height, then leave after sweeping past
+          en.baseFloor += Math.sign(p.floor + 0.35 - en.baseFloor) * Math.min(Math.abs(p.floor + 0.35 - en.baseFloor), 0.5 * dt);
+          en.travel += en.speed * dt;
+          if (en.travel > 14.5) {
+            this.enemies.splice(ei, 1);
+            continue;
+          }
+        }
       }
 
-      // Player collision
+      // Player collision: knocked back down to the ledge below (into the sea if there's none)
       if (
         p.invuln <= 0 &&
+        !p.hidden &&
         Math.abs(en.floor - p.floor) < 0.55 &&
-        Math.abs(colDist(en.col, p.col)) < 0.52
+        Math.abs(colDist(en.col, p.col)) < 0.5
       ) {
-        sound.hurt();
-        this.addShake(9);
-        this.input.haptic(40);
-        p.invuln = 1.6;
-        p.vy = 4.2;
-        p.onGround = false;
-        p.onElevator = null;
-        p.coyoteTimer = 0;
-        p.knockbackTimer = 0.18;
-        p.squashX = 1.25;
-        p.squashY = 0.78;
-        p.vx = (colDist(en.col, p.col) >= 0 ? 1 : -1) * 3.5;
+        this._knockDown(colDist(en.col, p.col) >= 0 ? 1 : -1);
       }
     }
 
     p.landingFloor = this._computeLandingFloor(p.col, p.floor);
     this._updateCamera(dt);
     this._syncHud();
+  }
+
+  _knockDown(dir) {
+    const p = this.player;
+    sound.hurt();
+    this.addShake(9);
+    this.input.haptic(40);
+    this.hitStop = 0.08;
+    this.flash = 0.6;
+    p.invuln = 1.7;
+    p.stunTimer = 0.5;
+    p.vy = 2.6;
+    p.vx = dir * 0.9;
+    p.onGround = false;
+    p.onElevator = null;
+    p.coyoteTimer = 0;
+    p.jumpBufferTimer = 0;
+    p.knockbackTimer = 0.5;
+    p.dropThrough = Math.round(p.floor);
+    p.squashX = 1.25;
+    p.squashY = 0.78;
+    this.comboCount = 0;
+    this.comboTimer = 0;
+  }
+
+  // Classic climb scoring: points the first time you reach each new floor
+  _onReachFloor(floor) {
+    const p = this.player;
+    const f = Math.round(floor);
+    if (f > (p.bestFloor || 0)) {
+      const gained = f - (p.bestFloor || 0);
+      p.bestFloor = f;
+      if (this.mode === 'tower') {
+        this.addScore(25 * gained);
+        sound.climb?.();
+        this.addPopup({ col: p.col, floor: f + 1.0, text: `+${25 * gained}`, color: '#a7f3d0', maxLife: 0.7 });
+      }
+    }
   }
 
   _computeLandingFloor(col, floor) {
@@ -884,11 +1092,12 @@ export class TowerTopplerGame {
     );
   }
 
-  _findLedgeLanding(col, prevFloor, nextFloor) {
+  _findLedgeLanding(col, prevFloor, nextFloor, dropThrough = null) {
     return this.ledges.find(
       (l) =>
         !l.gone &&
         l.type !== 'box' &&
+        (dropThrough == null || l.floor < dropThrough - 0.05) &&
         prevFloor >= l.floor - 0.15 &&
         nextFloor <= l.floor + 0.05 &&
         Math.abs(colDist(col, l.col + 0.5)) < 0.66
@@ -896,10 +1105,25 @@ export class TowerTopplerGame {
   }
 
   _updateCamera(dt) {
-    const d = colDist(this.camCol, this.player.col);
-    this.camCol = wrapCol(this.camCol + d * Math.min(1, dt * 12));
-    const targetFloor = Math.max(2, this.player.floor + 1.2);
-    this.camFloor += (targetFloor - this.camFloor) * Math.min(1, dt * 7);
+    const p = this.player;
+    // Horizontal: follow with a small lead in the walking direction so you see what's coming.
+    const lead = Math.max(-0.6, Math.min(0.6, p.vx * 0.12));
+    const d = colDist(this.camCol, p.col + lead);
+    this.camCol = wrapCol(this.camCol + d * Math.min(1, dt * 9));
+
+    // Vertical: anchor to the last floor stood on, so ordinary hops don't bob the whole screen.
+    // Follow immediately when falling below it or after landing somewhere new.
+    if (p.onGround || p.hidden) {
+      this.camAnchor = p.floor;
+    }
+    let focus = this.camAnchor;
+    if (!p.onGround && !p.hidden) {
+      if (p.floor < this.camAnchor) focus = p.floor;
+      else focus = this.camAnchor + (p.floor - this.camAnchor) * 0.3;
+    }
+    const targetFloor = Math.max(2, focus + 1.0);
+    const rate = targetFloor < this.camFloor ? 6.5 : 4.5;
+    this.camFloor += (targetFloor - this.camFloor) * Math.min(1, dt * rate);
   }
 
   _loseLife(reason) {
@@ -930,6 +1154,12 @@ export class TowerTopplerGame {
     this.player.knockbackTimer = 0;
     this.player.muzzleFlash = 0;
     this.player.stepUpCooldown = 0;
+    this.player.teeter = 0;
+    this.player.stunTimer = 0;
+    this.player.dropThrough = null;
+    this.enemies = this.enemies.filter((e) => !e.spawned);
+    this.flyerTimer = 6;
+    this.camAnchor = this.player.floor;
     this.comboCount = 0;
     this.comboTimer = 0;
     this.player.landingFloor = this._computeLandingFloor(this.player.col, this.player.floor);

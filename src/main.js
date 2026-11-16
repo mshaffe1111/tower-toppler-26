@@ -1,7 +1,7 @@
-import { sound } from './audio.js?v=6';
-import { InputController } from './input.js?v=6';
-import { GameRenderer } from './renderer.js?v=6';
-import { TowerTopplerGame } from './game.js?v=6';
+import { sound } from './audio.js?v=8';
+import { InputController } from './input.js?v=8';
+import { GameRenderer } from './renderer.js?v=8';
+import { TowerTopplerGame } from './game.js?v=8';
 
 const canvas = document.getElementById('game-canvas');
 const stageWrap = document.getElementById('stage-wrap');
@@ -145,8 +145,9 @@ btnMusic?.addEventListener('click', () => {
   btnMusic.textContent = enabled ? '🎵' : '🔕';
 });
 
-btnPause.addEventListener('click', () => {
-  if (game.mode === 'title' || game.mode === 'gameover' || game.mode === 'victory') return;
+function togglePause() {
+  if (game.mode === 'title' || game.mode === 'gameover' || game.mode === 'victory' || game.mode === 'topple') return;
+  input.releaseAll();
   const paused = game.togglePause();
   sound.setMusicActive(!paused && (game.mode === 'tower' || game.mode === 'submarine'));
   if (paused) {
@@ -156,6 +157,13 @@ btnPause.addEventListener('click', () => {
   } else {
     overlayPause.classList.add('hidden');
   }
+}
+btnPause.addEventListener('click', togglePause);
+input.onPause = togglePause;
+
+// Auto-pause when the app is backgrounded (phone call, app switch, tab change)
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && (game.mode === 'tower' || game.mode === 'submarine')) togglePause();
 });
 
 btnResume.addEventListener('click', () => {
@@ -163,6 +171,27 @@ btnResume.addEventListener('click', () => {
   overlayPause.classList.add('hidden');
   game.togglePause();
   sound.setMusicActive(game.mode === 'tower' || game.mode === 'submarine');
+});
+
+// Thumbstick side (right by default), remembered per device
+const touchControlsEl = document.getElementById('touch-controls');
+const btnSwap = document.getElementById('btn-swap');
+function applyStickSide(side) {
+  const left = side === 'left';
+  touchControlsEl?.classList.toggle('swapped', left);
+  if (btnSwap) btnSwap.textContent = left ? '⇄ STICK ON RIGHT' : '⇄ STICK ON LEFT';
+}
+let stickSide = 'right';
+try {
+  stickSide = localStorage.getItem('tt26_stick_side') || 'right';
+} catch (_) {}
+applyStickSide(stickSide);
+btnSwap?.addEventListener('click', () => {
+  stickSide = stickSide === 'left' ? 'right' : 'left';
+  try {
+    localStorage.setItem('tt26_stick_side', stickSide);
+  } catch (_) {}
+  applyStickSide(stickSide);
 });
 
 btnRestart.addEventListener('click', () => {
@@ -189,11 +218,15 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+const hitFlashEl = document.getElementById('hit-flash');
+let lastFlash = -1;
+
 // Main 60fps loop
 let lastTs = performance.now();
 function loop(ts) {
   const dt = (ts - lastTs) / 1000;
   lastTs = ts;
+  input.poll();
 
   if (game.mode === 'title') {
     // Gently rotate preview tower on title screen
@@ -204,6 +237,13 @@ function loop(ts) {
   }
 
   game.render();
+  if (hitFlashEl) {
+    const f = game.flash || 0;
+    if (f !== lastFlash) {
+      hitFlashEl.style.opacity = String(Math.min(1, f).toFixed(3));
+      lastFlash = f;
+    }
+  }
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);

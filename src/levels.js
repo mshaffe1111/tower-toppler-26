@@ -13,7 +13,9 @@ function buildTower({
   enemies = [],
   spawn = { col: 0, floor: 0 },
 }) {
-  return { id, name, timeLimit, palette, floors, ledges, elevators, doors, enemies, spawn };
+  // Time limits are scaled for the deliberate, classic-paced movement (Pogo walks ~30% slower than before)
+  const paced = Math.round((timeLimit * 1.3) / 5) * 5;
+  return { id, name, timeLimit: paced, palette, floors, ledges, elevators, doors, enemies, spawn };
 }
 
 // Helper to add a horizontal run of ledges wrapping around the 16-column cylinder

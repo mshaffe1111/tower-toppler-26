@@ -447,6 +447,19 @@ class SoundEngine {
     this._fmTone(f * 1.498, 2.0, f * 0.3, 0.16, 0.055, 0.035);
   }
 
+  // Incoming flying nasty: quick rising two-note warble
+  flyerWarn() {
+    const f = this._vary(880, 0.02);
+    this._tone(f, f * 1.5, 0.09, 'square', 0.035, 0, 2400);
+    this._tone(f * 1.2, f * 1.8, 0.09, 'square', 0.03, 0.11, 2400);
+  }
+
+  // Score tick for climbing to a new floor
+  climb() {
+    const f = this._vary(1046.5, 0.01);
+    this._fmTone(f, 2.0, f * 0.15, 0.08, 0.035, 0);
+  }
+
   catchFish() {
     this._tone(145, 52, 0.14, 'sine', 0.13, 0);
     const chord = [523.25, 659.25, 783.99, 987.77, 1174.66]; // Cmaj9
