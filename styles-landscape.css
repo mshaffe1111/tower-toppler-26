@@ -191,36 +191,19 @@
     pointer-events: auto;
   }
 
-  .action-cluster {
-    gap: 12px;
-    padding: 0 0 6px 4px;
+  /* Thumb-arc cluster (defined in styles.css) sized for short landscape screens */
+  #touch-controls {
+    --jump: 76px;
+    --fire: 60px;
+    --rew: 42px;
+    background: none;
   }
 
-  #touch-controls.swapped .action-cluster {
-    padding: 0 4px 6px 0;
+  #stage-wrap .action-prompt {
+    bottom: 12px;
   }
 
-  .action-btn {
-    width: 64px;
-    height: 64px;
-    opacity: 0.94;
-  }
-
-  .action-fire {
-    margin-bottom: 14px;
-  }
-
-  .action-jump {
-    width: 76px;
-    height: 76px;
-  }
-
-  .action-rewind {
-    width: 42px;
-    height: 42px;
-  }
-
-  .stick-zone {
+  #touch-controls .stick-zone {
     flex: 0 0 auto;
     width: clamp(168px, 26vw, 232px);
     max-width: none;
@@ -492,19 +475,10 @@
       font-size: 13.5px;
     }
 
-    .action-btn {
-      width: 56px;
-      height: 56px;
-    }
-
-    .action-jump {
-      width: 66px;
-      height: 66px;
-    }
-
-    .action-rewind {
-      width: 38px;
-      height: 38px;
+    #touch-controls {
+      --jump: 66px;
+      --fire: 54px;
+      --rew: 38px;
     }
 
     .stick-base {

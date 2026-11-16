@@ -26,6 +26,15 @@ const isMobile =
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
+// Capture beforeinstallprompt as soon as this module is evaluated, so the event isn't lost if it fires
+// before setupInstallPrompt() is called. An inline <head> script may also have stashed it on
+// window.__deferredInstallPrompt (see README snippet) for pages that load this module late.
+let earlyPrompt = window.__deferredInstallPrompt || null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  earlyPrompt = e;
+});
+
 function lsGet(key) {
   try {
     return window.localStorage.getItem(key);
@@ -109,16 +118,21 @@ export function setupInstallPrompt(buttonEl) {
   const show = () => buttonEl.classList.remove('hidden');
   const hide = () => buttonEl.classList.add('hidden');
 
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
+  const offer = (e) => {
     deferred = e;
     iosHint = false;
     buttonEl.classList.remove('ios-hint');
     show();
+  };
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    offer(e);
   });
+  if (earlyPrompt) offer(earlyPrompt);
 
   window.addEventListener('appinstalled', () => {
     deferred = null;
+    earlyPrompt = null;
     hide();
   });
 
@@ -130,6 +144,7 @@ export function setupInstallPrompt(buttonEl) {
     if (!deferred) return;
     const evt = deferred;
     deferred = null;
+    earlyPrompt = null;
     try {
       await evt.prompt();
       await evt.userChoice;

@@ -310,6 +310,7 @@ export class TowerTopplerGame {
     } else {
       this.secrets = this._autoSecrets(rand);
     }
+    this._populateExtras(rand);
     this.secretsTotal = t.mechanic === 'vault' ? t.doors.filter((d) => d.vault).length : this.secrets.length;
     this.secretsGot = 0;
 
@@ -353,6 +354,67 @@ export class TowerTopplerGame {
     return true;
   }
 
+  // Towers get busier as you go: extra patrols, spiky fuzzballs guarding staircases and
+  // robo-eyes that charge when they spot you. Never on the spawn floor, doors or checkpoints.
+  _populateExtras(rand) {
+    const diff = this._difficulty();
+    // Procedural towers already place their own enemies, so add fewer extras there
+    const want = Math.round(this.tower.procedural ? diff * 4 : 1 + diff * 8);
+    const t = this.tower;
+    const blockedKey = new Set(t.doors.map((d) => `${d.col},${d.floor}`));
+    const spawnF = t.spawn.floor;
+    const top = this.exitFloor;
+    const busy = (col, floor) => this.enemies.some((e) => Math.abs(Math.round(e.baseFloor) - floor) < 1 && Math.abs(colDist(e.col, col)) < 2.2);
+    // Ledge runs (contiguous columns on a floor)
+    const runs = [];
+    const byFloor = new Map();
+    for (const l of this.ledges) {
+      if (l.type === 'box' || l.piston) continue;
+      if (!byFloor.has(l.floor)) byFloor.set(l.floor, new Set());
+      byFloor.get(l.floor).add(l.col);
+    }
+    for (const [floor, cols] of byFloor) {
+      if (floor <= spawnF + 1 || floor >= top) continue;
+      const seen = new Set();
+      for (const c of cols) {
+        if (seen.has(c)) continue;
+        let a = c;
+        while (cols.has((a + COLS - 1) % COLS) && !seen.has((a + COLS - 1) % COLS) && (a + COLS - 1) % COLS !== c) a = (a + COLS - 1) % COLS;
+        const run = [];
+        let k = a;
+        while (cols.has(k) && !seen.has(k)) {
+          seen.add(k);
+          run.push(k);
+          k = (k + 1) % COLS;
+        }
+        runs.push({ floor, cols: run });
+      }
+    }
+    const safe = (col, floor) =>
+      !blockedKey.has(`${col},${floor}`) &&
+      !this.checkpoints.some((c) => Math.abs(colDist(c.col, col + 0.5)) < 1.5 && c.floor === floor) &&
+      !(this.exitDoor && Math.abs(floor - this.exitDoor.floor) < 1);
+    let placed = 0;
+    let tries = 0;
+    while (placed < want && tries < 80 && runs.length) {
+      tries++;
+      const r = runs[Math.floor(rand() * runs.length)];
+      const useSpiker = diff > 0.1 && (r.cols.length < 3 || rand() < 0.4);
+      if (useSpiker) {
+        const col = r.cols[Math.floor(rand() * r.cols.length)];
+        if (!safe(col, r.floor) || busy(col + 0.5, r.floor)) continue;
+        this.enemies.push(this._makeEnemy({ type: 'spiker', col: col + 0.5, floor: r.floor, dir: 1, speed: 0, range: 1.1 + rand() * 0.6, extra: true }));
+        placed++;
+      } else if (r.cols.length >= 3) {
+        const col = r.cols[1 + Math.floor(rand() * (r.cols.length - 2))];
+        if (!safe(col, r.floor) || busy(col + 0.5, r.floor)) continue;
+        const type = diff > 0.12 && rand() < 0.55 ? 'chaser' : rand() < 0.5 ? 'bouncer' : 'roller';
+        this.enemies.push(this._makeEnemy({ type, col: col + 0.5, floor: r.floor, dir: rand() < 0.5 ? -1 : 1, speed: type === 'chaser' ? 1.3 : 1.6, extra: true }));
+        placed++;
+      }
+    }
+  }
+
   _autoSecrets(rand) {
     // Prefer short isolated ledges (dead ends) spread across the lower, middle and upper thirds
     const top = this.exitFloor;
@@ -374,10 +436,29 @@ export class TowerTopplerGame {
     return out;
   }
 
+  // First-time contextual hints (each shown once ever, unless hints are reset)
+  _hint(id, text) {
+    if (this.runMode === 'title') return;
+    progress.hintsSeen = progress.hintsSeen || {};
+    if (progress.hintsSeen[id]) return;
+    if (this._hintCooldown > 0) return;
+    progress.hintsSeen[id] = true;
+    saveProgress();
+    this._hintCooldown = 4.5;
+    this.cb.onHint?.(text);
+  }
+
+  _difficulty() {
+    // 0 on the first tower -> 1 by the eighth (endless keeps climbing)
+    return this.runMode === 'campaign' ? this.towerIndex / 7 : Math.min(1.4, 0.25 + this.towerIndex * 0.12);
+  }
+
   _makeEnemy(e) {
+    const diff = this._difficulty();
     return {
+      hp: e.type === 'spiker' ? 2 : e.type === 'chaser' ? 3 : 1,
       ...e,
-      speed: (e.speed || 1.5) * ENEMY_PACE,
+      speed: (e.speed || 1.5) * ENEMY_PACE * (1 + diff * 0.3),
       baseFloor: e.floor,
       phase: Math.random() * Math.PI * 2,
       stunTimer: 0,
@@ -669,6 +750,9 @@ export class TowerTopplerGame {
       return;
     }
 
+    if (p.emote && p.emote.t > 0) p.emote.t -= dt;
+    if (this._hintCooldown > 0) this._hintCooldown -= dt;
+    this._checkHints(dt);
     for (const k of ['invuln', 'fireCooldown', 'knockbackTimer', 'muzzleFlash', 'stepUpCooldown', 'stunTimer', 'frozenSelf', 'hurtFace']) {
       if (p[k] > 0) p[k] = Math.max(0, p[k] - dt);
     }
@@ -831,6 +915,7 @@ export class TowerTopplerGame {
             p.vaultDoor = door;
             this.secretsGot += 1;
             this.timer += 10;
+            p.emote = { kind: 'joy', t: 1.6 };
             this.addScore(500);
             sound.door();
             sound.secret?.();
@@ -1076,6 +1161,27 @@ export class TowerTopplerGame {
     this._syncHud();
   }
 
+  _checkHints(dt) {
+    const p = this.player;
+    if (this.towerTime > 1.5) this._hint('walk', 'Push the stick to walk round the tower. Walk into a step to climb it.');
+    if (p.teeter > 0) this._hint('jump', 'Careful — that\'s the sea! Press JUMP to hop across gaps.');
+    if (!this.classic && this.towerTime > 9) this._hint('peek', 'Hold the stick ▲ or ▼ while standing still to look up or down the tower.');
+    const near = this.enemies.find((e) => !e.dead && Math.abs(e.floor - p.floor) < 0.8 && Math.abs(colDist(e.col, p.col)) < 3.5);
+    if (near) {
+      this._hint('fire', 'Tap FIRE to throw a snowball. Bouncers & molecules pop; rollers just freeze.');
+      if (near.type === 'eye' || near.type === 'roller' || near.type === 'chaser') this._hint('charge', 'Hold FIRE to pack a mega-snowball — it freezes anything into an ice block you can stand on!');
+    }
+    if (!p.onGround && p.floor - p.landingFloor > 1.6 && this.towerTime > 4) this._hint('pound', 'In mid-air, push ▼ to ground-pound: it stuns enemies and smashes blocks.');
+    if (this.hitsTaken > 0 && !this.classic) this._hint('rewind', 'Knocked down? Hold ⏪ REWIND to turn back time a few seconds.');
+    if (this.secretsGot > 0) this._hint('star', `Hidden star-fish! Find all ${this.secretsTotal} on a tower for a medal.`);
+    if (this.mech.kind === 'pistons') this._hint('m-pistons', 'Clockwork ledges slide into the wall — watch for the red blink!');
+    if (this.mech.kind === 'vault') this._hint('m-vault', 'Some doors here are tricks… and some hide secret vaults.');
+    if (this.mech.kind === 'blizzard') this._hint('m-blizzard', 'Gusts are coming — streaks of wind warn you which way.');
+    if (this.mech.kind === 'collapse') this._hint('m-collapse', 'The tower is crumbling from the bottom up. Keep climbing!');
+    if (this.mech.kind === 'flood') this._hint('m-flood', 'The sea is rising. The water IS the clock — climb!');
+    if (this.mech.kind === 'dark') this._hint('m-dark', 'Night storm. Your lantern lights the way; lightning shows the rest.');
+  }
+
   _landImpact(wasOnGround, prevVy) {
     const p = this.player;
     if (!wasOnGround && prevVy < -1.2) {
@@ -1268,7 +1374,16 @@ export class TowerTopplerGame {
         if (Math.abs(en.floor - sb.floor) < 0.65 + sb.power * 0.25 && Math.abs(colDist(sb.col, en.col)) < 0.55 + sb.power * 0.2) {
           sb.hit.add(en);
           en.hitFlash = 0.18;
-          if (en.fireball || (!sb.power && (en.type === 'bouncer' || en.type === 'molecule'))) {
+          if (!sb.power && (en.type === 'spiker' || en.type === 'chaser')) {
+            en.hp -= 1;
+            if (en.type === 'chaser') en.stunTimer = Math.max(en.stunTimer, 0.6);
+            if (en.hp <= 0) this._popEnemy(en);
+            else {
+              this._burstAt(en.col, en.floor + 0.3, en.type === 'spiker' ? '#fde047' : '#e2e8f0', 8, 90);
+              sound.stunEnemy();
+              this.addShake(1.5);
+            }
+          } else if (en.fireball || (!sb.power && (en.type === 'bouncer' || en.type === 'molecule'))) {
             this._popEnemy(en);
           } else if (sb.power > 0) {
             en.stunTimer = this._freezeTime(3 + sb.power * 3);
@@ -1308,10 +1423,11 @@ export class TowerTopplerGame {
   }
 
   _popEnemy(en) {
+    if (!this.player.emote || this.player.emote.t <= 0) this.player.emote = { kind: 'smug', t: 0.7 };
     en.dead = true;
     en.deathTimer = 0.5;
-    const pts = en.fireball ? 75 : en.type === 'molecule' ? 150 : 100;
-    const col = en.fireball ? '#fb923c' : en.type === 'molecule' ? '#f472b6' : '#fca5a5';
+    const pts = en.fireball ? 75 : en.type === 'molecule' || en.type === 'spiker' ? 150 : en.type === 'chaser' ? 250 : 100;
+    const col = en.fireball ? '#fb923c' : en.type === 'molecule' ? '#f472b6' : en.type === 'spiker' ? '#fde047' : en.type === 'chaser' ? '#e2e8f0' : '#fca5a5';
     this._scoreComboHit(pts, { col: en.col, floor: en.floor + 0.5 }, col);
     this.addShake(4.0);
     this.hitStop = Math.max(this.hitStop, 0.045);
@@ -1351,8 +1467,33 @@ export class TowerTopplerGame {
         continue;
       }
 
-      if (en.type === 'roller' || en.type === 'bouncer') {
+      if (en.type === 'spiker') {
+        // Hovers up and down over its step, guarding the staircase
+        en.floor = en.baseFloor + 0.25 + (Math.sin(this.time * 1.5 + en.phase) * 0.5 + 0.5) * (en.range || 1.2);
+        en.col = en.col + Math.sin(this.time * 2.3 + en.phase) * 0.002;
+      } else if (en.type === 'roller' || en.type === 'bouncer' || en.type === 'chaser') {
         const floorLvl = Math.round(en.baseFloor);
+        // Robo-eye: spots Pogo on its floor and charges
+        let spd = en.speed;
+        if (en.type === 'chaser') {
+          const dc = colDist(en.col, p.col);
+          const sameFloor = Math.abs(p.floor - floorLvl) < 0.35 && !p.hidden;
+          const ahead = Math.sign(dc) === en.dir;
+          if (sameFloor && Math.abs(dc) < 4.5 && ahead) {
+            if (!en.alert) sound.enemyCue?.('roller', 0, false);
+            en.alert = Math.min(1, (en.alert || 0) + dt * 3);
+          } else {
+            en.alert = Math.max(0, (en.alert || 0) - dt * 1.5);
+            if (sameFloor && Math.abs(dc) < 3 && !ahead) {
+              en.turnT = (en.turnT || 0) + dt;
+              if (en.turnT > 0.7) {
+                en.dir *= -1;
+                en.turnT = 0;
+              }
+            }
+          }
+          spd = en.speed * (1 + (en.alert || 0) * 1.6);
+        }
         const support = (c) =>
           this.ledges.find((l) => this._isSolid(l) && l.type !== 'box' && l.floor === floorLvl && Math.abs(colDist(c, l.col + 0.5)) <= 0.52);
         if (en.falling || !support(en.col)) {
@@ -1367,7 +1508,7 @@ export class TowerTopplerGame {
           }
           continue;
         }
-        const nextCol = wrapCol(en.col + en.dir * en.speed * dt);
+        const nextCol = wrapCol(en.col + en.dir * spd * dt);
         const blocked = this.ledges.some(
           (l) => this._isSolid(l) && l.type === 'box' && l.floor === floorLvl && Math.abs(colDist(nextCol, l.col + 0.5)) < 0.75
         );
@@ -1494,6 +1635,7 @@ export class TowerTopplerGame {
         else sound.extraLife();
         this._burstAt(s.col, s.floor + 0.4, '#fde047', 16, 120);
         if (this.secretsGot === this.secretsTotal) sound.secret?.();
+        p.emote = { kind: 'joy', t: 1.3 };
       }
     }
     for (const c of this.checkpoints) {
@@ -1503,6 +1645,7 @@ export class TowerTopplerGame {
         this.rewindMeter = REWIND_MAX;
         this.timer += 5;
         p.checkpoint = { col: c.col, floor: c.floor };
+        p.emote = { kind: 'thumbs', t: 1.2 };
         sound.checkpoint?.();
         this.addPopup({ col: c.col, floor: c.floor + 1.3, text: 'CHECKPOINT +5s', color: '#86efac', maxLife: 1.3 });
         this._burstAt(c.col, c.floor + 0.6, '#86efac', 14, 110);
@@ -1817,13 +1960,21 @@ export class TowerTopplerGame {
     this._camVel = dt > 0 ? move / dt : 0;
     this.camCol = wrapCol(this.camCol + move);
 
+    // Look-around: hold the stick up/down while standing still (not at a door or on a lift)
+    const inp = this.input.state;
+    const nearDoor = this.tower.doors.some((d) => Math.abs(d.floor - p.floor) < 0.5 && Math.abs(colDist(p.col, d.col + 0.5)) < 0.9);
+    const canPeek = p.onGround && !p.onElevator && !nearDoor && Math.abs(p.vx) < 0.2 && !(inp.left || inp.right);
+    if (canPeek && (inp.up || inp.down)) this._peekHold = (this._peekHold || 0) + dt;
+    else this._peekHold = 0;
+    const peekGoal = this._peekHold > 0.3 ? (inp.up ? 3.5 : -3) : 0;
+    this.peek = (this.peek || 0) + (peekGoal - (this.peek || 0)) * Math.min(1, dt * 4);
     if (p.onGround || p.hidden || p.hang) this.camAnchor = p.floor;
     let focus = this.camAnchor;
     if (!p.onGround && !p.hidden && !p.hang) {
       if (p.floor < this.camAnchor) focus = p.floor;
       else focus = this.camAnchor + (p.floor - this.camAnchor) * 0.3;
     }
-    const targetFloor = Math.max(2, focus + 1.0);
+    const targetFloor = Math.max(2, focus + 1.0 + (this.peek || 0));
     const rate = targetFloor < this.camFloor ? 6.5 : 4.5;
     this.camFloor += (targetFloor - this.camFloor) * Math.min(1, dt * rate);
   }

@@ -1192,3 +1192,108 @@ html, body {
   background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.04) 0 2px, transparent 2px 4px);
   padding: 6px 14px;
 }
+
+/* ===================== Controls overlay (thumb-arc layout) =====================
+   The game now uses the whole screen; controls float over the bottom corners.
+   Button cluster forms an arc around the thumb's resting spot:
+     JUMP  – biggest, in the corner (primary action)
+     FIRE  – up and inward from JUMP (hold to charge)
+     REWIND – small, above JUMP (an occasional "undo")
+   The stick sits in the opposite corner. .swapped mirrors everything. */
+#app { position: relative; }
+
+#touch-controls {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 0 14px calc(14px + var(--safe-bottom));
+  background: linear-gradient(180deg, rgba(2, 6, 18, 0) 0%, rgba(2, 6, 18, 0.35) 100%);
+  border-top: 0;
+  box-shadow: none;
+  pointer-events: none;
+  z-index: 20;
+  --jump: 88px;
+  --fire: 68px;
+  --rew: 50px;
+}
+#touch-controls > .action-cluster,
+#touch-controls > .stick-zone { pointer-events: auto; }
+
+#touch-controls .action-cluster {
+  position: relative;
+  display: block;
+  width: calc(var(--jump) + var(--fire) * 0.85 + 8px);
+  height: calc(var(--jump) + var(--rew) + 22px);
+  padding: 0;
+  gap: 0;
+  flex: 0 0 auto;
+}
+#touch-controls .action-cluster .action-btn {
+  position: absolute;
+  margin: 0;
+  align-self: auto;
+  opacity: 0.93;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+#touch-controls .action-jump { width: var(--jump); height: var(--jump); left: 0; bottom: 0; }
+#touch-controls .action-fire { width: var(--fire); height: var(--fire); left: calc(var(--jump) + 6px); bottom: calc(var(--jump) * 0.48); }
+#touch-controls .action-rewind { width: var(--rew); height: var(--rew); left: calc(var(--jump) * 0.2); bottom: calc(var(--jump) + 14px); }
+
+#touch-controls.swapped { flex-direction: row-reverse; }
+#touch-controls.swapped .action-jump { left: auto; right: 0; }
+#touch-controls.swapped .action-fire { left: auto; right: calc(var(--jump) + 6px); }
+#touch-controls.swapped .action-rewind { left: auto; right: calc(var(--jump) * 0.2); }
+
+#touch-controls .stick-zone {
+  flex: 0 0 auto;
+  width: 196px;
+  max-width: 52vw;
+  height: 176px;
+  background: radial-gradient(circle at 50% 60%, rgba(0, 240, 255, 0.07) 0%, rgba(0, 240, 255, 0) 70%);
+}
+#touch-controls .stick-base {
+  background: radial-gradient(circle at 50% 50%, rgba(12, 22, 48, 0.35) 0%, rgba(4, 8, 20, 0.7) 72%);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+/* Pills over the game need a touch more contrast */
+#stage-wrap .action-prompt { bottom: 206px; }
+
+@media (max-height: 700px) {
+  #touch-controls { --jump: 78px; --fire: 60px; --rew: 44px; }
+  #touch-controls .stick-zone { height: 156px; width: 176px; }
+}
+
+/* First-time hint card */
+.hint-card {
+  position: absolute;
+  left: 50%;
+  top: 44px;
+  transform: translate(-50%, -12px);
+  width: min(88%, 340px);
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 14px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(15, 30, 66, 0.92), rgba(6, 12, 30, 0.94));
+  border: 1px solid rgba(253, 224, 71, 0.55);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5), 0 0 18px rgba(253, 224, 71, 0.18);
+  color: #f8fafc;
+  font-family: var(--font-ui);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.25;
+  z-index: 16;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.hint-card.show { opacity: 1; transform: translate(-50%, 0); }
+.hint-ico { font-size: 18px; line-height: 1.1; }

@@ -46,6 +46,10 @@ const hide = (name) => overlays[name].classList.add('hidden');
 const input = new InputController();
 const renderer = new GameRenderer(canvas);
 
+const hintEl = $('hint-card');
+const hintText = $('hint-text');
+let hintTimeout = null;
+
 // ---------------- Banner ----------------
 let bannerTimeout = null;
 function showBanner(sub, title) {
@@ -139,6 +143,14 @@ const game = new TowerTopplerGame(renderer, input, {
     }
   },
   onBanner: showBanner,
+  onHint(text) {
+    hintText.textContent = text;
+    hintEl.classList.remove('hidden');
+    hintEl.classList.remove('show');
+    requestAnimationFrame(() => hintEl.classList.add('show'));
+    clearTimeout(hintTimeout);
+    hintTimeout = setTimeout(() => hintEl.classList.remove('show'), 4300);
+  },
   onTowerResults(r) {
     $('res-label').textContent = `${r.towerLabel} TOPPLED`;
     $('res-name').textContent = r.towerName;

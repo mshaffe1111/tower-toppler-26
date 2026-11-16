@@ -17,15 +17,21 @@
 //        LIFT      an elevator in the next column rising 3..5 floors.
 //        TUNNEL    a door pair through the tower (8 columns round, 1..3 floors up).
 //      The route keeps a winding direction so it spirals round the cylinder; lifts and tunnels
-//      may reverse it. Every move reserves the "air" it needs (jump gaps, lift shafts), and new
-//      route ledges must keep clear of older route ledges (no ledge within one column and one
-//      floor of another part of the route) so nothing can block a step-up or catch a jump.
-//   2. EXTRAS that can never block the route: secret branches (back-step spurs, lift stops,
-//      tunnel nooks, secret tunnels), decoy ledges (kept out of every reserved cell and at least
-//      one column/floor away from the route), special ledge types on route-run interiors only
-//      (short, with solid ledges either side), and enemies.
+//      may reverse it. Every move reserves the "air" it needs (jump gaps, the zone where the
+//      ledge-hang assist could grab a lip, lift shafts). New route ledges keep clear of older
+//      parts of the route: never within one column and one floor (could block a step-up or catch
+//      a jump), and never within jump reach of a run three or more runs back (no short-circuits).
+//   2. EXTRAS that can never block the route: secret branches (back-step spurs, pits under jump
+//      gaps, lift stops, tunnel nooks, secret tunnels), decoy ledges, special ledge types on
+//      route-run interiors only (short, with solid ledges either side), and enemies. Extras stay
+//      out of reserved cells and one column/floor clear of the route, and every cluster of extras
+//      may only touch route runs that are close together in route order, so decoys are dead ends
+//      rather than stepping stones past the route.
 //   3. If the route generator paints itself into a corner it retries with a derived seed;
 //      every attempt is deterministic, so the same seed always yields the same tower.
+//
+// Verified with an engine-driven reachability checker (real game.update(), walks and jumps from
+// every ledge, BFS from spawn to the exit door), under both modern and classic rules.
 
 import { COLS } from './levels.js';
 
@@ -110,6 +116,19 @@ const colDist = (a, b) => {
 };
 const key = (c, f) => `${wrap(c)},${f}`;
 
+// Could a player get from one of these cells to the other in a single hop? Measured in the
+// engine: a running jump covers ~4 columns on the level or one floor up, and with the modern
+// ledge-hang assist it climbs two floors within ~4 columns. Dropping down is always possible.
+// Distinct parts of the route (and every cluster of extras) are kept out of each other's reach
+// so nothing short-circuits the spiral.
+function inReach(c1, f1, c2, f2) {
+  const df = Math.abs(f1 - f2);
+  const dc = Math.abs(colDist(c1, c2));
+  return df <= 2 && dc <= 4;
+}
+// Extras may link route runs at most this far apart in route order (a tiny shortcut at most).
+const MAX_SPAN = 2;
+
 // ---------------------------------------------------------------------------------------------
 // Layout grid: occupied cells, reserved air, and the clearance rules
 // ---------------------------------------------------------------------------------------------
@@ -117,8 +136,10 @@ const key = (c, f) => `${wrap(c)},${f}`;
 class Layout {
   constructor() {
     this.cells = new Map(); // key -> { col, floor, type, role, runId }
-    this.air = new Set(); // keys that must stay empty (jump gaps, lift shafts)
-    this.route = []; // route cells (for clearance checks)
+    this.air = new Set(); // keys that must stay empty (jump gaps, hang zones, lift shafts)
+    this.route = []; // route + branch cells (for clearance checks)
+    this.extras = []; // standable extra cells: { col, floor, comp }
+    this.comps = []; // extra clusters: { min, max } = span of route runs they touch (in route order)
   }
   occupied(c, f) {
     return this.cells.has(key(c, f));
@@ -126,13 +147,68 @@ class Layout {
   free(c, f) {
     return !this.cells.has(key(c, f)) && !this.air.has(key(c, f));
   }
-  // True if (c, f) sits within one column and one floor of a route cell from another run.
-  nearRoute(c, f, ignoreRuns = null) {
+  // Clearance for a new cell of route run `runId` against older parts of the route.
+  //  * nothing within 1 column and 1 floor of a run two or more runs back (could block a
+  //    step-up or catch a jump);
+  //  * nothing within reach (see inReach) of a run three or more runs back: that would let the
+  //    player skip a big part of the route.
+  // The previous run (age 1) is exempt: the move that joins them defines that relationship.
+  routeClash(c, f, runId) {
     for (const r of this.route) {
-      if (ignoreRuns && ignoreRuns.has(r.runId)) continue;
-      if (Math.abs(r.floor - f) <= 1 && Math.abs(colDist(r.col, c)) <= 1) return true;
+      if (r.role !== 'route') continue;
+      const age = runId - r.runId;
+      if (age <= 1) continue;
+      const dc = Math.abs(colDist(r.col, c));
+      const df = Math.abs(r.floor - f);
+      if (dc <= 1 && df <= 1) return true;
+      if (age >= 3 && inReach(r.col, r.floor, c, f)) return true;
     }
     return false;
+  }
+  // Clearance for an extra (branch / decoy) cell: keep 1 column / 1 floor clear of the route and
+  // of branches, so an extra can never block a step-up or catch a route jump.
+  extraClash(c, f, ignoreRuns = null) {
+    for (const r of this.route) {
+      if (ignoreRuns && ignoreRuns.has(r.runId)) continue;
+      if (Math.abs(colDist(r.col, c)) <= 1 && Math.abs(r.floor - f) <= 1) return true;
+    }
+    return false;
+  }
+  // Span check for a new group of extra cells: the cluster it would join (itself plus any extras
+  // within reach) must only touch route runs that are close together in route order, so extras
+  // stay dead ends instead of becoming stepping stones past the route. `links` are run ids the
+  // group is joined to by other means (a lift, a tunnel door).
+  extraSpan(cells, links = []) {
+    let min = Infinity;
+    let max = -Infinity;
+    const merge = new Set();
+    for (const id of links) {
+      min = Math.min(min, id);
+      max = Math.max(max, id);
+    }
+    for (const [c, f] of cells) {
+      for (const r of this.route) {
+        if (r.role === 'route' && inReach(r.col, r.floor, c, f)) {
+          min = Math.min(min, r.runId);
+          max = Math.max(max, r.runId);
+        }
+      }
+      for (const x of this.extras) if (inReach(x.col, x.floor, c, f)) merge.add(x.comp);
+    }
+    for (const id of merge) {
+      min = Math.min(min, this.comps[id].min);
+      max = Math.max(max, this.comps[id].max);
+    }
+    return { ok: !(max - min > MAX_SPAN), min, max, merge };
+  }
+  addExtras(cells, type, role, span) {
+    const comp = this.comps.length;
+    this.comps.push({ min: span.min, max: span.max });
+    for (const x of this.extras) if (span.merge.has(x.comp)) x.comp = comp;
+    for (const [c, f] of cells) {
+      this.add(c, f, type, role);
+      if (type !== 'box') this.extras.push({ col: wrap(c), floor: f, comp });
+    }
   }
   add(c, f, type, role, runId = -1) {
     const cell = { col: wrap(c), floor: f, type, role, runId };
@@ -181,9 +257,9 @@ function buildRoute(rng, D, exitFloor, mech, idTag) {
   let lastMove = null;
   let doorSeq = 0;
 
-  // Can a run of `cols` on `floor` be placed as route (ignoring the runs in `ignore`)?
-  const runOk = (cols, floor, ignore) =>
-    cols.every((c) => L.free(c, floor) && !L.nearRoute(c, floor, ignore)) &&
+  // Can a run of `cols` on `floor` be placed as the next route run?
+  const runOk = (cols, floor) =>
+    cols.every((c) => L.free(c, floor) && !L.routeClash(c, floor, runs.length)) &&
     new Set(cols).size === cols.length;
   const addRun = (cols, floor, dir, arrive) => {
     const run = { id: runs.length, floor, cells: cols.slice(), dir, arrive, depart: null, doors: new Set() };
@@ -220,7 +296,7 @@ function buildRoute(rng, D, exitFloor, mech, idTag) {
     // Encourage at least one lift or tunnel per tower for variety
     const shortcutBoost = lifts + tunnels === 0 && f > exitFloor * 0.4 ? 2.2 : 1;
     const options = rng.weightedOrder([
-      { m: MOVE.STEP, w: stairStreak >= 4 ? 0 : 1.0 },
+      { m: MOVE.STEP, w: stairStreak >= 4 ? 0 : 1.0 - 0.35 * D },
       { m: MOVE.JUMP_UP, w: 0.35 + 0.45 * D },
       { m: MOVE.JUMP_FLAT, w: flatLast || remaining < 2 ? 0 : 0.22 + 0.25 * D },
       { m: MOVE.BOX, w: flatLast || remaining < 2 ? 0 : 0.06 + 0.2 * D },
@@ -235,18 +311,17 @@ function buildRoute(rng, D, exitFloor, mech, idTag) {
 
     let next = null;
     for (const { m } of options) {
-      const ignore = new Set([cur.id]);
       if (m === MOVE.STEP) {
         const nf = f + 1;
         const w = nf === exitFloor ? landWidth(nf) : rng.chance(0.62) ? 2 : landWidth(nf);
         const cols = runCells(e + d, d, w);
-        if (!runOk(cols, nf, ignore)) continue;
+        if (!runOk(cols, nf)) continue;
         next = addRun(cols, nf, d, m);
       } else if (m === MOVE.JUMP_UP) {
         const nf = f + 1;
         const gapFree = !L.occupied(e + d, f) && !L.occupied(e + d, nf) && hangZoneFree(e, d, f, 3);
         const cols = runCells(e + 2 * d, d, landWidth(nf));
-        if (!gapFree || !runOk(cols, nf, ignore)) continue;
+        if (!gapFree || !runOk(cols, nf)) continue;
         L.reserve(e + d, f);
         L.reserve(e + d, nf);
         reserveHangZone(e, d, f, 3);
@@ -255,11 +330,11 @@ function buildRoute(rng, D, exitFloor, mech, idTag) {
         const g = m === MOVE.BOX ? 1 : rng.chance(lerp(0.1, 0.7, D)) ? maxGap : 1;
         let gapFree = true;
         for (let i = 1; i <= g; i++) {
-          if (L.occupied(e + d * i, f) || L.occupied(e + d * i, f + 1) || L.nearRoute(e + d * i, f, ignore)) gapFree = false;
+          if (L.occupied(e + d * i, f) || L.occupied(e + d * i, f + 1) || L.routeClash(e + d * i, f, runs.length)) gapFree = false;
         }
         if (!hangZoneFree(e, d, f, g + 2)) gapFree = false;
         const cols = runCells(e + d * (g + 1), d, landWidth(f));
-        if (!gapFree || !runOk(cols, f, ignore)) continue;
+        if (!gapFree || !runOk(cols, f)) continue;
         for (let i = 1; i <= g; i++) {
           if (m === MOVE.JUMP_FLAT) L.reserve(e + d * i, f);
           L.reserve(e + d * i, f + 1);
@@ -280,7 +355,7 @@ function buildRoute(rng, D, exitFloor, mech, idTag) {
         const d2 = flip ? -d : d;
         const nf = f + h;
         const cols = runCells(s + d2, d2, landWidth(nf));
-        if (!runOk(cols, nf, ignore)) continue;
+        if (!runOk(cols, nf)) continue;
         for (let k = Math.max(0, f - 3); k <= f + h + 1; k++) L.reserve(s, k);
         const speed = +(lerp(1.4, 2.2, D) + rng.range(-0.1, 0.1)).toFixed(2);
         elevators.push({ col: wrap(s), minFloor: f, maxFloor: nf, startFloor: f, speed });
@@ -298,10 +373,10 @@ function buildRoute(rng, D, exitFloor, mech, idTag) {
         const back = rng.chance(0.4) ? 1 : 0;
         const w = back + (nf === exitFloor ? rng.int(4, 5) : rng.int(3, 4));
         const cols = runCells(b - d2 * back, d2, w);
-        if (!runOk(cols, nf, ignore) || !doorClear(b, nf)) continue;
+        if (!runOk(cols, nf) || !doorClear(b, nf)) continue;
         // Optional dead-end nook beyond door A (a secret hides there)
         let nookCol = null;
-        if (rng.chance(0.5) && L.free(e + d, f) && !L.nearRoute(e + d, f, ignore) && Math.abs(colDist(e + d, b)) > 2) {
+        if (rng.chance(0.5) && L.free(e + d, f) && !L.routeClash(e + d, f, cur.id) && Math.abs(colDist(e + d, b)) > 2) {
           nookCol = wrap(e + d);
         }
         const idA = `${idTag}d${doorSeq++}`;
@@ -358,13 +433,24 @@ function buildRoute(rng, D, exitFloor, mech, idTag) {
 // Can an extra (non-route) ledge go at (c, f)? It must avoid reserved air and keep one column /
 // one floor clear of the route (except for the runs named in `ignore`).
 function extraOk(L, c, f, ignore = null, maxFloor = Infinity) {
-  return f >= 1 && f <= maxFloor && L.free(c, f) && !L.nearRoute(c, f, ignore);
+  return f >= 1 && f <= maxFloor && L.free(c, f) && !L.extraClash(c, f, ignore);
 }
 
 function placeSecrets(rng, R, D, exitFloor, idTag, cpFloors) {
   const { L, runs, elevators, doors, nooks } = R;
   const secrets = [];
   const used = new Set(); // runs already used as a branch anchor
+  // First pass: branches must stay dead ends (span rule). If that leaves us short of three
+  // secrets, a second pass lets a branch double as a small secret shortcut (a fair reward).
+  let relaxed = false;
+  const ok = (c, fl, ignore = null) => extraOk(L, c, fl, ignore, exitFloor);
+  // Commit a branch if its cluster passes the span rule (always, in the relaxed pass)
+  const commit = (cells, links) => {
+    const span = L.extraSpan(cells, links);
+    if (!span.ok && !relaxed) return false;
+    L.addExtras(cells, 'solid', 'branch', span);
+    return true;
+  };
   const doorClear = (c, f) => doors.every((d) => d.floor !== f || Math.abs(colDist(d.col, c)) >= 2);
 
   // Generators: each tries to build one branch and returns the secret position or null
@@ -377,17 +463,32 @@ function placeSecrets(rng, R, D, exitFloor, idTag, cpFloors) {
       const d = run.dir;
       const f = run.floor;
       const ignore = new Set([run.id]);
-      const steps = rng.chance(0.4) ? 2 : 1;
-      const cells = [];
-      for (let k = 0; k < steps; k++) {
-        cells.push([s - d * (1 + 2 * k), f + 1 + k], [s - d * (2 + 2 * k), f + 1 + k]);
-      }
-      if (!cells.every(([c, fl]) => extraOk(L, c, fl, ignore, exitFloor) && !cpFloors.has(fl))) return null;
-      // the spur must be unique cells
-      for (const [c, fl] of cells) L.add(c, fl, 'solid', 'branch');
+      // variants: two 2-wide steps, one 2-wide step, or a single perch (in that order of taste)
+      const step = (k) => [[s - d * (1 + 2 * k), f + 1 + k], [s - d * (2 + 2 * k), f + 1 + k]];
+      const variants = rng.chance(0.4) ? [[...step(0), ...step(1)], step(0)] : [step(0), [...step(0), ...step(1)]];
+      variants.push([[s - d, f + 1]]);
+      const cells = variants.find((v) => v.every(([c, fl]) => ok(c, fl, ignore) && !cpFloors.has(fl)) && L.extraSpan(v, [run.id]).ok);
+      const fallback = relaxed && variants.find((v) => v.every(([c, fl]) => ok(c, fl, ignore) && !cpFloors.has(fl)));
+      if (!(cells || fallback) || !commit(cells || fallback, [run.id])) return null;
       used.add(run.id);
-      const [sc, sf] = cells[cells.length - 1];
+      const [sc, sf] = (cells || fallback)[(cells || fallback).length - 1];
       return { col: wrap(sc), floor: sf, kind: 'spur' };
+    },
+    // Pit: a little platform hidden just below a 2-column jump gap. Dropping in lands you there
+    // (instead of in the sea) and a step-up on either side climbs back onto the route. (Under a
+    // 1-column gap the ledge-hang assist would always carry you across, so it would be unreachable.)
+    pit(run) {
+      if (run.arrive !== MOVE.JUMP_FLAT || run.gap !== 2 || used.has(run.id) || run.floor < 2) return null;
+      const s = run.cells[0];
+      const d = run.dir;
+      const fl = run.floor - 1;
+      if (cpFloors.has(fl)) return null;
+      const cells = [];
+      for (let i = 1; i <= run.gap; i++) cells.push(s - d * i);
+      const ignore = new Set([run.id, run.id - 1]);
+      if (!cells.every((c) => ok(c, fl, ignore)) || !commit(cells.map((c) => [c, fl]), [run.id - 1, run.id])) return null;
+      used.add(run.id);
+      return { col: wrap(cells[cells.length - 1]), floor: fl, kind: 'pit' };
     },
     // Lift stop: a little dead-end platform beside a lift shaft, part-way up
     liftStop(run) {
@@ -400,8 +501,7 @@ function placeSecrets(rng, R, D, exitFloor, idTag, cpFloors) {
           const fl = el.minFloor + k;
           if (cpFloors.has(fl)) continue;
           const cells = [el.col + side, el.col + 2 * side];
-          if (!cells.every((c) => extraOk(L, c, fl, null, exitFloor))) continue;
-          for (const c of cells) L.add(c, fl, 'solid', 'branch');
+          if (!cells.every((c) => ok(c, fl)) || !commit(cells.map((c) => [c, fl]), [run.id - 1, run.id])) continue;
           used.add(run.id);
           return { col: wrap(cells[1]), floor: fl, kind: 'liftStop' };
         }
@@ -415,14 +515,13 @@ function placeSecrets(rng, R, D, exitFloor, idTag, cpFloors) {
       for (const i of rng.shuffle(run.cells.slice(1, -1).map((_, j) => j + 1))) {
         const a = run.cells[i];
         if (run.doors.has(a) || !doorClear(a, f)) continue;
-        for (const dfl of rng.shuffle([1, 2, -1])) {
+        for (const dfl of rng.shuffle([1, 2, 3, 0, -1, -2])) {
           const fl = f + dfl;
           if (fl < 1 || fl > exitFloor - 1 || cpFloors.has(fl)) continue;
           const b = a + COLS / 2;
           const d2 = rng.chance(0.5) ? 1 : -1;
           const cells = [b, b + d2, b + 2 * d2].slice(0, rng.int(2, 3));
-          if (!cells.every((c) => extraOk(L, c, fl, null, exitFloor)) || !doorClear(b, fl)) continue;
-          for (const c of cells) L.add(c, fl, 'solid', 'branch');
+          if (!cells.every((c) => ok(c, fl)) || !doorClear(b, fl) || !commit(cells.map((c) => [c, fl]), [run.id])) continue;
           const idA = `${idTag}d${R.doorSeq++}`;
           const idB = `${idTag}d${R.doorSeq++}`;
           doors.push({ id: idA, col: wrap(a), floor: f, targetId: idB, isExit: false });
@@ -443,9 +542,10 @@ function placeSecrets(rng, R, D, exitFloor, idTag, cpFloors) {
     [(2 * exitFloor) / 3, exitFloor + 1],
   ];
   const nookPool = rng.shuffle(nooks);
-  const kinds = rng.shuffle(['spur', 'liftStop', 'tunnel', 'nook']);
+  const KINDS = ['spur', 'liftStop', 'tunnel', 'nook', 'pit'];
+  const kinds = rng.shuffle(KINDS);
   const tryBand = (lo, hi, preferKind) => {
-    const order = [preferKind, ...rng.shuffle(['spur', 'liftStop', 'tunnel', 'nook'].filter((k) => k !== preferKind))];
+    const order = [preferKind, ...rng.shuffle(KINDS.filter((k) => k !== preferKind))];
     for (const kind of order) {
       if (kind === 'nook') {
         const n = nookPool.find((x) => x.floor >= lo && x.floor < hi && !used.has(x.runId));
@@ -463,11 +563,18 @@ function placeSecrets(rng, R, D, exitFloor, idTag, cpFloors) {
     }
     return null;
   };
+  const missing = [];
   for (let i = 0; i < 3; i++) {
-    const s = tryBand(bands[i][0], bands[i][1], kinds[i]) || tryBand(0, exitFloor + 1, kinds[(i + 1) % 4]);
+    const s = tryBand(bands[i][0], bands[i][1], kinds[i]) || tryBand(0, exitFloor + 1, kinds[(i + 3) % KINDS.length]);
+    if (s) secrets.push(s);
+    else missing.push(i);
+  }
+  relaxed = true;
+  for (const i of missing) {
+    const s = tryBand(bands[i][0], bands[i][1], kinds[i]) || tryBand(0, exitFloor + 1, kinds[(i + 3) % KINDS.length]);
     if (s) secrets.push(s);
   }
-  return secrets;
+  return secrets.sort((a, b) => a.floor - b.floor);
 }
 
 // Special ledge types on route run interiors (never the first/last cell of a run, never under a
@@ -505,7 +612,7 @@ function placeDecoys(rng, R, D, exitFloor, cpFloors) {
   const { L } = R;
   const target = Math.round((exitFloor + 2) * lerp(0.4, 0.55, D));
   let placed = 0;
-  for (let tries = 0; tries < target * 25 && placed < target; tries++) {
+  for (let tries = 0; tries < target * 40 && placed < target; tries++) {
     const r = rng.pick(L.route);
     const side = rng.chance(0.5) ? 1 : -1;
     const c = r.col + side * rng.int(2, 3);
@@ -513,10 +620,13 @@ function placeDecoys(rng, R, D, exitFloor, cpFloors) {
     const w = rng.int(1, 3);
     const cols = runCells(c, side, w);
     if (!cols.every((x) => extraOk(L, x, f, null, exitFloor - 1))) continue;
+    const cells = cols.map((x) => [x, f]);
+    const span = L.extraSpan(cells);
+    if (!span.ok) continue;
     const roll = rng.next();
     let type = roll < lerp(0.15, 0.4, D) ? 'crumble' : roll < lerp(0.25, 0.55, D) ? 'ice' : 'solid';
     if (cpFloors.has(f)) type = 'crumble';
-    cols.forEach((x) => L.add(x, f, type, 'decoy'));
+    L.addExtras(cells, type, 'decoy', span);
     // A shootable box on the far end of some wider decoys (bonus points, never in the way)
     if (w >= 2 && rng.chance(lerp(0.1, 0.35, D))) {
       const bc = cols[cols.length - 1] + side;
@@ -585,11 +695,11 @@ const NAME_OF = [
 ];
 const MECH_WORDS = {
   blizzard: ['FROZEN', 'FROST', 'SNOWBOUND'],
-  wind: ['HOWLING', 'GALE', 'STORMS'],
+  wind: ['HOWLING', 'GALES', 'STORMS'],
   flood: ['SUNKEN', 'TIDES', 'DROWNED'],
   dark: ['SHADOWS', 'MIDNIGHT', 'LIGHTLESS'],
   collapse: ['CRUMBLING', 'BROKEN', 'RUIN'],
-  pistons: ['CLOCKWORK', 'GEARS', 'PISTON'],
+  pistons: ['CLOCKWORK', 'GEARS', 'PISTONS'],
 };
 
 function makeName(rng, mech) {

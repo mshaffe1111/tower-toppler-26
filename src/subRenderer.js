@@ -587,8 +587,8 @@ function jellyBellMaterial(U) {
         float gon = smoothstep(0.55, 0.95, sin(ang * 4.0) * 0.5 + 0.5) * smoothstep(0.15, 0.5, vL.y) * smoothstep(0.82, 0.45, vL.y);
         float rim = smoothstep(0.12, -0.08, vL.y);
         float beat = 0.75 + 0.25 * sin(uTime * 3.0 + vPh);
-        vec3 col = vC * (0.42 + fres * 1.5) * beat + vC * gon * 1.2 + vec3(1.0) * (fres * 0.3 + rim * 0.45);
-        float a = clamp(0.5 + fres * 0.5 + gon * 0.3 + rim * 0.3, 0.0, 1.0) * vA;
+        vec3 col = vC * (0.5 + fres * 1.35) * beat + vC * gon * 1.3 + vec3(1.0) * (fres * 0.12 + rim * 0.35);
+        float a = clamp(0.6 + fres * 0.4 + gon * 0.3 + rim * 0.3, 0.0, 1.0) * vA;
         gl_FragColor = vec4(col, a);
         ${GLSL_OUT}
       }`,
@@ -715,6 +715,8 @@ export class SubRenderer {
     this._c = new THREE.Color();
     this._c2 = new THREE.Color();
     this._colorCache = new Map();
+    this._rgb = [0, 0, 0];
+    this._lastStageT = 0;
     this._heal = -1;
     this._lastTime = null;
     this._glowColor = new THREE.Color('#38bdf8');
@@ -1129,10 +1131,10 @@ export class SubRenderer {
       const items = [];
       for (let i = 0; i < N; i++) {
         const isFg = i < fg;
-        const s = isFg ? lerp(0.45, 0.75, rngFn()) : lerp(sMin, sMax, rngFn());
+        const s = isFg ? lerp(0.3, 0.5, rngFn()) : lerp(sMin, sMax, rngFn());
         items.push({
           u: rngFn(),
-          z: isFg ? lerp(1.3, 2.4, rngFn()) : lerp(zNear, zFar, rngFn()),
+          z: isFg ? lerp(2.1, 2.8, rngFn()) : lerp(zNear, zFar, rngFn()),
           dy: -0.08,
           sx: s,
           sy: s * lerp(0.85, 1.25, rngFn()),
@@ -1248,6 +1250,7 @@ export class SubRenderer {
       this.barrelLayer = addLayer(mesh, items, 3, { kind: 'barrel' });
     }
 
+    this._haloLayers = [this.brainLayer, this.tubeLayer];
     // compose base matrices (rotation/scale fixed; translation is written per frame)
     for (const layer of this.layers) this._composeLayer(layer);
   }
@@ -2155,7 +2158,7 @@ export class SubRenderer {
     this._sN = 0;
     this._gN = 0;
   }
-  _glow(x, y, z, size, r, g, b) {
+  _glow(x, y, z, size, r, g, b, sy = size) {
     if (this._gN >= MAX_GLOW) return;
     const i = this._gN++;
     const m = this.glowMesh.instanceMatrix.array;
@@ -2165,7 +2168,7 @@ export class SubRenderer {
     m[o + 2] = 0;
     m[o + 3] = 0;
     m[o + 4] = 0;
-    m[o + 5] = size;
+    m[o + 5] = sy;
     m[o + 6] = 0;
     m[o + 7] = 0;
     m[o + 8] = 0;
@@ -2212,6 +2215,11 @@ export class SubRenderer {
     this._ky = stage.height ? this.height / stage.height : 1;
     const U = this.U;
     U.uTime.value = time;
+    if ((stage.t || 0) < this._lastStageT) {
+      // a new ride started: clear leftover wake bubbles
+      for (let i = 0; i < MAX_WAKE; i++) this.wake[i].life = 0;
+    }
+    this._lastStageT = stage.t || 0;
     const h = clamp(stage.healing || 0, 0, 1);
     if (Math.abs(h - this._heal) > 0.0005) this._applyHealing(h);
 
@@ -2351,7 +2359,8 @@ export class SubRenderer {
       }
     }
     // soft bioluminescent halo on brain coral & tubes
-    for (const layer of [this.brainLayer, this.tubeLayer]) {
+    for (let li = 0; li < this._haloLayers.length; li++) {
+      const layer = this._haloLayers[li];
       for (let i = 0; i < layer.mesh.count; i++) {
         const it = layer.items[i];
         if (it.fg) continue;
@@ -2460,6 +2469,13 @@ export class SubRenderer {
     this._glow(nx, ny, 0.6, sc * 1.1 * lightOn, 1.0 * lightOn, 0.95 * lightOn, 0.7 * lightOn);
     this._glow(v.x, v.y + bob, -0.8, sc * 4.6, 0.14, 0.12, 0.05);
     this._shade(v.x, v.y + bob, sc * 5.2, sc * 3.6);
+    // surfacing: foam / meniscus line where the hull breaks the water
+    const sf = sub.surfaced || 0;
+    if (sf > 0) {
+      const foam = sf * (0.75 + 0.25 * Math.sin(time * 6));
+      this._glow(v.x, this._surfW - 0.05, 0.75, sc * 7, 0.55 * foam, 0.62 * foam, 0.65 * foam, sc * 0.7);
+      this._glow(v.x, this._surfW - 0.05, 0.8, sc * 3.2, 0.5 * foam, 0.55 * foam, 0.55 * foam, sc * 0.45);
+    }
     this._subTail = this._subTail || new THREE.Vector3();
     this._subTail.set(v.x - 1.45 * sc * c, v.y + bob - 1.45 * sc * s, 0);
     this._subSc = sc;
@@ -2765,7 +2781,7 @@ export class SubRenderer {
     const mesh = this.ringMesh;
     const arr = mesh.instanceMatrix.array;
     const col = mesh.instanceColor.array;
-    const rgb = [0, 0, 0];
+    const rgb = this._rgb;
     let n = 0;
     for (let i = 0; i < rings.length && n < MAX_RING; i++) {
       const r = rings[i];
@@ -2775,7 +2791,7 @@ export class SubRenderer {
       const o = n * 16;
       arr.fill(0, o, o + 16);
       arr[o] = rad;
-      arr[o + 5] = rad;
+      arr[o + 5] = r.flat ? rad * 0.22 : rad;
       arr[o + 10] = 1;
       arr[o + 12] = v.x;
       arr[o + 13] = v.y;
@@ -2873,7 +2889,7 @@ export class SubRenderer {
   _updateParticles(particles, pr) {
     const g = this.partPoints.geometry;
     const n = particles ? Math.min(particles.length, MAX_PART) : 0;
-    const rgb = [0, 0, 0];
+    const rgb = this._rgb;
     for (let i = 0; i < n; i++) {
       const p = particles[i];
       this.pPos[i * 3] = p.x * this._kx;

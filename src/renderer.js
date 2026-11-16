@@ -1,11 +1,16 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { TowerFx } from './towerFx.js';
+import { PogoRig } from './pogo.js';
+import { Ocean } from './water.js';
+import { createTowerStoneMaterial, createLedgeStoneMaterial, setWaterlineY } from './materials.js';
 import { PostFX } from './postfx.js';
 import { settings, currentSkin } from './settings.js';
 import { COLS } from './levels.js';
 
 const TWO_PI = Math.PI * 2;
+// Low sun behind and slightly left of the tower (rim light, water glitter path, sky disc)
+const SUN_DIR = new THREE.Vector3(-0.2, 0.17, -0.96).normalize();
 const COL_ANGLE = TWO_PI / COLS;
 const TOWER_RADIUS = 2.55;
 const FLOOR_HEIGHT = 1.0;
@@ -15,6 +20,13 @@ function wrapAngle(a) {
   if (res > Math.PI) res -= TWO_PI;
   if (res < -Math.PI) res += TWO_PI;
   return res;
+}
+
+function colDistR(a, b) {
+  let d = (((b % COLS) + COLS) % COLS) - (((a % COLS) + COLS) % COLS);
+  if (d > COLS / 2) d -= COLS;
+  if (d < -COLS / 2) d += COLS;
+  return d;
 }
 
 function getShakeOffset(shake, time) {
@@ -48,130 +60,6 @@ function shadeHex(hex, amt) {
   c.getHSL(hsl);
   c.setHSL(hsl.h, Math.min(1, hsl.s * (1 + amt * 0.4)), Math.max(0, Math.min(1, hsl.l * (1 + amt))));
   return `#${c.getHexString()}`;
-}
-
-function createBrickTextures(pal, seed = 1) {
-  const size = 512;
-  const rand = mulberry32(seed * 9973 + 17);
-  const mk = () => {
-    const c = document.createElement('canvas');
-    c.width = size;
-    c.height = size;
-    return [c, c.getContext('2d')];
-  };
-  const [colCanvas, ctx] = mk();
-  const [bumpCanvas, bCtx] = mk();
-  const [roughCanvas, rCtx] = mk();
-  const [emCanvas, eCtx] = mk();
-
-  // Recessed mortar with soft grime
-  ctx.fillStyle = pal.mortar;
-  ctx.fillRect(0, 0, size, size);
-  bCtx.fillStyle = '#202020';
-  bCtx.fillRect(0, 0, size, size);
-  rCtx.fillStyle = '#f0f0f0';
-  rCtx.fillRect(0, 0, size, size);
-  eCtx.fillStyle = '#000000';
-  eCtx.fillRect(0, 0, size, size);
-
-  const cols = 24;
-  const rows = 12;
-  const bw = size / cols;
-  const bh = size / rows;
-  const gap = 3;
-
-  for (let r = 0; r < rows; r++) {
-    const offset = (r % 2) * (bw * 0.5);
-    for (let c = -1; c <= cols; c++) {
-      const x = c * bw + offset + gap * 0.5;
-      const y = r * bh + gap * 0.5;
-      const w = bw - gap;
-      const h = bh - gap;
-
-      // Per-brick tone variation so the wall doesn't read as a flat checkerboard
-      const base = rand() < 0.5 ? pal.brickA : pal.brickB;
-      const tone = shadeHex(base, (rand() - 0.5) * 0.36);
-      const grad = ctx.createLinearGradient(x, y, x, y + h);
-      grad.addColorStop(0, shadeHex(tone, 0.22));
-      grad.addColorStop(0.55, tone);
-      grad.addColorStop(1, shadeHex(tone, -0.28));
-      ctx.fillStyle = grad;
-      ctx.fillRect(x, y, w, h);
-
-      // Bevel highlights / shadows
-      ctx.fillStyle = 'rgba(255,255,255,0.22)';
-      ctx.fillRect(x, y, w, 2);
-      ctx.fillRect(x, y, 2, h);
-      ctx.fillStyle = 'rgba(0,0,0,0.38)';
-      ctx.fillRect(x, y + h - 2.5, w, 2.5);
-      ctx.fillRect(x + w - 2, y, 2, h);
-
-      // Speckle / weathering
-      for (let k = 0; k < 10; k++) {
-        const sx = x + rand() * w;
-        const sy = y + rand() * h;
-        ctx.fillStyle = rand() < 0.5 ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.12)';
-        ctx.fillRect(sx, sy, 1 + rand() * 3, 1 + rand() * 2);
-      }
-      // Occasional chipped corner
-      if (rand() < 0.18) {
-        ctx.fillStyle = pal.mortar;
-        const cs = 3 + rand() * 5;
-        const cx = rand() < 0.5 ? x : x + w - cs;
-        const cy = rand() < 0.5 ? y : y + h - cs;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(cx + cs, cy);
-        ctx.lineTo(cx, cy + cs);
-        ctx.fill();
-      }
-
-      // Bump: domed brick face
-      const bg = bCtx.createLinearGradient(x, y, x, y + h);
-      bg.addColorStop(0, '#ffffff');
-      bg.addColorStop(0.25, '#e6e6e6');
-      bg.addColorStop(1, '#a8a8a8');
-      bCtx.fillStyle = bg;
-      bCtx.fillRect(x, y, w, h);
-
-      const rv = Math.floor(110 + rand() * 60);
-      rCtx.fillStyle = `rgb(${rv},${rv},${rv})`;
-      rCtx.fillRect(x, y, w, h);
-
-      // Sparse glowing rune seams
-      if (rand() < 0.07) {
-        eCtx.fillStyle = pal.glow;
-        eCtx.fillRect(x + w * 0.2, y + h * 0.46, w * 0.6, 2);
-      }
-    }
-  }
-
-  // Vertical grime streaks
-  for (let i = 0; i < 26; i++) {
-    const x = rand() * size;
-    const g = ctx.createLinearGradient(0, 0, 0, size);
-    g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(rand(), 'rgba(0,0,0,0.16)');
-    g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(x, 0, 2 + rand() * 7, size);
-  }
-
-  const wrap = (canvas, srgb = false) => {
-    const t = new THREE.CanvasTexture(canvas);
-    t.wrapS = THREE.RepeatWrapping;
-    t.wrapT = THREE.RepeatWrapping;
-    t.anisotropy = 4;
-    if (srgb) t.colorSpace = THREE.SRGBColorSpace;
-    return t;
-  };
-
-  return {
-    map: wrap(colCanvas, true),
-    bumpMap: wrap(bumpCanvas),
-    roughnessMap: wrap(roughCanvas),
-    emissiveMap: wrap(emCanvas, true),
-  };
 }
 
 // Curved slab that hugs the tower: an annular sector spanning `span` radians centred on +Z,
@@ -228,6 +116,9 @@ function createSkyMaterial() {
       glowColor: { value: new THREE.Color('#38bdf8') },
       time: { value: 0 },
       yaw: { value: 0 },
+      sunDir: { value: SUN_DIR.clone() },
+      sunColor: { value: new THREE.Color('#ffb46e') },
+      sunAmount: { value: 1 },
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
@@ -242,6 +133,9 @@ function createSkyMaterial() {
       uniform vec3 glowColor;
       uniform float time;
       uniform float yaw;
+      uniform vec3 sunDir;
+      uniform vec3 sunColor;
+      uniform float sunAmount;
       varying vec3 vDir;
 
       float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -278,119 +172,13 @@ function createSkyMaterial() {
         float n2 = fbm(uv * 3.1 - vec2(0.0, time * 0.008));
         float neb = smoothstep(0.45, 0.85, n) * smoothstep(-0.1, 0.35, h) * (1.0 - smoothstep(0.55, 0.95, h));
         col += mix(glowColor, vec3(0.85, 0.45, 1.0), n2) * neb * 0.13;
+        // Low sun behind the tower: disc, corona, and a warm band along the horizon
+        float sd = max(dot(d, normalize(sunDir)), 0.0);
+        col += sunColor * sunAmount * (pow(sd, 1600.0) * 3.0 + pow(sd, 90.0) * 0.12 + pow(sd, 10.0) * 0.04);
+        col += sunColor * sunAmount * 0.09 * exp(-abs(h - 0.01) * 16.0) * pow(sd, 3.0);
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
-      }
-    `,
-  });
-}
-
-function createSeaMaterial() {
-  const uniforms = THREE.UniformsUtils.merge([
-    THREE.UniformsLib.fog,
-    {
-      time: { value: 0 },
-      deepColor: { value: new THREE.Color('#010b16') },
-      shallowColor: { value: new THREE.Color('#0b4f6c') },
-      skyColor: { value: new THREE.Color('#0b1d3d') },
-      glowColor: { value: new THREE.Color('#38bdf8') },
-      sunDir: { value: new THREE.Vector3(0.45, 0.6, 0.66).normalize() },
-      towerRadius: { value: TOWER_RADIUS },
-    },
-  ]);
-  return new THREE.ShaderMaterial({
-    uniforms,
-    fog: true,
-    vertexShader: /* glsl */ `
-      uniform float time;
-      varying vec3 vWorld;
-      varying vec3 vNormal;
-      varying float vHeight;
-      #include <fog_pars_vertex>
-
-      // Sum of directional waves; returns height and analytic slope
-      vec3 waves(vec2 p) {
-        float h = 0.0; float dx = 0.0; float dz = 0.0;
-        vec2 dirs[4];
-        dirs[0] = normalize(vec2(1.0, 0.35));
-        dirs[1] = normalize(vec2(-0.6, 1.0));
-        dirs[2] = normalize(vec2(0.25, -1.0));
-        dirs[3] = normalize(vec2(-1.0, -0.4));
-        float amps[4]; amps[0] = 0.12; amps[1] = 0.07; amps[2] = 0.045; amps[3] = 0.03;
-        float freqs[4]; freqs[0] = 0.55; freqs[1] = 0.9; freqs[2] = 1.6; freqs[3] = 2.4;
-        float speeds[4]; speeds[0] = 1.6; speeds[1] = 2.1; speeds[2] = 2.9; speeds[3] = 3.6;
-        for (int i = 0; i < 4; i++) {
-          float ph = dot(dirs[i], p) * freqs[i] + time * speeds[i];
-          h += sin(ph) * amps[i];
-          float c = cos(ph) * amps[i] * freqs[i];
-          dx += c * dirs[i].x;
-          dz += c * dirs[i].y;
-        }
-        return vec3(h, dx, dz);
-      }
-
-      void main() {
-        vec4 wp = modelMatrix * vec4(position, 1.0);
-        // Calm the swell right next to the tower base and far away (cheaper on the eye)
-        float r = length(wp.xz);
-        float calm = smoothstep(2.4, 4.0, r);
-        vec3 w = waves(wp.xz) * calm;
-        wp.y += w.x;
-        vHeight = w.x;
-        vNormal = normalize(vec3(-w.y, 1.0, -w.z));
-        vWorld = wp.xyz;
-        vec4 mvPosition = viewMatrix * wp;
-        gl_Position = projectionMatrix * mvPosition;
-        #include <fog_vertex>
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform float time;
-      uniform vec3 deepColor;
-      uniform vec3 shallowColor;
-      uniform vec3 skyColor;
-      uniform vec3 glowColor;
-      uniform vec3 sunDir;
-      uniform float towerRadius;
-      varying vec3 vWorld;
-      varying vec3 vNormal;
-      varying float vHeight;
-      #include <fog_pars_fragment>
-
-      float hash(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 15731.743); }
-      float noise(vec2 p) {
-        vec2 i = floor(p); vec2 f = fract(p);
-        vec2 u = f * f * (3.0 - 2.0 * f);
-        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
-                   mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
-      }
-
-      void main() {
-        vec3 n = normalize(vNormal);
-        vec3 v = normalize(cameraPosition - vWorld);
-        float fres = pow(1.0 - max(dot(n, v), 0.0), 3.0);
-        vec3 col = mix(deepColor, shallowColor, clamp(vHeight * 3.0 + 0.45, 0.0, 1.0));
-        col = mix(col, skyColor * 0.9 + glowColor * 0.06, fres * 0.6);
-        // Sun glint
-        vec3 hv = normalize(sunDir + v);
-        float spec = pow(max(dot(n, hv), 0.0), 160.0);
-        col += vec3(0.9, 0.97, 1.0) * spec * 0.55;
-        // Foam collar around the tower base + wave crests
-        float r = length(vWorld.xz);
-        float ang = atan(vWorld.x, vWorld.z);
-        float fn = noise(vec2(ang * 9.0, r * 3.0 - time * 1.4));
-        float collar = smoothstep(towerRadius + 0.75, towerRadius + 0.3, r + fn * 0.3);
-        float ripple = smoothstep(0.9, 0.99, sin(r * 6.0 - time * 2.6) * 0.5 + 0.5)
-          * smoothstep(towerRadius + 1.8, towerRadius + 0.5, r) * fn;
-        float crest = smoothstep(0.15, 0.22, vHeight) * smoothstep(0.55, 0.9, noise(vWorld.xz * 2.5 + time * 0.3));
-        float foam = clamp(collar * 0.9 + ripple * 0.35 + crest * 0.35, 0.0, 1.0);
-        col = mix(col, vec3(0.75, 0.92, 1.0), foam * 0.6);
-        col += glowColor * 0.025;
-        gl_FragColor = vec4(col, 1.0);
-        #include <tonemapping_fragment>
-        #include <colorspace_fragment>
-        #include <fog_fragment>
       }
     `,
   });
@@ -487,6 +275,7 @@ export class GameRenderer {
   // Quality tier changed (auto or by the player): resolution, shadows, effects
   _applyQuality(tier) {
     this.qualityTier = tier;
+    if (this.ocean) this.ocean.resScale = tier === 'high' ? 0.6 : 0.4;
     if (this.keyLight) {
       const wantShadow = tier !== 'low';
       const size = tier === 'high' ? 2048 : 1024;
@@ -500,6 +289,32 @@ export class GameRenderer {
       }
     }
     if (this._lastSize) this.resize(this._lastSize.w, this._lastSize.h, this._lastSize.dpr);
+  }
+
+  // Image-based lighting from the current sky (rebuilt only when the sky's look changes)
+  _updateEnvironment(pal, mech, heal) {
+    const dark = mech?.darkness || 0;
+    const key = `${pal.glow}|${pal.brickA}|${dark.toFixed(1)}|${Math.round((heal || 0) * 4)}`;
+    if (this._envKey === key) return;
+    this._envKey = key;
+    if (!this._pmrem) {
+      this._pmrem = new THREE.PMREMGenerator(this.webgl);
+      this._envSkyMat = this.skyMat.clone();
+      this._envScene = new THREE.Scene();
+      this._envScene.add(new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), this._envSkyMat));
+    }
+    const src = this.skyMat.uniforms;
+    const dst = this._envSkyMat.uniforms;
+    for (const k of Object.keys(src)) {
+      const v = src[k].value;
+      if (v && v.copy) dst[k].value.copy(v);
+      else dst[k].value = v;
+    }
+    const rt = this._pmrem.fromScene(this._envScene, 0.03, 0.1, 100);
+    if (this._envRT) this._envRT.dispose();
+    this._envRT = rt;
+    this.towerScene.environment = rt.texture;
+    this.towerScene.environmentIntensity = 0.55 * (1 - dark * 0.7);
   }
 
   setQualityMode(mode) {
@@ -525,7 +340,7 @@ export class GameRenderer {
     this.towerScene.add(this.skyDome);
 
     // Balanced high-contrast 3-point lighting (no washed-out white fill/bloom)
-    const hemi = new THREE.HemisphereLight('#38bdf8', '#020617', 0.6);
+    const hemi = new THREE.HemisphereLight('#38bdf8', '#020617', 0.35);
     this.hemiLight = hemi;
     this.towerScene.add(hemi);
 
@@ -555,8 +370,8 @@ export class GameRenderer {
     this.fillLight = fillLight;
     this.towerScene.add(fillLight);
 
-    const rimLight = new THREE.DirectionalLight('#38bdf8', 0.75);
-    rimLight.position.set(-9, 6, -6);
+    const rimLight = new THREE.DirectionalLight('#ffd9a8', 1.1);
+    rimLight.position.copy(SUN_DIR).multiplyScalar(30);
     this.rimLight = rimLight;
     this.towerScene.add(rimLight);
 
@@ -628,13 +443,10 @@ export class GameRenderer {
     this.planetRing = ringMesh;
     this.towerScene.add(planetGroup);
 
-    // GPU-animated ocean: waves, fresnel sky reflection, sun glints and a foam collar at the tower base.
-    // Large enough that its edge always disappears into the fog/horizon.
-    const seaGeo = new THREE.PlaneGeometry(140, 140, 180, 180);
-    seaGeo.rotateX(-Math.PI / 2);
-    this.seaMat = createSeaMaterial();
-    this.seaMesh = new THREE.Mesh(seaGeo, this.seaMat);
-    this.seaMesh.position.set(0, -0.62, 0);
+    // Reflective ocean (planar reflections, ripples, glitter, foam)
+    this.ocean = new Ocean(this.webgl, { towerRadius: TOWER_RADIUS });
+    this.seaMesh = this.ocean.mesh;
+    this.seaMat = this.ocean.material;
     this.towerScene.add(this.seaMesh);
 
     // Tower cache & dynamic pools
@@ -643,10 +455,8 @@ export class GameRenderer {
     this.conveyorTexR = createConveyorTexture(1);
     this.conveyorTexL = createConveyorTexture(-1);
 
-    this.pogoGroup = this._buildPogoMesh();
-    this.pogoGroup.traverse((o) => {
-      if (o.isMesh) o.castShadow = true;
-    });
+    this.pogoRig = new PogoRig();
+    this.pogoGroup = this.pogoRig.group;
     this._applyChrome(this.pogoGroup);
     this.towerScene.add(this.pogoGroup);
 
@@ -747,165 +557,6 @@ export class GameRenderer {
     return g;
   }
 
-  _buildPogoMesh() {
-    const g = new THREE.Group();
-
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: '#4ade80',
-      emissive: '#16a34a',
-      emissiveIntensity: 0.14,
-      roughness: 0.35,
-      metalness: 0.15,
-    });
-
-    // Sculpted LatheGeometry torso (pear-shaped athletic frog hero)
-    const lathePts = [
-      new THREE.Vector2(0.01, 0.12),
-      new THREE.Vector2(0.24, 0.16),
-      new THREE.Vector2(0.35, 0.34),
-      new THREE.Vector2(0.32, 0.54),
-      new THREE.Vector2(0.23, 0.68),
-      new THREE.Vector2(0.01, 0.72),
-    ];
-    const body = new THREE.Mesh(new THREE.LatheGeometry(lathePts, 20), bodyMat);
-    g.add(body);
-
-    // Sculpted Belly Armor Plate
-    const belly = new THREE.Mesh(
-      new THREE.SphereGeometry(0.23, 16, 12),
-      new THREE.MeshStandardMaterial({ color: '#dcfce7', roughness: 0.3, metalness: 0.1 })
-    );
-    belly.scale.set(0.7, 1.05, 0.92);
-    belly.position.set(0.17, 0.36, 0);
-    g.add(belly);
-
-    // Backpack Cryo-Tank with glowing cyan energy core
-    const tank = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.11, 0.11, 0.32, 12),
-      new THREE.MeshStandardMaterial({ color: '#475569', metalness: 0.8, roughness: 0.2 })
-    );
-    tank.position.set(-0.28, 0.42, 0);
-    const tankCore = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.06, 0.06, 0.22, 10),
-      new THREE.MeshBasicMaterial({ color: '#38bdf8' })
-    );
-    tankCore.position.set(-0.34, 0.42, 0);
-    g.add(tank, tankCore);
-
-    // Spring Antennae + glowing orbs
-    const stalkGeo = new THREE.CylinderGeometry(0.025, 0.035, 0.24, 8);
-    const tipMat = new THREE.MeshStandardMaterial({
-      color: '#bef264',
-      emissive: '#4ade80',
-      emissiveIntensity: 0.9,
-      roughness: 0.15,
-    });
-    for (const zSide of [-0.14, 0.14]) {
-      const stalk = new THREE.Mesh(stalkGeo, bodyMat);
-      stalk.position.set(-0.04, 0.78, zSide);
-      stalk.rotation.x = zSide * 1.4;
-      const tip = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 10), tipMat);
-      tip.position.set(-0.04, 0.91, zSide * 1.3);
-      g.add(stalk, tip);
-    }
-
-    // Articulated Legs & Boots
-    const bootMat = new THREE.MeshStandardMaterial({ color: '#0f766e', metalness: 0.45, roughness: 0.3 });
-    const makeLeg = (zOff) => {
-      const lg = new THREE.Group();
-      lg.position.set(0, 0.16, zOff);
-      const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.12, 8), bodyMat);
-      shin.position.y = -0.05;
-      const boot = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.1, 0.15), bootMat);
-      boot.position.set(0.04, -0.11, 0);
-      lg.add(shin, boot);
-      return lg;
-    };
-    const footL = makeLeg(-0.14);
-    const footR = makeLeg(0.14);
-    g.add(footL, footR);
-    g.userData.footL = footL;
-    g.userData.footR = footR;
-
-    // Detailed 3D Eyes (sclera, iris, pupil, eyelid)
-    const eyeGroup = new THREE.Group();
-    eyeGroup.position.set(0.18, 0.6, 0);
-    const scleraMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.1 });
-    const irisMat = new THREE.MeshStandardMaterial({ color: '#0ea5e9', emissive: '#0284c7', emissiveIntensity: 0.4 });
-    const pupilMat = new THREE.MeshBasicMaterial({ color: '#090d16' });
-    const lidMat = new THREE.MeshStandardMaterial({ color: '#22c55e', roughness: 0.3 });
-
-    const makeEye = (zOff) => {
-      const eg = new THREE.Group();
-      eg.position.z = zOff;
-      const sc = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 12), scleraMat);
-      const ir = new THREE.Mesh(new THREE.SphereGeometry(0.072, 10, 10), irisMat);
-      ir.position.set(0.058, 0, 0);
-      const pu = new THREE.Mesh(new THREE.SphereGeometry(0.042, 8, 8), pupilMat);
-      pu.position.set(0.088, 0, 0);
-      const lid = new THREE.Mesh(
-        new THREE.SphereGeometry(0.118, 12, 8, 0, TWO_PI, 0, Math.PI * 0.55),
-        lidMat
-      );
-      lid.scale.y = 0.05;
-      eg.add(sc, ir, pu, lid);
-      eg.userData.lid = lid;
-      return eg;
-    };
-    const eyeL = makeEye(-0.11);
-    const eyeR = makeEye(0.11);
-    eyeGroup.add(eyeL, eyeR);
-    g.add(eyeGroup);
-    g.userData.eyeL = eyeL;
-    g.userData.eyeR = eyeR;
-
-    // 2-Tone Cryo-Blaster
-    const barrel = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.085, 0.11, 0.32, 12),
-      new THREE.MeshStandardMaterial({ color: '#334155', metalness: 0.85, roughness: 0.2 })
-    );
-    barrel.rotation.z = -Math.PI / 2;
-    barrel.position.set(0.35, 0.42, 0);
-    const cryoChamber = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.095, 0.095, 0.12, 12),
-      new THREE.MeshStandardMaterial({ color: '#38bdf8', emissive: '#0ea5e9', emissiveIntensity: 1.2 })
-    );
-    cryoChamber.rotation.z = -Math.PI / 2;
-    cryoChamber.position.set(0.33, 0.42, 0);
-    const muzzle = new THREE.Mesh(
-      new THREE.SphereGeometry(0.1, 10, 10),
-      new THREE.MeshBasicMaterial({ color: '#e0f2fe' })
-    );
-    muzzle.position.set(0.53, 0.42, 0);
-    const muzzleLight = new THREE.PointLight('#67e8f9', 0, 4.2);
-    muzzleLight.position.set(0.6, 0.42, 0);
-    g.add(barrel, cryoChamber, muzzle, muzzleLight);
-    g.userData.barrel = barrel;
-    g.userData.cryoChamber = cryoChamber;
-    g.userData.muzzle = muzzle;
-    g.userData.muzzleLight = muzzleLight;
-    g.userData.eyeGroup = eyeGroup;
-    g.userData.body = body;
-    g.userData.mats = { bodyMat, bootMat, lidMat, tipMat };
-
-    // Hat mount on top of the head
-    const hat = new THREE.Group();
-    hat.position.set(0.02, 0.72, 0);
-    g.add(hat);
-    g.userData.hat = hat;
-
-    // Ice block when Pogo is hit by his own snowball
-    const ice = new THREE.Mesh(
-      new THREE.BoxGeometry(0.9, 1.1, 0.8),
-      new THREE.MeshStandardMaterial({ color: '#bae6fd', emissive: '#38bdf8', emissiveIntensity: 0.3, transparent: true, opacity: 0.5, roughness: 0.05, depthWrite: false })
-    );
-    ice.position.y = 0.48;
-    ice.visible = false;
-    g.add(ice);
-    g.userData.ice = ice;
-    return g;
-  }
-
   // Skins & hats (unlocked with medals)
   _applySkin(group, skin) {
     const ud = group.userData;
@@ -913,16 +564,19 @@ export class GameRenderer {
     ud.skinId = skin.id;
     ud.mats.bodyMat.color.set(skin.body);
     ud.mats.bodyMat.emissive.set(skin.emissive);
-    ud.mats.bodyMat.metalness = skin.metal ? 0.85 : 0.15;
-    ud.mats.bodyMat.roughness = skin.metal ? 0.22 : 0.35;
+    ud.mats.bodyMat.metalness = skin.metal ? 0.85 : 0.0;
+    ud.mats.bodyMat.roughness = skin.metal ? 0.22 : 0.38;
     if (skin.metal && this.chromeEnv) {
       ud.mats.bodyMat.envMap = this.chromeEnv;
       ud.mats.bodyMat.needsUpdate = true;
     }
-    ud.mats.lidMat.color.set(skin.body).multiplyScalar(0.8);
+    ud.mats.lidMat.color.set(skin.body);
+    ud.mats.lidMat.emissive?.set(skin.emissive);
+    if (ud.mats.spotMat) ud.mats.spotMat.color.set(skin.body).multiplyScalar(0.72);
     ud.mats.bootMat.color.set(skin.boots);
     ud.mats.tipMat.emissive.set(skin.emissive);
     const hat = ud.hat;
+    hat.scale.setScalar(0.85);
     while (hat.children.length) hat.remove(hat.children[0]);
     const mk = (geo, color, opts = {}) =>
       new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.1, ...opts }));
@@ -1008,36 +662,20 @@ export class GameRenderer {
     const totalH = tower.floors * FLOOR_HEIGHT;
 
     // 1. Main 3D Cylindrical Tower Body with PBR maps
-    const tex = createBrickTextures(pal, tower.id);
-    tex.map.repeat.set(1, tower.floors / 4);
-    tex.bumpMap.repeat.set(1, tower.floors / 4);
-    tex.roughnessMap.repeat.set(1, tower.floors / 4);
-    tex.emissiveMap.repeat.set(1, tower.floors / 4);
-
-    const cylMat = new THREE.MeshStandardMaterial({
-      map: tex.map,
-      bumpMap: tex.bumpMap,
-      bumpScale: 1.6,
-      roughnessMap: tex.roughnessMap,
-      emissive: pal.glow,
-      emissiveMap: tex.emissiveMap,
-      emissiveIntensity: 0.35,
-      roughness: 0.78,
-      metalness: 0.08,
-    });
+    // Procedural cut-stone PBR (normal, AO, roughness, palette-tinted albedo, glowing runes)
+    const cylMat = createTowerStoneMaterial(pal, tower.id, tower.floors);
+    this._stoneMats = this._stoneMats || new Set();
+    this._stoneMats.add(cylMat);
     const cylMesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(TOWER_RADIUS, TOWER_RADIUS, totalH, 48, 1, false),
+      new THREE.CylinderGeometry(TOWER_RADIUS, TOWER_RADIUS, totalH, 72, 1, false),
       cylMat
     );
     cylMesh.position.y = totalH * 0.5;
     group.add(cylMesh);
 
     // 2. Real 3D Cornice Rings every 2 floors
-    const trimMat = new THREE.MeshStandardMaterial({
-      color: pal.brickB,
-      metalness: 0.35,
-      roughness: 0.48,
-    });
+    const trimMat = createLedgeStoneMaterial(new THREE.Color(pal.brickB).lerp(new THREE.Color('#b9bec8'), 0.6), {});
+    this._stoneMats.add(trimMat);
     const collarMat = new THREE.MeshStandardMaterial({
       color: pal.ledge,
       emissive: pal.glow,
@@ -1051,20 +689,6 @@ export class GameRenderer {
       ring.rotation.x = Math.PI / 2;
       ring.position.y = f * FLOOR_HEIGHT - 0.04;
       group.add(ring);
-    }
-
-    // 3. Subtle Vertical Pilaster Ribs (no blinding vertical neon bars)
-    const ribGeo = new THREE.BoxGeometry(0.12, totalH, 0.08);
-    for (let k = 0; k < 8; k++) {
-      const phi = (k * 2 + 0.5) * COL_ANGLE;
-      const rib = new THREE.Mesh(ribGeo, trimMat);
-      rib.position.set(
-        (TOWER_RADIUS + 0.02) * Math.sin(phi),
-        totalH * 0.5,
-        (TOWER_RADIUS + 0.02) * Math.cos(phi)
-      );
-      rib.rotation.y = phi;
-      group.add(rib);
     }
 
     // 4. Detailed 3D Crenellated Battlements + Beacon Spires at Crown
@@ -1263,24 +887,16 @@ export class GameRenderer {
     const ledgeWidth = TOWER_RADIUS * COL_ANGLE * 1.12;
     const boxGeo = new THREE.BoxGeometry(ledgeWidth * 0.86, 0.54, 0.58);
 
-    const solidMat = new THREE.MeshStandardMaterial({
-      color: pal.ledge,
-      emissive: pal.glow,
-      emissiveIntensity: 0.06,
-      roughness: 0.5,
-      metalness: 0.25,
-    });
+    const solidMat = createLedgeStoneMaterial(new THREE.Color(pal.ledge).lerp(new THREE.Color('#c9ccd3'), 0.45), {});
+    this._stoneMats.add(solidMat);
     const solidTopMat = new THREE.MeshStandardMaterial({
       color: pal.ledgeTop,
       emissive: pal.glow,
       emissiveIntensity: 0.55,
       roughness: 0.3,
     });
-    const bracketMat = new THREE.MeshStandardMaterial({
-      color: shadeHex(pal.mortar, 0.9),
-      metalness: 0.4,
-      roughness: 0.6,
-    });
+    const bracketMat = createLedgeStoneMaterial(new THREE.Color(pal.mortar).lerp(new THREE.Color('#5b5f68'), 0.6), {});
+    this._stoneMats.add(bracketMat);
     const iceMat = new THREE.MeshStandardMaterial({
       color: '#7dd3fc',
       emissive: '#0284c7',
@@ -1363,12 +979,7 @@ export class GameRenderer {
         node.userData = { baseY: y, type: l.type, mainMat: boxMat };
       } else if (l.type === 'crumble') {
         // 3 fractured segments with a glowing amber fault lip
-        const cMat = new THREE.MeshStandardMaterial({
-          color: '#f59e0b',
-          emissive: '#b45309',
-          emissiveIntensity: 0.35,
-          roughness: 0.75,
-        });
+        const cMat = createLedgeStoneMaterial('#d6a256', { emissive: '#b45309', emissiveIntensity: 0.25 });
         for (const k of [-1, 0, 1]) {
           const seg = new THREE.Mesh(geoCache.seg, cMat);
           seg.rotation.y = k * span * 0.335;
@@ -1431,8 +1042,9 @@ export class GameRenderer {
     // Tower plinth rising out of the sea + shadow flags for the rest of the tower group
     const plinth = new THREE.Mesh(
       new THREE.CylinderGeometry(TOWER_RADIUS + 0.12, TOWER_RADIUS + 0.45, 1.6, 48),
-      new THREE.MeshStandardMaterial({ color: shadeHex(pal.mortar, 1.2), roughness: 0.85, metalness: 0.1 })
+      createLedgeStoneMaterial(new THREE.Color(pal.mortar).lerp(new THREE.Color('#4b4f58'), 0.6), {})
     );
+    this._stoneMats.add(plinth.material);
     plinth.position.y = -0.8;
     plinth.receiveShadow = true;
     group.add(plinth);
@@ -1595,6 +1207,72 @@ export class GameRenderer {
       cartoonEyes(face, 0.2, 0.06, 0.09, 0.065, true);
       body.add(rubber, stripe, face);
       halo('#f87171', 0.95);
+    } else if (type === 'spiker') {
+      // Spiky fuzzball: hovering guardian of staircases (two hits to pop)
+      const hues = ['#facc15', '#38bdf8', '#4ade80', '#22d3ee', '#f472b6'];
+      const col = hues[Math.floor(Math.random() * hues.length)];
+      const coreMat = new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.35, roughness: 0.55 });
+      const core = new THREE.Mesh(new THREE.IcosahedronGeometry(0.17, 2), coreMat);
+      body.add(core);
+      const spikeGeo = new THREE.ConeGeometry(0.035, 0.2, 5);
+      spikeGeo.translate(0, 0.17, 0);
+      const dirs = new THREE.IcosahedronGeometry(1, 1).attributes.position;
+      const spikes = new THREE.InstancedMesh(spikeGeo, coreMat, 42);
+      const seen = new Set();
+      const m4 = new THREE.Matrix4();
+      const q = new THREE.Quaternion();
+      const up = new THREE.Vector3(0, 1, 0);
+      const v = new THREE.Vector3();
+      let n = 0;
+      for (let i = 0; i < dirs.count && n < 42; i++) {
+        v.fromBufferAttribute(dirs, i).normalize();
+        const key = `${v.x.toFixed(2)},${v.y.toFixed(2)},${v.z.toFixed(2)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        q.setFromUnitVectors(up, v);
+        m4.compose(new THREE.Vector3(), q, new THREE.Vector3(1, 0.8 + Math.random() * 0.5, 1));
+        spikes.setMatrixAt(n++, m4);
+      }
+      spikes.count = n;
+      body.add(spikes);
+      const face = new THREE.Group();
+      cartoonEyes(face, 0.15, 0.03, 0.065, 0.05, true);
+      body.add(face);
+      g.userData.spikes = spikes;
+      g.userData.coreMat = coreMat;
+      halo(col, 1.0);
+    } else if (type === 'chaser') {
+      // Chrome robo-eye: patrols, then charges when it spots Pogo (three hits to scrap)
+      const shell = new THREE.Mesh(
+        new THREE.SphereGeometry(0.25, 28, 20),
+        new THREE.MeshStandardMaterial({ color: '#cbd5e1', metalness: 0.95, roughness: 0.18, envMap: this.chromeEnv || null })
+      );
+      const lensRing = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.025, 8, 24), new THREE.MeshStandardMaterial({ color: '#1e293b', metalness: 0.8, roughness: 0.3 }));
+      lensRing.position.z = 0.22;
+      const lensMat = new THREE.MeshStandardMaterial({ color: '#22d3ee', emissive: '#06b6d4', emissiveIntensity: 1.8 });
+      const lens = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 12), lensMat);
+      lens.position.z = 0.2;
+      lens.scale.z = 0.5;
+      const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.18, 6), lensRing.material);
+      antenna.position.y = 0.3;
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), lensMat);
+      bulb.position.y = 0.4;
+      const legs = [];
+      for (const side of [-1, 1]) {
+        const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.035, 0.1, 3, 6), lensRing.material);
+        leg.position.set(side * 0.12, -0.27, 0);
+        body.add(leg);
+        legs.push(leg);
+      }
+      body.add(shell, lensRing, lens, antenna, bulb);
+      const alert = new THREE.Sprite(new THREE.SpriteMaterial({ map: this._alertTex(), transparent: true, depthWrite: false }));
+      alert.scale.set(0.35, 0.35, 1);
+      alert.position.y = 0.72;
+      g.add(alert);
+      g.userData.lensMat = lensMat;
+      g.userData.legs = legs;
+      g.userData.alert = alert;
+      halo('#22d3ee', 0.9);
     } else {
       // Floating eye: invulnerable. Sclera, glowing iris, blinking lids and little bat wings.
       const sclera = new THREE.Mesh(
@@ -1832,6 +1510,7 @@ export class GameRenderer {
     this._lastSize = { w, h, dpr };
     const clampedDpr = Math.min(dpr, this.postfx ? this.postfx.pixelRatioCap : 2);
     this.postfx?.resize(w, h, clampedDpr);
+    this.ocean?.setSize(w, h, clampedDpr);
     this.webgl.setPixelRatio(clampedDpr);
     this.webgl.setSize(w, h, false);
 
@@ -1924,8 +1603,14 @@ export class GameRenderer {
     const focusY = camFloor * FLOOR_HEIGHT + ease * 1.6;
     const shake = getShakeOffset(state.shake, time);
 
-    this.towerCam.position.set(shake.x, focusY + 1.15 + ease * 2.2 + shake.y, camZ + ease * 7);
-    this.towerCam.lookAt(shake.x, focusY - 0.35 + shake.y, 0);
+    // Idle push-in: stand still and the camera drifts closer for a character moment
+    const idleGoal = state.mode === 'tower' && (player.idleTime || 0) > 2.5 && !settings.reducedMotion ? 1 : 0;
+    this._idleZoom = (this._idleZoom || 0) + (idleGoal - (this._idleZoom || 0)) * Math.min(1, (this._realDt || 0.016) * (idleGoal ? 0.8 : 4));
+    const iz = this._idleZoom * this._idleZoom * (3 - 2 * this._idleZoom);
+    const pyFocus = player.floor * FLOOR_HEIGHT + 0.6;
+    const zoomY = (pyFocus - focusY) * iz * 0.6;
+    this.towerCam.position.set(shake.x, focusY + 1.15 + ease * 2.2 + shake.y + zoomY - iz * 0.5, camZ + ease * 7 - iz * camZ * 0.32);
+    this.towerCam.lookAt(shake.x, focusY - 0.35 + shake.y + zoomY, 0);
     this.towerCam.updateMatrixWorld();
 
     // Shadow light tracks the view vertically
@@ -1946,7 +1631,7 @@ export class GameRenderer {
     sky.yaw.value = -camCol * COL_ANGLE * 0.15;
     this.skyDome.position.copy(this.towerCam.position);
     this.hemiLight.color.set(pal.ledge);
-    this.rimLight.color.set(pal.glow);
+    this.rimLight.color.set('#ffd9a8').lerp(this._tempColor.set(pal.glow), 0.25);
     this.planetMesh.material.color.set(pal.ledge);
     this.planetMesh.material.emissive.set(pal.glow);
     const su = this.seaMat.uniforms;
@@ -1961,18 +1646,23 @@ export class GameRenderer {
     const cleanDeep = this._c4 || (this._c4 = new THREE.Color('#012a40'));
     su.shallowColor.value.copy(toxicShallow).lerp(cleanShallow, heal).lerp(this._tempColor.set(pal.brickA), 0.15).multiplyScalar(0.75);
     su.deepColor.value.copy(toxicDeep).lerp(cleanDeep, heal);
-    this.seaMesh.position.y = mech.kind === 'flood' ? mech.waterFloor * FLOOR_HEIGHT : -0.62;
+    const seaY = mech.kind === 'flood' ? mech.waterFloor * FLOOR_HEIGHT : -0.62;
+    this.seaMesh.position.y = seaY;
+    if (this._stoneMats) setWaterlineY(this._stoneMats, seaY);
+    su.sunStrength.value = 1 - (mech.darkness || 0) * 0.8;
+    su.sunDir.value.copy(SUN_DIR);
+    sky.sunAmount.value = 1 - (mech.darkness || 0) * 0.9;
 
     // Darkness (night storm) & lightning
     const dark = mech.darkness || 0;
     const bolt = mech.lightning || 0;
-    this.hemiLight.intensity = 0.6 * (1 - dark * 0.8) + bolt * 1.4;
+    this.hemiLight.intensity = 0.35 * (1 - dark * 0.7) + bolt * 1.4;
     this.keyLight.intensity = 1.7 * (1 - dark * 0.85);
-    this.rimLight.intensity = 0.75 * (1 - dark * 0.5);
+
     this.lightningLight.intensity = bolt * 3.5;
     this.fillLight.intensity = 0.28 * (1 - dark * 0.9);
-    this.rimLight.intensity = 0.75 * (1 - dark * 0.75);
-    this.webgl.toneMappingExposure = 1.05 * (1 - dark * 0.3) + bolt * 0.5;
+    this.rimLight.intensity = 1.1 * (1 - dark * 0.8);
+    this.webgl.toneMappingExposure = 0.95 * (1 - dark * 0.3) + bolt * 0.5;
     this.lantern.intensity = dark > 0 ? 7 + Math.sin(time * 9) * 0.4 : 0;
     this.lantern.distance = 6.5;
     if (this._cachedTower?.cylMat) this._cachedTower.cylMat.emissiveIntensity = 0.35 + dark * 1.4;
@@ -2119,72 +1809,58 @@ export class GameRenderer {
     this.pogoGroup.visible = pogoVisible && !blinkOff;
     this.landingRingGroup.visible = pogoVisible;
     if (pogoVisible) {
-      const moving = player.onGround && Math.abs(player.vx) > 0.2;
-      const bob = moving ? Math.abs(Math.sin(time * 18)) * 0.08 : 0;
-      const stride = moving ? Math.sin(time * 18) * 0.14 : 0;
-
       this._applySkin(this.pogoGroup, currentSkin());
-      const ud = this.pogoGroup.userData;
-      // Summit celebration: happy hops and a spin
-      const cele = player.celebrate > 0 && (state.mode === 'summit' || state.mode === 'topple');
-      const celeHop = cele ? Math.abs(Math.sin(time * 8)) * 0.45 : 0;
-      // Hanging from a ledge lip: tucked in toward the wall
-      const hangOffset = player.hang ? 0.05 : 0;
+      this.pogoGroup.position.set(px, py + (player.hang ? 0.05 : 0), pz);
+      this.pogoGroup.rotation.set(player.hang ? -0.25 : 0, pTheta, 0);
+      this.pogoGroup.scale.setScalar(1.25);
 
-      this.pogoGroup.position.set(px, py + bob + celeHop + hangOffset, pz);
-      // Angle Pogo 3/4 toward the camera (+Z) so both big eyes, belly & blaster are clearly visible!
-      const faceYaw = player.facing < 0 ? Math.PI - 0.42 : 0.42;
-      this.pogoGroup.rotation.y = pTheta + faceYaw + (cele ? time * 9 : 0);
-      this.pogoGroup.rotation.x = player.hang ? -0.25 : 0;
-      // Arms-out wobble when the edge guard stops you at a drop into the sea
-      const teeter = Math.min(1, (player.teeter || 0) / 0.25);
-      this.pogoGroup.rotation.z = teeter > 0 ? -Math.sin(time * 26) * 0.16 * teeter : 0;
-      if (player.stunTimer > 0) {
-        // Knocked silly: tumble as he drops to the ledge below
-        this.pogoGroup.rotation.z = Math.sin(time * 30) * 0.35;
-        this.pogoGroup.rotation.y += time * 14;
+      // Nearest threat drives Pogo's eyes and nerves
+      let dangerDir = null;
+      let dangerUp = 0;
+      let danger = 0;
+      for (const en of state.enemies) {
+        if (en.dead) continue;
+        const dc = colDistR(player.col, en.col);
+        const df = en.floor - player.floor;
+        const d = Math.abs(dc) + Math.abs(df) * 1.5;
+        const k = 1 - Math.min(1, d / 3.2);
+        if (k > danger) {
+          danger = k;
+          dangerDir = Math.sign(dc) * (player.facing || 1);
+          dangerUp = Math.max(-1, Math.min(1, df));
+        }
       }
-      const sx = player.squashX || 1;
-      const sy = player.squashY || 1;
-      this.pogoGroup.scale.set(sx, sy, sx);
-
-      this.pogoGroup.userData.footL.position.x = stride;
-      this.pogoGroup.userData.footR.position.x = -stride;
-
-      // Eyes: blink, squint when hurt, sleepy when idle a long time, look around when bored
-      const blinking = (time * 0.75) % 4.4 > 4.22;
-      const idle = player.idleTime || 0;
-      let lidScaleY = blinking ? 1.0 : 0.05;
-      if (player.hurtFace > 0 || player.stunTimer > 0) lidScaleY = 0.7;
-      else if (idle > 7) lidScaleY = 0.55 + Math.sin(time * 1.5) * 0.25;
-      if (cele) lidScaleY = 0.45;
-      ud.eyeL.userData.lid.scale.y = lidScaleY;
-      ud.eyeR.userData.lid.scale.y = lidScaleY;
-      const eyeSquash = player.hurtFace > 0 ? 0.6 : 1;
-      ud.eyeL.scale.set(1, eyeSquash, 1);
-      ud.eyeR.scale.set(1, eyeSquash, 1);
-      ud.eyeGroup.rotation.y = idle > 2.5 ? Math.sin(time * 0.9) * 0.6 : 0;
-      // Foot tap & yawn stretch when idle
-      if (idle > 4.5 && !moving) ud.footR.position.y = 0.16 + Math.max(0, Math.sin(time * 9)) * 0.05;
-      else ud.footR.position.y = 0.16;
-      if (idle > 7) this.pogoGroup.scale.y *= 1 + Math.max(0, Math.sin(time * 0.8)) * 0.08;
-      if (ud.antennaBall) ud.antennaBall.material.emissiveIntensity = 1 + Math.sin(time * 6) * 1;
-      ud.ice.visible = player.frozenSelf > 0;
-      // Charge glow on the blaster
-      const ch = player.charge || 0;
-      ud.cryoChamber.material.emissiveIntensity = 1.2 + ch * 4 + (ch >= 1 ? Math.sin(time * 30) * 1.5 : 0);
-      ud.cryoChamber.material.emissive.set(ch > 0 ? '#e0f2fe' : '#0ea5e9');
-
-      const mf = Math.max(0, player.muzzleFlash != null ? player.muzzleFlash : player.fireCooldown > 0.1 ? 0.1 : 0);
-      const flashRatio = Math.min(1, mf / 0.14);
-      this.pogoGroup.userData.barrel.position.x = 0.35 - flashRatio * 0.08;
-      this.pogoGroup.userData.cryoChamber.position.x = 0.33 - flashRatio * 0.08;
-      this.pogoGroup.userData.muzzle.scale.setScalar(0.75 + flashRatio * 1.35 + ch * 0.9);
-      this.pogoGroup.userData.muzzleLight.intensity = flashRatio * 2.6;
+      const emote = player.emote && player.emote.t > 0 ? player.emote.kind : null;
+      this.pogoRig.update(this._realDt || 0.016, {
+        time,
+        vx: player.vx,
+        vy: player.vy,
+        facing: player.facing,
+        onGround: player.onGround,
+        squashX: player.squashX || 1,
+        squashY: player.squashY || 1,
+        teeter: (player.teeter || 0) > 0,
+        stun: player.stunTimer > 0,
+        hurt: player.hurtFace > 0.6,
+        idle: state.mode === 'tower' ? player.idleTime || 0 : 0,
+        celebrate: player.celebrate > 0 && (state.mode === 'summit' || state.mode === 'topple' || state.mode === 'results'),
+        emote,
+        pound: player.pound,
+        hang: Boolean(player.hang),
+        charge: player.charge || 0,
+        muzzle: player.muzzleFlash || 0,
+        frozen: player.frozenSelf > 0,
+        danger,
+        dangerDir,
+        dangerUp,
+        lowTime: state.mode === 'tower' && state.timer < 15,
+        dark: (mech.darkness || 0) > 0.5,
+      });
 
       this.heroLight.position.set(px, py + 0.8, pz + 0.8);
       this.heroLight.color.set(pal.glow);
-      this.lantern.position.set(px + 0.3, py + 1.1, pz + 0.6);
+      if ((mech.darkness || 0) > 0.5) this.pogoRig.lanternWorld(this.lantern.position);
+      else this.lantern.position.set(px + 0.3, py + 1.1, pz + 0.6);
 
       // Landing Target / Shadow Ring at player.landingFloor
       const lf = player.landingFloor != null ? player.landingFloor : -0.55;
@@ -2274,6 +1950,23 @@ export class GameRenderer {
         const squash = frozen ? 0 : Math.max(0, 0.18 - h) / 0.18;
         body.scale.set(flashK * (1 + squash * 0.3), flashK * (1 - squash * 0.32 + (h > 0.4 ? 0.06 : 0)), flashK * (1 + squash * 0.3));
         body.position.y = -squash * 0.07;
+      } else if (en.type === 'spiker' && ud.spikes) {
+        const pulse = frozen ? 1 : 1 + Math.sin(time * 8 + i) * 0.08;
+        ud.spikes.scale.setScalar(pulse);
+        if (!frozen) body.rotation.y = time * 1.2 + i;
+        ud.coreMat.emissiveIntensity = en.hp < 2 ? 0.9 + Math.sin(time * 20) * 0.4 : 0.35;
+        slot.mesh.rotation.y = eTheta;
+      } else if (en.type === 'chaser' && ud.lensMat) {
+        const a = en.alert || 0;
+        ud.lensMat.color.set(a > 0.3 ? '#ef4444' : '#22d3ee');
+        ud.lensMat.emissive.set(a > 0.3 ? '#dc2626' : '#06b6d4');
+        ud.alert.visible = a > 0.3 && !frozen;
+        ud.alert.position.y = 0.72 + Math.sin(time * 12) * 0.03;
+        const step = frozen ? 0 : Math.sin(time * (8 + a * 10) + i);
+        ud.legs[0].position.y = -0.27 + Math.max(0, step) * 0.05;
+        ud.legs[1].position.y = -0.27 + Math.max(0, -step) * 0.05;
+        body.position.y = Math.abs(step) * 0.03;
+        slot.mesh.rotation.y = eTheta + (en.dir < 0 ? -Math.PI / 2 : Math.PI / 2) * 0.8;
       } else if (ud.isFireball) {
         ud.core.rotation.set(time * 7, time * 5, 0);
         ud.halo.material.opacity = 0.7 + Math.sin(time * 30 + i) * 0.2;
@@ -2338,14 +2031,45 @@ export class GameRenderer {
     this._syncPopups(state.popups || [], camCol, this.towerScene, this.towerCam, true);
 
     // World effects: clouds, birds, weather, props, guardian, ghost
-    if (settings.ghosts !== false && state.ghostData) this.fx.ensureGhost(() => this._buildPogoMesh());
+    if (settings.ghosts !== false && state.ghostData) this.fx.ensureGhost(() => new PogoRig({ ghost: true }).group);
     this.fx.update(state, { time, camCol, cam: this.towerCam, focusY, tg, TOWER_RADIUS, FLOOR_HEIGHT, pal });
 
     // Tilt-shift focus follows Pogo's height on screen
     const pScreen = this._v3b.set(px, py + 0.4, pz).project(this.towerCam);
     const focus = Math.max(0.25, Math.min(0.75, pScreen.y * 0.5 + 0.5));
     this.postfx.monitor(this._realDt || 0.016);
+    // Planar reflection pass (sky dome re-centred on the mirrored camera while it renders)
+    this.ocean.reflectionEnabled = this.qualityTier !== 'low';
+    if (this.ocean.reflectionEnabled) {
+      const skyPos = this.skyDome.position.clone();
+      this.skyDome.position.set(this.towerCam.position.x, -this.towerCam.position.y + 2 * seaY, this.towerCam.position.z);
+      this.fx.setReflectionPass?.(true);
+      this.ocean.updateReflection(this.towerScene, this.towerCam);
+      this.fx.setReflectionPass?.(false);
+      this.skyDome.position.copy(skyPos);
+    }
+    this._updateEnvironment(pal, mech, heal);
     this.postfx.render({ time, focus, flash: (state.mech?.lightning || 0) * 0.35, darkness: state.mech?.darkness || 0 });
+  }
+
+  _alertTex() {
+    if (this._alertTexCache) return this._alertTexCache;
+    const c = document.createElement('canvas');
+    c.width = 64;
+    c.height = 64;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath();
+    ctx.arc(32, 32, 28, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.font = '900 44px Orbitron, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('!', 32, 35);
+    this._alertTexCache = new THREE.CanvasTexture(c);
+    this._alertTexCache.colorSpace = THREE.SRGBColorSpace;
+    return this._alertTexCache;
   }
 
   _getWarnSprite(idx) {

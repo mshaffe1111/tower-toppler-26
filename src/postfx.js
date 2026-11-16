@@ -114,7 +114,7 @@ export class PostFX {
     const c = new EffectComposer(this.webgl);
     this.renderPass = new RenderPass(this.scene, this.camera);
     c.addPass(this.renderPass);
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.55, 0.5, 0.82);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.4, 0.45, 0.92);
     c.addPass(this.bloom);
     c.addPass(new OutputPass());
     this.tiltH = new ShaderPass(TiltShiftShader);
@@ -147,7 +147,7 @@ export class PostFX {
     const t = this.tier;
     this.useComposer = t !== 'low';
     if (this.bloom) this.bloom.enabled = t === 'high' || t === 'medium';
-    if (this.bloom) this.bloom.strength = t === 'high' ? 0.6 : 0.45;
+    if (this.bloom) this.bloom.strength = t === 'high' ? 0.42 : 0.32;
     const tilt = this.diorama && t !== 'low';
     if (this.tiltH) this.tiltH.enabled = tilt;
     if (this.tiltV) this.tiltV.enabled = tilt;

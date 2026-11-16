@@ -121,12 +121,12 @@ export function saveGhostIfBest(key, duration, data) {
 
 // ---------- Skins (unlocked by total medals) ----------
 export const SKINS = [
-  { id: 'classic', name: 'Classic Pogo', body: '#4ade80', emissive: '#16a34a', boots: '#0f766e', hat: null, need: 0 },
-  { id: 'arctic', name: 'Arctic', body: '#7dd3fc', emissive: '#0284c7', boots: '#e0f2fe', hat: 'beanie', need: 3 },
-  { id: 'ember', name: 'Ember', body: '#fb923c', emissive: '#c2410c', boots: '#7c2d12', hat: 'horns', need: 6 },
-  { id: 'neon', name: 'Neon Night', body: '#f472b6', emissive: '#db2777', boots: '#312e81', hat: 'visor', need: 10 },
-  { id: 'chrome', name: 'Chrome Bot', body: '#cbd5e1', emissive: '#475569', boots: '#1e293b', hat: 'antenna', need: 15, metal: true },
-  { id: 'royal', name: 'Royal Toppler', body: '#facc15', emissive: '#a16207', boots: '#7c2d12', hat: 'crown', need: 24 },
+  { id: 'classic', name: 'Classic Pogo', body: '#5ee08a', emissive: '#15803d', boots: '#3fca76', hat: null, need: 0 },
+  { id: 'arctic', name: 'Arctic', body: '#93c5fd', emissive: '#0284c7', boots: '#7dd3fc', hat: 'beanie', need: 3 },
+  { id: 'ember', name: 'Ember', body: '#fb923c', emissive: '#c2410c', boots: '#f97316', hat: 'horns', need: 6 },
+  { id: 'neon', name: 'Neon Night', body: '#f9a8d4', emissive: '#db2777', boots: '#f472b6', hat: 'visor', need: 10 },
+  { id: 'chrome', name: 'Chrome Bot', body: '#cbd5e1', emissive: '#475569', boots: '#94a3b8', hat: 'antenna', need: 15, metal: true },
+  { id: 'royal', name: 'Royal Toppler', body: '#fde047', emissive: '#a16207', boots: '#facc15', hat: 'crown', need: 24 },
 ];
 
 export function skinUnlocked(skin) {

@@ -50,6 +50,7 @@ export class TowerFx {
     this._tmpColor = new THREE.Color();
 
     this._buildClouds();
+    this._buildHorizon();
     this._buildBirds();
     this._buildWeather();
     this._buildGustStreaks();
@@ -71,7 +72,7 @@ export class TowerFx {
     const layers = [3.5, 8, 12.5, 17, 22, 27];
     for (const h of layers) {
       for (let i = 0; i < 7; i++) {
-        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.5, fog: true });
+        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.35, fog: true });
         const sp = new THREE.Sprite(mat);
         const s = 4 + Math.random() * 5;
         sp.scale.set(s * 2, s, 1);
@@ -80,13 +81,67 @@ export class TowerFx {
           ang: Math.random() * TWO_PI,
           r: 9 + Math.random() * 9,
           speed: (0.015 + Math.random() * 0.025) * (Math.random() < 0.5 ? -1 : 1),
-          base: 0.35 + Math.random() * 0.3,
+          base: 0.16 + Math.random() * 0.2,
         };
         this.cloudGroup.add(sp);
         this.clouds.push(sp);
       }
     }
     this.scene.add(this.cloudGroup);
+  }
+
+  // The wider world: rocky islands and the other towers of Nebulus on the horizon.
+  // The group turns with the tower, so walking round reveals different views.
+  _buildHorizon() {
+    const g = new THREE.Group();
+    const rockMat = new THREE.MeshStandardMaterial({ color: '#1b2433', roughness: 0.95, flatShading: true });
+    const grassMat = new THREE.MeshStandardMaterial({ color: '#1f3b2c', roughness: 0.9, flatShading: true });
+    let seed = 3;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < 9; i++) {
+      const ang = (i / 9) * Math.PI * 2 + rnd() * 0.4;
+      const r = 34 + rnd() * 14;
+      const isl = new THREE.Group();
+      const h = 2 + rnd() * 5;
+      const base = new THREE.Mesh(new THREE.ConeGeometry(3 + rnd() * 4, h, 7, 2), rockMat);
+      base.position.y = h / 2 - 0.9;
+      base.rotation.y = rnd() * 3;
+      base.scale.z = 0.6 + rnd() * 0.5;
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(1.4 + rnd() * 1.5, 1.2, 6), grassMat);
+      cap.position.y = h - 0.6;
+      isl.add(base, cap);
+      isl.position.set(Math.sin(ang) * r, 0, Math.cos(ang) * r);
+      g.add(isl);
+    }
+    // Distant towers (one per tower still standing in the campaign)
+    this.farTowers = [];
+    const towerGeo = new THREE.CylinderGeometry(1.1, 1.3, 1, 16, 1);
+    towerGeo.translate(0, 0.5, 0);
+    for (let i = 0; i < 8; i++) {
+      const ang = Math.PI + (i - 3.5) * 0.55 + (i % 2 ? 0.12 : -0.08);
+      const r = 40 + (i % 3) * 5;
+      const t = new THREE.Group();
+      const body = new THREE.Mesh(towerGeo, new THREE.MeshStandardMaterial({ color: '#2a3550', roughness: 0.8 }));
+      const height = 18 + (i % 4) * 4;
+      body.scale.y = height;
+      const beacon = new THREE.Sprite(
+        new THREE.SpriteMaterial({ map: this.softDotTex, color: '#38bdf8', transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending })
+      );
+      beacon.scale.setScalar(4);
+      beacon.position.y = height + 0.6;
+      const windows = new THREE.Mesh(
+        new THREE.CylinderGeometry(1.12, 1.12, height * 0.9, 16, 6, true),
+        new THREE.MeshBasicMaterial({ color: '#38bdf8', transparent: true, opacity: 0.12, wireframe: true, fog: true })
+      );
+      windows.position.y = height * 0.5;
+      t.add(body, windows, beacon);
+      t.position.set(Math.sin(ang) * r, -0.6, Math.cos(ang) * r);
+      t.userData = { body, beacon, windows, height };
+      g.add(t);
+      this.farTowers.push(t);
+    }
+    this.horizon = g;
+    this.scene.add(g);
   }
 
   _buildBirds() {
@@ -328,6 +383,18 @@ export class TowerFx {
     return g;
   }
 
+  // Weather & streaks are skipped in the water's reflection pass (cheaper, and they'd double up)
+  setReflectionPass(on) {
+    if (on) {
+      this._vis = [this.flakes.visible, this.rain.visible, this.streaks.visible];
+      this.flakes.visible = false;
+      this.rain.visible = false;
+      this.streaks.visible = false;
+    } else if (this._vis) {
+      [this.flakes.visible, this.rain.visible, this.streaks.visible] = this._vis;
+    }
+  }
+
   // ---------------- Per-frame update ----------------
   update(state, ctx) {
     const { time, camCol, cam, focusY, tg, TOWER_RADIUS, FLOOR_HEIGHT, pal } = ctx;
@@ -337,8 +404,9 @@ export class TowerFx {
 
     // Clouds orbit slowly; brightness follows the biome; thicker in storms
     const stormy = mech.kind === 'storm' || mech.kind === 'dark';
-    this._tmpColor.set(pal.ledgeTop).lerp(new THREE.Color('#ffffff'), 0.55);
-    if (stormy) this._tmpColor.multiplyScalar(0.45);
+    // Clouds take the sky's colour so they read as atmosphere, not grey haze
+    this._tmpColor.set(pal.mortar).lerp(new THREE.Color('#9fb3d9'), 0.55);
+    if (stormy) this._tmpColor.multiplyScalar(0.5);
     for (const sp of this.clouds) {
       const u = sp.userData;
       u.ang += u.speed * dt;
@@ -350,6 +418,23 @@ export class TowerFx {
       // Fade clouds that would drift between the camera and the tower
       const front = z > -1 && Math.abs(x) < 4.5 && Math.abs(u.h - focusY) < 4 ? 0.12 : 1;
       sp.material.opacity = u.base * front * (stormy ? 1.3 : 1);
+    }
+
+    // Horizon turns with the tower; only towers still standing are on it
+    if (this.horizon) {
+      this.horizon.rotation.y = -camCol * COL_ANGLE;
+      const towers = state.campaignTowers || [];
+      const standing = state.runMode === 'campaign' ? Math.max(0, 7 - (state.towerIndex || 0)) : 5;
+      this.farTowers.forEach((ft, i) => {
+        ft.visible = i < standing;
+        const pal2 = towers[Math.min(towers.length - 1, (state.towerIndex || 0) + 1 + i)]?.palette;
+        if (pal2) {
+          ft.userData.beacon.material.color.set(pal2.glow);
+          ft.userData.windows.material.color.set(pal2.glow);
+          ft.userData.body.material.color.set(pal2.brickA).lerp(this._tmpColor2 || (this._tmpColor2 = new THREE.Color()), 0).multiplyScalar(0.35);
+        }
+        ft.userData.beacon.material.opacity = 0.65 + Math.sin(time * 2 + i) * 0.25;
+      });
     }
 
     for (const flock of this.birds) {
@@ -514,7 +599,7 @@ export class TowerFx {
         const th = wrapAngle((gs.col - camCol) * COL_ANGLE);
         const r = TOWER_RADIUS + 0.5;
         this.ghost.position.set(r * Math.sin(th), gs.floor * FLOOR_HEIGHT, r * Math.cos(th));
-        this.ghost.rotation.y = th + (gs.facing < 0 ? Math.PI - 0.42 : 0.42);
+        this.ghost.rotation.y = th + (gs.facing < 0 ? Math.PI + 0.85 : -0.85);
       }
     }
   }

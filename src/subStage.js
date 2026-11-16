@@ -315,9 +315,9 @@ export class SubStage {
     return this.mult;
   }
 
-  _ring(x, y, r0, r1, color, life = 0.45) {
+  _ring(x, y, r0, r1, color, life = 0.45, flat = false) {
     if (this.rings.length > 22) this.rings.shift();
-    this.rings.push({ x, y, r0, r1, color, life, maxLife: life });
+    this.rings.push({ x, y, r0, r1, color, life, maxLife: life, flat });
   }
 
   // ------------------------------------------------------------------ submarine
@@ -361,10 +361,17 @@ export class SubStage {
         sound?.subSurface?.();
         fx.particles?.(sub.x, this.surfaceY, '#e0f7ff', 18, 150);
         fx.particles?.(sub.x - sub.rx * 0.6, this.surfaceY, '#bae6fd', 10, 110);
-        this._ring(sub.x, this.surfaceY, sub.rx * 0.6, sub.rx * 2.6, '#e0f7ff', 0.8);
+        this._ring(sub.x, this.surfaceY, sub.rx * 0.6, sub.rx * 2.6, '#e0f7ff', 0.8, true);
         fx.shake?.(2);
       }
-      if (sub.surfaced > 0) sub.surfaced = Math.min(1, sub.surfaced + dt * 1.6);
+      if (sub.surfaced > 0) {
+        sub.surfaced = Math.min(1, sub.surfaced + dt * 1.6);
+        this._foamT = (this._foamT || 0) - dt;
+        if (this._foamT <= 0) {
+          this._foamT = 0.45;
+          this._ring(sub.x + (Math.random() - 0.5) * sub.rx, this.surfaceY + 2 * s, sub.rx * 0.4, sub.rx * 1.8, '#bfe9f5', 0.7, true);
+        }
+      }
       return;
     } else {
       if (sub.stun > 0) {
