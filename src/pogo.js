@@ -266,30 +266,44 @@ function addRimLight(mat, color = '#d9f99d', strength = 0.3, { form = true } = {
 // cheeks, muzzle, eye sockets, belly and the waist all catch light and cast soft shadow.
 // Local space: feet at y = 0, facing +X, symmetric in Z.
 // ---------------------------------------------------------------------------------------------
-const EYE = { x: 0.065, y: 0.775, z: 0.152, r: 0.148 }; // eye domes
-export const EYEBALL = { x: 0.12, y: 0.787, z: 0.162, r: 0.113 };
+// Like the 1987 sprite, Pogo is a plump, hunched frog: a big round body and back, frog haunches,
+// and the head pushed FORWARD of the body rather than stacked on top of it. Every head feature is
+// modelled in head space and offset by HEAD, so eyes, mouth, cheeks and blush all move together.
+const HEAD = { x: 0.1, y: -0.02 };
+const EYE = { x: 0.065 + HEAD.x, y: 0.775 + HEAD.y, z: 0.152, r: 0.148 }; // eye domes
+export const EYEBALL = { x: 0.12 + HEAD.x, y: 0.787 + HEAD.y, z: 0.162, r: 0.113 };
+const HIP = { x: -0.045, y: 0.15, z: 0.2 };
+const SCARF_Y = 0.45; // mid-height of the band at the sides
+const SCARF_TILT = 0.075; // a real wrap: low under the chin, up at the nape where it's knotted
 
 function pogoSDF(x, y, z) {
   const az = Math.abs(z);
-  // pear body + rounder head, blended into one bean with a soft waist
-  let d = sdEllipsoid(x, y, z, 0.0, 0.3, 0, 0.33, 0.29, 0.335);
-  d = smin(d, sdEllipsoid(x, y, z, 0.02, 0.585, 0, 0.29, 0.225, 0.305), 0.14);
+  const hx = x - HEAD.x; // head space
+  const hy = y - HEAD.y;
+  // big round body, set back under a rounded hump of a back
+  // (as wide side-to-side as he is deep, so he reads equally plump from the front and the side)
+  let d = sdEllipsoid(x, y, z, -0.05, 0.31, 0, 0.38, 0.3, 0.42);
+  d = smin(d, sdEllipsoid(x, y, z, -0.15, 0.44, 0, 0.27, 0.235, 0.33), 0.12);
+  // frog haunches: thick thighs bulging at the lower sides
+  d = smin(d, sdEllipsoid(x, y, az, -0.08, 0.165, 0.24, 0.19, 0.135, 0.13), 0.08);
+  // the head, forward of the body, blended in with a soft fold
+  d = smin(d, sdEllipsoid(hx, hy, z, 0.02, 0.585, 0, 0.29, 0.225, 0.305), 0.12);
   // belly bulge, front-low, with a gentle crease where it meets the body
-  d = smin(d, sdEllipsoid(x, y, z, 0.135, 0.27, 0, 0.205, 0.215, 0.245), 0.035);
+  d = smin(d, sdEllipsoid(x, y, z, 0.11, 0.27, 0, 0.23, 0.23, 0.31), 0.035);
   // wide frog muzzle
-  d = smin(d, sdEllipsoid(x, y, z, 0.165, 0.565, 0, 0.135, 0.085, 0.205), 0.06);
+  d = smin(d, sdEllipsoid(hx, hy, z, 0.165, 0.565, 0, 0.135, 0.085, 0.205), 0.06);
   // puffy cheeks
-  d = smin(d, sdSphere(x, y, az, 0.16, 0.515, 0.175, 0.095), 0.05);
+  d = smin(d, sdSphere(hx, hy, az, 0.16, 0.515, 0.175, 0.095), 0.05);
   // brow pads above the eyes
-  d = smin(d, sdEllipsoid(x, y, az, 0.1, 0.9, 0.16, 0.07, 0.035, 0.07), 0.04);
+  d = smin(d, sdEllipsoid(hx, hy, az, 0.1, 0.9, 0.16, 0.07, 0.035, 0.07), 0.04);
   // frog eye domes
   d = smin(d, sdSphere(x, y, az, EYE.x, EYE.y, EYE.z, EYE.r), 0.06);
   // sockets the eyeballs sit in
   d = ssub(d, sdSphere(x, y, az, EYEBALL.x + 0.055, EYEBALL.y, EYEBALL.z + 0.004, 0.098), 0.022);
   // dimples at the mouth corners
-  d = ssub(d, sdSphere(x, y, az, 0.262, 0.565, 0.14, 0.022), 0.022);
+  d = ssub(d, sdSphere(hx, hy, az, 0.262, 0.565, 0.14, 0.022), 0.022);
   // nostrils
-  d = ssub(d, sdSphere(x, y, az, 0.292, 0.648, 0.042, 0.013), 0.012);
+  d = ssub(d, sdSphere(hx, hy, az, 0.292, 0.648, 0.042, 0.013), 0.012);
   return d;
 }
 
@@ -302,12 +316,12 @@ function footSDF(x, y, z) {
   return d;
 }
 
-// Arm with a mitten hand and thumb (local shoulder space: hangs toward -Y, thumb toward +X)
+// Chunky arm with a big mitten hand and thumb (local shoulder space: hangs toward -Y, thumb +X)
 function armSDF(side) {
   return (x, y, z) => {
-    let d = sdCapsule(x, y, z, 0, 0.0, 0, 0, -0.12, 0, 0.05);
-    d = smin(d, sdEllipsoid(x, y, z, 0.008, -0.19, 0, 0.07, 0.068, 0.078), 0.04);
-    d = smin(d, sdEllipsoid(x, y, z, 0.058, -0.162, -side * 0.032, 0.03, 0.036, 0.028), 0.02);
+    let d = sdCapsule(x, y, z, 0, 0.0, 0, 0.004, -0.13, 0, 0.066);
+    d = smin(d, sdEllipsoid(x, y, z, 0.012, -0.205, 0, 0.088, 0.084, 0.096), 0.05);
+    d = smin(d, sdEllipsoid(x, y, z, 0.075, -0.17, -side * 0.04, 0.036, 0.044, 0.034), 0.025);
     return d;
   };
 }
@@ -315,10 +329,10 @@ function armSDF(side) {
 let SCULPT = null;
 function sculptCache() {
   if (SCULPT) return SCULPT;
-  const body = meshSDF(pogoSDF, [-0.4, -0.02, -0.42], [0.42, 0.97, 0.42], 0.0125, { aoScale: 1.2 });
+  const body = meshSDF(pogoSDF, [-0.5, -0.02, -0.5], [0.52, 0.97, 0.5], 0.0125, { aoScale: 1.2 });
   const foot = meshSDF(footSDF, [-0.12, -0.17, -0.16], [0.3, 0.1, 0.16], 0.0085, { aoScale: 0.7 });
-  const armL = meshSDF(armSDF(-1), [-0.09, -0.28, -0.1], [0.1, 0.06, 0.1], 0.0075, { aoScale: 0.6 });
-  const armR = meshSDF(armSDF(1), [-0.09, -0.28, -0.1], [0.1, 0.06, 0.1], 0.0075, { aoScale: 0.6 });
+  const armL = meshSDF(armSDF(-1), [-0.12, -0.32, -0.13], [0.14, 0.08, 0.13], 0.0075, { aoScale: 0.6 });
+  const armR = meshSDF(armSDF(1), [-0.12, -0.32, -0.13], [0.14, 0.08, 0.13], 0.0075, { aoScale: 0.6 });
   SCULPT = { body, foot, armL, armR };
   return SCULPT;
 }
@@ -329,13 +343,14 @@ const smooth = (e0, e1, x) => {
 };
 
 const FRECKLES = [
-  [-0.24, 0.66, 0.16],
-  [-0.27, 0.58, -0.12],
-  [-0.18, 0.76, -0.05],
-  [-0.3, 0.46, 0.08],
-  [-0.2, 0.7, 0.24],
-  [-0.12, 0.83, 0.1],
-  [-0.29, 0.38, -0.2],
+  [-0.22, 0.64, 0.16],
+  [-0.27, 0.6, -0.12],
+  [-0.06, 0.76, -0.05],
+  [-0.36, 0.48, 0.08],
+  [-0.12, 0.7, 0.24],
+  [0.0, 0.81, 0.1],
+  [-0.38, 0.36, -0.2],
+  [-0.3, 0.52, 0.25],
 ];
 
 // Paint the body skin: base colour, cream belly & throat, cheek blush, freckles, then
@@ -350,14 +365,14 @@ function paintBody(geo, ao, skinHex) {
     const az = Math.abs(z);
     c.copy(base);
     // belly + throat cream, fading softly at the edge
-    const bellyD = sdEllipsoid(x, y, z, 0.15, 0.27, 0, 0.195, 0.205, 0.235);
+    const bellyD = sdEllipsoid(x, y, z, 0.13, 0.27, 0, 0.215, 0.215, 0.29);
     const front = smooth(0.0, 0.11, x);
     let m = smooth(0.025, -0.03, bellyD) * front;
-    const throat = smooth(0.06, -0.02, sdEllipsoid(x, y, z, 0.2, 0.49, 0, 0.12, 0.06, 0.17)) * smooth(0.12, 0.2, x);
+    const throat = smooth(0.06, -0.02, sdEllipsoid(x, y, z, 0.2 + HEAD.x, 0.49 + HEAD.y, 0, 0.12, 0.06, 0.17)) * smooth(0.12 + HEAD.x, 0.2 + HEAD.x, x);
     m = Math.max(m, throat * 0.8);
     c.lerp(cream, m);
     // cheek blush
-    const bd = (x - 0.225) ** 2 + (y - 0.515) ** 2 + (az - 0.2) ** 2;
+    const bd = (x - 0.225 - HEAD.x) ** 2 + (y - 0.515 - HEAD.y) ** 2 + (az - 0.2) ** 2;
     c.lerp(blush, Math.exp(-bd / 0.0028) * 0.5);
     // freckles on the back & crown
     for (const [fx, fy, fz] of FRECKLES) {
@@ -681,7 +696,7 @@ export class PogoRig {
     for (const side of [-1, 1]) {
       const b = new THREE.Mesh(new THREE.CircleGeometry(0.05, 20), blushMat);
       const dir = [Math.cos(0.85), -0.05, side * Math.sin(0.85)];
-      const p = traceSurface(pogoSDF, [0, 0.515, 0], dir, 0.6);
+      const p = traceSurface(pogoSDF, [HEAD.x, 0.515 + HEAD.y, 0], dir, 0.6);
       b.position.set(p[0] + dir[0] * 0.004, p[1], p[2] + dir[2] * 0.004);
       b.lookAt(p[0] + dir[0], p[1] + dir[1], p[2] + dir[2]);
       face.add(b);
@@ -690,8 +705,8 @@ export class PogoRig {
 
     // Mouth shapes (wide frog mouth), placed on the front surface
     const mouth = new THREE.Group();
-    const my = 0.575;
-    const mouthP = traceSurface(pogoSDF, [0, my, 0], [1, 0, 0], 0.6);
+    const my = 0.575 + HEAD.y;
+    const mouthP = traceSurface(pogoSDF, [HEAD.x, my, 0], [1, 0, 0], 0.6);
     mouth.position.set(mouthP[0] + 0.006, my, 0);
     face.add(mouth);
     const mouths = {};
@@ -770,7 +785,8 @@ export class PogoRig {
       };
       for (let i = 0; i <= U; i++) {
         const a = (i / U) * Math.PI * 2;
-        const yc = 0.405 + Math.sin(a) * 0.012;
+        // sloped like a scarf on a forward-leaning neck: low under the chin, higher at the back
+        const yc = SCARF_Y - Math.cos(a) * SCARF_TILT + Math.sin(a) * 0.012;
         for (let j = 0; j <= V; j++) {
           const v = j / V - 0.5;
           const y = yc + v * 2 * half;
@@ -807,16 +823,19 @@ export class PogoRig {
       B.add(edge);
     }
     // flat knot at the back
-    const knotP = traceSurface(pogoSDF, [0, 0.4, 0.06], [-1, 0, 0], 0.6);
+    const knotY = SCARF_Y + SCARF_TILT - 0.005;
+    const knotP = traceSurface(pogoSDF, [0, knotY, 0.06], [-1, 0, 0], 0.6);
     const knot = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 12), scarfMat);
     knot.scale.set(0.45, 0.85, 1.1);
-    knot.position.set(knotP[0] - 0.03, 0.4, 0.06);
+    knot.position.set(knotP[0] - 0.03, knotY, 0.06);
     B.add(knot);
     this._knotX = knotP[0] - 0.035;
+    this._knotY = knotY;
     const tailMat = scarfMat.clone();
     tailMat.map = chunkyKnitTexture('v');
     tailMat.map.repeat.set(1, 1.5);
-    ud.scarfTails = [new ScarfTail(tailMat, 8, 0.068, 0.12, 0.022), new ScarfTail(tailMat, 7, 0.068, 0.11, 0.022)];
+    // long tails that hang down his back almost to the ground
+    ud.scarfTails = [new ScarfTail(tailMat, 9, 0.07, 0.13, 0.024), new ScarfTail(tailMat, 8, 0.07, 0.12, 0.024)];
     for (const tail of ud.scarfTails) {
       tail.mesh.castShadow = !ghost;
       this.yawRoot.add(tail.mesh, tail.tassels);
@@ -827,7 +846,7 @@ export class PogoRig {
     const arms = [];
     for (const side of [-1, 1]) {
       const shoulder = new THREE.Group();
-      shoulder.position.set(0.04, 0.37, side * 0.305);
+      shoulder.position.set(0.03, 0.385, side * 0.385);
       const arm = new THREE.Mesh(side < 0 ? armGeoL : armGeoR, limbSkin);
       const hand = arm;
       shoulder.add(arm);
@@ -853,7 +872,7 @@ export class PogoRig {
     const legs = [];
     for (const side of [-1, 1]) {
       const hip = new THREE.Group();
-      hip.position.set(-0.02, 0.15, side * 0.14);
+      hip.position.set(HIP.x, HIP.y, side * HIP.z);
       const foot = new THREE.Mesh(footGeo, limbSkin);
       hip.add(foot);
       if (!ghost) addOutline(foot);
@@ -1037,12 +1056,12 @@ export class PogoRig {
       const sgn = leg.side < 0 ? 1 : -1;
       const swing = Math.sin(ph) * sgn * 0.13 * stepAmt;
       const lift = Math.max(0, Math.sin(ph) * sgn) * 0.07 * stepAmt;
-      leg.hip.position.set(swing - 0.02, 0.15 + lift, leg.side * 0.14);
+      leg.hip.position.set(swing + HIP.x, HIP.y + lift, leg.side * HIP.z);
       leg.hip.rotation.z = -swing * 1.6;
     }
     if (!s.onGround) {
-      ud.legs[0].hip.position.set(0.06, 0.18 + (s.vy > 0 ? 0.04 : 0), -0.15);
-      ud.legs[1].hip.position.set(-0.04, 0.17, 0.15);
+      ud.legs[0].hip.position.set(HIP.x + 0.08, 0.18 + (s.vy > 0 ? 0.04 : 0), -HIP.z - 0.01);
+      ud.legs[1].hip.position.set(HIP.x - 0.02, 0.17, HIP.z + 0.01);
       ud.legs[0].hip.rotation.z = -0.5;
       ud.legs[1].hip.rotation.z = 0.3;
     }
@@ -1353,7 +1372,7 @@ export class PogoRig {
 
     // ---- Scarf physics (in yawRoot space) ----
     const knotX = this._knotX ?? -0.36;
-    this._anchor.set(knotX, 0.39 + this.body.position.y, 0.0);
+    this._anchor.set(knotX, (this._knotY ?? 0.45) + this.body.position.y, 0.0);
     const fwd = Math.abs(s.vx);
     const wind = fwd * 6 + Math.abs(s.vy) * 1.5 + (s.wind || 0) * 8;
     this._force.set(-wind * 2.2 - 0.8, -11 - s.vy * 1.5, Math.sin(t * 9) * wind * 0.6);
