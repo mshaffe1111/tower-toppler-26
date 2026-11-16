@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { TowerFx } from './towerFx.js';
-import { createPropMaterials, themeLedgeMaterials, buildTowerBody, buildDoor, buildLiftTrack, buildLiftPod, buildLedge, animateConveyorTextures, FH } from './props.js';
+import { createPropMaterials, themeLedgeMaterials, buildTowerBody, buildDoor, buildLiftTrack, buildLiftPod, buildLedge, animateConveyorTextures, FH, setStepHeight, STEP_ORIGINAL, STEP_REBOOT } from './props.js';
 import { PogoRig } from './pogo.js';
 import { Ocean } from './water.js';
 import { createTowerStoneMaterial, createLedgeStoneMaterial, setWaterlineY } from './materials.js';
@@ -80,7 +80,6 @@ const ORIGINAL_SIZE = { eye: 1.5, robot: 1.22, chaser: 1.22, bouncer: 1.63, roll
 const SUN_DIR = new THREE.Vector3(-0.2, 0.17, -0.96).normalize();
 const COL_ANGLE = TWO_PI / COLS;
 const TOWER_RADIUS = 2.55;
-const FLOOR_HEIGHT = FH; // one stair step (see props.js)
 
 function wrapAngle(a) {
   let res = a % TWO_PI;
@@ -947,7 +946,7 @@ export class GameRenderer {
     for (const el of tower.elevators) {
       group.add(buildLiftTrack(el, pal, mats));
       const pod = buildLiftPod(el, pal, mats, this.softDotTex);
-      pod.position.y = el.startFloor * FLOOR_HEIGHT;
+      pod.position.y = el.startFloor * FH;
       group.add(pod);
       elevatorPods.push(pod);
       updaters.push(pod.userData.update);
@@ -1183,7 +1182,7 @@ export class GameRenderer {
     const theta = wrapAngle((col - camCol) * COL_ANGLE);
     if (Math.abs(theta) > Math.PI * 0.55) return null;
     const r = TOWER_RADIUS + radialOffset;
-    const v = this._v3b.set(r * Math.sin(theta), floor * FLOOR_HEIGHT, r * Math.cos(theta)).project(this.towerCam);
+    const v = this._v3b.set(r * Math.sin(theta), floor * FH, r * Math.cos(theta)).project(this.towerCam);
     return { x: (v.x * 0.5 + 0.5) * this.width, y: (0.5 - v.y * 0.5) * this.height };
   }
 
@@ -1222,12 +1221,24 @@ export class GameRenderer {
 
   renderTowerScene(state) {
     const { tower, player, camCol, camFloor, time, particles, snowballs, topple } = state;
+    // the Original is built to the 7800's proportions (lower steps against the tower)
+    setStepHeight(state.original ? STEP_ORIGINAL : STEP_REBOOT);
     const pal = tower.palette;
+    // A long lens from further back: the 7800 draws the tower flat, so Pogo (who stands in front
+    // of it) mustn't be magnified against it. 46 degrees made him 0.30 of the tower's radius on
+    // screen against the 7800's 0.24; 18 degrees gives ~0.245. The Reboot keeps a little depth.
+    const wantFov = state.original ? 18 : 30;
+    if (this.towerCam.fov !== wantFov) {
+      this.towerCam.fov = wantFov;
+      this.towerCam.updateProjectionMatrix();
+    }
     const aspect = this.towerCam.aspect;
     // Fit ~3.7 world units either side of the tower axis so the ledges curving around the sides
     // (where you're heading next) stay on screen on narrow phones.
     const halfTan = Math.tan(THREE.MathUtils.degToRad(this.towerCam.fov * 0.5));
-    const camZ = Math.max(10.5, Math.min(15.5, 3.7 / (halfTan * Math.max(0.35, aspect))));
+    const lens = Math.tan(THREE.MathUtils.degToRad(23)) / halfTan; // distance scale vs the 46-degree view
+    const camZ = Math.max(10.5 * lens, Math.min(15.5 * lens, 3.7 / (halfTan * Math.max(0.35, aspect))));
+    this._camExtra = camZ - Math.max(10.5, Math.min(15.5, 3.7 / (Math.tan(THREE.MathUtils.degToRad(23)) * Math.max(0.35, aspect))));
     // camFloor is already smoothed & jump-stabilised by the game; a gentle downward tilt shows ledge tops.
     const nowMs = performance.now();
     this._realDt = this._lastFrameMs ? Math.min(0.25, (nowMs - this._lastFrameMs) / 1000) : 0.016;
@@ -1240,16 +1251,17 @@ export class GameRenderer {
     pull = settings.reducedMotion ? pull * 0.4 : pull;
     const ease = pull * pull * (3 - 2 * pull);
     this._pullT = ease;
-    const focusY = camFloor * FLOOR_HEIGHT + ease * 1.6;
+    const focusY = camFloor * FH + ease * 1.6;
     const shake = getShakeOffset(state.shake, time);
 
     // Idle push-in: stand still and the camera drifts closer for a character moment
     const idleGoal = state.mode === 'tower' && (player.idleTime || 0) > 2.5 && !settings.reducedMotion ? 1 : 0;
     this._idleZoom = (this._idleZoom || 0) + (idleGoal - (this._idleZoom || 0)) * Math.min(1, (this._realDt || 0.016) * (idleGoal ? 0.8 : 4));
     const iz = this._idleZoom * this._idleZoom * (3 - 2 * this._idleZoom);
-    const pyFocus = player.floor * FLOOR_HEIGHT + 0.6;
+    const pyFocus = player.floor * FH + 0.6;
     const zoomY = (pyFocus - focusY) * iz * 0.6;
-    this.towerCam.position.set(shake.x, focusY + 1.15 + ease * 2.2 + shake.y + zoomY - iz * 0.5, camZ + ease * 7 - iz * camZ * 0.32);
+    // (height above the focus scales with the distance, so the downward tilt stays the same)
+    this.towerCam.position.set(shake.x, focusY + (1.15 + ease * 2.2) * lens + shake.y + zoomY - iz * 0.5, camZ + ease * 7 * lens - iz * camZ * 0.32);
     this.towerCam.lookAt(shake.x, focusY - 0.35 + shake.y + zoomY, 0);
     this.towerCam.updateMatrixWorld();
 
@@ -1315,7 +1327,7 @@ export class GameRenderer {
       su.shallowColor.value.lerp(this._tempColor.copy(this._sceneSea).multiplyScalar(0.75), 0.5 * heal);
       su.deepColor.value.lerp(this._tempColor.copy(this._sceneSea).multiplyScalar(0.18), 0.4 * heal);
     }
-    const seaY = mech.kind === 'flood' ? mech.waterFloor * FLOOR_HEIGHT : -0.62;
+    const seaY = mech.kind === 'flood' ? mech.waterFloor * FH : -0.62;
     // Ripples: splashes from the game, raindrops in storms, and the occasional lapping ring
     if (state.waterEvents && state.waterEvents.length) {
       for (const ev of state.waterEvents) {
@@ -1365,6 +1377,9 @@ export class GameRenderer {
     }
 
     if (!orig) this._applyTimeOfDay(state, mech, dark, bolt);
+    // fog distances are from the camera, which now sits further back
+    this.towerScene.fog.near += this._camExtra || 0;
+    this.towerScene.fog.far += this._camExtra || 0;
 
     // Swap cached tower group if tower changed
     const cached = this._getOrBuildTowerGroup(tower);
@@ -1381,7 +1396,7 @@ export class GameRenderer {
 
     // Tower topple animation
     if (topple.active) {
-      tg.position.y = -topple.progress * tower.floors * FLOOR_HEIGHT * 1.05;
+      tg.position.y = -topple.progress * tower.floors * FH * 1.05;
       tg.rotation.z = Math.sin(time * 38) * 0.045 * (1 - topple.progress) + topple.progress * 0.14;
       tg.position.x = Math.sin(time * 48) * 0.16 * (1 - topple.progress);
 
@@ -1461,7 +1476,7 @@ export class GameRenderer {
     for (let i = 0; i < state.elevators.length; i++) {
       const el = state.elevators[i];
       const pod = cached.elevatorPods[i];
-      if (pod) pod.position.y = el.floor * FLOOR_HEIGHT;
+      if (pod) pod.position.y = el.floor * FH;
     }
     const thrustPulse = 0.75 + 0.35 * Math.sin(time * 24);
     for (const th of cached.elevatorThrusters) {
@@ -1482,7 +1497,7 @@ export class GameRenderer {
     const pr = TOWER_RADIUS + 0.38;
     const px = pr * Math.sin(pTheta);
     const pz = pr * Math.cos(pTheta);
-    const py = player.floor * FLOOR_HEIGHT + (topple.active ? tg.position.y : 0);
+    const py = player.floor * FH + (topple.active ? tg.position.y : 0);
 
     const inTunnel = Boolean(player.hidden && player.tunnelTimer > 0 && !topple.active);
     this.tunnelVortexGroup.visible = inTunnel;
@@ -1504,7 +1519,9 @@ export class GameRenderer {
       this._applySkin(this.pogoGroup, currentSkin());
       this.pogoGroup.position.set(px, py + (player.hang ? -0.3 : 0), pz); // hanging: hands at the ledge lip
       this.pogoGroup.rotation.set(player.hang ? -0.25 : 0, pTheta, 0);
-      this.pogoGroup.scale.setScalar(0.72); // like the 7800 sprite (~15% of the tower face), small against the tower
+      // Reboot: ~2 steps tall. Original: the 7800 sprite, 2.1 rows of its lower steps (0.24 of the
+      // tower's radius, 0.8 of a column wide), measured from the player's clip
+      this.pogoGroup.scale.setScalar(0.72 * (FH / 0.36) * (2.1 / 2.0));
 
       // Nearest threat drives Pogo's eyes and nerves
       let dangerDir = null;
@@ -1557,7 +1574,7 @@ export class GameRenderer {
       // Landing Target / Shadow Ring at player.landingFloor
       const lf = player.landingFloor != null ? player.landingFloor : -0.55;
       const dist = Math.max(0, player.floor - lf);
-      this.landingRingGroup.position.set(px, lf * FLOOR_HEIGHT + 0.03, pz);
+      this.landingRingGroup.position.set(px, lf * FH + 0.03, pz);
       const ringScale = Math.max(0.55, 1.15 - dist * 0.12);
       this.landingRingGroup.scale.setScalar(ringScale);
       const overSea = lf <= -0.5;
@@ -1594,7 +1611,7 @@ export class GameRenderer {
       // bouncing ball 1.23, rolling ball 1.29, spiker 1.61, molecule 0.62 rows at scale 0.95).
       const sizeMode = state.original ? 'o' : 'r';
       if (slot.sizeMode !== sizeMode) {
-        slot.mesh.scale.setScalar(0.95 * (state.original ? ORIGINAL_SIZE[en.type] || 1 : 1));
+        slot.mesh.scale.setScalar(0.95 * (FH / 0.36) * (state.original ? ORIGINAL_SIZE[en.type] || 1 : 1));
         slot.sizeMode = sizeMode;
         slot.groundOffset = undefined;
       }
@@ -1604,8 +1621,8 @@ export class GameRenderer {
       if (slot.groundOffset === undefined) slot.groundOffset = this._enemyGroundOffset(slot.mesh, en.type, state.original);
       // frozen: the ice block's top sits exactly where Pogo can stand on it (game ICE_TOP 0.95);
       // the Original's stunned ball just stops where it is
-      const yOff = en.stunTimer > 0 && !en.dead && !state.original ? 1.6 * FLOOR_HEIGHT - 0.367 * slot.mesh.scale.y : slot.groundOffset;
-      slot.mesh.position.set(er * Math.sin(eTheta), en.floor * FLOOR_HEIGHT + yOff, er * Math.cos(eTheta));
+      const yOff = en.stunTimer > 0 && !en.dead && !state.original ? 1.6 * FH - 0.367 * slot.mesh.scale.y : slot.groundOffset;
+      slot.mesh.position.set(er * Math.sin(eTheta), en.floor * FH + yOff, er * Math.cos(eTheta));
       const animEn = en.type === 'robot' ? { ...en, type: 'chaser', alert: 0 } : en;
       animateEnemy(slot.mesh, animEn, { time, dt: this._realDt || 1 / 60, eTheta, player: { col: player.col, floor: player.floor }, camCol, COLS });
 
@@ -1614,7 +1631,7 @@ export class GameRenderer {
         const w = this._getWarnSprite(warnIdx++);
         const side = Math.sign(eTheta);
         const halfW = Math.tan(THREE.MathUtils.degToRad(this.towerCam.fov * 0.5)) * this.towerCam.aspect * (this.towerCam.position.z - 2.5);
-        w.position.set(side * (halfW - 0.35), en.floor * FLOOR_HEIGHT + 0.3, 2.5);
+        w.position.set(side * (halfW - 0.35), en.floor * FH + 0.3, 2.5);
         const pulse = 0.85 + Math.sin(time * 14) * 0.15;
         w.scale.set(0.62 * pulse, 0.62 * pulse, 1);
         w.material.opacity = 0.95;
@@ -1639,7 +1656,7 @@ export class GameRenderer {
       m.visible = true;
       const st = wrapAngle((sb.col - camCol) * COL_ANGLE);
       const sr = TOWER_RADIUS + 0.38;
-      m.position.set(sr * Math.sin(st), sb.floor * FLOOR_HEIGHT, sr * Math.cos(st)); // from Pogo's hands
+      m.position.set(sr * Math.sin(st), sb.floor * FH, sr * Math.cos(st)); // from Pogo's hands
       m.rotation.set(time * 6, time * 8, 0);
       m.scale.setScalar(1 + (sb.power || 0) * 1.6);
     }
@@ -1654,7 +1671,7 @@ export class GameRenderer {
 
     // World effects: clouds, birds, weather, props, guardian, ghost
     if (settings.ghosts !== false && state.ghostData) this.fx.ensureGhost(() => new PogoRig({ ghost: true }).group);
-    this.fx.update(state, { time, camCol, cam: this.towerCam, focusY, tg, TOWER_RADIUS, FLOOR_HEIGHT, pal });
+    this.fx.update(state, { time, camCol, cam: this.towerCam, focusY, tg, TOWER_RADIUS, FLOOR_HEIGHT: FH, pal });
 
     // Tilt-shift focus follows Pogo's height on screen
     const pScreen = this._v3b.set(px, py + 0.4, pz).project(this.towerCam);
@@ -1780,7 +1797,7 @@ export class GameRenderer {
       if (isTower && pop.col != null && pop.floor != null) {
         const theta = wrapAngle((pop.col - camCol) * COL_ANGLE);
         const r = TOWER_RADIUS + 0.85;
-        slot.sprite.position.set(r * Math.sin(theta), pop.floor * FLOOR_HEIGHT + 0.6 + t * 0.85, r * Math.cos(theta));
+        slot.sprite.position.set(r * Math.sin(theta), pop.floor * FH + 0.6 + t * 0.85, r * Math.cos(theta));
         slot.sprite.scale.set(1.6, 0.4, 1);
       } else if (pop.x != null && pop.y != null) {
         const wp = this._screenToWorld(pop.x, pop.y, cam, 1.5);

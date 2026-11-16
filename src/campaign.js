@@ -14,6 +14,13 @@ const GEN_MECH = { none: 'none', pistons: 'pistons', vault: 'none', blizzard: 'b
 
 import { buildRealTower, hasRealTower } from './realTowers.js';
 import { TOWER_MATERIAL } from './props.js';
+import { makeGeneratedTower } from './towergen.js';
+
+// REBOOT towers come from the grid generator built on the real towers' pieces (staircases, lifts
+// level with the floor, door pairs, single crumbling steps), each proven climbable. Heights grow
+// through the campaign (44 -> 79 rows, +6 on a tower's third level).
+const REBOOT_LOOK = ['eye', 'robot', 'spiker', 'eye', 'spiker', 'robot', 'spiker', 'eye'];
+export const rebootHeight = (tower, level) => 44 + tower * 5 + (level === 3 ? 6 : 0);
 
 const mix = (a, b) => (Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x632be5ab, 0xc2b2ae35)) >>> 0;
 
@@ -50,7 +57,19 @@ export function makeCampaignProvider({ towers, procgen, runSeed, variant }) {
       // fresh each campaign. Tall, staircase-led towers at the spec heights.
       const canonical = level === 1;
       const difficulty = Math.min(0.95, 0.12 + tower * 0.09 + (level - 1) * 0.08);
-      const t = procgen.generateTower({
+      const seed = canonical ? mix(0x7901, tower) : mix(runSeed >>> 0, tower * 16 + level);
+      const t =
+        makeGeneratedTower({
+          seed,
+          height: rebootHeight(tower, level),
+          difficulty,
+          id: base.id,
+          name: base.name,
+          look: REBOOT_LOOK[tower % REBOOT_LOOK.length],
+          palette: base.palette,
+          mechanic: GEN_MECH[base.mechanic] || 'none',
+        }) ||
+        procgen.generateTower({
         seed: canonical ? mix(0x7800 + (variant === 'original' ? 0 : 0x101), tower) : mix(runSeed >>> 0, tower * 16 + level),
         difficulty,
         id: base.id,

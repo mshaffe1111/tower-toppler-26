@@ -61,6 +61,10 @@ const ENEMY_PACE = 0.62; // global enemy speed multiplier (classic, deliberate p
 const ICE_TOP = 1.6; // a frozen enemy's ice block top, in steps above its floor (matches the drawn block)
 // Sizes in steps (one step = props FH, ~one brick row): Pogo is ~1.8 steps tall, enemies ~1.6
 const POGO_H = 1.8;
+// What you see, in steps (renderer: Pogo 2.08 rows tall; ledge slabs 0.175 units = 0.62 of a
+// 0.28 row): heads bump on the slab's underside, so Pogo never pokes into a ledge above
+const POGO_VIS_H = 2.05;
+const SLAB_ROWS = 0.62;
 // ORIGINAL timing from the PICO-8 port, on the same clock as everything else: 32 port ticks a
 // second, the scale at which its walk and lift speeds match the 7800 footage (2.0 columns/s,
 // 4 rows/s). Port source: the molecule ("bonker") waits 600 ticks after the last one, then
@@ -1157,7 +1161,8 @@ export class TowerTopplerGame {
     else p.jumpBufferTimer = Math.max(0, p.jumpBufferTimer - dt);
 
     // Smart jump on a lift: jumping rides it up instead of hopping off (until it reaches the top)
-    const liftRide = p.onElevator && p.onElevator.floor < p.onElevator.maxFloor - 0.01;
+    // (walking across a lift, a jump is a jump)
+    const liftRide = p.onElevator && p.onElevator.floor < p.onElevator.maxFloor - 0.01 && targetVx === 0;
     if (liftRide && p.jumpBufferTimer > 0) p.jumpBufferTimer = 0;
 
     // Jump (also lets go of a ledge hang)
@@ -1242,6 +1247,19 @@ export class TowerTopplerGame {
 
     this._updateFire(dt, stunned);
 
+    // Lifts are level with the floor: walking onto one at rest puts you on it (no hop)
+    if (p.onGround && !p.onElevator && !p.hang) {
+      const el = this.elevators.find((e) => Math.abs(e.floor - p.floor) < 0.06 && Math.abs(colDist(p.col, e.col + 0.5)) < 0.4);
+      if (el) {
+        p.onElevator = el;
+        if (this.original && !el.boarded) {
+          el.boarded = true;
+          this.addScore(50);
+          this.addPopup({ col: p.col, floor: p.floor + 1.0, text: '+50', color: '#a7f3d0', maxLife: 0.7 });
+        }
+      }
+    }
+
     // ----- Vertical physics -----
     const wasOnGround = p.onGround;
     const prevVy = p.vy;
@@ -1265,7 +1283,11 @@ export class TowerTopplerGame {
       }
     } else if (p.onElevator) {
       const el = p.onElevator;
-      if (Math.abs(colDist(p.col, el.col + 0.5)) > 0.65) {
+      if (Math.abs(colDist(p.col, el.col + 0.5)) > 0.4 && !el.autoDir) {
+        // walked off: onto the ledge beside it (level), or off the edge
+        p.onElevator = null;
+        p.onGround = Boolean(this._findLedgeAt(p.col, p.floor));
+      } else if (Math.abs(colDist(p.col, el.col + 0.5)) > 0.65) {
         el.autoDir = 0;
         p.onElevator = null;
         p.onGround = false;
@@ -1338,14 +1360,14 @@ export class TowerTopplerGame {
         p.vy = Math.max(-maxFall, p.vy - (this.original ? PHYS.origFallG : PHYS.gravity) * dt);
         p.floor += p.vy * dt;
       }
-      // ORIGINAL: ledges are solid blocks, so a jump bumps its head on one above instead of passing
-      // through (our slabs are half a row thick, so the bump is at the slab's underside)
-      if (this.original && p.vy > 0 && !p.tumbling) {
-        const head = p.floor + POGO_H;
-        const prevHead = prevFloor + POGO_H;
+      // Ledges are solid blocks (as in 1987): a jump bumps its head on the slab's underside
+      // instead of passing through it
+      if (p.vy > 0 && !p.tumbling) {
+        const head = p.floor + POGO_VIS_H;
+        const prevHead = prevFloor + POGO_VIS_H;
         for (const l of this.ledges) {
           if (!this._isSolid(l) || Math.abs(colDist(p.col, l.col + 0.5)) > 0.42) continue;
-          const bottom = l.type === 'box' || l.type === 'pillar' ? l.floor : l.floor - 0.5;
+          const bottom = l.type === 'box' || l.type === 'pillar' ? l.floor : l.floor - SLAB_ROWS;
           if (l.type === 'box' && !l.h) continue;
           if (bottom > prevHead - 0.01 && bottom <= head) {
             p.floor = bottom - POGO_H - 0.001;
@@ -2642,12 +2664,16 @@ export class TowerTopplerGame {
     this.peek = (this.peek || 0) + (peekGoal - (this.peek || 0)) * Math.min(1, dt * 4);
     if (p.onGround || p.hidden || p.hang) this.camAnchor = p.floor;
     let focus = this.camAnchor;
-    if (!p.onGround && !p.hidden && !p.hang) {
+    if (this.original && !p.hidden) {
+      // ORIGINAL: the 7800 scrolls the tower to keep Pogo at the same height on screen through
+      // hops, jumps and climbs (within half a row in the player's clip)
+      focus = p.floor;
+    } else if (!p.onGround && !p.hidden && !p.hang) {
       if (p.floor < this.camAnchor) focus = p.floor;
       else focus = this.camAnchor + (p.floor - this.camAnchor) * 0.3;
     }
     const targetFloor = Math.max(2, focus + 2.2 + (this.peek || 0) + (this.lookFloor || 0));
-    const rate = look && look.active ? 10 : targetFloor < this.camFloor ? 12 : 9;
+    const rate = look && look.active ? 10 : this.original ? 18 : targetFloor < this.camFloor ? 12 : 9;
     this.camFloor += (targetFloor - this.camFloor) * Math.min(1, dt * rate);
   }
 

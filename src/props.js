@@ -485,14 +485,27 @@ export function buildLedge(l, pal, mats) {
 export const DOOR_W = 0.68; // world units across the opening
 // World height of one floor (one stair step). Measured from 7800 footage: a step is about one
 // brick row and Pogo is about two steps tall, so steps are low and wide like real stairs.
-export const FH = 0.36;
-export const DOOR_H = 1.0; // a doorway is ~2.8 steps tall: taller than Pogo
-let DGEO = null;
+// Both modes use the 7800's proportions, measured from the player's clip: a step row is 0.28 of
+// a column's width (21.5 px rows on a 195 px-radius tower), so stairs, Pogo and enemies sit low
+// against the tower. (Kept switchable per mode with setStepHeight(); everything reads FH live.)
+export const STEP_ORIGINAL = 0.28;
+export const STEP_REBOOT = 0.28;
+export let FH = STEP_REBOOT;
+export let DOOR_H = FH * 2.78; // a doorway is ~2.8 steps tall: taller than Pogo
+let COURSE_H = FH / 2; // two brick courses per step
+export function setStepHeight(h) {
+  if (h === FH) return;
+  FH = h;
+  DOOR_H = h * 2.78;
+  COURSE_H = h / 2;
+}
+const DGEOS = {};
 function doorGeos() {
-  if (DGEO) return DGEO;
-  DGEO = { portal: new THREE.PlaneGeometry(DOOR_W * 0.96, DOOR_H * 0.96) };
+  if (DGEOS[FH]) return DGEOS[FH];
+  const DGEO = { portal: new THREE.PlaneGeometry(DOOR_W * 0.96, DOOR_H * 0.96) };
   DGEO.portal.translate(0, (DOOR_H * 0.96) / 2 + 0.02, 0);
   for (const geo of Object.values(DGEO)) geo.userData.shared = true;
+  DGEOS[FH] = DGEO;
   return DGEO;
 }
 
@@ -751,7 +764,6 @@ export function towerStyleName(tower) {
 // Measured from the originals: 5 brick rows per floor (a ledge takes the place of one), ~8-9
 // bricks across the visible face = 22 around (each ~0.74 wide, ~4:1), thin dark mortar
 const BRICKS_AROUND = 22;
-const COURSE_H = 0.18; // two brick courses per step (FH)
 const BRICK_PROUD = 0.055; // how far a brick face stands out from the mortar
 const BRICK_GAIN = 1.22; // instance colour gain (the clay texture is ~0.85 albedo)
 const MERLONS = 12;
