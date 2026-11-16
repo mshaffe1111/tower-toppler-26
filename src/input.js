@@ -1,7 +1,7 @@
 // Multi-source Input Controller: floating analog thumbstick + action buttons + on-canvas gestures + keyboard + gamepad.
 // Every action is held by a *set of sources* (a key, a pointer, the gamepad...), so releasing one source
 // never cancels another one that is still holding the same action (no more "stuck" or "dropped" inputs).
-const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'fire'];
+const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'fire', 'rewind'];
 
 export class InputController {
   constructor() {
@@ -30,6 +30,7 @@ export class InputController {
   }
 
   haptic(ms = 12) {
+    if (this.hapticsEnabled === false) return;
     if (navigator.vibrate) {
       try {
         navigator.vibrate(ms);
@@ -241,6 +242,7 @@ export class InputController {
     };
     bindAction('btn-jump', 'jump');
     bindAction('btn-fire', 'fire');
+    bindAction('btn-rewind', 'rewind');
 
     // On-canvas gestures: horizontal drag = walk (relative, re-centres so reversing is instant),
     // swipe up = jump (+ up for doors/lifts), swipe down = down, quick tap = fire.
@@ -342,6 +344,8 @@ export class InputController {
       KeyJ: 'fire',
       Enter: 'fire',
       ShiftLeft: 'fire',
+      KeyR: 'rewind',
+      Backspace: 'rewind',
     };
     window.addEventListener('keydown', (e) => {
       if (e.target instanceof HTMLSelectElement) return;
@@ -408,6 +412,7 @@ export class InputController {
       down: btn(13) || ay > 0.55,
       jump: btn(0) || btn(1),
       fire: btn(2) || btn(3) || btn(5) || btn(7),
+      rewind: btn(4) || btn(6) || btn(8),
     };
     let any = false;
     for (const a of ACTIONS) {

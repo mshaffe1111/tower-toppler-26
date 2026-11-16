@@ -174,6 +174,10 @@ export function createTowers() {
       { id: 't3a', col: 3, floor: 4, targetId: 't3b', isExit: false },
       { id: 't3b', col: 11, floor: 7, targetId: 't3a', isExit: false },
       { id: 't3exit', col: 7, floor: 16, targetId: null, isExit: true },
+      // Secret vaults hidden behind trick doors (each holds one of the tower's 3 star-fish)
+      { id: 't3v1', col: 14, floor: 3, targetId: null, isExit: false, vault: true },
+      { id: 't3v2', col: 7, floor: 9, targetId: null, isExit: false, vault: true },
+      { id: 't3v3', col: 4, floor: 16, targetId: null, isExit: false, vault: true },
     ],
     enemies: [
       { type: 'bouncer', col: 6, floor: 1, dir: 1, speed: 1.8 },
@@ -433,5 +437,19 @@ export function createTowers() {
     ],
   });
 
-  return [t1, t2, t3, t4, t5, t6, t7, t8];
+  // Each tower has one signature idea, introduced gently and then pushed (see game.js):
+  //  none      – the tutorial tower
+  //  pistons   – clockwork ledges that retract into the wall on a rhythm
+  //  vault     – trick doors hide secret vaults
+  //  blizzard  – snowstorm gusts; frozen enemies stay frozen longer
+  //  collapse  – the tower crumbles away beneath you as time runs out
+  //  flood     – the sea rises: the timer is the water you can see
+  //  dark      – a night storm: Pogo's lantern and lightning flashes
+  //  storm     – gales, embers and a guardian eye that must be defeated to open the exit
+  const mechanics = ['none', 'pistons', 'vault', 'blizzard', 'collapse', 'flood', 'dark', 'storm'];
+  const towers = [t1, t2, t3, t4, t5, t6, t7, t8];
+  towers.forEach((t, i) => {
+    t.mechanic = mechanics[i];
+  });
+  return towers;
 }

@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { TowerFx } from './towerFx.js';
+import { PostFX } from './postfx.js';
+import { settings, currentSkin } from './settings.js';
 import { COLS } from './levels.js';
 
 const TWO_PI = Math.PI * 2;
@@ -469,10 +472,42 @@ export class GameRenderer {
 
     this._initTowerScene();
     this._initSubScene();
+
+    this.fx = new TowerFx(this.towerScene, this, this.softDotTex);
+    this.postfx = new PostFX(this.webgl, { onTierChange: (tier) => this._applyQuality(tier) });
+    this.postfx.attach(this.towerScene, this.towerCam);
+    this.postfx.setMode(settings.quality || 'auto');
+    this.postfx.setDiorama(settings.diorama !== false);
   }
 
   _renderWithComposer(scene, camera) {
     this.webgl.render(scene, camera);
+  }
+
+  // Quality tier changed (auto or by the player): resolution, shadows, effects
+  _applyQuality(tier) {
+    this.qualityTier = tier;
+    if (this.keyLight) {
+      const wantShadow = tier !== 'low';
+      const size = tier === 'high' ? 2048 : 1024;
+      if (this.keyLight.castShadow !== wantShadow || this.keyLight.shadow.mapSize.x !== size) {
+        this.keyLight.castShadow = wantShadow;
+        this.keyLight.shadow.mapSize.set(size, size);
+        if (this.keyLight.shadow.map) {
+          this.keyLight.shadow.map.dispose();
+          this.keyLight.shadow.map = null;
+        }
+      }
+    }
+    if (this._lastSize) this.resize(this._lastSize.w, this._lastSize.h, this._lastSize.dpr);
+  }
+
+  setQualityMode(mode) {
+    this.postfx?.setMode(mode);
+  }
+
+  setDiorama(on) {
+    this.postfx?.setDiorama(on);
   }
 
   _initTowerScene() {
@@ -517,6 +552,7 @@ export class GameRenderer {
 
     const fillLight = new THREE.DirectionalLight('#1e3a8a', 0.28);
     fillLight.position.set(-6, 3, 10);
+    this.fillLight = fillLight;
     this.towerScene.add(fillLight);
 
     const rimLight = new THREE.DirectionalLight('#38bdf8', 0.75);
@@ -526,6 +562,13 @@ export class GameRenderer {
 
     this.heroLight = new THREE.PointLight('#38bdf8', 0.65, 6);
     this.towerScene.add(this.heroLight);
+
+    // Pogo's lantern for the dark tower, and a lightning flash light
+    this.lantern = new THREE.PointLight('#ffd7a0', 0, 7.5, 1.4);
+    this.towerScene.add(this.lantern);
+    this.lightningLight = new THREE.DirectionalLight('#dbeafe', 0);
+    this.lightningLight.position.set(-6, 20, 8);
+    this.towerScene.add(this.lightningLight);
 
     // 3D Starfield
     const starCount = 520;
@@ -634,6 +677,11 @@ export class GameRenderer {
       emissiveIntensity: 1.5,
       roughness: 0.1,
     });
+  }
+
+  _isSharedGeo(geo) {
+    const c = this._ledgeGeoCache;
+    return Boolean(c && Object.values(c).includes(geo));
   }
 
   _applyChrome(root) {
@@ -836,8 +884,87 @@ export class GameRenderer {
     g.userData.cryoChamber = cryoChamber;
     g.userData.muzzle = muzzle;
     g.userData.muzzleLight = muzzleLight;
+    g.userData.eyeGroup = eyeGroup;
+    g.userData.body = body;
+    g.userData.mats = { bodyMat, bootMat, lidMat, tipMat };
 
+    // Hat mount on top of the head
+    const hat = new THREE.Group();
+    hat.position.set(0.02, 0.72, 0);
+    g.add(hat);
+    g.userData.hat = hat;
+
+    // Ice block when Pogo is hit by his own snowball
+    const ice = new THREE.Mesh(
+      new THREE.BoxGeometry(0.9, 1.1, 0.8),
+      new THREE.MeshStandardMaterial({ color: '#bae6fd', emissive: '#38bdf8', emissiveIntensity: 0.3, transparent: true, opacity: 0.5, roughness: 0.05, depthWrite: false })
+    );
+    ice.position.y = 0.48;
+    ice.visible = false;
+    g.add(ice);
+    g.userData.ice = ice;
     return g;
+  }
+
+  // Skins & hats (unlocked with medals)
+  _applySkin(group, skin) {
+    const ud = group.userData;
+    if (!ud.mats || ud.skinId === skin.id) return;
+    ud.skinId = skin.id;
+    ud.mats.bodyMat.color.set(skin.body);
+    ud.mats.bodyMat.emissive.set(skin.emissive);
+    ud.mats.bodyMat.metalness = skin.metal ? 0.85 : 0.15;
+    ud.mats.bodyMat.roughness = skin.metal ? 0.22 : 0.35;
+    if (skin.metal && this.chromeEnv) {
+      ud.mats.bodyMat.envMap = this.chromeEnv;
+      ud.mats.bodyMat.needsUpdate = true;
+    }
+    ud.mats.lidMat.color.set(skin.body).multiplyScalar(0.8);
+    ud.mats.bootMat.color.set(skin.boots);
+    ud.mats.tipMat.emissive.set(skin.emissive);
+    const hat = ud.hat;
+    while (hat.children.length) hat.remove(hat.children[0]);
+    const mk = (geo, color, opts = {}) =>
+      new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.1, ...opts }));
+    if (skin.hat === 'beanie') {
+      const cap = mk(new THREE.SphereGeometry(0.2, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), '#e0f2fe');
+      const band = mk(new THREE.TorusGeometry(0.19, 0.04, 8, 20), '#0284c7');
+      band.rotation.x = Math.PI / 2;
+      const pom = mk(new THREE.SphereGeometry(0.07, 10, 8), '#f472b6');
+      pom.position.y = 0.21;
+      hat.add(cap, band, pom);
+    } else if (skin.hat === 'horns') {
+      for (const z of [-0.12, 0.12]) {
+        const horn = mk(new THREE.ConeGeometry(0.05, 0.22, 8), '#fef3c7');
+        horn.position.set(0, 0.08, z);
+        horn.rotation.x = z * 2.5;
+        hat.add(horn);
+      }
+    } else if (skin.hat === 'visor') {
+      const v = mk(new THREE.BoxGeometry(0.12, 0.08, 0.36), '#22d3ee', { emissive: '#06b6d4', emissiveIntensity: 2 });
+      v.position.set(0.17, -0.1, 0);
+      hat.add(v);
+    } else if (skin.hat === 'antenna') {
+      const stalk = mk(new THREE.CylinderGeometry(0.015, 0.015, 0.3, 6), '#94a3b8', { metalness: 0.8 });
+      stalk.position.y = 0.15;
+      const ball = mk(new THREE.SphereGeometry(0.05, 10, 8), '#ef4444', { emissive: '#ef4444', emissiveIntensity: 2 });
+      ball.position.y = 0.32;
+      hat.add(stalk, ball);
+      ud.antennaBall = ball;
+    } else if (skin.hat === 'crown') {
+      const band = mk(new THREE.CylinderGeometry(0.15, 0.17, 0.1, 16, 1, true), '#facc15', { metalness: 0.9, roughness: 0.2, side: THREE.DoubleSide, envMap: this.chromeEnv || null });
+      band.position.y = 0.04;
+      hat.add(band);
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const spike = mk(new THREE.ConeGeometry(0.035, 0.1, 6), '#facc15', { metalness: 0.9, roughness: 0.2, envMap: this.chromeEnv || null });
+        spike.position.set(Math.cos(a) * 0.15, 0.13, Math.sin(a) * 0.15);
+        hat.add(spike);
+      }
+      const gem = mk(new THREE.OctahedronGeometry(0.04), '#f43f5e', { emissive: '#e11d48', emissiveIntensity: 1.5 });
+      gem.position.set(0.16, 0.05, 0);
+      hat.add(gem);
+    }
   }
 
   _buildDebrisPool() {
@@ -861,8 +988,19 @@ export class GameRenderer {
   }
 
   _getOrBuildTowerGroup(tower) {
-    if (this.towerCache.has(tower.id)) {
-      return this.towerCache.get(tower.id);
+    const cacheKey = tower.cacheKey ?? tower.id;
+    if (this.towerCache.has(cacheKey)) {
+      return this.towerCache.get(cacheKey);
+    }
+    // Keep memory bounded in endless runs: drop the oldest cached tower geometry
+    if (this.towerCache.size >= 3) {
+      const [oldKey, old] = this.towerCache.entries().next().value;
+      if (old.group !== this.currentTowerGroup) {
+        old.group.traverse((o) => {
+          if (o.isMesh && o.geometry && !this._isSharedGeo(o.geometry)) o.geometry.dispose();
+        });
+        this.towerCache.delete(oldKey);
+      }
     }
 
     const pal = tower.palette;
@@ -991,7 +1129,7 @@ export class GameRenderer {
 
       const inner = new THREE.Mesh(
         new THREE.BoxGeometry(0.54, 0.8, 0.1),
-        new THREE.MeshBasicMaterial({ color: door.isExit ? '#713f12' : '#020617' })
+        new THREE.MeshBasicMaterial({ color: door.isExit ? '#713f12' : door.vault ? '#2e1065' : '#020617' })
       );
       const portalEnergy = new THREE.Mesh(
         new THREE.PlaneGeometry(0.46, 0.72),
@@ -1005,8 +1143,8 @@ export class GameRenderer {
       portalEnergy.position.z = 0.06;
 
       const archMat = new THREE.MeshStandardMaterial({
-        color: door.isExit ? '#fde047' : pal.glow,
-        emissive: door.isExit ? '#f59e0b' : pal.glow,
+        color: door.isExit ? '#fde047' : door.vault ? '#c084fc' : pal.glow,
+        emissive: door.isExit ? '#f59e0b' : door.vault ? '#9333ea' : pal.glow,
         emissiveIntensity: 1.8,
       });
       const arch = new THREE.Mesh(
@@ -1312,11 +1450,17 @@ export class GameRenderer {
       conveyorRollers,
       cylMat,
     };
-    this.towerCache.set(tower.id, cached);
+    this.towerCache.set(cacheKey, cached);
     return cached;
   }
 
   _createEnemyMesh(type) {
+    if (type === 'fireball') {
+      const fb = this.fx.createFireballMesh();
+      fb.userData.body = fb.userData.core;
+      fb.userData.shell = new THREE.Object3D();
+      return fb;
+    }
     const g = this._createEnemyMeshInner(type);
     g.scale.setScalar(1.2); // read clearly at phone size
     g.traverse((o) => {
@@ -1503,8 +1647,9 @@ export class GameRenderer {
     }
 
     // Ice shell shown while stunned/frozen by a snowball
+    // Ice block shown while frozen: flat-topped so it reads as a platform you can stand on
     const shell = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.4, 0),
+      new THREE.BoxGeometry(0.66, 0.61, 0.62, 1, 1, 1),
       new THREE.MeshStandardMaterial({
         color: '#bae6fd',
         emissive: '#38bdf8',
@@ -1684,7 +1829,9 @@ export class GameRenderer {
   resize(w, h, dpr = 1) {
     this.width = w;
     this.height = h;
-    const clampedDpr = Math.min(dpr, 2);
+    this._lastSize = { w, h, dpr };
+    const clampedDpr = Math.min(dpr, this.postfx ? this.postfx.pixelRatioCap : 2);
+    this.postfx?.resize(w, h, clampedDpr);
     this.webgl.setPixelRatio(clampedDpr);
     this.webgl.setSize(w, h, false);
 
@@ -1763,10 +1910,21 @@ export class GameRenderer {
     const halfTan = Math.tan(THREE.MathUtils.degToRad(this.towerCam.fov * 0.5));
     const camZ = Math.max(10.5, Math.min(15.5, 3.7 / (halfTan * Math.max(0.35, aspect))));
     // camFloor is already smoothed & jump-stabilised by the game; a gentle downward tilt shows ledge tops.
-    const focusY = camFloor * FLOOR_HEIGHT;
+    const nowMs = performance.now();
+    this._realDt = this._lastFrameMs ? Math.min(0.25, (nowMs - this._lastFrameMs) / 1000) : 0.016;
+    this._lastFrameMs = nowMs;
+    const mech = state.mech || { kind: 'none', darkness: 0, lightning: 0, waterFloor: -0.62 };
+    // Summit / topple: slow cinematic pull-back to show the whole tower against the sky
+    let pull = 0;
+    if (state.summit) pull = Math.min(1, state.summit.t / state.summit.duration);
+    if (topple.active || state.mode === 'results') pull = 1;
+    pull = settings.reducedMotion ? pull * 0.4 : pull;
+    const ease = pull * pull * (3 - 2 * pull);
+    this._pullT = ease;
+    const focusY = camFloor * FLOOR_HEIGHT + ease * 1.6;
     const shake = getShakeOffset(state.shake, time);
 
-    this.towerCam.position.set(shake.x, focusY + 1.15 + shake.y, camZ);
+    this.towerCam.position.set(shake.x, focusY + 1.15 + ease * 2.2 + shake.y, camZ + ease * 7);
     this.towerCam.lookAt(shake.x, focusY - 0.35 + shake.y, 0);
     this.towerCam.updateMatrixWorld();
 
@@ -1795,8 +1953,40 @@ export class GameRenderer {
     su.time.value = time;
     su.skyColor.value.copy(this.towerScene.fog.color);
     su.glowColor.value.set(pal.glow);
-    su.shallowColor.value.set(pal.brickA).lerp(this._tempColor.set('#0b4f6c'), 0.65).multiplyScalar(0.8);
-    su.deepColor.value.set(pal.mortar).lerp(this._tempColor.set('#010810'), 0.6);
+    // The sea heals as towers fall: sickly toxic purple-green -> clear turquoise
+    const heal = Math.max(0, Math.min(1, state.healing || 0));
+    const toxicShallow = this._c1 || (this._c1 = new THREE.Color('#3b5214'));
+    const cleanShallow = this._c2 || (this._c2 = new THREE.Color('#0aa5b8'));
+    const toxicDeep = this._c3 || (this._c3 = new THREE.Color('#1b0b2a'));
+    const cleanDeep = this._c4 || (this._c4 = new THREE.Color('#012a40'));
+    su.shallowColor.value.copy(toxicShallow).lerp(cleanShallow, heal).lerp(this._tempColor.set(pal.brickA), 0.15).multiplyScalar(0.75);
+    su.deepColor.value.copy(toxicDeep).lerp(cleanDeep, heal);
+    this.seaMesh.position.y = mech.kind === 'flood' ? mech.waterFloor * FLOOR_HEIGHT : -0.62;
+
+    // Darkness (night storm) & lightning
+    const dark = mech.darkness || 0;
+    const bolt = mech.lightning || 0;
+    this.hemiLight.intensity = 0.6 * (1 - dark * 0.8) + bolt * 1.4;
+    this.keyLight.intensity = 1.7 * (1 - dark * 0.85);
+    this.rimLight.intensity = 0.75 * (1 - dark * 0.5);
+    this.lightningLight.intensity = bolt * 3.5;
+    this.fillLight.intensity = 0.28 * (1 - dark * 0.9);
+    this.rimLight.intensity = 0.75 * (1 - dark * 0.75);
+    this.webgl.toneMappingExposure = 1.05 * (1 - dark * 0.3) + bolt * 0.5;
+    this.lantern.intensity = dark > 0 ? 7 + Math.sin(time * 9) * 0.4 : 0;
+    this.lantern.distance = 6.5;
+    if (this._cachedTower?.cylMat) this._cachedTower.cylMat.emissiveIntensity = 0.35 + dark * 1.4;
+    this.lantern.color.set(dark > 0 ? '#ffd7a0' : '#ffffff');
+    if (dark > 0) {
+      this.towerScene.fog.color.multiplyScalar(1 - dark * 0.7).lerp(this._tempColor.set('#c7d2fe'), bolt * 0.5);
+      this.towerScene.fog.near = 20 - dark * 12;
+      this.towerScene.fog.far = 58 - dark * 30;
+      sky.topColor.value.multiplyScalar(1 - dark * 0.6).lerp(this._tempColor.set('#e0e7ff'), bolt * 0.4);
+      sky.horizonColor.value.copy(this.towerScene.fog.color);
+    } else {
+      this.towerScene.fog.near = 20;
+      this.towerScene.fog.far = 58;
+    }
 
     // Swap cached tower group if tower changed
     const cached = this._getOrBuildTowerGroup(tower);
@@ -1806,6 +1996,7 @@ export class GameRenderer {
       this.towerScene.add(this.currentTowerGroup);
     }
 
+    this._cachedTower = cached;
     // Rotate tower cylinder around Y so camCol faces +Z
     const tg = cached.group;
     tg.rotation.y = -camCol * COL_ANGLE;
@@ -1827,7 +2018,10 @@ export class GameRenderer {
       }
     } else {
       tg.position.set(0, 0, 0);
-      tg.rotation.z = 0;
+      // Height you can feel: the upper tower sways gently in the wind (more in gales)
+      const heightFrac = Math.min(1, player.floor / Math.max(1, tower.floors));
+      const gustAmp = mech.gust && mech.gust.state === 'blow' ? 2.2 : 1;
+      tg.rotation.z = settings.reducedMotion ? 0 : Math.sin(time * 0.7) * 0.0045 * heightFrac * gustAmp;
       this.debrisPool.group.visible = false;
     }
 
@@ -1843,8 +2037,33 @@ export class GameRenderer {
       const l = state.ledges[i];
       const mesh = cached.ledgeMeshes[i];
       if (!mesh) continue;
-      mesh.visible = !l.gone;
+      mesh.visible = !l.gone && !l.collapsed;
       if (!mesh.visible) continue;
+
+      if (l.piston) {
+        // Clockwork piston: slides into the wall, blinking red before it goes
+        const retract = l.retracted ? 1 : 0;
+        mesh.userData.slide = (mesh.userData.slide ?? 0) + (retract - (mesh.userData.slide ?? 0)) * 0.25;
+        const k = mesh.userData.slide;
+        mesh.scale.set(1 - k * 0.15, 1, 1 - k * 0.15);
+        mesh.position.y = mesh.userData.baseY - k * 0.02;
+        mesh.visible = k < 0.97;
+        if (!mesh.userData.pistonMat) {
+          mesh.traverse((o) => {
+            if (o.isMesh && !mesh.userData.pistonMat) {
+              o.material = o.material.clone();
+              mesh.userData.pistonMat = o.material;
+            }
+          });
+        }
+        const pm = mesh.userData.pistonMat;
+        if (pm && pm.emissive) {
+          const warn = l.pistonWarn && Math.sin(time * 30) > 0;
+          pm.emissive.set(warn ? '#ef4444' : '#a16207');
+          pm.emissiveIntensity = warn ? 1.2 : 0.35;
+        }
+        continue;
+      }
 
       if (l.type === 'crumble' && mesh.userData.mainMat) {
         mesh.userData.mainMat.color.set(l.crumbling ? '#ef4444' : '#f59e0b');
@@ -1904,10 +2123,19 @@ export class GameRenderer {
       const bob = moving ? Math.abs(Math.sin(time * 18)) * 0.08 : 0;
       const stride = moving ? Math.sin(time * 18) * 0.14 : 0;
 
-      this.pogoGroup.position.set(px, py + bob, pz);
+      this._applySkin(this.pogoGroup, currentSkin());
+      const ud = this.pogoGroup.userData;
+      // Summit celebration: happy hops and a spin
+      const cele = player.celebrate > 0 && (state.mode === 'summit' || state.mode === 'topple');
+      const celeHop = cele ? Math.abs(Math.sin(time * 8)) * 0.45 : 0;
+      // Hanging from a ledge lip: tucked in toward the wall
+      const hangOffset = player.hang ? 0.05 : 0;
+
+      this.pogoGroup.position.set(px, py + bob + celeHop + hangOffset, pz);
       // Angle Pogo 3/4 toward the camera (+Z) so both big eyes, belly & blaster are clearly visible!
       const faceYaw = player.facing < 0 ? Math.PI - 0.42 : 0.42;
-      this.pogoGroup.rotation.y = pTheta + faceYaw;
+      this.pogoGroup.rotation.y = pTheta + faceYaw + (cele ? time * 9 : 0);
+      this.pogoGroup.rotation.x = player.hang ? -0.25 : 0;
       // Arms-out wobble when the edge guard stops you at a drop into the sea
       const teeter = Math.min(1, (player.teeter || 0) / 0.25);
       this.pogoGroup.rotation.z = teeter > 0 ? -Math.sin(time * 26) * 0.16 * teeter : 0;
@@ -1923,20 +2151,40 @@ export class GameRenderer {
       this.pogoGroup.userData.footL.position.x = stride;
       this.pogoGroup.userData.footR.position.x = -stride;
 
+      // Eyes: blink, squint when hurt, sleepy when idle a long time, look around when bored
       const blinking = (time * 0.75) % 4.4 > 4.22;
-      const lidScaleY = blinking ? 1.0 : 0.05;
-      this.pogoGroup.userData.eyeL.userData.lid.scale.y = lidScaleY;
-      this.pogoGroup.userData.eyeR.userData.lid.scale.y = lidScaleY;
+      const idle = player.idleTime || 0;
+      let lidScaleY = blinking ? 1.0 : 0.05;
+      if (player.hurtFace > 0 || player.stunTimer > 0) lidScaleY = 0.7;
+      else if (idle > 7) lidScaleY = 0.55 + Math.sin(time * 1.5) * 0.25;
+      if (cele) lidScaleY = 0.45;
+      ud.eyeL.userData.lid.scale.y = lidScaleY;
+      ud.eyeR.userData.lid.scale.y = lidScaleY;
+      const eyeSquash = player.hurtFace > 0 ? 0.6 : 1;
+      ud.eyeL.scale.set(1, eyeSquash, 1);
+      ud.eyeR.scale.set(1, eyeSquash, 1);
+      ud.eyeGroup.rotation.y = idle > 2.5 ? Math.sin(time * 0.9) * 0.6 : 0;
+      // Foot tap & yawn stretch when idle
+      if (idle > 4.5 && !moving) ud.footR.position.y = 0.16 + Math.max(0, Math.sin(time * 9)) * 0.05;
+      else ud.footR.position.y = 0.16;
+      if (idle > 7) this.pogoGroup.scale.y *= 1 + Math.max(0, Math.sin(time * 0.8)) * 0.08;
+      if (ud.antennaBall) ud.antennaBall.material.emissiveIntensity = 1 + Math.sin(time * 6) * 1;
+      ud.ice.visible = player.frozenSelf > 0;
+      // Charge glow on the blaster
+      const ch = player.charge || 0;
+      ud.cryoChamber.material.emissiveIntensity = 1.2 + ch * 4 + (ch >= 1 ? Math.sin(time * 30) * 1.5 : 0);
+      ud.cryoChamber.material.emissive.set(ch > 0 ? '#e0f2fe' : '#0ea5e9');
 
       const mf = Math.max(0, player.muzzleFlash != null ? player.muzzleFlash : player.fireCooldown > 0.1 ? 0.1 : 0);
       const flashRatio = Math.min(1, mf / 0.14);
       this.pogoGroup.userData.barrel.position.x = 0.35 - flashRatio * 0.08;
       this.pogoGroup.userData.cryoChamber.position.x = 0.33 - flashRatio * 0.08;
-      this.pogoGroup.userData.muzzle.scale.setScalar(0.75 + flashRatio * 1.35);
+      this.pogoGroup.userData.muzzle.scale.setScalar(0.75 + flashRatio * 1.35 + ch * 0.9);
       this.pogoGroup.userData.muzzleLight.intensity = flashRatio * 2.6;
 
       this.heroLight.position.set(px, py + 0.8, pz + 0.8);
       this.heroLight.color.set(pal.glow);
+      this.lantern.position.set(px + 0.3, py + 1.1, pz + 0.6);
 
       // Landing Target / Shadow Ring at player.landingFloor
       const lf = player.landingFloor != null ? player.landingFloor : -0.55;
@@ -1993,7 +2241,7 @@ export class GameRenderer {
       ud.shell.visible = frozen;
       if (frozen) {
         const crack = en.stunTimer < 1 ? Math.sin(time * 40) * 0.04 : 0;
-        ud.shell.rotation.set(0.3, time * 0.4, crack * 4);
+        ud.shell.rotation.set(0, crack * 3, 0);
         ud.shell.scale.setScalar(1 + crack);
       }
       const flashK = en.hitFlash > 0 ? 1.25 : 1;
@@ -2026,6 +2274,11 @@ export class GameRenderer {
         const squash = frozen ? 0 : Math.max(0, 0.18 - h) / 0.18;
         body.scale.set(flashK * (1 + squash * 0.3), flashK * (1 - squash * 0.32 + (h > 0.4 ? 0.06 : 0)), flashK * (1 + squash * 0.3));
         body.position.y = -squash * 0.07;
+      } else if (ud.isFireball) {
+        ud.core.rotation.set(time * 7, time * 5, 0);
+        ud.halo.material.opacity = 0.7 + Math.sin(time * 30 + i) * 0.2;
+        ud.trail.forEach((t, k) => t.position.set(-(en.dir || 1) * (k + 1) * 0.16, Math.sin(time * 20 + k) * 0.03, 0));
+        slot.mesh.rotation.y = eTheta;
       } else if (en.type === 'eye' && ud.iris) {
         // Iris tracks Pogo
         const look = Math.max(-1, Math.min(1, wrapAngle((player.col - en.col) * COL_ANGLE) * 2));
@@ -2073,6 +2326,7 @@ export class GameRenderer {
       const sr = TOWER_RADIUS + 0.38;
       m.position.set(sr * Math.sin(st), sb.floor * FLOOR_HEIGHT + 0.28, sr * Math.cos(st));
       m.rotation.set(time * 6, time * 8, 0);
+      m.scale.setScalar(1 + (sb.power || 0) * 1.6);
     }
 
     // Parallax stars & planet
@@ -2083,7 +2337,15 @@ export class GameRenderer {
     this._syncParticles(this.particlePool, this.towerScene, particles, this.towerCam, TOWER_RADIUS + 0.6);
     this._syncPopups(state.popups || [], camCol, this.towerScene, this.towerCam, true);
 
-    this._renderWithComposer(this.towerScene, this.towerCam);
+    // World effects: clouds, birds, weather, props, guardian, ghost
+    if (settings.ghosts !== false && state.ghostData) this.fx.ensureGhost(() => this._buildPogoMesh());
+    this.fx.update(state, { time, camCol, cam: this.towerCam, focusY, tg, TOWER_RADIUS, FLOOR_HEIGHT, pal });
+
+    // Tilt-shift focus follows Pogo's height on screen
+    const pScreen = this._v3b.set(px, py + 0.4, pz).project(this.towerCam);
+    const focus = Math.max(0.25, Math.min(0.75, pScreen.y * 0.5 + 0.5));
+    this.postfx.monitor(this._realDt || 0.016);
+    this.postfx.render({ time, focus, flash: (state.mech?.lightning || 0) * 0.35, darkness: state.mech?.darkness || 0 });
   }
 
   _getWarnSprite(idx) {

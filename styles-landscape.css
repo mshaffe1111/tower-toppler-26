@@ -1,0 +1,538 @@
+/* ==========================================================================
+   Tower Toppler '26: landscape phone layout
+   Only applies to short landscape screens (phones held sideways). Desktops and
+   tablets (taller than 540px) keep the 480px portrait frame from styles.css.
+   The canvas fills the screen; HUD and touch controls float over it.
+   Load AFTER styles.css.
+   ========================================================================== */
+
+@media (orientation: landscape) and (max-height: 540px) {
+  :root {
+    --safe-left: env(safe-area-inset-left, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+    --ls-edge-l: max(12px, calc(var(--safe-left) + 6px));
+    --ls-edge-r: max(12px, calc(var(--safe-right) + 6px));
+    --ls-hud-h: 40px;
+    --ls-stick-h: min(188px, 48vh);
+  }
+
+  /* ---------- Full-bleed app frame ---------- */
+  #app {
+    max-width: none;
+    border-left: 0;
+    border-right: 0;
+    box-shadow: none;
+  }
+
+  #stage-wrap {
+    flex: 1 1 auto;
+    height: 100%;
+  }
+
+  /* ---------- Slim floating HUD: three glass pills in one row ---------- */
+  #hud {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 8px;
+    padding: calc(5px + var(--safe-top)) var(--ls-edge-r) 10px var(--ls-edge-l);
+    background: linear-gradient(180deg, rgba(3, 6, 16, 0.62) 0%, rgba(3, 6, 16, 0.28) 60%, rgba(3, 6, 16, 0) 100%);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-bottom: 0;
+    box-shadow: none;
+    pointer-events: none;
+    z-index: 30;
+  }
+
+  .hud-left,
+  .hud-right,
+  .hud-center {
+    flex-direction: row;
+    align-items: center;
+    gap: 7px;
+    height: 30px;
+    padding: 0 11px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, rgba(12, 22, 50, 0.72), rgba(5, 9, 24, 0.66));
+    border: 1px solid rgba(0, 240, 255, 0.24);
+    backdrop-filter: blur(10px) saturate(150%);
+    -webkit-backdrop-filter: blur(10px) saturate(150%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 3px 12px rgba(0, 0, 0, 0.4);
+  }
+
+  .hud-left {
+    justify-self: start;
+  }
+
+  .hud-right {
+    justify-self: end;
+    padding-right: 4px;
+  }
+
+  .hud-center {
+    padding: 0 4px 0 9px;
+  }
+
+  .hud-label {
+    font-size: 7px;
+    letter-spacing: 0.1em;
+    line-height: 1.05;
+    max-width: 44px;
+    white-space: normal;
+    text-align: left;
+    opacity: 0.9;
+  }
+
+  .hud-right .hud-label {
+    text-align: right;
+  }
+
+  .hud-score {
+    font-size: 12.5px;
+  }
+
+  .hud-lives {
+    margin-top: 0;
+    gap: 3px;
+  }
+
+  .life-pip {
+    width: 8px;
+    height: 8px;
+  }
+
+  .hud-tower-row {
+    gap: 4px;
+  }
+
+  .timer-shell {
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+
+  .hud-timer {
+    font-size: 15px;
+  }
+
+  .hud-actions {
+    margin-top: 0;
+    gap: 4px;
+    pointer-events: auto;
+  }
+
+  .hud-icon-btn {
+    width: 28px;
+    height: 24px;
+    border-radius: 999px;
+    font-size: 11px;
+  }
+
+  /* ---------- Stage furniture ---------- */
+  .altitude-meter {
+    top: calc(var(--ls-hud-h) + 10px + var(--safe-top));
+    bottom: calc(var(--ls-stick-h) + 18px + var(--safe-bottom));
+    right: var(--ls-edge-r);
+    height: auto;
+    min-height: 84px;
+    max-height: 240px;
+    transform: none;
+  }
+
+  .stage-banner {
+    top: calc(var(--ls-hud-h) + 14px + var(--safe-top));
+    padding: 8px 18px;
+  }
+
+  .banner-title {
+    font-size: 15px;
+  }
+
+  .action-prompt {
+    bottom: calc(12px + var(--safe-bottom));
+  }
+
+  .status-strip {
+    top: calc(var(--ls-hud-h) + 6px + var(--safe-top));
+    left: var(--ls-edge-l);
+  }
+
+  .boss-bar {
+    top: calc(var(--ls-hud-h) + 6px + var(--safe-top));
+    width: min(40%, 300px);
+  }
+
+  #stage-wrap.rewinding::before {
+    top: 50%;
+  }
+
+  /* ---------- Touch controls: transparent overlay in the bottom corners ---------- */
+  #touch-controls {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding: 0 var(--ls-edge-r) calc(8px + var(--safe-bottom)) var(--ls-edge-l);
+    background: none;
+    border-top: 0;
+    box-shadow: none;
+    pointer-events: none; /* the empty middle passes touches through to the canvas */
+    z-index: 20;
+  }
+
+  #touch-controls > .action-cluster,
+  #touch-controls > .stick-zone {
+    pointer-events: auto;
+  }
+
+  .action-cluster {
+    gap: 12px;
+    padding: 0 0 6px 4px;
+  }
+
+  #touch-controls.swapped .action-cluster {
+    padding: 0 4px 6px 0;
+  }
+
+  .action-btn {
+    width: 64px;
+    height: 64px;
+    opacity: 0.94;
+  }
+
+  .action-fire {
+    margin-bottom: 14px;
+  }
+
+  .action-jump {
+    width: 76px;
+    height: 76px;
+  }
+
+  .action-rewind {
+    width: 42px;
+    height: 42px;
+  }
+
+  .stick-zone {
+    flex: 0 0 auto;
+    width: clamp(168px, 26vw, 232px);
+    max-width: none;
+    height: var(--ls-stick-h);
+    border-radius: 32px;
+    background: radial-gradient(circle at 50% 55%, rgba(0, 240, 255, 0.07) 0%, rgba(0, 240, 255, 0) 68%);
+  }
+
+  .stick-base {
+    width: 120px;
+    height: 120px;
+    margin: -60px 0 0 -60px;
+    background: radial-gradient(circle at 50% 50%, rgba(12, 22, 48, 0.32) 0%, rgba(4, 8, 20, 0.62) 72%);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+  }
+
+  .stick-knob {
+    width: 54px;
+    height: 54px;
+    margin: -27px 0 0 -27px;
+  }
+
+  /* ---------- Overlays & modals: fit in ~390px, scroll if they still don't ---------- */
+  .overlay {
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-start;
+    padding: calc(var(--ls-hud-h) + 4px + var(--safe-top)) var(--ls-edge-r) calc(8px + var(--safe-bottom)) var(--ls-edge-l);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+  }
+
+  .overlay * {
+    touch-action: pan-y;
+  }
+
+  /* margin:auto centres the card when it fits and lets it scroll from the top when it doesn't */
+  .overlay > .modal-card {
+    margin: auto;
+    flex-shrink: 0;
+    max-width: 380px;
+    padding: 14px 18px;
+    border-radius: 18px;
+  }
+
+  .retro-pill {
+    font-size: 8px;
+    padding: 3px 10px;
+    margin-bottom: 6px;
+  }
+
+  .modal-heading {
+    font-size: 20px;
+    margin-bottom: 4px;
+  }
+
+  .modal-sub {
+    font-size: 13px;
+    margin-bottom: 10px;
+  }
+
+  .btn-primary {
+    padding: 10px 16px;
+    font-size: 13px;
+    border-radius: 12px;
+  }
+
+  .btn-secondary {
+    margin-top: 7px;
+    padding: 9px 16px;
+    font-size: 11px;
+    border-radius: 11px;
+  }
+
+  .final-stats {
+    margin: 8px 0 12px;
+  }
+
+  .stat-box {
+    padding: 7px 8px;
+  }
+
+  /* Title / main menu goes two-column: branding on the left, actions on the right */
+  .overlay > .modal-card.modal-hero {
+    max-width: 680px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+    grid-template-areas:
+      'pill  launch'
+      'title select'
+      'title modes'
+      'tag   modes'
+      'tag   menu'
+      'medal menu';
+    grid-template-rows: auto auto auto auto auto 1fr;
+    column-gap: 20px;
+    align-items: start;
+    padding: 14px 16px 12px;
+    text-align: left;
+  }
+
+  .modal-hero > .retro-pill {
+    grid-area: pill;
+    justify-self: start;
+  }
+
+  .modal-hero .game-title {
+    grid-area: title;
+    margin: 0 0 6px;
+  }
+
+  .modal-hero .title-top {
+    font-size: 32px;
+  }
+
+  .modal-hero .title-bot {
+    font-size: 21px;
+  }
+
+  .modal-hero .game-tagline {
+    grid-area: tag;
+    font-size: 12.5px;
+    line-height: 1.34;
+    margin: 0;
+  }
+
+  .modal-hero .btn-launch {
+    grid-area: launch;
+  }
+
+  .modal-hero .tower-select-row {
+    grid-area: select;
+    margin-top: 8px;
+  }
+
+  .modal-hero .mode-row {
+    grid-area: modes;
+    margin-top: 8px;
+  }
+
+  .modal-hero .btn-mode {
+    padding: 7px 6px 6px;
+    border-radius: 12px;
+  }
+
+  .modal-hero .mode-ico {
+    font-size: 15px;
+  }
+
+  .modal-hero .menu-row {
+    grid-area: menu;
+    margin-top: 8px;
+  }
+
+  .modal-hero .btn-chip {
+    padding: 6px 9px;
+  }
+
+  .modal-hero .medal-summary {
+    grid-area: medal;
+    align-self: end;
+    text-align: left;
+    margin-top: 8px;
+  }
+
+  /* Long lists use the extra width instead of scrolling */
+  .overlay > .modal-card.modal-scroll {
+    max-width: 640px;
+    max-height: none;
+    overflow: visible;
+    padding: 10px 16px 12px;
+  }
+
+  .modal-scroll > .retro-pill {
+    margin-bottom: 2px;
+  }
+
+  .modal-scroll .ctrl-item strong {
+    white-space: nowrap;
+  }
+
+  .settings-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 6px;
+    margin: 0 0 8px;
+  }
+
+  .set-row {
+    padding: 4px 9px;
+    border-radius: 10px;
+  }
+
+  .modal-scroll .modal-heading {
+    font-size: 18px;
+    margin-bottom: 5px;
+  }
+
+  .set-row strong {
+    font-size: 13px;
+  }
+
+  .set-row small {
+    font-size: 10.5px;
+  }
+
+  .modal-scroll .controls-preview {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 12px;
+    font-size: 11.5px;
+    line-height: 1.25;
+    margin-bottom: 10px;
+  }
+
+  .skin-grid {
+    grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+    margin: 4px 0 10px;
+  }
+
+  .skin-card {
+    padding: 7px 4px 6px;
+  }
+
+  /* Results: medals + 4 stats side by side */
+  #overlay-results > .modal-card {
+    max-width: 520px;
+  }
+
+  .medal-row {
+    margin: 4px 0 8px;
+  }
+
+  .medal {
+    padding: 6px 4px 5px;
+  }
+
+  .medal-ico {
+    font-size: 20px;
+  }
+
+  .final-stats.res-stats {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+
+  #overlay-results .modal-sub,
+  #overlay-gameover .modal-sub {
+    margin-bottom: 8px;
+  }
+
+  /* ---------- Very short screens (e.g. 667x320 with browser chrome) ---------- */
+  @media (max-height: 360px) {
+    :root {
+      --ls-hud-h: 36px;
+      --ls-stick-h: min(164px, 50vh);
+    }
+
+    .hud-left,
+    .hud-right,
+    .hud-center {
+      height: 27px;
+    }
+
+    .hud-timer {
+      font-size: 13.5px;
+    }
+
+    .action-btn {
+      width: 56px;
+      height: 56px;
+    }
+
+    .action-jump {
+      width: 66px;
+      height: 66px;
+    }
+
+    .action-rewind {
+      width: 38px;
+      height: 38px;
+    }
+
+    .stick-base {
+      width: 108px;
+      height: 108px;
+      margin: -54px 0 0 -54px;
+    }
+
+    .stick-knob {
+      width: 48px;
+      height: 48px;
+      margin: -24px 0 0 -24px;
+    }
+
+    .modal-hero .game-tagline {
+      font-size: 11.5px;
+    }
+
+    .modal-hero .title-top {
+      font-size: 27px;
+    }
+
+    .modal-hero .title-bot {
+      font-size: 18px;
+    }
+
+    .modal-hero .mode-sub {
+      display: none;
+    }
+  }
+}

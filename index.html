@@ -57,6 +57,19 @@
         </div>
       </div>
 
+      <!-- Status strip: secrets, rewind meter, rising hazard, guardian health -->
+      <div id="status-strip" class="status-strip hidden">
+        <div id="st-secrets" class="st-chip" title="Secret star-fish">★ 0/3</div>
+        <div id="st-rewind" class="st-chip st-rewind" title="Rewind (hold ⏪ / R)">
+          <span class="st-ico">⏪</span><span class="st-bar"><span id="st-rewind-fill"></span></span>
+        </div>
+        <div id="st-hazard" class="st-chip st-hazard hidden">🌊 +3.0</div>
+      </div>
+      <div id="boss-bar" class="boss-bar hidden" aria-label="Guardian health">
+        <div class="boss-name">GUARDIAN OF DOOM</div>
+        <div class="boss-track"><div id="boss-fill" class="boss-fill"></div></div>
+      </div>
+
       <!-- Contextual Action Prompt Pill -->
       <div id="action-prompt" class="action-prompt hidden">▲ ENTER PORTAL</div>
 
@@ -66,43 +79,97 @@
         <div id="banner-title" class="banner-title">THE TOWER OF EYES</div>
       </div>
 
-      <!-- Hero Title / Start Overlay -->
+      <!-- Main Menu -->
       <div id="overlay-title" class="overlay overlay-hero">
         <div class="modal-card modal-hero">
-          <div class="retro-pill">ATARI 7800 CLASSIC • 2026 EDITION</div>
+          <div class="retro-pill">A NEBULUS REBOOT • 2026</div>
           <h1 class="game-title">
             <span class="title-top">TOWER</span>
             <span class="title-bot">TOPPLER <span class="title-yr">'26</span></span>
           </h1>
           <p class="game-tagline">
-            Scale 8 rotating 3D towers on planet Nebulus, dodge mutant molecules, fire your snowball gun, and pilot the MK.7 Mini-Submarine!
+            Eight towers are poisoning the seas of Nebulus. Climb each one, reach the summit, and topple it — and watch the ocean come back to life.
           </p>
-
-          <div class="controls-preview">
-            <div class="ctrl-item"><span class="ctrl-badge">🕹️</span> <strong>Thumbstick</strong> Walk · push ▲ for doors &amp; lifts</div>
-            <div class="ctrl-item"><span class="ctrl-badge">▲</span> <strong>JUMP</strong> Hop gaps — hit by a nasty and you drop a ledge!</div>
-            <div class="ctrl-item"><span class="ctrl-badge">❄️</span> <strong>FIRE</strong> Pop balls &amp; molecules, freeze rollers, call lifts</div>
-            <div class="ctrl-item ctrl-keys"><strong>Keys</strong> ←→↑↓ / WASD · Space jump · X fire · P pause · Gamepad ✓</div>
-          </div>
 
           <button id="btn-start" class="btn-primary btn-launch" type="button">
             <span class="btn-glow"></span>
-            <span class="btn-text">LAUNCH MISSION</span>
+            <span class="btn-text">CAMPAIGN</span>
           </button>
-
           <div class="tower-select-row">
-            <label for="start-tower">DROP ZONE</label>
-            <select id="start-tower">
-              <option value="0">1. The Tower of Eyes</option>
-              <option value="1">2. The Realm of Robots</option>
-              <option value="2">3. Trap of Tricks</option>
-              <option value="3">4. Slippery Slide</option>
-              <option value="4">5. Broken Path</option>
-              <option value="5">6. Swimmer's Delight</option>
-              <option value="6">7. Nasty One</option>
-              <option value="7">8. Edge of Doom</option>
-            </select>
+            <label for="start-tower">TOWER</label>
+            <select id="start-tower"></select>
           </div>
+
+          <div class="mode-row">
+            <button id="btn-daily" class="btn-mode" type="button">
+              <span class="mode-ico">📅</span><span class="mode-name">DAILY TOWER</span><span id="daily-sub" class="mode-sub">New every day</span>
+            </button>
+            <button id="btn-endless" class="btn-mode" type="button">
+              <span class="mode-ico">♾️</span><span class="mode-name">ENDLESS</span><span id="endless-sub" class="mode-sub">How high can you go?</span>
+            </button>
+          </div>
+
+          <div class="menu-row">
+            <button id="btn-settings" class="btn-chip" type="button">⚙ SETTINGS</button>
+            <button id="btn-skins" class="btn-chip" type="button">🎨 POGO</button>
+            <button id="btn-howto" class="btn-chip" type="button">❔ HOW TO</button>
+            <button id="btn-install" class="btn-chip hidden" type="button">⬇ INSTALL</button>
+          </div>
+          <div id="medal-summary" class="medal-summary">🏅 0 medals</div>
+        </div>
+      </div>
+
+      <!-- How to play -->
+      <div id="overlay-howto" class="overlay hidden">
+        <div class="modal-card modal-scroll">
+          <div class="retro-pill">FIELD MANUAL</div>
+          <h2 class="modal-heading">HOW TO TOPPLE</h2>
+          <div class="controls-preview">
+            <div class="ctrl-item"><span class="ctrl-badge">🕹️</span> <strong>Stick</strong> Walk · push ▲ at doors · ▲▼ ride lifts</div>
+            <div class="ctrl-item"><span class="ctrl-badge">▲</span> <strong>Jump</strong> Hop gaps. Grab ledge lips automatically.</div>
+            <div class="ctrl-item"><span class="ctrl-badge">▼</span> <strong>Ground pound</strong> Push ▼ in mid-air: stuns enemies, smashes blocks.</div>
+            <div class="ctrl-item"><span class="ctrl-badge">❄️</span> <strong>Fire</strong> Tap to shoot. Hold to charge a mega-snowball that freezes anything.</div>
+            <div class="ctrl-item"><span class="ctrl-badge">🧊</span> <strong>Ice blocks</strong> Frozen enemies are platforms — climb on them!</div>
+            <div class="ctrl-item"><span class="ctrl-badge">🔄</span> <strong>Wrap-around</strong> Snowballs circle the tower… and can come back to hit you.</div>
+            <div class="ctrl-item"><span class="ctrl-badge">⏪</span> <strong>Rewind</strong> Hold ⏪ REWIND (R / LB) to turn back time a few seconds.</div>
+            <div class="ctrl-item"><span class="ctrl-badge">💥</span> <strong>Hit</strong> You drop to the ledge below. No ledge? Splash.</div>
+            <div class="ctrl-item"><span class="ctrl-badge">🏅</span> <strong>Medals</strong> Fast clear · no hits · all 3 hidden ★ star-fish.</div>
+          </div>
+          <button id="btn-howto-close" class="btn-primary" type="button">GOT IT</button>
+        </div>
+      </div>
+
+      <!-- Settings -->
+      <div id="overlay-settings" class="overlay hidden">
+        <div class="modal-card modal-scroll">
+          <div class="retro-pill">SYSTEM CONFIG</div>
+          <h2 class="modal-heading">SETTINGS</h2>
+          <div class="settings-list">
+            <label class="set-row"><span><strong>Stick on left</strong><small>Swap stick &amp; buttons</small></span><input type="checkbox" data-setting="stickLeft" /></label>
+            <label class="set-row"><span><strong>Assist mode</strong><small>Infinite lives &amp; rewind</small></span><input type="checkbox" data-setting="assist" /></label>
+            <label class="set-row"><span><strong>Classic rules</strong><small>No edge guard, rewind or checkpoints</small></span><input type="checkbox" data-setting="classic" /></label>
+            <label class="set-row"><span><strong>Mirror mode</strong><small>Every tower flipped</small></span><input type="checkbox" data-setting="mirror" /></label>
+            <label class="set-row"><span><strong>Ghost runs</strong><small>Race your best climb</small></span><input type="checkbox" data-setting="ghosts" /></label>
+            <label class="set-row"><span><strong>Diorama look</strong><small>Tilt-shift toy-world blur</small></span><input type="checkbox" data-setting="diorama" /></label>
+            <label class="set-row"><span><strong>Reduced motion</strong><small>No shake, flashes or camera swoops</small></span><input type="checkbox" data-setting="reducedMotion" /></label>
+            <label class="set-row"><span><strong>Vibration</strong><small>Haptic feedback</small></span><input type="checkbox" data-setting="haptics" /></label>
+            <label class="set-row"><span><strong>Game speed</strong><small>Slower = easier</small></span>
+              <select data-setting="gameSpeed"><option value="1">100%</option><option value="0.85">85%</option><option value="0.7">70%</option><option value="0.6">60%</option></select></label>
+            <label class="set-row"><span><strong>Graphics</strong><small>Auto adapts to your device</small></span>
+              <select data-setting="quality"><option value="auto">Auto</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label>
+          </div>
+          <button id="btn-settings-close" class="btn-primary" type="button">DONE</button>
+        </div>
+      </div>
+
+      <!-- Skins -->
+      <div id="overlay-skins" class="overlay hidden">
+        <div class="modal-card modal-scroll">
+          <div class="retro-pill">WARDROBE</div>
+          <h2 class="modal-heading">POGO</h2>
+          <p class="modal-sub">Earn medals to unlock new looks.</p>
+          <div id="skin-grid" class="skin-grid"></div>
+          <button id="btn-skins-close" class="btn-primary" type="button">DONE</button>
         </div>
       </div>
 
@@ -113,8 +180,30 @@
           <h2 class="modal-heading">PAUSED</h2>
           <p id="pause-tower-name" class="modal-sub">Tower 1: The Tower of Eyes</p>
           <button id="btn-resume" class="btn-primary" type="button">RESUME</button>
-          <button id="btn-restart" class="btn-secondary" type="button">RESTART MISSION</button>
+          <button id="btn-pause-settings" class="btn-secondary" type="button">⚙ SETTINGS</button>
           <button id="btn-swap" class="btn-secondary" type="button">⇄ STICK ON LEFT</button>
+          <button id="btn-restart" class="btn-secondary" type="button">QUIT TO MENU</button>
+        </div>
+      </div>
+
+      <!-- Tower Results -->
+      <div id="overlay-results" class="overlay hidden">
+        <div class="modal-card">
+          <div id="res-label" class="retro-pill">TOWER 1 TOPPLED</div>
+          <h2 id="res-name" class="modal-heading res-name">THE TOWER OF EYES</h2>
+          <div class="medal-row">
+            <div id="medal-time" class="medal"><span class="medal-ico">⏱️</span><span class="medal-lbl">SPEED</span></div>
+            <div id="medal-nohit" class="medal"><span class="medal-ico">🛡️</span><span class="medal-lbl">NO HITS</span></div>
+            <div id="medal-secrets" class="medal"><span class="medal-ico">⭐</span><span class="medal-lbl">SECRETS</span></div>
+          </div>
+          <div class="final-stats res-stats">
+            <div class="stat-box"><span class="stat-lbl">TIME</span><span id="res-time" class="stat-val">0:00</span></div>
+            <div class="stat-box"><span class="stat-lbl">BONUS</span><span id="res-bonus" class="stat-val">0</span></div>
+            <div class="stat-box"><span class="stat-lbl">STAR-FISH</span><span id="res-secrets" class="stat-val">0/3</span></div>
+            <div class="stat-box"><span class="stat-lbl">SCORE</span><span id="res-score" class="stat-val">0</span></div>
+          </div>
+          <p id="res-ghost" class="modal-sub"></p>
+          <button id="btn-continue" class="btn-primary" type="button">CONTINUE ▸</button>
         </div>
       </div>
 
@@ -134,6 +223,8 @@
             </div>
           </div>
           <button id="btn-play-again" class="btn-primary" type="button">PLAY AGAIN</button>
+          <button id="btn-share" class="btn-secondary" type="button">📤 SHARE SCORE CARD</button>
+          <button id="btn-menu" class="btn-secondary" type="button">MAIN MENU</button>
         </div>
       </div>
     </main>
@@ -141,7 +232,11 @@
     <!-- Touch Controls: action buttons + floating analog thumbstick (stick on the right by default; swappable) -->
     <footer id="touch-controls" aria-label="Touch Controls">
       <div class="action-cluster">
-        <button id="btn-fire" class="action-btn action-fire" type="button" aria-label="Fire Snowball">
+        <button id="btn-rewind" class="action-btn action-rewind" type="button" aria-label="Hold to rewind time">
+          <span class="action-icon">⏪</span>
+          <span class="action-lbl">REWIND</span>
+        </button>
+        <button id="btn-fire" class="action-btn action-fire" type="button" aria-label="Fire Snowball (hold to charge)">
           <span class="action-icon">❄️</span>
           <span class="action-lbl">FIRE</span>
         </button>
@@ -172,6 +267,6 @@
     }
   }
   </script>
-  <script type="module" src="src/main.js?v=8"></script>
+  <script type="module" src="src/main.js?v=9"></script>
 </body>
 </html>
