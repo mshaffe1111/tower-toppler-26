@@ -220,6 +220,13 @@
     right: auto;
   }
 
+  #touch-controls.scheme-slide {
+    height: auto;
+  }
+  #touch-controls.scheme-slide .slide-hint {
+    display: none;
+  }
+
   /* Layout editor: compact panel at the top centre, over the tower, clear of both control areas */
   .ctl-editor {
     top: calc(6px + var(--safe-top));

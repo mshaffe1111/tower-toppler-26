@@ -7,9 +7,9 @@ const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'fire', 'rewind'];
 
 // Stick feel presets: dead = centre deadzone, full = how far (fraction of the rim) gives full speed
 const SENSITIVITY = {
-  low: { dead: 0.22, full: 0.95 },
-  medium: { dead: 0.18, full: 0.8 },
-  high: { dead: 0.13, full: 0.62 },
+  low: { dead: 0.2, full: 0.85 },
+  medium: { dead: 0.15, full: 0.62 },
+  high: { dead: 0.12, full: 0.48 },
 };
 // Gesture pad tuning
 const SWIPE_PX = 22; // movement that turns a touch into a swipe
@@ -132,14 +132,23 @@ export class InputController {
     return this._placeBase(p.x, p.y);
   }
 
-  _placeBase(x, y) {
-    // x, y relative to the zone's top-left; base is centred on that point
+  _placeBase(x, y, free = false) {
+    // x, y relative to the zone's top-left; base is centred on that point. While a thumb is
+    // dragging it (free), the stick may follow the thumb anywhere on screen, not just the zone.
     if (!this._baseEl || !this._zoneEl) return;
     const zw = this._zoneEl.clientWidth;
     const zh = this._zoneEl.clientHeight;
     const half = this._baseEl.offsetWidth * 0.5;
-    const cx = Math.max(half * 0.6, Math.min(zw - half * 0.6, x));
-    const cy = Math.max(half * 0.55, Math.min(zh - half * 0.55, y));
+    let cx;
+    let cy;
+    if (free) {
+      const r = this._zoneEl.getBoundingClientRect();
+      cx = Math.max(half * 0.5 - r.left, Math.min(window.innerWidth - r.left - half * 0.5, x));
+      cy = Math.max(half * 0.5 - r.top, Math.min(window.innerHeight - r.top - half * 0.5, y));
+    } else {
+      cx = Math.max(half * 0.6, Math.min(zw - half * 0.6, x));
+      cy = Math.max(half * 0.55, Math.min(zh - half * 0.55, y));
+    }
     this._baseEl.style.transform = `translate(${(cx - zw / 2).toFixed(1)}px, ${(cy - zh / 2).toFixed(1)}px)`;
     return { cx, cy };
   }
@@ -156,10 +165,10 @@ export class InputController {
     let dist = Math.hypot(dx, dy);
     // Floating stick: drag past the rim and the whole stick follows your thumb (no "dead" thumb
     // positions). A fixed stick stays put; pushing past the rim just means full deflection.
-    const follow = R * 1.35;
+    const follow = R * 1.0;
     if (!entry.fixed && dist > follow) {
       const k = (dist - follow) / dist;
-      const moved = this._placeBase(entry.cx + dx * k, entry.cy + dy * k);
+      const moved = this._placeBase(entry.cx + dx * k, entry.cy + dy * k, true);
       entry.cx = moved.cx;
       entry.cy = moved.cy;
       dx = clientX - (rect.left + entry.cx);
@@ -215,6 +224,10 @@ export class InputController {
       entry.el?.classList.remove('active');
     } else if (entry.type === 'canvas' && entry.action) {
       this._hold(entry.action, src, false);
+    } else if (entry.type === 'slide') {
+      for (const d of entry.dirs || []) this._hold(d, src, false);
+      this.state.axisX = 0;
+      this._slideRing?.classList.remove('on');
     } else if (entry.type === 'gesture') {
       clearTimeout(entry.timer);
       if (entry.state === 'pending') this._pulseAction('fire', 70); // quick tap = snowball
@@ -222,6 +235,92 @@ export class InputController {
       else if (entry.state === 'jump') this._hold('jump', src, false);
       this._gestureFx(entry, 'end');
     }
+  }
+
+  // ---------- Slide (default): one thumb anywhere on the screen ----------
+  // Put a thumb down anywhere that isn't a button and slide: left / right walks (speed by how far
+  // you slide), up jumps (and goes through doors / rides lifts up: the game makes jump smart),
+  // down rides lifts down or ground-pounds. The centre follows the thumb, so it never runs out of
+  // room. Only FIRE and REWIND are buttons.
+  _bindSlide() {
+    const app = document.getElementById('app');
+    if (!app) return;
+    this._slideRing = document.getElementById('slide-ring');
+    this._slideDot = document.getElementById('slide-dot');
+    const isSlide = () => settings.controls?.scheme === 'slide';
+    const excluded = (t) => t.closest?.('button, select, input, label, .overlay, #hud, .ctl-editor, .ctl-edit-layer, .hint-card');
+    app.addEventListener(
+      'pointerdown',
+      (e) => {
+        if (!isSlide() || excluded(e.target)) return;
+        for (const ent of this._activePointers.values()) if (ent.type === 'slide') return; // one thumb steers
+        e.preventDefault();
+        e.stopPropagation(); // the slide owns this touch (no stick zone / camera drag)
+        this.lastDevice = 'touch';
+        const entry = { type: 'slide', id: e.pointerId, ox: e.clientX, oy: e.clientY, dirs: [] };
+        this._activePointers.set(e.pointerId, entry);
+        try { app.setPointerCapture(e.pointerId); } catch (_) {}
+        this._slideFx(entry, e.clientX, e.clientY, true);
+      },
+      { capture: true }
+    );
+    app.addEventListener('pointermove', (e) => {
+      const entry = this._activePointers.get(e.pointerId);
+      if (!entry || entry.type !== 'slide') return;
+      e.preventDefault();
+      this._updateSlide(entry, e.clientX, e.clientY);
+    });
+    const onUp = (e) => {
+      const entry = this._activePointers.get(e.pointerId);
+      if (!entry || entry.type !== 'slide') return;
+      this._releasePointer(e.pointerId);
+    };
+    app.addEventListener('pointerup', onUp);
+    app.addEventListener('pointercancel', onUp);
+    app.addEventListener('lostpointercapture', onUp);
+  }
+
+  _updateSlide(entry, x, y) {
+    const c = settings.controls || {};
+    // how far you slide for full speed (px): shorter = more sensitive
+    const R = c.sensitivity === 'high' ? 34 : c.sensitivity === 'low' ? 56 : 44;
+    let dx = x - entry.ox;
+    let dy = y - entry.oy;
+    // the centre follows the thumb, so a drifting thumb never runs out of room
+    if (Math.abs(dx) > R) {
+      entry.ox = x - Math.sign(dx) * R;
+      dx = Math.sign(dx) * R;
+    }
+    const VR = R * 1.25;
+    if (Math.abs(dy) > VR) {
+      entry.oy = y - Math.sign(dy) * VR;
+      dy = Math.sign(dy) * VR;
+    }
+    const { dead } = SENSITIVITY[c.sensitivity] || SENSITIVITY.medium;
+    const nx = dx / R;
+    // full speed by ~75% of the slide, so a quick flick of the thumb is a full-speed dodge
+    const ax = Math.abs(nx) < dead ? 0 : Math.sign(nx) * Math.min(1, (Math.abs(nx) - dead) / (0.75 - dead));
+    this.state.axisX = ax;
+    const dirs = [];
+    if (ax > 0) dirs.push('right');
+    else if (ax < 0) dirs.push('left');
+    // up = jump (smart: doors / lifts) with hysteresis so it doesn't flicker; down = down
+    const upT = Math.max(0.35, Math.min(0.8, c.upThreshold ?? 0.55));
+    const wasUp = (entry.dirs || []).includes('jump');
+    const wasDown = (entry.dirs || []).includes('down');
+    if (dy < -R * (wasUp ? upT * 0.45 : upT)) dirs.push('jump', 'up');
+    else if (dy > R * (wasDown ? upT * 0.45 : upT + 0.05)) dirs.push('down');
+    this._setStickDirs(entry, dirs);
+    this._slideFx(entry, x, y, false);
+  }
+
+  // A faint ring where the thumb is anchored and a dot under the thumb
+  _slideFx(entry, x, y, start) {
+    const ring = this._slideRing;
+    if (!ring) return;
+    if (start) ring.classList.add('on');
+    ring.style.transform = `translate(${entry.ox.toFixed(1)}px, ${entry.oy.toFixed(1)}px)`;
+    if (this._slideDot) this._slideDot.style.transform = `translate(${(x - entry.ox).toFixed(1)}px, ${(y - entry.oy).toFixed(1)}px)`;
   }
 
   // ---------- Gesture pad (alternative to the JUMP / FIRE buttons) ----------
@@ -316,6 +415,7 @@ export class InputController {
       window.addEventListener('resize', () => requestAnimationFrame(() => this._restStick()));
       this._zoneEl.addEventListener('pointerdown', (e) => {
         e.preventDefault();
+        if (settings.controls?.scheme === 'slide') return;
         // One thumb per stick
         for (const ent of this._activePointers.values()) if (ent.type === 'stick') return;
         this.lastDevice = 'touch';
@@ -370,6 +470,7 @@ export class InputController {
     bindAction('btn-fire', 'fire');
     bindAction('btn-rewind', 'rewind');
     this._bindGesturePad();
+    this._bindSlide();
 
     // Touch camera: drag anywhere on the open play area to look around the tower and up/down
     // (great for planning a route). The view glides back when you let go.
@@ -378,6 +479,7 @@ export class InputController {
     if (canvas) {
       canvas.addEventListener('pointerdown', (e) => {
         e.preventDefault();
+        if (settings.controls?.scheme === 'slide') return;
         this.lastDevice = 'touch';
         for (const ent of this._activePointers.values()) if (ent.type === 'look') return;
         const r = canvas.getBoundingClientRect();

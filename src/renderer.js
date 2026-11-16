@@ -121,6 +121,8 @@ function createSkyMaterial() {
       sunDir: { value: SUN_DIR.clone() },
       sunColor: { value: new THREE.Color('#ffb46e') },
       sunAmount: { value: 1 },
+      sunset: { value: 0 }, // 1 = the 1987 look: black starry sky over a banded sunset
+      mountains: { value: 0 }, // 1 = ring of mountain silhouettes on the horizon
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
@@ -138,6 +140,8 @@ function createSkyMaterial() {
       uniform vec3 sunDir;
       uniform vec3 sunColor;
       uniform float sunAmount;
+      uniform float sunset;
+      uniform float mountains;
       varying vec3 vDir;
 
       float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -173,7 +177,28 @@ function createSkyMaterial() {
         float n = fbm(uv * 1.6 + vec2(time * 0.01, 0.0));
         float n2 = fbm(uv * 3.1 - vec2(0.0, time * 0.008));
         float neb = smoothstep(0.45, 0.85, n) * smoothstep(-0.1, 0.35, h) * (1.0 - smoothstep(0.55, 0.95, h));
-        col += mix(glowColor, vec3(0.85, 0.45, 1.0), n2) * neb * 0.13;
+        col += mix(glowColor, vec3(0.85, 0.45, 1.0), n2) * neb * 0.13 * (1.0 - sunset * 0.85);
+        // The 1987 sky: near-black above, a banded sunset (yellow > orange > red > dusk) at the
+        // horizon, with faint copper-bar banding as a nod to the Amiga
+        if (sunset > 0.0) {
+          float hb = clamp(h, 0.0, 1.0);
+          vec3 band = mix(vec3(1.0, 0.84, 0.32), vec3(1.0, 0.45, 0.06), smoothstep(0.0, 0.045, hb));
+          band = mix(band, vec3(0.82, 0.07, 0.1), smoothstep(0.045, 0.1, hb));
+          band = mix(band, vec3(0.22, 0.02, 0.1), smoothstep(0.1, 0.19, hb));
+          band = mix(band, vec3(0.006, 0.007, 0.02), smoothstep(0.19, 0.36, hb));
+          float bars = 1.0 - 0.07 * step(0.5, fract(hb * 64.0)) * (1.0 - smoothstep(0.02, 0.2, hb));
+          col = mix(col, band * bars, sunset);
+        }
+        // Mountain silhouettes ringing the horizon (ridged noise), lighter at the peaks
+        if (mountains > 0.0) {
+          float a = ang * 2.2;
+          float ridge = 1.0 - abs(2.0 * fbm(vec2(a * 2.4, 7.3)) - 1.0);
+          float m = 0.006 + 0.07 * pow(ridge, 2.2) + 0.012 * noise(vec2(a * 18.0, 2.0));
+          float inside = 1.0 - smoothstep(m - 0.003, m + 0.003, h);
+          float peak = smoothstep(m - 0.035, m, h);
+          vec3 mc = mix(vec3(0.03, 0.05, 0.14), vec3(0.24, 0.3, 0.55), peak * 0.8);
+          col = mix(col, mc, inside * mountains * step(-0.03, h));
+        }
         // Low sun behind the tower: disc, corona, and a warm band along the horizon
         float sd = max(dot(d, normalize(sunDir)), 0.0);
         col += sunColor * sunAmount * (pow(sd, 1600.0) * 3.0 + pow(sd, 90.0) * 0.12 + pow(sd, 10.0) * 0.04);
@@ -300,7 +325,7 @@ export class GameRenderer {
   // Image-based lighting from the current sky (rebuilt only when the sky's look changes)
   _updateEnvironment(pal, mech, heal) {
     const dark = mech?.darkness || 0;
-    const key = `${pal.glow}|${pal.brickA}|${dark.toFixed(1)}|${Math.round((heal || 0) * 4)}`;
+    const key = `${pal.glow}|${pal.brickA}|${dark.toFixed(1)}|${Math.round((heal || 0) * 4)}|${this.skyMat.uniforms.sunset.value}`;
     if (this._envKey === key) return;
     this._envKey = key;
     if (!this._pmrem) {
@@ -1014,6 +1039,15 @@ export class GameRenderer {
     sky.topColor.value.copy(this.towerScene.background);
     sky.horizonColor.value.copy(this.towerScene.fog.color);
     sky.glowColor.value.set(pal.glow);
+    // ORIGINAL mode: black starry sky, sunset band, mountains, clean blue sea (the 1987 look)
+    const orig = Boolean(state.original);
+    sky.sunset.value = orig ? 1 : 0;
+    sky.mountains.value = orig ? 1 : 0;
+    if (orig) {
+      sky.topColor.value.set('#020309');
+      this.towerScene.fog.color.set('#1c0a22');
+    }
+    this.planetGroup.visible = !orig;
     sky.time.value = time;
     sky.yaw.value = -camCol * COL_ANGLE * 0.15;
     this.skyDome.position.copy(this.towerCam.position);
@@ -1026,7 +1060,7 @@ export class GameRenderer {
     su.skyColor.value.copy(this.towerScene.fog.color);
     su.glowColor.value.set(pal.glow);
     // The sea heals as towers fall: sickly toxic purple-green -> clear turquoise
-    const heal = Math.max(0, Math.min(1, state.healing || 0));
+    const heal = state.original ? 1 : Math.max(0, Math.min(1, state.healing || 0));
     const toxicShallow = this._c1 || (this._c1 = new THREE.Color('#3b5214'));
     const cleanShallow = this._c2 || (this._c2 = new THREE.Color('#0aa5b8'));
     const toxicDeep = this._c3 || (this._c3 = new THREE.Color('#1b0b2a'));

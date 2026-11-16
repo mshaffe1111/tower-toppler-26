@@ -25,11 +25,12 @@ export const OPTION_TABS = [
     rows: [
       {
         key: 'controls.scheme',
-        label: 'Action input',
-        desc: 'Buttons, or a gesture pad: swipe ↑ jump · tap fire · hold charge · swipe ↓ pound',
+        label: 'Control style',
+        desc: 'Slide: one thumb anywhere moves you, slide up to jump (or go through a door). Buttons: joystick + JUMP. Gesture pad: swipe to jump.',
         options: [
+          ['slide', 'Slide'],
           ['buttons', 'Buttons'],
-          ['gesture', 'Gesture pad'],
+          ['gesture', 'Gesture'],
         ],
       },
       {

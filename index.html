@@ -97,13 +97,13 @@
       <div id="overlay-title" class="overlay overlay-hero">
         <div class="modal-card modal-hero">
           <div class="retro-pill">A NEBULUS REBOOT • 2026</div>
-          <h1 class="game-title">
-            <span class="title-top">TOWER</span>
-            <span class="title-bot">TOPPLER <span class="title-yr">'26</span></span>
+          <h1 class="game-title logo" aria-label="Tower Toppler '26">
+            <span class="logo-tower" aria-hidden="true"><i>T</i><i>O</i><i>W</i><i>E</i><i>R</i></span>
+            <span class="logo-toppler" aria-hidden="true"><i>T</i><i>O</i><i>P</i><i>P</i><i>L</i><i>E</i><i>R</i></span>
+            <span class="logo-26" aria-hidden="true">'26</span>
+            <span class="logo-dust" aria-hidden="true"></span>
           </h1>
-          <p class="game-tagline">
-            Eight towers are poisoning the seas of Nebulus. Climb each one, reach the summit, and topple it — and watch the ocean come back to life.
-          </p>
+          <p class="game-tagline">Climb eight towers. Reach the top. Topple them all.</p>
 
           <button id="btn-continue-run" class="btn-continue hidden" type="button">
             <span class="cont-title">▶ CONTINUE</span>
@@ -276,9 +276,13 @@
           <div id="stick-knob" class="stick-knob"></div>
         </div>
       </div>
+      <div class="slide-hint" aria-hidden="true"><span>SLIDE ANYWHERE TO MOVE<br />SLIDE ↑ TO JUMP</span></div>
       <div id="ctl-split" class="ctl-split" aria-hidden="true"><span></span></div>
       <div id="ctl-edit-layer" class="ctl-edit-layer hidden" aria-hidden="true"></div>
     </footer>
+
+    <!-- Slide controls: where the thumb is anchored (ring) and where it is now (dot) -->
+    <div id="slide-ring" class="slide-ring" aria-hidden="true"><span id="slide-dot" class="slide-dot"></span></div>
 
     <!-- Control layout editor (Options > Controls > Edit layout) -->
     <div id="ctl-editor" class="ctl-editor hidden" role="dialog" aria-label="Edit control layout">

@@ -33,8 +33,8 @@ function mulberry32(seed) {
 
 // Classic-paced movement tuning (deliberate like the 7800 original, but with modern assists)
 const PHYS = {
-  walkSpeed: 2.3, // columns / second on the ground (~7s per lap of the tower, like the original)
-  airSpeed: 2.9, // a running jump carries a little extra distance
+  walkSpeed: 2.8, // columns / second on the ground (~6s per lap: original feel, quick enough to dodge)
+  airSpeed: 3.3, // a running jump carries a little extra distance
   gravity: 15,
   jumpVy: 6.9, // ~1.6 floors high
   stepVy: 5.7, // auto step-up hop onto the next stair
@@ -896,7 +896,7 @@ export class TowerTopplerGame {
     const axis = typeof inp.axisX === 'number' && inp.axisX !== 0 ? inp.axisX : (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
     let targetVx = 0;
     if (!stunned && !p.hang && !p.pound && Math.abs(axis) > 0.05) {
-      const mag = Math.min(1, Math.max(0.35, Math.abs(axis)));
+      const mag = Math.min(1, Math.max(0.55, Math.abs(axis))); // no slow crawl from a light push
       targetVx = Math.sign(axis) * maxSpeed * mag;
       p.facing = Math.sign(axis);
     }
@@ -956,7 +956,15 @@ export class TowerTopplerGame {
     else p.vx = 0;
 
     // Doors (UP): exit, tunnels and secret vaults
-    const upTapped = this.input.consumeJustPressed('up');
+    // Smart jump: jumping while standing at a door goes through it (why else jump at a door?)
+    const jumpAtDoor =
+      this.input.justPressed.jump &&
+      !stunned &&
+      !p.hidden &&
+      (p.onGround || p.coyoteTimer > 0) &&
+      this.tower.doors.some((d) => Math.abs(d.floor - p.floor) < 0.5 && Math.abs(colDist(p.col, d.col + 0.5)) < 0.55);
+    if (jumpAtDoor) this.input.justPressed.jump = false;
+    const upTapped = this.input.consumeJustPressed('up') || jumpAtDoor;
     if (!inp.up) p.doorLock = false;
     if (!stunned && (upTapped || (inp.up && !p.doorLock)) && (p.onGround || p.coyoteTimer > 0)) {
       const door = this.tower.doors.find((d) => Math.abs(d.floor - p.floor) < 0.5 && Math.abs(colDist(p.col, d.col + 0.5)) < 0.72);
@@ -1015,6 +1023,10 @@ export class TowerTopplerGame {
     else p.coyoteTimer = Math.max(0, p.coyoteTimer - dt);
     if (this.input.consumeJustPressed('jump')) p.jumpBufferTimer = 0.15;
     else p.jumpBufferTimer = Math.max(0, p.jumpBufferTimer - dt);
+
+    // Smart jump on a lift: jumping rides it up instead of hopping off (until it reaches the top)
+    const liftRide = p.onElevator && p.onElevator.floor < p.onElevator.maxFloor - 0.01;
+    if (liftRide && p.jumpBufferTimer > 0) p.jumpBufferTimer = 0;
 
     // Jump (also lets go of a ledge hang)
     if (!stunned && p.jumpBufferTimer > 0 && (p.onGround || p.coyoteTimer > 0 || p.hang)) {
@@ -1105,7 +1117,7 @@ export class TowerTopplerGame {
         p.onElevator = null;
         p.onGround = false;
       } else {
-        if (inp.up) {
+        if (inp.up || inp.jump) {
           el.recallTarget = null;
           el.dir = 1;
           el.floor = Math.min(el.maxFloor, el.floor + el.speed * 0.45 * dt);
