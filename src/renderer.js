@@ -562,8 +562,11 @@ export class GameRenderer {
     const ud = group.userData;
     if (!ud.mats || ud.skinId === skin.id) return;
     ud.skinId = skin.id;
-    ud.mats.bodyMat.color.set(skin.body);
-    ud.mats.bodyMat.emissive.set(skin.emissive);
+    if (ud.recolor) ud.recolor(skin.body, skin.boots);
+    else {
+      ud.mats.bodyMat.color.set(skin.body);
+      ud.mats.bodyMat.emissive.set(skin.emissive);
+    }
     ud.mats.bodyMat.metalness = skin.metal ? 0.85 : 0.0;
     ud.mats.bodyMat.roughness = skin.metal ? 0.22 : 0.38;
     if (skin.metal && this.chromeEnv) {
@@ -571,6 +574,10 @@ export class GameRenderer {
       ud.mats.bodyMat.needsUpdate = true;
     }
     ud.mats.lidMat.color.set(skin.body);
+    if (ud.mats.limbMat) {
+      ud.mats.limbMat.color.set(skin.body);
+      ud.mats.limbMat.emissive?.set(skin.emissive);
+    }
     ud.mats.lidMat.emissive?.set(skin.emissive);
     if (ud.mats.spotMat) ud.mats.spotMat.color.set(skin.body).multiplyScalar(0.72);
     ud.mats.bootMat.color.set(skin.boots);

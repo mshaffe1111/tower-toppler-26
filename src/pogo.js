@@ -10,6 +10,7 @@
 //
 // Local space: feet at y = 0, facing +X, up +Y.
 import * as THREE from 'three';
+import { meshSDF, sdSphere, sdEllipsoid, sdCapsule, smin, ssub, traceSurface, paintVertices } from './sculpt.js';
 
 const TWO_PI = Math.PI * 2;
 const damp = (a, b, k, dt) => a + (b - a) * (1 - Math.exp(-k * dt));
@@ -149,33 +150,54 @@ function eyeTexture(kind) {
   return t;
 }
 
-// Chunky ribbed-knit texture (vertical V-stitch ribs with cream stripes)
-function chunkyKnitTexture() {
+// Chunky striped knit. `along` = which texture axis runs along the scarf's length ('u' or 'v');
+// stripes are bands across the scarf, repeating along its length (they ring the whole way round).
+function chunkyKnitTexture(along = 'u') {
+  const S = 128;
   const c = document.createElement('canvas');
-  c.width = 128;
-  c.height = 128;
+  c.width = S;
+  c.height = S;
   const ctx = c.getContext('2d');
-  ctx.fillStyle = '#dc2626';
-  ctx.fillRect(0, 0, 128, 128);
-  // stripes
-  ctx.fillStyle = '#fef3c7';
-  ctx.fillRect(0, 40, 128, 16);
-  ctx.fillRect(0, 96, 128, 8);
-  // V stitches
-  for (let x = 0; x < 128; x += 16) {
-    for (let y = 0; y < 128; y += 10) {
-      const lg = ctx.createLinearGradient(x, y, x + 16, y);
-      lg.addColorStop(0, 'rgba(0,0,0,0.28)');
-      lg.addColorStop(0.5, 'rgba(255,255,255,0.12)');
-      lg.addColorStop(1, 'rgba(0,0,0,0.28)');
-      ctx.strokeStyle = lg;
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(x + 1, y);
-      ctx.lineTo(x + 8, y + 9);
-      ctx.lineTo(x + 15, y);
-      ctx.stroke();
+  // Draw with stripes as vertical bands (varying along x), then rotate if needed
+  const draw = (g) => {
+    const bands = [
+      ['#dc2626', 46],
+      ['#fef3c7', 11],
+      ['#dc2626', 9],
+      ['#fde68a', 6],
+      ['#dc2626', 9],
+      ['#fef3c7', 11],
+      ['#dc2626', 36],
+    ];
+    let x = 0;
+    for (const [col, w] of bands) {
+      g.fillStyle = col;
+      g.fillRect(x, 0, w, S);
+      x += w;
     }
+    // knit rows: V stitches stacked across the scarf
+    for (let yy = 0; yy < S; yy += 16) {
+      for (let xx = 0; xx < S; xx += 8) {
+        const lg = g.createLinearGradient(xx, yy, xx, yy + 16);
+        lg.addColorStop(0, 'rgba(0,0,0,0.3)');
+        lg.addColorStop(0.5, 'rgba(255,255,255,0.14)');
+        lg.addColorStop(1, 'rgba(0,0,0,0.3)');
+        g.strokeStyle = lg;
+        g.lineWidth = 3.5;
+        g.beginPath();
+        g.moveTo(xx, yy + 1);
+        g.lineTo(xx + 7, yy + 8);
+        g.lineTo(xx, yy + 15);
+        g.stroke();
+      }
+    }
+  };
+  if (along === 'u') {
+    draw(ctx);
+  } else {
+    ctx.translate(S, 0);
+    ctx.rotate(Math.PI / 2);
+    draw(ctx);
   }
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
@@ -190,7 +212,7 @@ const OUTLINE_MAT = new THREE.MeshBasicMaterial({ color: '#0b1226', side: THREE.
 OUTLINE_MAT.onBeforeCompile = (shader) => {
   shader.vertexShader = shader.vertexShader.replace(
     '#include <begin_vertex>',
-    '#include <begin_vertex>\ntransformed += normalize(objectNormal) * 0.018;'
+    '#include <begin_vertex>\ntransformed += normalize(objectNormal) * 0.021;'
   );
 };
 OUTLINE_MAT.customProgramCacheKey = () => 'pogo-outline';
@@ -202,44 +224,160 @@ function addOutline(mesh) {
   return o;
 }
 
-// Fresnel rim light so Pogo always separates from the background
-function addRimLight(mat, color = '#d9f99d', strength = 0.55) {
+// Fresnel rim light + form shading. Pogo's body is otherwise one smooth colour, which reads as a
+// "blob"; this darkens him underneath, in the creases under the scarf / arms / eye domes, and adds
+// a soft top-light, so his shape reads at a glance. Uses object-space height (feet = 0, top ≈ 0.84).
+function addRimLight(mat, color = '#d9f99d', strength = 0.3, { form = true } = {}) {
   mat.userData.rim = { value: new THREE.Color(color) };
   mat.userData.rimStrength = { value: strength };
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.rimColor = mat.userData.rim;
     shader.uniforms.rimStrength = mat.userData.rimStrength;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vObjPos;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvObjPos = position;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform vec3 rimColor;\nuniform float rimStrength;')
+      .replace('#include <common>', '#include <common>\nuniform vec3 rimColor;\nuniform float rimStrength;\nvarying vec3 vObjPos;')
+      .replace(
+        '#include <map_fragment>',
+        form
+          ? `#include <map_fragment>
+        // height-based occlusion (darker toward the feet), soft top light
+        float yN = clamp(vObjPos.y / 0.84, 0.0, 1.0);
+        float ao = mix(0.5, 1.0, smoothstep(0.02, 0.55, yN));
+        // crease under the scarf (scarf sits around y = 0.39)
+        ao *= 1.0 - 0.28 * exp(-pow((vObjPos.y - 0.31) / 0.045, 2.0));
+        // seam under the eye domes
+        ao *= 1.0 - 0.16 * exp(-pow((vObjPos.y - 0.64) / 0.03, 2.0));
+        diffuseColor.rgb *= ao;
+        diffuseColor.rgb *= 1.0 + 0.12 * smoothstep(0.6, 1.0, yN);`
+          : '#include <map_fragment>'
+      )
       .replace(
         '#include <opaque_fragment>',
-        'float rimF = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 2.6);\noutgoingLight += rimColor * rimF * rimStrength;\n#include <opaque_fragment>'
+        'float rimF = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 3.0);\noutgoingLight += rimColor * rimF * rimStrength;\n#include <opaque_fragment>'
       );
   };
-  mat.customProgramCacheKey = () => 'pogo-rim';
+  mat.customProgramCacheKey = () => 'pogo-rim-' + (form ? 'f' : 'n');
 }
 
-const BODY_PROFILE = [
-  [0.0, 0.07],
-  [0.16, 0.09],
-  [0.27, 0.17],
-  [0.325, 0.29],
-  [0.335, 0.42],
-  [0.32, 0.54],
-  [0.29, 0.65],
-  [0.235, 0.74],
-  [0.14, 0.81],
-  [0.0, 0.835],
+// ---------------------------------------------------------------------------------------------
+// Pogo's sculpt: head and body are ONE continuous surface built from blended shapes, so the
+// cheeks, muzzle, eye sockets, belly and the waist all catch light and cast soft shadow.
+// Local space: feet at y = 0, facing +X, symmetric in Z.
+// ---------------------------------------------------------------------------------------------
+const EYE = { x: 0.065, y: 0.775, z: 0.152, r: 0.148 }; // eye domes
+export const EYEBALL = { x: 0.12, y: 0.787, z: 0.162, r: 0.113 };
+
+function pogoSDF(x, y, z) {
+  const az = Math.abs(z);
+  // pear body + rounder head, blended into one bean with a soft waist
+  let d = sdEllipsoid(x, y, z, 0.0, 0.3, 0, 0.33, 0.29, 0.335);
+  d = smin(d, sdEllipsoid(x, y, z, 0.02, 0.585, 0, 0.29, 0.225, 0.305), 0.14);
+  // belly bulge, front-low, with a gentle crease where it meets the body
+  d = smin(d, sdEllipsoid(x, y, z, 0.135, 0.27, 0, 0.205, 0.215, 0.245), 0.035);
+  // wide frog muzzle
+  d = smin(d, sdEllipsoid(x, y, z, 0.165, 0.565, 0, 0.135, 0.085, 0.205), 0.06);
+  // puffy cheeks
+  d = smin(d, sdSphere(x, y, az, 0.16, 0.515, 0.175, 0.095), 0.05);
+  // brow pads above the eyes
+  d = smin(d, sdEllipsoid(x, y, az, 0.1, 0.9, 0.16, 0.07, 0.035, 0.07), 0.04);
+  // frog eye domes
+  d = smin(d, sdSphere(x, y, az, EYE.x, EYE.y, EYE.z, EYE.r), 0.06);
+  // sockets the eyeballs sit in
+  d = ssub(d, sdSphere(x, y, az, EYEBALL.x + 0.055, EYEBALL.y, EYEBALL.z + 0.004, 0.098), 0.022);
+  // dimples at the mouth corners
+  d = ssub(d, sdSphere(x, y, az, 0.262, 0.565, 0.14, 0.022), 0.022);
+  // nostrils
+  d = ssub(d, sdSphere(x, y, az, 0.292, 0.648, 0.042, 0.013), 0.012);
+  return d;
+}
+
+// Big webbed frog foot + short leg (local hip space: hip at origin, toes toward +X)
+function footSDF(x, y, z) {
+  let d = sdCapsule(x, y, z, 0, 0.03, 0, 0.012, -0.075, 0, 0.056);
+  d = smin(d, sdEllipsoid(x, y, z, 0.06, -0.112, 0, 0.165, 0.058, 0.125), 0.05);
+  for (const tz of [-0.082, 0, 0.082]) d = smin(d, sdEllipsoid(x, y, z, 0.215, -0.12, tz, 0.06, 0.036, 0.042), 0.035);
+  d = Math.max(d, -(y + 0.158)); // flat sole
+  return d;
+}
+
+// Arm with a mitten hand and thumb (local shoulder space: hangs toward -Y, thumb toward +X)
+function armSDF(side) {
+  return (x, y, z) => {
+    let d = sdCapsule(x, y, z, 0, 0.0, 0, 0, -0.12, 0, 0.05);
+    d = smin(d, sdEllipsoid(x, y, z, 0.008, -0.19, 0, 0.07, 0.068, 0.078), 0.04);
+    d = smin(d, sdEllipsoid(x, y, z, 0.058, -0.162, -side * 0.032, 0.03, 0.036, 0.028), 0.02);
+    return d;
+  };
+}
+
+let SCULPT = null;
+function sculptCache() {
+  if (SCULPT) return SCULPT;
+  const body = meshSDF(pogoSDF, [-0.4, -0.02, -0.42], [0.42, 0.97, 0.42], 0.0125, { aoScale: 1.2 });
+  const foot = meshSDF(footSDF, [-0.12, -0.17, -0.16], [0.3, 0.1, 0.16], 0.0085, { aoScale: 0.7 });
+  const armL = meshSDF(armSDF(-1), [-0.09, -0.28, -0.1], [0.1, 0.06, 0.1], 0.0075, { aoScale: 0.6 });
+  const armR = meshSDF(armSDF(1), [-0.09, -0.28, -0.1], [0.1, 0.06, 0.1], 0.0075, { aoScale: 0.6 });
+  SCULPT = { body, foot, armL, armR };
+  return SCULPT;
+}
+
+const smooth = (e0, e1, x) => {
+  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
+
+const FRECKLES = [
+  [-0.24, 0.66, 0.16],
+  [-0.27, 0.58, -0.12],
+  [-0.18, 0.76, -0.05],
+  [-0.3, 0.46, 0.08],
+  [-0.2, 0.7, 0.24],
+  [-0.12, 0.83, 0.1],
+  [-0.29, 0.38, -0.2],
 ];
 
-// Radius of the body at height y (for placing things on the surface)
-function bodyRadiusAt(y) {
-  for (let i = 0; i < BODY_PROFILE.length - 1; i++) {
-    const [r0, y0] = BODY_PROFILE[i];
-    const [r1, y1] = BODY_PROFILE[i + 1];
-    if (y >= y0 && y <= y1) return r0 + ((y - y0) / (y1 - y0)) * (r1 - r0);
-  }
-  return 0.2;
+// Paint the body skin: base colour, cream belly & throat, cheek blush, freckles, then
+// multiply by baked occlusion and a soft top light so every crease has shadow.
+function paintBody(geo, ao, skinHex) {
+  const base = new THREE.Color(skinHex);
+  const deep = base.clone().multiplyScalar(0.6);
+  const cream = new THREE.Color('#f3f7cf');
+  const blush = new THREE.Color('#f87197');
+  const c = new THREE.Color();
+  paintVertices(geo, (x, y, z, i, out) => {
+    const az = Math.abs(z);
+    c.copy(base);
+    // belly + throat cream, fading softly at the edge
+    const bellyD = sdEllipsoid(x, y, z, 0.15, 0.27, 0, 0.195, 0.205, 0.235);
+    const front = smooth(0.0, 0.11, x);
+    let m = smooth(0.025, -0.03, bellyD) * front;
+    const throat = smooth(0.06, -0.02, sdEllipsoid(x, y, z, 0.2, 0.49, 0, 0.12, 0.06, 0.17)) * smooth(0.12, 0.2, x);
+    m = Math.max(m, throat * 0.8);
+    c.lerp(cream, m);
+    // cheek blush
+    const bd = (x - 0.225) ** 2 + (y - 0.515) ** 2 + (az - 0.2) ** 2;
+    c.lerp(blush, Math.exp(-bd / 0.0028) * 0.5);
+    // freckles on the back & crown
+    for (const [fx, fy, fz] of FRECKLES) {
+      const fd = (x - fx) ** 2 + (y - fy) ** 2 + (z - fz) ** 2;
+      c.lerp(deep, Math.exp(-fd / 0.0007) * 0.85);
+    }
+    // darker back, lighter top (form) and baked occlusion
+    const k = ao[i] * (0.78 + 0.26 * smooth(0.05, 0.85, y)) * (0.92 + 0.08 * smooth(-0.3, 0.2, x));
+    out.copy(c).multiplyScalar(k);
+  });
+}
+
+function paintPart(geo, ao, skinHex, { toeLight = false } = {}) {
+  const base = new THREE.Color(skinHex);
+  const light = base.clone().lerp(new THREE.Color('#f3f7cf'), 0.35);
+  paintVertices(geo, (x, y, z, i, out) => {
+    out.copy(base);
+    if (toeLight) out.lerp(light, smooth(0.16, 0.24, x) * 0.6);
+    out.multiplyScalar(ao[i] * (0.85 + 0.2 * smooth(-0.15, 0.05, y)));
+  });
 }
 
 class ScarfTail {
@@ -327,12 +465,17 @@ class ScarfTail {
       this.p[0].copy(anchor);
       for (let i = 1; i <= n; i++) {
         const p = this.p[i];
-        const r = bodyRadiusAt(Math.max(0.1, Math.min(0.8, p.y))) + 0.05;
-        const h = Math.hypot(p.x, p.z);
-        if (p.y > 0.08 && p.y < 0.83 && h < r) {
-          const k2 = r / (h || 1e-4);
-          p.x *= k2;
-          p.z *= k2;
+        // push out of the sculpted body along its gradient
+        const d = pogoSDF(p.x, p.y, p.z);
+        if (d < 0.028) {
+          const e = 0.004;
+          let gx = pogoSDF(p.x + e, p.y, p.z) - pogoSDF(p.x - e, p.y, p.z);
+          let gy = pogoSDF(p.x, p.y + e, p.z) - pogoSDF(p.x, p.y - e, p.z);
+          let gz = pogoSDF(p.x, p.y, p.z + e) - pogoSDF(p.x, p.y, p.z - e);
+          const l = Math.hypot(gx, gy, gz) || 1;
+          p.x += (gx / l) * (0.028 - d);
+          p.y += (gy / l) * (0.028 - d);
+          p.z += (gz / l) * (0.028 - d);
         }
         if (p.y < 0.03) p.y = 0.03;
       }
@@ -411,20 +554,21 @@ export class PogoRig {
     const ghost = this.ghost;
     const phys = (opts) => (ghost ? new THREE.MeshBasicMaterial({ color: opts.color }) : new THREE.MeshPhysicalMaterial(opts));
     const bodyMat = phys({
-      color: '#5ee08a',
-      emissive: '#15803d',
-      emissiveIntensity: 0.07,
-      roughness: 0.38,
-      clearcoat: 0.7,
-      clearcoatRoughness: 0.25,
-      sheen: 0.8,
-      sheenColor: new THREE.Color('#ecfccb'),
-      sheenRoughness: 0.4,
+      color: '#45c46c',
+      emissive: '#14532d',
+      emissiveIntensity: 0.05,
+      roughness: 0.48,
+      clearcoat: 0.35,
+      clearcoatRoughness: 0.35,
+      sheen: 0.25,
+      sheenColor: new THREE.Color('#d9f99d'),
+      sheenRoughness: 0.5,
     });
     const bellyMat = phys({ color: '#f7fee7', roughness: 0.45, clearcoat: 0.4, sheen: 0.5, sheenColor: new THREE.Color('#ffffff') });
-    const spotMat = phys({ color: '#2fb86a', roughness: 0.45, clearcoat: 0.6 });
+    const spotMat = phys({ color: '#22964f', roughness: 0.5, clearcoat: 0.4 });
     const lidMat = bodyMat.clone();
-    const bootMat = phys({ color: '#3fca76', roughness: 0.4, clearcoat: 0.6 }); // frog feet (skins recolour)
+    const limbMat = bodyMat.clone(); // domes, arms, legs: same skin without height-based shading
+    const bootMat = phys({ color: '#34b360', roughness: 0.45, clearcoat: 0.4 }); // frog feet (skins recolour)
     const tipMat = new THREE.MeshStandardMaterial({ color: '#fde68a', emissive: '#fde68a', emissiveIntensity: 0.3 });
     const darkMat = new THREE.MeshBasicMaterial({ color: '#0b1020' });
     const whiteMat = phys({ color: '#ffffff', roughness: 0.05, clearcoat: 1 });
@@ -433,42 +577,53 @@ export class PogoRig {
     const glintMat = new THREE.MeshBasicMaterial({ color: '#ffffff' });
     const blushMat = new THREE.MeshBasicMaterial({ color: '#fb7185', transparent: true, opacity: 0.35, depthWrite: false });
     const tongueMat = new THREE.MeshStandardMaterial({ color: '#fb7185', roughness: 0.35 });
-    const scarfMat = new THREE.MeshStandardMaterial({ map: chunkyKnitTexture(), roughness: 0.92, side: THREE.DoubleSide });
+    const scarfMat = new THREE.MeshStandardMaterial({ map: chunkyKnitTexture('u'), roughness: 0.92, side: THREE.DoubleSide });
     const snowMat = new THREE.MeshStandardMaterial({ color: '#f8fafc', emissive: '#7dd3fc', emissiveIntensity: 0.2, roughness: 0.7 });
     if (!ghost) {
-      addRimLight(bodyMat, '#ecfccb', 0.5);
-      addRimLight(lidMat, '#ecfccb', 0.5);
+      addRimLight(bodyMat, '#fef9c3', 0.3);
+      addRimLight(lidMat, '#fef9c3', 0.3, { form: false });
+      addRimLight(bellyMat, '#ffffff', 0.15, { form: false });
+      addRimLight(limbMat, '#fef9c3', 0.3, { form: false });
     }
-    ud.mats = { bodyMat, bootMat, lidMat, tipMat, bellyMat, spotMat };
+    ud.mats = { bodyMat, bootMat, lidMat, tipMat, bellyMat, spotMat, limbMat };
 
     const B = this.body;
 
-    // Bean body (head and body are one squishy shape)
-    const torso = new THREE.Mesh(new THREE.LatheGeometry(BODY_PROFILE.map(([r, y]) => new THREE.Vector2(r, y)), 48), bodyMat);
+    // Sculpted head + body (one surface, vertex-painted, occlusion baked in)
+    const sc = sculptCache();
+    const bodyGeo = sc.body.geo.clone();
+    paintBody(bodyGeo, sc.body.ao, '#45c46c');
+    const skinMat = ghost
+      ? new THREE.MeshBasicMaterial({ color: '#45c46c' })
+      : new THREE.MeshPhysicalMaterial({
+          vertexColors: true,
+          color: '#ffffff',
+          roughness: 0.5,
+          clearcoat: 0.3,
+          clearcoatRoughness: 0.35,
+          sheen: 0.2,
+          sheenColor: new THREE.Color('#ecfccb'),
+          sheenRoughness: 0.5,
+        });
+    if (!ghost) addRimLight(skinMat, '#fef9c3', 0.28, { form: false });
+    const torso = new THREE.Mesh(bodyGeo, skinMat);
     B.add(torso);
     if (!ghost) addOutline(torso);
-    const belly = new THREE.Mesh(new THREE.SphereGeometry(0.24, 28, 20), bellyMat);
-    belly.scale.set(0.42, 0.95, 0.85);
-    belly.position.set(0.215, 0.3, 0);
-    B.add(belly);
-    // Freckle spots on the back and crown
-    const spotGeo = new THREE.SphereGeometry(0.035, 10, 8);
-    const spots = [
-      [0.62, 2.6, 1.0],
-      [0.5, 3.2, 0.8],
-      [0.68, 3.6, 0.7],
-      [0.38, 2.9, 0.9],
-      [0.56, 4.0, 0.6],
-      [0.72, 2.2, 0.6],
-    ];
-    for (const [y, ang, sc] of spots) {
-      const r = bodyRadiusAt(y);
-      const sp = new THREE.Mesh(spotGeo, spotMat);
-      sp.position.set(Math.cos(ang) * r, y, Math.sin(ang) * r);
-      sp.scale.set(sc, sc, sc * 0.35);
-      sp.lookAt(sp.position.x * 2, y, sp.position.z * 2);
-      B.add(sp);
-    }
+    // Limb pieces share the skin look through their own vertex-painted geometries
+    const limbSkin = ghost ? skinMat : skinMat.clone();
+    if (!ghost) addRimLight(limbSkin, '#fef9c3', 0.28, { form: false });
+    const footGeo = sc.foot.geo.clone();
+    paintPart(footGeo, sc.foot.ao, '#3cb865', { toeLight: true });
+    const armGeoL = sc.armL.geo.clone();
+    const armGeoR = sc.armR.geo.clone();
+    paintPart(armGeoL, sc.armL.ao, '#45c46c');
+    paintPart(armGeoR, sc.armR.ao, '#45c46c');
+    ud.recolor = (skinHex, footHex) => {
+      paintBody(bodyGeo, sc.body.ao, skinHex);
+      paintPart(armGeoL, sc.armL.ao, skinHex);
+      paintPart(armGeoR, sc.armR.ao, skinHex);
+      paintPart(footGeo, sc.foot.ao, footHex || skinHex, { toeLight: true });
+    };
 
     // Frog eye-domes on top of the head, with big glossy eyes set into the front
     const face = new THREE.Group();
@@ -479,23 +634,20 @@ export class PogoRig {
     ud.eyeTex = eyeTex;
     const lashMat = new THREE.MeshBasicMaterial({ color: '#0b1020' });
     for (const side of [-1, 1]) {
-      const dome = new THREE.Mesh(new THREE.SphereGeometry(0.155, 32, 24), bodyMat);
-      dome.position.set(0.05, 0.765, side * 0.152);
-      face.add(dome);
-      if (!ghost) addOutline(dome);
+      const dome = new THREE.Object3D(); // domes are part of the sculpt
       const eg = new THREE.Group();
-      eg.position.set(0.105, 0.78, side * 0.158);
+      eg.position.set(EYEBALL.x, EYEBALL.y, side * EYEBALL.z);
       const eyeMat = ghost ? whiteMat : new THREE.MeshPhysicalMaterial({ map: eyeTex.normal, roughness: 0.06, clearcoat: 1, clearcoatRoughness: 0.03 });
-      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.125, 40, 28), eyeMat);
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(EYEBALL.r, 40, 28), eyeMat);
       if (!ghost) addOutline(ball);
       const glint = new THREE.Mesh(new THREE.SphereGeometry(0.024, 10, 8), glintMat);
       const glint2 = new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 6), glintMat);
-      const lidGeo = new THREE.SphereGeometry(0.133, 32, 14, 0, TWO_PI, 0, Math.PI * 0.5);
+      const lidGeo = new THREE.SphereGeometry(EYEBALL.r + 0.008, 32, 14, 0, TWO_PI, 0, Math.PI * 0.5);
       const upper = new THREE.Mesh(lidGeo, lidMat);
       const upperPivot = new THREE.Group();
       upperPivot.add(upper);
       // lid line + lashes ride on the upper lid
-      const lidLine = new THREE.Mesh(new THREE.TorusGeometry(0.133, 0.009, 6, 32, Math.PI), lashMat);
+      const lidLine = new THREE.Mesh(new THREE.TorusGeometry(EYEBALL.r + 0.008, 0.009, 6, 32, Math.PI), lashMat);
       lidLine.rotation.set(Math.PI / 2, 0, Math.PI / 2);
       upperPivot.add(lidLine);
       for (let k = 0; k < 3; k++) {
@@ -512,7 +664,7 @@ export class PogoRig {
       const brow = new THREE.Mesh(new THREE.CapsuleGeometry(0.018, 0.08, 4, 8), darkMat);
       brow.rotation.x = Math.PI / 2;
       const browPivot = new THREE.Group();
-      browPivot.position.set(0.05, 0.135, 0);
+      browPivot.position.set(0.04, 0.135, 0);
       browPivot.add(brow);
       eg.add(ball, glint, glint2, upperPivot, lowerPivot, browPivot);
       face.add(eg);
@@ -527,20 +679,20 @@ export class PogoRig {
 
     // Cheeks
     for (const side of [-1, 1]) {
-      const b = new THREE.Mesh(new THREE.CircleGeometry(0.058, 20), blushMat);
-      const y = 0.56;
-      const r = bodyRadiusAt(y) + 0.003;
-      const ang = side * 0.85;
-      b.position.set(Math.cos(ang) * r, y, Math.sin(ang) * r);
-      b.lookAt(b.position.x * 2, y, b.position.z * 2);
+      const b = new THREE.Mesh(new THREE.CircleGeometry(0.05, 20), blushMat);
+      const dir = [Math.cos(0.85), -0.05, side * Math.sin(0.85)];
+      const p = traceSurface(pogoSDF, [0, 0.515, 0], dir, 0.6);
+      b.position.set(p[0] + dir[0] * 0.004, p[1], p[2] + dir[2] * 0.004);
+      b.lookAt(p[0] + dir[0], p[1] + dir[1], p[2] + dir[2]);
       face.add(b);
     }
     ud.blushMat = blushMat;
 
     // Mouth shapes (wide frog mouth), placed on the front surface
     const mouth = new THREE.Group();
-    const my = 0.59;
-    mouth.position.set(bodyRadiusAt(my) + 0.004, my, 0);
+    const my = 0.575;
+    const mouthP = traceSurface(pogoSDF, [0, my, 0], [1, 0, 0], 0.6);
+    mouth.position.set(mouthP[0] + 0.006, my, 0);
     face.add(mouth);
     const mouths = {};
     const arcGeo = (r, arc) => new THREE.TorusGeometry(r, 0.018, 8, 28, arc);
@@ -596,29 +748,75 @@ export class PogoRig {
     mouths.smile.visible = true;
     ud.mouths = mouths;
 
-    // Scarf: knitted ring + two simulated tails knotted at the back
-    // Chunky hand-knitted wrap: a lumpy, slightly tilted tube around the neck
-    const wrapPts = [];
-    for (let i = 0; i < 24; i++) {
-      const a = (i / 24) * Math.PI * 2;
-      const r = 0.345 + Math.sin(a * 3) * 0.008;
-      wrapPts.push(new THREE.Vector3(Math.cos(a) * r, 0.405 + Math.sin(a) * 0.03 + Math.sin(a * 5) * 0.006, Math.sin(a) * r));
-    }
-    const wrapCurve = new THREE.CatmullRomCurve3(wrapPts, true);
-    const ringGeo = new THREE.TubeGeometry(wrapCurve, 64, 0.072, 12, true);
-    const ring = new THREE.Mesh(ringGeo, scarfMat);
-    scarfMat.map.repeat.set(10, 1);
+    // Scarf: a thin knitted band wrapped snugly round the neck, following the sculpted body
+    // (it lies on the skin with a slight fabric puff, small wrinkles and rolled edges),
+    // knotted at the back with two draping tails.
+    const scarfGeo = (() => {
+      const U = 120;
+      const V = 9;
+      const half = 0.058; // half band width
+      const verts = [];
+      const uvs = [];
+      const idx = [];
+      const edgeTop = [];
+      const edgeBot = [];
+      const e = 0.004;
+      const grad = (x, y, z) => {
+        const gx = pogoSDF(x + e, y, z) - pogoSDF(x - e, y, z);
+        const gy = pogoSDF(x, y + e, z) - pogoSDF(x, y - e, z);
+        const gz = pogoSDF(x, y, z + e) - pogoSDF(x, y, z - e);
+        const l = Math.hypot(gx, gy, gz) || 1;
+        return [gx / l, gy / l, gz / l];
+      };
+      for (let i = 0; i <= U; i++) {
+        const a = (i / U) * Math.PI * 2;
+        const yc = 0.405 + Math.sin(a) * 0.012;
+        for (let j = 0; j <= V; j++) {
+          const v = j / V - 0.5;
+          const y = yc + v * 2 * half;
+          const sp = traceSurface(pogoSDF, [0, y, 0], [Math.cos(a), 0, Math.sin(a)], 0.6);
+          const n = grad(sp[0], sp[1], sp[2]);
+          const puff = 0.014 + 0.012 * Math.cos(v * Math.PI) + 0.003 * Math.sin(a * 11 + v * 4);
+          const p = [sp[0] + n[0] * puff, sp[1] + n[1] * puff, sp[2] + n[2] * puff];
+          verts.push(...p);
+          uvs.push((i / U) * 7, j / V);
+          if (j === 0) edgeBot.push(new THREE.Vector3(...p));
+          if (j === V) edgeTop.push(new THREE.Vector3(...p));
+          if (i < U && j < V) {
+            const a0 = i * (V + 1) + j;
+            const b0 = a0 + V + 1;
+            idx.push(a0, b0, a0 + 1, a0 + 1, b0, b0 + 1);
+          }
+        }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+      g.setIndex(idx);
+      g.computeVertexNormals();
+      return { g, edgeTop, edgeBot };
+    })();
+    const ring = new THREE.Mesh(scarfGeo.g, scarfMat);
+    ring.castShadow = !ghost;
     B.add(ring);
-    if (!ghost) addOutline(ring);
-    const knot = new THREE.Mesh(new THREE.SphereGeometry(0.085, 16, 12), scarfMat);
-    knot.scale.set(0.8, 1, 1.15);
-    knot.position.set(-0.35, 0.41, 0.07);
+    // rolled knit edges give the band a defined border
+    const edgeMat = new THREE.MeshStandardMaterial({ color: '#b91c1c', roughness: 0.9 });
+    for (const pts of [scarfGeo.edgeTop, scarfGeo.edgeBot]) {
+      const curve = new THREE.CatmullRomCurve3(pts.slice(0, -1), true);
+      const edge = new THREE.Mesh(new THREE.TubeGeometry(curve, 120, 0.009, 6, true), edgeMat);
+      B.add(edge);
+    }
+    // flat knot at the back
+    const knotP = traceSurface(pogoSDF, [0, 0.4, 0.06], [-1, 0, 0], 0.6);
+    const knot = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 12), scarfMat);
+    knot.scale.set(0.45, 0.85, 1.1);
+    knot.position.set(knotP[0] - 0.03, 0.4, 0.06);
     B.add(knot);
-    if (!ghost) addOutline(knot);
+    this._knotX = knotP[0] - 0.035;
     const tailMat = scarfMat.clone();
-    tailMat.map = chunkyKnitTexture();
-    tailMat.map.repeat.set(1, 2);
-    ud.scarfTails = [new ScarfTail(tailMat, 8, 0.07, 0.15, 0.045), new ScarfTail(tailMat, 7, 0.07, 0.13, 0.045)];
+    tailMat.map = chunkyKnitTexture('v');
+    tailMat.map.repeat.set(1, 1.5);
+    ud.scarfTails = [new ScarfTail(tailMat, 8, 0.068, 0.12, 0.022), new ScarfTail(tailMat, 7, 0.068, 0.11, 0.022)];
     for (const tail of ud.scarfTails) {
       tail.mesh.castShadow = !ghost;
       this.yawRoot.add(tail.mesh, tail.tassels);
@@ -629,19 +827,11 @@ export class PogoRig {
     const arms = [];
     for (const side of [-1, 1]) {
       const shoulder = new THREE.Group();
-      shoulder.position.set(0.04, 0.36, side * 0.32);
-      const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.048, 0.1, 4, 10), bodyMat);
-      upper.position.y = -0.08;
-      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.065, 16, 12), bodyMat);
-      hand.position.y = -0.18;
-      hand.scale.set(1, 0.9, 1.1);
-      const thumb = new THREE.Mesh(new THREE.SphereGeometry(0.028, 10, 8), bodyMat);
-      thumb.position.set(0.05, -0.16, -side * 0.02);
-      shoulder.add(upper, hand, thumb);
-      if (!ghost) {
-        addOutline(upper);
-        addOutline(hand);
-      }
+      shoulder.position.set(0.04, 0.37, side * 0.305);
+      const arm = new THREE.Mesh(side < 0 ? armGeoL : armGeoR, limbSkin);
+      const hand = arm;
+      shoulder.add(arm);
+      if (!ghost) addOutline(arm);
       B.add(shoulder);
       arms.push({ shoulder, hand, side });
     }
@@ -663,25 +853,16 @@ export class PogoRig {
     const legs = [];
     for (const side of [-1, 1]) {
       const hip = new THREE.Group();
-      hip.position.set(0, 0.14, side * 0.13);
-      const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.06, 4, 8), bodyMat);
-      leg.position.y = -0.05;
-      const foot = new THREE.Mesh(new THREE.SphereGeometry(0.09, 16, 10), bootMat);
-      foot.scale.set(1.35, 0.42, 1.05);
-      foot.position.set(0.06, -0.115, 0);
-      hip.add(leg, foot);
+      hip.position.set(-0.02, 0.15, side * 0.14);
+      const foot = new THREE.Mesh(footGeo, limbSkin);
+      hip.add(foot);
       if (!ghost) addOutline(foot);
       // pink toe-bean pads on the sole (flash when the foot lifts)
-      for (const tz of [-0.045, 0, 0.045]) {
-        const pad = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 6), new THREE.MeshStandardMaterial({ color: '#fda4af', roughness: 0.5 }));
-        pad.position.set(0.12, -0.15, tz);
-        pad.scale.y = 0.4;
+      for (const tz of [-0.082, 0, 0.082]) {
+        const pad = new THREE.Mesh(new THREE.SphereGeometry(0.024, 10, 6), new THREE.MeshStandardMaterial({ color: '#fda4af', roughness: 0.5 }));
+        pad.position.set(0.22, -0.155, tz);
+        pad.scale.y = 0.35;
         hip.add(pad);
-      }
-      for (const tz of [-0.05, 0, 0.05]) {
-        const toe = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 6), bootMat);
-        toe.position.set(0.17, -0.12, tz);
-        hip.add(toe);
       }
       this.yawRoot.add(hip);
       legs.push({ hip, side });
@@ -789,7 +970,10 @@ export class PogoRig {
 
     if (!ghost) {
       this.root.traverse((o) => {
-        if (o.isMesh && !o.material.transparent) o.castShadow = true;
+        if (o.isMesh && !o.material.transparent && !o.userData.outline) {
+          o.castShadow = true;
+          o.receiveShadow = true;
+        }
       });
     }
     this._anchor = new THREE.Vector3();
@@ -853,7 +1037,7 @@ export class PogoRig {
       const sgn = leg.side < 0 ? 1 : -1;
       const swing = Math.sin(ph) * sgn * 0.13 * stepAmt;
       const lift = Math.max(0, Math.sin(ph) * sgn) * 0.07 * stepAmt;
-      leg.hip.position.set(swing, 0.14 + lift, leg.side * 0.13);
+      leg.hip.position.set(swing - 0.02, 0.15 + lift, leg.side * 0.14);
       leg.hip.rotation.z = -swing * 1.6;
     }
     if (!s.onGround) {
@@ -1168,10 +1352,11 @@ export class PogoRig {
     ud.blushMat.opacity = damp(ud.blushMat.opacity, blushGoal, 8, dt);
 
     // ---- Scarf physics (in yawRoot space) ----
-    this._anchor.set(-0.36, 0.4 + this.body.position.y, 0.0);
+    const knotX = this._knotX ?? -0.36;
+    this._anchor.set(knotX, 0.39 + this.body.position.y, 0.0);
     const fwd = Math.abs(s.vx);
     const wind = fwd * 6 + Math.abs(s.vy) * 1.5 + (s.wind || 0) * 8;
-    this._force.set(-wind * 2.2, -9 - s.vy * 1.5, Math.sin(t * 9) * wind * 0.6);
+    this._force.set(-wind * 2.2 - 0.8, -11 - s.vy * 1.5, Math.sin(t * 9) * wind * 0.6);
     if (emo === 'panic') this._force.set(-12, 6, Math.sin(t * 20) * 14);
     if (emo === 'celebrate') this._force.set(-6, 4, Math.sin(t * 12) * 8);
     ud.scarfTails.forEach((tail, i) => {
