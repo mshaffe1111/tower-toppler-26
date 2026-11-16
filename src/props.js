@@ -392,7 +392,7 @@ export function buildLedge(l, pal, mats) {
   const G = ledgeGeos();
   const R = TOWER_RADIUS;
   const node = new THREE.Group();
-  node.position.y = l.floor;
+  node.position.y = l.floor * FH;
   node.rotation.y = (l.col + 0.5) * COL_ANGLE;
   const add = (geo, mat, y = 0, cast = true) => {
     const m = new THREE.Mesh(geo, mat);
@@ -402,7 +402,7 @@ export function buildLedge(l, pal, mats) {
     node.add(m);
     return m;
   };
-  node.userData = { baseY: l.floor, type: l.type };
+  node.userData = { baseY: l.floor * FH, type: l.type };
 
   if (l.type === 'box') {
     // Shootable energy block: rounded crate with glowing rune panels
@@ -468,7 +468,10 @@ export function buildLedge(l, pal, mats) {
 // (The opening itself is cut by buildTowerBody; this adds the vortex, motes and exit emblem.)
 // ---------------------------------------------------------------------------------------------
 export const DOOR_W = 0.68; // world units across the opening
-export const DOOR_H = 1.0; // floor to the top of the 4th brick course
+// World height of one floor (one stair step). Measured from 7800 footage: a step is about one
+// brick row and Pogo is about two steps tall, so steps are low and wide like real stairs.
+export const FH = 0.36;
+export const DOOR_H = 1.0; // a doorway is ~2.8 steps tall: taller than Pogo
 let DGEO = null;
 function doorGeos() {
   if (DGEO) return DGEO;
@@ -483,7 +486,7 @@ export function buildDoor(door, pal, mats, softDotTex) {
   const R = TOWER_RADIUS;
   const g = new THREE.Group();
   g.rotation.y = (door.col + 0.5) * COL_ANGLE;
-  g.position.y = door.floor;
+  g.position.y = door.floor * FH;
   const kind = door.isExit ? 'exit' : door.vault ? 'vault' : 'tunnel';
   const glow = kind === 'exit' ? '#ffb020' : kind === 'vault' ? '#b26bff' : pal.glow;
   const glow2 = kind === 'exit' ? '#fff3b0' : kind === 'vault' ? '#ff7ad9' : '#ffffff';
@@ -572,7 +575,7 @@ export function buildLiftTrack(el, pal, mats) {
   const G = liftGeos();
   const g = new THREE.Group();
   g.rotation.y = (el.col + 0.5) * COL_ANGLE;
-  const baseY = el.minFloor - LEDGE_T - 0.12; // just under a boarding ledge's slab
+  const baseY = el.minFloor * FH - LEDGE_T - 0.12; // just under a boarding ledge's slab
   const base = new THREE.Mesh(G.base, mats.liftDisc);
   base.position.set(0, baseY, R + 0.42);
   base.castShadow = true;
@@ -602,8 +605,8 @@ export function buildLiftPod(el, pal, mats) {
   top.receiveShadow = true;
   pod.add(top);
 
-  const bottom = el.minFloor - LEDGE_T; // top of the footing disc
-  const maxDiscs = Math.ceil((el.maxFloor - el.minFloor + 0.45) / DISC_H) + 1;
+  const bottom = el.minFloor * FH - LEDGE_T; // top of the footing disc
+  const maxDiscs = Math.ceil(((el.maxFloor - el.minFloor) * FH + 0.45) / DISC_H) + 1;
   const column = new THREE.InstancedMesh(G.disc, mats.liftDisc, maxDiscs);
   column.castShadow = true;
   column.receiveShadow = true;
@@ -664,7 +667,7 @@ export function towerStyleName(tower) {
 // Measured from the originals: 5 brick rows per floor (a ledge takes the place of one), ~8-9
 // bricks across the visible face = 22 around (each ~0.74 wide, ~4:1), thin dark mortar
 const BRICKS_AROUND = 22;
-const COURSE_H = 0.2;
+const COURSE_H = 0.18; // two brick courses per step (FH)
 const BRICK_PROUD = 0.055; // how far a brick face stands out from the mortar
 const BRICK_GAIN = 1.22; // instance colour gain (the clay texture is ~0.85 albedo)
 const MERLONS = 12;
@@ -672,7 +675,7 @@ const MERLONS = 12;
 export function buildTowerBody(tower, pal, mats, softDotTex, chromeEnv = null) {
   const R = TOWER_RADIUS;
   const floors = tower.floors;
-  const totalH = floors;
+  const totalH = floors * FH;
   const g = new THREE.Group();
   const styleName = towerStyleName(tower);
   const S = TOWER_STYLES[styleName];
@@ -689,7 +692,7 @@ export function buildTowerBody(tower, pal, mats, softDotTex, chromeEnv = null) {
 
   // Door openings: straight-sided black rectangles, four courses tall
   const halfW = DOOR_W / 2 / (R + BRICK_PROUD); // half-width in radians at the brick face
-  const holes = tower.doors.map((d) => ({ a: (d.col + 0.5) * COL_ANGLE, w: halfW, y0: d.floor + 0.01, y1: d.floor + DOOR_H - 0.01 }));
+  const holes = tower.doors.map((d) => ({ a: (d.col + 0.5) * COL_ANGLE, w: halfW, y0: d.floor * FH + 0.01, y1: d.floor * FH + DOOR_H - 0.01 }));
   const angDist = (a, b) => {
     let d = (a - b) % TWO_PI;
     if (d > Math.PI) d -= TWO_PI;

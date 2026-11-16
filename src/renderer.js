@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { TowerFx } from './towerFx.js';
-import { createPropMaterials, buildTowerBody, buildDoor, buildLiftTrack, buildLiftPod, buildLedge, animateConveyorTextures } from './props.js';
+import { createPropMaterials, buildTowerBody, buildDoor, buildLiftTrack, buildLiftPod, buildLedge, animateConveyorTextures, FH } from './props.js';
 import { PogoRig } from './pogo.js';
 import { Ocean } from './water.js';
 import { createTowerStoneMaterial, createLedgeStoneMaterial, setWaterlineY } from './materials.js';
@@ -15,7 +15,7 @@ const TWO_PI = Math.PI * 2;
 const SUN_DIR = new THREE.Vector3(-0.2, 0.17, -0.96).normalize();
 const COL_ANGLE = TWO_PI / COLS;
 const TOWER_RADIUS = 2.55;
-const FLOOR_HEIGHT = 1.0;
+const FLOOR_HEIGHT = FH; // one stair step (see props.js)
 
 function wrapAngle(a) {
   let res = a % TWO_PI;
@@ -1252,7 +1252,7 @@ export class GameRenderer {
     this.landingRingGroup.visible = pogoVisible;
     if (pogoVisible) {
       this._applySkin(this.pogoGroup, currentSkin());
-      this.pogoGroup.position.set(px, py + (player.hang ? 0.05 : 0), pz);
+      this.pogoGroup.position.set(px, py + (player.hang ? -0.3 : 0), pz); // hanging: hands at the ledge lip
       this.pogoGroup.rotation.set(player.hang ? -0.25 : 0, pTheta, 0);
       this.pogoGroup.scale.setScalar(0.72); // like the 7800 sprite (~15% of the tower face), small against the tower
 
@@ -1343,7 +1343,7 @@ export class GameRenderer {
       // Ground enemies sit exactly on the ledge surface (measured from the model's own bounds)
       if (slot.groundOffset === undefined) slot.groundOffset = this._enemyGroundOffset(slot.mesh, en.type);
       // frozen: the ice block's top sits exactly where Pogo can stand on it (game ICE_TOP 0.95)
-      const yOff = en.stunTimer > 0 && !en.dead ? 0.62 - 0.367 * slot.mesh.scale.y : slot.groundOffset;
+      const yOff = en.stunTimer > 0 && !en.dead ? 1.6 * FLOOR_HEIGHT - 0.367 * slot.mesh.scale.y : slot.groundOffset;
       slot.mesh.position.set(er * Math.sin(eTheta), en.floor * FLOOR_HEIGHT + yOff, er * Math.cos(eTheta));
       const animEn = en.type === 'robot' ? { ...en, type: 'chaser', alert: 0 } : en;
       animateEnemy(slot.mesh, animEn, { time, dt: this._realDt || 1 / 60, eTheta, player: { col: player.col, floor: player.floor }, camCol, COLS });
