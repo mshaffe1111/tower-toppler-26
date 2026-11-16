@@ -21,14 +21,14 @@ const SLIDE_LAYOUTS = {
     split: 0.5,
     jump: { x: 0.3, y: 0.7, s: 1 },
     fire: { x: 0.34, y: 0.6, s: 1.2 },
-    rewind: { x: 0.78, y: 0.42, s: 1.1 },
+    rewind: { x: 0.2, y: 0.62, s: 0.95 },
     stick: { x: 0.5, y: 0.62, s: 1 },
   },
   landscape: {
     split: 0.28,
     jump: { x: 0.24, y: 0.84, s: 1 },
     fire: { x: 0.3, y: 0.82, s: 1.2 },
-    rewind: { x: 0.3, y: 0.56, s: 1.1 },
+    rewind: { x: 0.24, y: 0.84, s: 0.95 },
     stick: { x: 0.55, y: 0.7, s: 1 },
   },
 };
@@ -189,7 +189,7 @@ export class ControlEditor {
     this.open_ = true;
     // only the controls that exist in this control style can be edited
     const sch = settings.controls.scheme;
-    const editable = sch === 'slide' ? ['fire', 'rewind'] : sch === 'gesture' ? ['rewind', 'stick'] : ['jump', 'fire', 'rewind', 'stick'];
+    const editable = sch === 'slide' ? ['rewind'] : sch === 'gesture' ? ['rewind', 'stick'] : ['jump', 'fire', 'rewind', 'stick'];
     for (const chip of document.querySelectorAll('[data-ed-select]')) chip.hidden = !editable.includes(chip.dataset.edSelect);
     if (!editable.includes(this.sel)) this.sel = editable[0];
     this.input.releaseAll();

@@ -225,9 +225,12 @@ export class InputController {
     } else if (entry.type === 'canvas' && entry.action) {
       this._hold(entry.action, src, false);
     } else if (entry.type === 'slide') {
+      clearTimeout(entry.holdTimer);
       for (const d of entry.dirs || []) this._hold(d, src, false);
       this.state.axisX = 0;
       this._slideRing?.classList.remove('on');
+      if (entry.charging) this._hold('fire', src, false); // throw the charged snowball
+      else if (performance.now() - entry.t0 < 200 && (entry.moved || 0) < 12) this._pulseAction('fire', 90); // tap = fire
     } else if (entry.type === 'gesture') {
       clearTimeout(entry.timer);
       if (entry.state === 'pending') this._pulseAction('fire', 70); // quick tap = snowball
@@ -255,18 +258,24 @@ export class InputController {
         if (!isSlide() || excluded(e.target)) return;
         for (const ent of this._activePointers.values()) {
           if (ent.type === 'slide') {
-            // a second finger tapping anywhere jumps (the first one keeps steering)
+            // a second thumb tapping anywhere fires (the first one keeps walking)
             e.preventDefault();
             e.stopPropagation();
-            this._pulseAction('jump', 260);
+            this._pulseAction('fire', 90);
             return;
           }
         }
         e.preventDefault();
         e.stopPropagation(); // the slide owns this touch (no stick zone / camera drag)
         this.lastDevice = 'touch';
-        const entry = { type: 'slide', id: e.pointerId, ox: e.clientX, oy: e.clientY, upRef: e.clientY, downRef: e.clientY, lastT: performance.now(), dirs: [] };
+        const entry = { type: 'slide', id: e.pointerId, ox: e.clientX, oy: e.clientY, sx: e.clientX, sy: e.clientY, t0: performance.now(), moved: 0, upRef: e.clientY, downRef: e.clientY, lastT: performance.now(), dirs: [] };
         this._activePointers.set(e.pointerId, entry);
+        // touch and hold still = charge a mega-snowball (released on lift-off)
+        entry.holdTimer = setTimeout(() => {
+          if (!this._activePointers.has(e.pointerId) || entry.moved > 12) return;
+          entry.charging = true;
+          this._hold('fire', `ptr:${e.pointerId}`, true);
+        }, 320);
         try { app.setPointerCapture(e.pointerId); } catch (_) {}
         this._slideFx(entry, e.clientX, e.clientY, true);
       },
@@ -291,6 +300,7 @@ export class InputController {
   _updateSlide(entry, x, y) {
     const c = settings.controls || {};
     const now = performance.now();
+    entry.moved = Math.max(entry.moved || 0, Math.hypot(x - entry.sx, y - entry.sy));
     // Short leash: full speed after a small slide, so the thumb never travels far
     const R = c.sensitivity === 'high' ? 22 : c.sensitivity === 'low' ? 36 : 28;
     const DEAD = 0.2;

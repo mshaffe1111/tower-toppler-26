@@ -1890,11 +1890,27 @@ body.editing-controls .action-prompt { display: none !important; }
    One thumb anywhere moves Pogo; only FIRE and REWIND are buttons, so the deck is shorter and the
    playfield gets the space back. */
 #touch-controls.scheme-slide .action-jump,
+#touch-controls.scheme-slide .action-fire,
+#touch-controls.scheme-slide .slide-hint,
 #touch-controls.scheme-slide .stick-zone,
 #touch-controls.scheme-slide .ctl-split,
 #touch-controls.scheme-slide::before { display: none !important; }
-#touch-controls.scheme-slide { height: calc(132px + var(--safe-bottom)); }
-@media (max-height: 700px) { #touch-controls.scheme-slide { height: calc(120px + var(--safe-bottom)); } }
+/* Slide: no control deck at all, the game fills the screen (tap fires, slide moves, push up
+   jumps). Only the Reboot's small REWIND button floats over the bottom-left corner. */
+#touch-controls.scheme-slide {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(120px + var(--safe-bottom));
+  background: none;
+  border: 0;
+  box-shadow: none;
+  pointer-events: none;
+  z-index: 20;
+}
+#touch-controls.scheme-slide .action-cluster { pointer-events: none; }
+#touch-controls.scheme-slide .action-rewind { pointer-events: auto; opacity: calc(var(--ctl-opacity) * 0.75); }
 .slide-hint { display: none; }
 #touch-controls.scheme-slide .slide-hint {
   display: flex;
