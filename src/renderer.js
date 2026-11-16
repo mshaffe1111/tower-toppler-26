@@ -11,6 +11,9 @@ import { COLS } from './levels.js';
 import { createEnemyModel, animateEnemy, warmEnemyModelsAsync } from './enemyModels.js';
 
 const TWO_PI = Math.PI * 2;
+// ORIGINAL enemy size factors (on top of the 0.95 base scale): see the enemy update below
+// (the molecule is sized by its whole orbit of atoms, not just the nucleus: ~2 rows overall)
+const ORIGINAL_SIZE = { eye: 1.5, robot: 1.22, chaser: 1.22, bouncer: 1.63, roller: 1.55, molecule: 1.8, spiker: 1.24 };
 // Low sun behind and slightly left of the tower (rim light, water glitter path, sky disc)
 const SUN_DIR = new THREE.Vector3(-0.2, 0.17, -0.96).normalize();
 const COL_ANGLE = TWO_PI / COLS;
@@ -1338,12 +1341,23 @@ export class GameRenderer {
         this.towerScene.add(slot.mesh);
       }
       slot.mesh.visible = true;
+      // ORIGINAL sizes: every enemy about 2 rows tall, as in the original (the port's collision
+      // shapes make an enemy 16 units = 2 rows tall; the 7800 footage shows the balls ~2 rows).
+      // Factors bring each model's solid body to 2 rows (measured: eye 1.33, robot 1.64,
+      // bouncing ball 1.23, rolling ball 1.29, spiker 1.61, molecule 0.62 rows at scale 0.95).
+      const sizeMode = state.original ? 'o' : 'r';
+      if (slot.sizeMode !== sizeMode) {
+        slot.mesh.scale.setScalar(0.95 * (state.original ? ORIGINAL_SIZE[en.type] || 1 : 1));
+        slot.sizeMode = sizeMode;
+        slot.groundOffset = undefined;
+      }
       const eTheta = wrapAngle((en.col - camCol) * COL_ANGLE);
       const er = TOWER_RADIUS + 0.4;
       // Ground enemies sit exactly on the ledge surface (measured from the model's own bounds)
-      if (slot.groundOffset === undefined) slot.groundOffset = this._enemyGroundOffset(slot.mesh, en.type);
-      // frozen: the ice block's top sits exactly where Pogo can stand on it (game ICE_TOP 0.95)
-      const yOff = en.stunTimer > 0 && !en.dead ? 1.6 * FLOOR_HEIGHT - 0.367 * slot.mesh.scale.y : slot.groundOffset;
+      if (slot.groundOffset === undefined) slot.groundOffset = this._enemyGroundOffset(slot.mesh, en.type, state.original);
+      // frozen: the ice block's top sits exactly where Pogo can stand on it (game ICE_TOP 0.95);
+      // the Original's stunned ball just stops where it is
+      const yOff = en.stunTimer > 0 && !en.dead && !state.original ? 1.6 * FLOOR_HEIGHT - 0.367 * slot.mesh.scale.y : slot.groundOffset;
       slot.mesh.position.set(er * Math.sin(eTheta), en.floor * FLOOR_HEIGHT + yOff, er * Math.cos(eTheta));
       const animEn = en.type === 'robot' ? { ...en, type: 'chaser', alert: 0 } : en;
       animateEnemy(slot.mesh, animEn, { time, dt: this._realDt || 1 / 60, eTheta, player: { col: player.col, floor: player.floor }, camCol, COLS });
@@ -1415,9 +1429,11 @@ export class GameRenderer {
 
   // Distance from an enemy model's origin down to its lowest point (after the group scale),
   // so walkers/rollers/bouncers touch the ledge instead of sinking into it. Flyers keep a hover.
-  _enemyGroundOffset(mesh, type) {
+  // all: measure every type (the Original places every enemy by its base: en.floor is the bottom
+  // of its cell for the patrollers and the molecule too)
+  _enemyGroundOffset(mesh, type, all = false) {
     const ground = ['roller', 'bouncer', 'chaser', 'robot', 'shieldbug', 'puffer', 'splitter'];
-    if (!ground.includes(type)) return 0.28;
+    if (!all && !ground.includes(type)) return 0.28;
     const body = mesh.userData.body || mesh;
     const box = new THREE.Box3();
     mesh.updateMatrixWorld(true);
