@@ -32,15 +32,15 @@ function mulberry32(seed) {
 
 // Classic-paced movement tuning (deliberate like the 7800 original, but with modern assists)
 const PHYS = {
-  walkSpeed: 2.9, // columns / second on the ground
-  airSpeed: 3.3, // a running jump carries a little extra distance
+  walkSpeed: 2.3, // columns / second on the ground (~7s per lap of the tower, like the original)
+  airSpeed: 2.9, // a running jump carries a little extra distance
   gravity: 15,
   jumpVy: 6.9, // ~1.6 floors high
   stepVy: 5.7, // auto step-up hop onto the next stair
   maxFall: 11,
   poundVy: -14,
 };
-const ENEMY_PACE = 0.72; // global enemy speed multiplier
+const ENEMY_PACE = 0.62; // global enemy speed multiplier (classic, deliberate pace)
 const ICE_TOP = 0.72; // a frozen enemy's ice block top, in floors above its centre floor
 const REWIND_MAX = 3; // seconds of rewind in the meter
 const HISTORY_MAX = 240; // 4s of snapshots at 60fps
@@ -74,6 +74,7 @@ export class TowerTopplerGame {
 
     this.particles = [];
     this.popups = [];
+    this.waterEvents = []; // {col, strength} consumed by the renderer (ripples)
     this.snowballs = [];
     this.ledges = [];
     this.elevators = [];
@@ -458,7 +459,7 @@ export class TowerTopplerGame {
     return {
       hp: e.type === 'spiker' ? 2 : e.type === 'chaser' ? 3 : 1,
       ...e,
-      speed: (e.speed || 1.5) * ENEMY_PACE * (1 + diff * 0.3),
+      speed: (e.speed || 1.5) * ENEMY_PACE * (1 + diff * 0.45), // later towers are quicker
       baseFloor: e.floor,
       phase: Math.random() * Math.PI * 2,
       stunTimer: 0,
@@ -479,7 +480,7 @@ export class TowerTopplerGame {
     const side = Math.random() < 0.5 ? -1 : 1;
     const lvl = this.runMode === 'campaign' ? this.towerIndex : Math.min(7, this.towerIndex + 2);
     const type = lvl >= 2 && Math.random() < 0.35 ? 'eye' : 'molecule';
-    const speed = 2.4 + lvl * 0.12;
+    const speed = 2.0 + lvl * 0.14;
     this.enemies.push(
       this._makeEnemy({
         type,
@@ -1143,6 +1144,7 @@ export class TowerTopplerGame {
     // Drowned / fell into the sea
     const seaLine = this.mech.kind === 'flood' ? this.mech.waterFloor - 0.35 : -0.55;
     if (p.floor < seaLine) {
+      this.waterEvents.push({ col: p.col, strength: 1.6 });
       sound.splash();
       this.addShake(10);
       const pos = this._colFloorToScreen(p.col, Math.max(p.floor, this.mech.waterFloor), 14);
@@ -1165,7 +1167,7 @@ export class TowerTopplerGame {
     const p = this.player;
     if (this.towerTime > 1.5) this._hint('walk', 'Push the stick to walk round the tower. Walk into a step to climb it.');
     if (p.teeter > 0) this._hint('jump', 'Careful — that\'s the sea! Press JUMP to hop across gaps.');
-    if (!this.classic && this.towerTime > 9) this._hint('peek', 'Hold the stick ▲ or ▼ while standing still to look up or down the tower.');
+    if (this.towerTime > 9) this._hint('peek', 'Drag anywhere on the screen to look around the tower and plan your route.');
     const near = this.enemies.find((e) => !e.dead && Math.abs(e.floor - p.floor) < 0.8 && Math.abs(colDist(e.col, p.col)) < 3.5);
     if (near) {
       this._hint('fire', 'Tap FIRE to throw a snowball. Bouncers & molecules pop; rollers just freeze.');
@@ -1502,6 +1504,7 @@ export class TowerTopplerGame {
           en.baseFloor += en.fallVy * dt;
           en.floor = en.baseFloor;
           if (en.floor < Math.max(-0.6, hz)) {
+            this.waterEvents.push({ col: en.col, strength: 1.0 });
             en.dead = true;
             const pos = this._colFloorToScreen(en.col, Math.max(0, hz), 14);
             if (pos) this._spawnSplashDroplets(pos.x, pos.y);
@@ -1955,7 +1958,23 @@ export class TowerTopplerGame {
   _updateCamera(dt) {
     const p = this.player;
     const lead = Math.max(-0.6, Math.min(0.6, p.vx * 0.12));
-    const d = colDist(this.camCol, p.col + lead);
+    // Touch camera: drag the view round the tower (±5 columns) and up/down (−3..+6 floors)
+    const look = this.input.look;
+    let lookColGoal = 0;
+    let lookFloorGoal = 0;
+    if (look && look.active) {
+      lookColGoal = Math.max(-5, Math.min(5, (-look.dx / Math.max(1, look.w)) * 9));
+      lookFloorGoal = Math.max(-3, Math.min(6, (look.dy / Math.max(1, look.h)) * 10));
+      this._lookHold = 0.5;
+    } else if (this._lookHold > 0) {
+      this._lookHold -= dt;
+      lookColGoal = this.lookCol || 0;
+      lookFloorGoal = this.lookFloor || 0;
+    }
+    const lk = look && look.active ? 12 : 3.5;
+    this.lookCol = (this.lookCol || 0) + (lookColGoal - (this.lookCol || 0)) * Math.min(1, dt * lk);
+    this.lookFloor = (this.lookFloor || 0) + (lookFloorGoal - (this.lookFloor || 0)) * Math.min(1, dt * lk);
+    const d = colDist(this.camCol, p.col + lead + this.lookCol);
     const move = d * Math.min(1, dt * 9);
     this._camVel = dt > 0 ? move / dt : 0;
     this.camCol = wrapCol(this.camCol + move);
@@ -1974,8 +1993,8 @@ export class TowerTopplerGame {
       if (p.floor < this.camAnchor) focus = p.floor;
       else focus = this.camAnchor + (p.floor - this.camAnchor) * 0.3;
     }
-    const targetFloor = Math.max(2, focus + 1.0 + (this.peek || 0));
-    const rate = targetFloor < this.camFloor ? 6.5 : 4.5;
+    const targetFloor = Math.max(2, focus + 1.0 + (this.peek || 0) + (this.lookFloor || 0));
+    const rate = look && look.active ? 10 : targetFloor < this.camFloor ? 6.5 : 4.5;
     this.camFloor += (targetFloor - this.camFloor) * Math.min(1, dt * rate);
   }
 

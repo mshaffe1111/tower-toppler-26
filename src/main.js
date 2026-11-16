@@ -3,6 +3,8 @@ import { InputController } from './input.js';
 import { GameRenderer } from './renderer.js';
 import { TowerTopplerGame } from './game.js';
 import { settings, setSetting, progress, saveProgress, getMedals, totalMedals, SKINS, skinUnlocked, currentSkin } from './settings.js';
+import { applyControls, bindControlsInput, ControlEditor } from './controls.js';
+import { OptionsMenu } from './options.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('game-canvas');
@@ -44,6 +46,7 @@ const show = (name) => overlays[name].classList.remove('hidden');
 const hide = (name) => overlays[name].classList.add('hidden');
 
 const input = new InputController();
+bindControlsInput(input);
 const renderer = new GameRenderer(canvas);
 
 const hintEl = $('hint-card');
@@ -186,6 +189,8 @@ const game = new TowerTopplerGame(renderer, input, {
     show('gameover');
   },
 });
+// Dev hook for automated tests: open with ?debug
+if (new URLSearchParams(location.search).has('debug')) window.__tt = { game, input, renderer };
 
 // Preview tower behind the menu
 game.loadTower(0);
@@ -220,60 +225,66 @@ import('./pwa.js')
   .catch(() => {});
 
 // ---------------- Layout ----------------
+let controlEditor = null; // created with the Options menu below
 function handleResize() {
   const rect = stageWrap.getBoundingClientRect();
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   renderer.resize(rect.width, rect.height, dpr);
   subRenderer?.resize(rect.width, rect.height);
   game.subStage?.resize?.(rect.width, rect.height);
+  applyControls();
+  controlEditor?.onResize();
 }
 window.addEventListener('resize', handleResize);
 window.addEventListener('orientationchange', () => setTimeout(handleResize, 150));
 handleResize();
 
-// ---------------- Settings ----------------
+// ---------------- Settings / Options menu ----------------
 function applySettings() {
-  $('touch-controls')?.classList.toggle('swapped', settings.stickSide === 'left');
-  $('btn-swap').textContent = settings.stickSide === 'left' ? '⇄ STICK ON RIGHT' : '⇄ STICK ON LEFT';
   appEl.classList.toggle('classic-rules', Boolean(settings.classic));
   input.hapticsEnabled = settings.haptics !== false;
   renderer.setQualityMode(settings.quality || 'auto');
   renderer.setDiorama(settings.diorama !== false);
+  sound.setVolumes?.(settings.musicVolume ?? 0.8, settings.sfxVolume ?? 1);
+  applyControls();
 }
-applySettings();
 
-function syncSettingsForm() {
-  for (const el of overlays.settings.querySelectorAll('[data-setting]')) {
-    const key = el.dataset.setting;
-    if (key === 'stickLeft') el.checked = settings.stickSide === 'left';
-    else if (el.type === 'checkbox') el.checked = Boolean(settings[key]);
-    else el.value = String(settings[key]);
-  }
-}
-for (const el of overlays.settings.querySelectorAll('[data-setting]')) {
-  el.addEventListener('change', () => {
-    sound.uiTap?.();
-    const key = el.dataset.setting;
-    if (key === 'stickLeft') setSetting('stickSide', el.checked ? 'left' : 'right');
-    else if (key === 'gameSpeed') setSetting('gameSpeed', Number(el.value));
-    else if (el.type === 'checkbox') setSetting(key, el.checked);
-    else setSetting(key, el.value);
-    if (key === 'classic' && el.checked && settings.assist) {
-      setSetting('assist', false);
-      syncSettingsForm();
-    }
-    if (key === 'assist' && el.checked && settings.classic) {
-      setSetting('classic', false);
-      syncSettingsForm();
-    }
+let settingsReturn = 'title';
+const optionsMenu = new OptionsMenu({
+  tabsEl: $('opt-tabs'),
+  bodyEl: $('opt-body'),
+  tap: () => sound.uiTap?.(),
+  onChange(key, value) {
+    // Assist and Classic rules are opposites
+    if (key === 'classic' && value && settings.assist) setSetting('assist', false);
+    if (key === 'assist' && value && settings.classic) setSetting('classic', false);
     applySettings();
     if (key === 'mirror' && game.mode === 'title') game.loadTower(Number($('start-tower').value) || 0);
-  });
-}
-let settingsReturn = 'title';
+  },
+  onAction(action, btn) {
+    if (action === 'reset-hints') {
+      progress.hintsSeen = {};
+      saveProgress();
+      btn.textContent = '✓ HINTS WILL SHOW AGAIN';
+    } else if (action === 'edit-layout') {
+      hide('settings');
+      controlEditor.open();
+    }
+  },
+});
+controlEditor = new ControlEditor({
+  input,
+  tap: () => sound.uiTap?.(),
+  onClose: () => {
+    optionsMenu.show('controls');
+    show('settings');
+  },
+});
+applySettings();
+
 function openSettings(from) {
   settingsReturn = from;
-  syncSettingsForm();
+  optionsMenu.show();
   hide(from);
   show('settings');
 }
@@ -283,12 +294,6 @@ $('btn-settings-close').addEventListener('click', () => {
   sound.uiBack?.();
   hide('settings');
   show(settingsReturn);
-});
-$('btn-reset-hints').addEventListener('click', () => {
-  progress.hintsSeen = {};
-  saveProgress();
-  $('btn-reset-hints').textContent = '💡 HINTS WILL SHOW AGAIN';
-  sound.uiTap?.();
 });
 $('btn-howto').addEventListener('click', () => {
   hide('title');
@@ -404,6 +409,11 @@ $('btn-endless').addEventListener('click', () => procgen && startRun({ mode: 'en
 
 // ---------------- Pause ----------------
 function togglePause() {
+  // Esc / Start while editing the layout = DONE (never un-pauses behind the editor)
+  if (controlEditor?.isOpen) {
+    controlEditor.close(true);
+    return;
+  }
   if (!['tower', 'submarine', 'summit', 'paused'].includes(game.mode)) return;
   input.releaseAll();
   const paused = game.togglePause();
@@ -427,10 +437,6 @@ $('btn-resume').addEventListener('click', () => {
   hide('pause');
   game.togglePause();
   sound.setMusicActive(true);
-});
-$('btn-swap').addEventListener('click', () => {
-  setSetting('stickSide', settings.stickSide === 'left' ? 'right' : 'left');
-  applySettings();
 });
 function toMenu() {
   for (const k of Object.keys(overlays)) hide(k);
@@ -562,22 +568,14 @@ function makeScoreCard(s) {
   return new Promise((res) => c.toBlob((b) => res(b), 'image/png'));
 }
 
-// Music toggles
-$('btn-sound').addEventListener('click', () => {
-  sound.unlock();
-  const muted = sound.toggleMute();
-  $('btn-sound').textContent = muted ? '🔇' : '🔊';
-});
-$('btn-music').addEventListener('click', () => {
-  sound.unlock();
-  const enabled = sound.toggleMusic();
-  $('btn-music').textContent = enabled ? '🎵' : '🔕';
-});
+// M toggles music (the volume sliders live in Options > Audio)
 window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyM' && !e.repeat) {
     sound.unlock();
-    const enabled = sound.toggleMusic();
-    $('btn-music').textContent = enabled ? '🎵' : '🔕';
+    const vol = settings.musicVolume > 0 ? 0 : settings.lastMusicVolume || 0.8;
+    if (settings.musicVolume > 0) setSetting('lastMusicVolume', settings.musicVolume);
+    setSetting('musicVolume', vol);
+    applySettings();
   }
 });
 

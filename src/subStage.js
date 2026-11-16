@@ -17,6 +17,9 @@ const PERFECT_BONUS = 750;
 const SCHOOL_BONUS = 150; // whole school caught in one go
 const HIT_PENALTY = 100;
 const MAX_MULT = 4;
+const NEAR_MISS_POINTS = 50; // squeezing past a hazard without touching it
+const COMBO_WINDOW = 2.4;
+const MAX_VFX = 48;
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -26,6 +29,12 @@ const smooth = (t) => t * t * (3 - 2 * t);
 function removeAt(arr, i) {
   const last = arr.length - 1;
   if (i !== last) arr[i] = arr[last];
+  arr.pop();
+}
+
+// order-preserving removal without the temporary array `splice` allocates
+function removeOrdered(arr, i) {
+  for (let k = i; k < arr.length - 1; k++) arr[k] = arr[k + 1];
   arr.pop();
 }
 
@@ -43,6 +52,11 @@ export class SubStage {
     this.clams = [];
     this.bubbles = [];
     this.rings = []; // shock-wave rings for the renderer: {x,y,r0,r1,life,maxLife,color}
+    // One-shot presentation events for the renderer (sparkles, pops, whooshes, splashes...).
+    // {id, kind, x, y, life, maxLife, size, color, a}; `id` increases so a renderer can spawn
+    // its own effects exactly once per event.
+    this.vfx = [];
+    this._vfxId = 0;
     this.tower = { active: false, x: 0, r: 100, targetX: 0, glow: '#38bdf8', name: '' };
     this._resetStats();
   }
@@ -63,6 +77,11 @@ export class SubStage {
       autoCd: 0,
       surfaced: 0, // 0..1 how far it has broken the surface during arrival
       prop: 0, // propeller speed factor 0..1.5
+      ax: 0, // smoothed acceleration (px/s^2) for banking / squash in the renderer
+      ay: 0,
+      shots: 0, // counters the renderer watches to trigger recoil / squash / cheer
+      catches: 0,
+      nearMisses: 0,
     };
   }
 
@@ -76,7 +95,11 @@ export class SubStage {
     this.perfect = false;
     this.combo = 0;
     this.comboTimer = 0;
+    this.comboTimerMax = COMBO_WINDOW;
+    this.comboPulseT = -10; // stage time of the last combo step (HUD pulse)
     this.mult = 1;
+    this.nearMisses = 0;
+    this.bestCombo = 0;
   }
 
   start({ width = 390, height = 620, towerIndex = 0, healing = 0, nextTowerName = 'NEXT TOWER', nextGlow = '#38bdf8' } = {}) {
@@ -109,6 +132,7 @@ export class SubStage {
     this.clams.length = 0;
     this.bubbles.length = 0;
     this.rings.length = 0;
+    this.vfx.length = 0;
     this._resetStats();
 
     this._layout();
@@ -195,6 +219,7 @@ export class SubStage {
     }
     for (const b of this.bubbles) fixXY(b);
     this.rings.length = 0;
+    this.vfx.length = 0;
     this.baseSpeed = 92 * this.s;
     const t = this.tower;
     t.r = this._towerRadius();
@@ -285,6 +310,12 @@ export class SubStage {
       r.x -= this.scrollSpeed * dt * 0.5;
       if (r.life <= 0) removeAt(this.rings, i);
     }
+    for (let i = this.vfx.length - 1; i >= 0; i--) {
+      const e = this.vfx[i];
+      e.life -= dt;
+      if (e.kind !== 'whoosh' && e.kind !== 'collect') e.x -= this.scrollSpeed * dt * 0.6;
+      if (e.life <= 0) removeOrdered(this.vfx, i); // keep order (ids ascending)
+    }
     return false;
   }
 
@@ -310,9 +341,18 @@ export class SubStage {
 
   _comboHit() {
     this.combo = this.comboTimer > 0 ? this.combo + 1 : 1;
-    this.comboTimer = 2.4;
+    this.comboTimer = COMBO_WINDOW;
+    this.comboTimerMax = COMBO_WINDOW;
+    const prev = this.mult;
     this.mult = Math.min(MAX_MULT, this.combo);
+    if (this.mult > prev) this.comboPulseT = this.t;
+    if (this.combo > this.bestCombo) this.bestCombo = this.combo;
     return this.mult;
+  }
+
+  _vfx(kind, x, y, { life = 0.6, size = 1, color = '#ffffff', a = 0, tx = 0, ty = 0 } = {}) {
+    if (this.vfx.length >= MAX_VFX) this.vfx.shift();
+    this.vfx.push({ id: ++this._vfxId, kind, x, y, life, maxLife: life, size, color, a, tx, ty });
   }
 
   _ring(x, y, r0, r1, color, life = 0.45, flat = false) {
@@ -322,6 +362,20 @@ export class SubStage {
 
   // ------------------------------------------------------------------ submarine
   _updateSub(dt, input, firePressed, fx, sound) {
+    const sub = this.sub;
+    const pvx = sub.vx;
+    const pvy = sub.vy;
+    this._moveSub(dt, input, firePressed, fx, sound);
+    if (dt > 0) {
+      const k = 1 - Math.exp(-10 * dt);
+      const ax = clamp((sub.vx - pvx) / dt, -4000, 4000);
+      const ay = clamp((sub.vy - pvy) / dt, -4000, 4000);
+      sub.ax += (ax - sub.ax) * k;
+      sub.ay += (ay - sub.ay) * k;
+    }
+  }
+
+  _moveSub(dt, input, firePressed, fx, sound) {
     const sub = this.sub;
     const s = this.s;
     const W = this.width;
@@ -340,8 +394,8 @@ export class SubStage {
       sub.prop = 1.3;
     } else if (this.phase === 'arrive') {
       // Autopilot: swim in front of the tower's base and break the surface
-      const tx = this.tower.x - this.tower.r * 0.95 - sub.rx * 0.2;
-      const ty = this.surfaceY + sub.ry * 0.3;
+      const tx = this.tower.x - this.tower.r * 1.4 - sub.rx * 0.2;
+      const ty = this.surfaceY - sub.ry * 0.2;
       const dx = tx - sub.x;
       const dy = ty - sub.y;
       const maxV = 190 * s;
@@ -362,7 +416,8 @@ export class SubStage {
         fx.particles?.(sub.x, this.surfaceY, '#e0f7ff', 18, 150);
         fx.particles?.(sub.x - sub.rx * 0.6, this.surfaceY, '#bae6fd', 10, 110);
         this._ring(sub.x, this.surfaceY, sub.rx * 0.6, sub.rx * 2.6, '#e0f7ff', 0.8, true);
-        fx.shake?.(2);
+        this._vfx('splash', sub.x, this.surfaceY, { life: 1.4, size: sub.rx, a: sub.vy });
+        fx.shake?.(3);
       }
       if (sub.surfaced > 0) {
         sub.surfaced = Math.min(1, sub.surfaced + dt * 1.6);
@@ -399,8 +454,13 @@ export class SubStage {
           ix /= len;
           iy /= len;
         }
-        const maxV = 215 * s;
-        const a = Math.min(1, dt * 7.5);
+        // Momentum: snappy when steering (and snappier still when reversing), a short glide
+        // when the stick is released, so the little sub feels like it has weight in water.
+        const maxV = 222 * s;
+        const steering = len > 0.05;
+        const reversing = ix * sub.vx < 0 || iy * sub.vy < 0;
+        const k = steering ? (reversing ? 9 : 6.2) : 2.8;
+        const a = 1 - Math.exp(-k * dt);
         sub.vx += (ix * maxV - sub.vx) * a;
         sub.vy += (iy * maxV - sub.vy) * a;
         sub.prop = 0.75 + Math.max(0, ix) * 0.6 - Math.max(0, -ix) * 0.35;
@@ -440,7 +500,9 @@ export class SubStage {
     if (this.bubbles.length >= 9) return;
     sub.fireCd = 0.15;
     sub.autoCd = 0.3;
+    sub.shots++;
     const s = this.s;
+    this._vfx('muzzle', sub.x + sub.rx * 1.05, sub.y + sub.ry * 0.15, { life: 0.28, size: 8 * s });
     this.bubbles.push({
       x: sub.x + sub.rx * 1.05,
       y: sub.y + sub.ry * 0.15,
@@ -647,6 +709,7 @@ export class SubStage {
         }
         sound?.bubble?.();
         this._ring(f.x, f.y, f.r, f.r * 3, '#bfefff', 0.4);
+        this._vfx('sparkle', f.x, f.y, { life: 0.55, size: f.r * 2.2, color: f.type === 'gold' ? '#fde047' : '#e0fbff' });
         return true;
       }
     }
@@ -667,6 +730,7 @@ export class SubStage {
         fx.particles?.(j.x, j.y, '#f0abfc', 14, 120);
         fx.particles?.(j.x, j.y, '#ffffff', 6, 80);
         this._ring(j.x, j.y, j.r * 0.6, j.r * 3.2, '#f0abfc', 0.5);
+        this._vfx('pop', j.x, j.y, { life: 0.6, size: j.r * 1.6, color: '#f0abfc' });
         sound?.jellyZap?.();
         return true;
       }
@@ -751,6 +815,9 @@ export class SubStage {
     const base = FISH_POINTS[f.type] || 100;
     const pts = base * mult;
     this.fishCaught++;
+    this.sub.catches++;
+    this._vfx('pop', f.x, f.y, { life: 0.55, size: f.bubbleR, color: f.type === 'gold' ? '#fde047' : '#bdf4ff' });
+    this._vfx('collect', f.x, f.y, { life: 0.32, size: f.r, color: f.type === 'gold' ? '#fde047' : '#a5f3fc', tx: this.sub.x, ty: this.sub.y });
     this._score(fx, pts);
     if (f.type === 'gold') {
       this.goldCaught++;
@@ -783,11 +850,13 @@ export class SubStage {
         sy += f.y;
         fx.particles?.(f.x, f.y, '#a5f3fc', 4, 90);
         this._ring(f.x, f.y, f.bubbleR * 0.6, f.bubbleR * 2.2, '#a5f3fc', 0.35);
+        this._vfx('pop', f.x, f.y, { life: 0.5, size: f.bubbleR * 0.8, color: '#bdf4ff' });
         removeAt(this.fish, i);
       } else if (f.state !== 'free') swimmers++;
       total++;
     }
     if (!n) return;
+    this.sub.catches++;
     const mult = this._comboHit();
     let pts = FISH_POINTS.small * n * mult;
     const whole = n === total && swimmers === 0 && n >= 4;
@@ -799,6 +868,8 @@ export class SubStage {
     const label = `${whole ? 'SCHOOL ' : ''}+${pts}${mult > 1 ? ` x${mult}` : ''}`;
     fx.popup?.(sx, sy - 20 * this.s, label, mult > 1 ? '#f472b6' : '#86efac');
     fx.particles?.(sx, sy, '#ffffff', 10, 140);
+    this._vfx('collect', sx, sy, { life: 0.32, size: 10 * this.s, color: '#a5f3fc', tx: this.sub.x, ty: this.sub.y });
+    if (whole) this._vfx('sparkle', sx, sy, { life: 0.7, size: 40 * this.s, color: '#fef9c3' });
     sound?.catchFish?.();
   }
 
@@ -828,6 +899,7 @@ export class SubStage {
     fx.particles?.(sub.x, sub.y, '#ffffff', 8, 120);
     this._ring(hx, hy, 8 * this.s, 70 * this.s, kind === 'mine' ? '#fb923c' : '#f0abfc', 0.55);
     fx.shake?.(kind === 'mine' ? 9 : 6);
+    this._vfx(kind === 'mine' ? 'boom' : 'zap', hx, hy, { life: 0.5, size: 40 * this.s, color: kind === 'mine' ? '#fb923c' : '#f0abfc' });
     if (kind === 'mine') (sound?.subHit || sound?.jellyZap)?.call(sound);
     else sound?.jellyZap?.();
   }
@@ -837,6 +909,30 @@ export class SubStage {
     const dx = (x - sub.x) / (sub.rx * 0.88 + r);
     const dy = (y - sub.y) / (sub.ry * 0.85 + r);
     return dx * dx + dy * dy < 1;
+  }
+
+  // Squeezing past a hazard (close, but no touch) is worth a few points and keeps the combo alive.
+  _nearMiss(h, x, y, r, fx, sound) {
+    if (h.nearDone) return;
+    const sub = this.sub;
+    if (this.phase !== 'ride' || sub.stun > 0 || sub.invuln > 0) {
+      if (h.nearArmed) h.nearDone = true;
+      return;
+    }
+    const dx = (x - sub.x) / (sub.rx * 0.88 + r);
+    const dy = (y - sub.y) / (sub.ry * 0.85 + r);
+    if (dx * dx + dy * dy < 2.5) h.nearArmed = true;
+    if (h.nearArmed && x < sub.x - sub.rx * 0.6) {
+      h.nearDone = true;
+      this.nearMisses++;
+      sub.nearMisses++;
+      const mult = this._comboHit();
+      const pts = NEAR_MISS_POINTS * mult;
+      this._score(fx, pts);
+      fx.popup?.(sub.x, sub.y - 34 * this.s, mult > 1 ? `CLOSE CALL +${pts} x${mult}` : `CLOSE CALL +${pts}`, '#67e8f9');
+      this._vfx('whoosh', sub.x, sub.y, { life: 0.45, size: sub.rx, a: y < sub.y ? -1 : 1 });
+      (sound?.nearMiss || sound?.whoosh || sound?.gust)?.call(sound);
+    }
   }
 
   _updateJellies(dt, fx, sound) {
@@ -861,7 +957,10 @@ export class SubStage {
       j.x += (-this.scrollSpeed * 0.92 - j.drift) * dt + Math.sin(j.age * 0.7 + j.phase) * 8 * s * dt;
       j.y = j.baseY + Math.sin(j.age * 0.9 + j.phase) * 14 * s;
       if (vulnerable && this._touchesSub(j.x, j.y + j.r * 0.25, j.r * 0.8)) {
+        j.nearDone = true;
         this._stun(j.x, j.y, fx, sound, 'jelly');
+      } else {
+        this._nearMiss(j, j.x, j.y + j.r * 0.25, j.r * 0.8, fx, sound);
       }
       if (j.x < -80 * s) removeAt(this.jellies, i);
     }
@@ -884,7 +983,10 @@ export class SubStage {
         m.y = m.baseY + Math.sin(m.phase * 0.9) * m.bob;
       }
       if (vulnerable && this._touchesSub(m.x, m.y, m.r * 1.05)) {
+        m.nearDone = true;
         this._stun(m.x, m.y, fx, sound, 'mine');
+      } else {
+        this._nearMiss(m, m.x, m.y, m.r * 1.05, fx, sound);
       }
       if (m.x < -80 * s) removeAt(this.mines, i);
     }
@@ -910,6 +1012,8 @@ export class SubStage {
           fx.popup?.(c.x, c.y - 34 * s, `PEARL +${PEARL_POINTS}`, '#fbcfe8');
           fx.particles?.(c.x, c.y - c.r * 0.4, '#fdf2f8', 16, 120);
           this._ring(c.x, c.y - c.r * 0.4, c.r * 0.4, c.r * 3, '#fbcfe8', 0.6);
+          this._vfx('sparkle', c.x, c.y - c.r * 0.4, { life: 0.7, size: c.r * 2.4, color: '#fbcfe8' });
+          this.sub.catches++;
           sound?.collect?.(this.pearls - 1);
         }
       }

@@ -170,61 +170,125 @@
     top: 50%;
   }
 
-  /* ---------- Touch controls: transparent overlay in the bottom corners ---------- */
+  /* ---------- Controls over the empty sky at the outer edges ----------
+     In landscape the tower and its ledges occupy the middle third of the screen; the far left
+     and right are open sky, so the controls float there without covering any gameplay. */
   #touch-controls {
     position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    align-items: flex-end;
-    justify-content: space-between;
-    padding: 0 var(--ls-edge-r) calc(8px + var(--safe-bottom)) var(--ls-edge-l);
+    inset: 0;
+    height: auto;
     background: none;
-    border-top: 0;
+    border: 0;
     box-shadow: none;
-    pointer-events: none; /* the empty middle passes touches through to the canvas */
+    pointer-events: none;
     z-index: 20;
+    --split: 0.28;
   }
-
-  #touch-controls > .action-cluster,
+  #touch-controls::before {
+    display: none;
+  }
+  /* The button region itself lets touches through (drag-to-look still works over open sky);
+     only the buttons, the gesture pad and the stick zone catch touches. */
+  #touch-controls > .action-cluster {
+    pointer-events: none;
+  }
+  #touch-controls .action-btn,
+  #touch-controls .gesture-pad,
   #touch-controls > .stick-zone {
     pointer-events: auto;
   }
+  #touch-controls .action-cluster {
+    left: var(--safe-left);
+    right: auto;
+    top: calc(var(--ls-hud-h) + 8px + var(--safe-top));
+    bottom: var(--safe-bottom);
+    width: min(32vw, 300px);
+  }
+  #touch-controls .stick-zone {
+    top: calc(var(--ls-hud-h) + 8px);
+    bottom: 0;
+    left: auto;
+    right: 0;
+    width: calc(var(--split) * 100%);
+  }
+  #touch-controls.swapped .action-cluster {
+    left: auto;
+    right: var(--safe-right);
+  }
+  #touch-controls.swapped .stick-zone {
+    left: 0;
+    right: auto;
+  }
 
-  /* Thumb-arc cluster (defined in styles.css) sized for short landscape screens */
-  #touch-controls {
-    --jump: 76px;
-    --fire: 60px;
-    --rew: 42px;
-    background: none;
+  /* Layout editor: compact panel at the top centre, over the tower, clear of both control areas */
+  .ctl-editor {
+    top: calc(6px + var(--safe-top));
+    width: min(40vw, 360px);
+    padding: 9px 12px 10px;
+  }
+  .ctl-ed-help {
+    display: none;
+  }
+  .ctl-ed-chips {
+    margin: 7px 0 2px;
+  }
+  .ctl-ed-chips button {
+    min-height: 30px;
+  }
+  .ctl-ed-row {
+    grid-template-columns: 92px 1fr 40px;
+    font-size: 12.5px;
+  }
+  .ctl-ed-row input[type='range'] {
+    height: 30px;
+  }
+  .ctl-ed-reset {
+    min-height: 30px;
+    margin-top: 5px;
+  }
+  .modal-card.modal-options {
+    max-width: 600px;
+  }
+  .opt-tabs {
+    margin-bottom: 8px;
+  }
+  .opt-tab {
+    flex-direction: row;
+    justify-content: center;
+    min-height: 34px;
+    gap: 6px;
+  }
+  .opt-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-content: start;
+  }
+  .opt-row {
+    padding: 8px 10px 9px;
+    gap: 6px;
+  }
+  .opt-text strong {
+    font-size: 14px;
+  }
+  .opt-text small {
+    font-size: 11.5px;
+  }
+  .seg button {
+    min-height: 32px;
+  }
+  .hud-icon-btn.hud-menu-btn {
+    width: 34px;
+    height: 26px;
   }
 
   #stage-wrap .action-prompt {
     bottom: 12px;
   }
 
-  #touch-controls .stick-zone {
-    flex: 0 0 auto;
-    width: clamp(168px, 26vw, 232px);
-    max-width: none;
-    height: var(--ls-stick-h);
-    border-radius: 32px;
-    background: radial-gradient(circle at 50% 55%, rgba(0, 240, 255, 0.07) 0%, rgba(0, 240, 255, 0) 68%);
-  }
-
-  .stick-base {
-    width: 120px;
-    height: 120px;
-    margin: -60px 0 0 -60px;
+  #touch-controls .stick-base {
     background: radial-gradient(circle at 50% 50%, rgba(12, 22, 48, 0.32) 0%, rgba(4, 8, 20, 0.62) 72%);
     backdrop-filter: blur(3px);
     -webkit-backdrop-filter: blur(3px);
-  }
-
-  .stick-knob {
-    width: 54px;
-    height: 54px;
-    margin: -27px 0 0 -27px;
   }
 
   /* ---------- Overlays & modals: fit in ~390px, scroll if they still don't ---------- */
@@ -475,23 +539,6 @@
       font-size: 13.5px;
     }
 
-    #touch-controls {
-      --jump: 66px;
-      --fire: 54px;
-      --rew: 38px;
-    }
-
-    .stick-base {
-      width: 108px;
-      height: 108px;
-      margin: -54px 0 0 -54px;
-    }
-
-    .stick-knob {
-      width: 48px;
-      height: 48px;
-      margin: -24px 0 0 -24px;
-    }
 
     .modal-hero .game-tagline {
       font-size: 11.5px;

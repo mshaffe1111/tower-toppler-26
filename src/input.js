@@ -1,7 +1,19 @@
 // Multi-source Input Controller: floating analog thumbstick + action buttons + on-canvas gestures + keyboard + gamepad.
 // Every action is held by a *set of sources* (a key, a pointer, the gamepad...), so releasing one source
 // never cancels another one that is still holding the same action (no more "stuck" or "dropped" inputs).
+import { settings } from './settings.js';
+
 const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'fire', 'rewind'];
+
+// Stick feel presets: dead = centre deadzone, full = how far (fraction of the rim) gives full speed
+const SENSITIVITY = {
+  low: { dead: 0.22, full: 0.95 },
+  medium: { dead: 0.18, full: 0.8 },
+  high: { dead: 0.13, full: 0.62 },
+};
+// Gesture pad tuning
+const SWIPE_PX = 22; // movement that turns a touch into a swipe
+const HOLD_MS = 140; // a still touch longer than this becomes a held (charging) FIRE
 
 export class InputController {
   constructor() {
@@ -80,7 +92,7 @@ export class InputController {
     this.state.axisX = 0;
     this._setKnob(0, 0);
     this._zoneEl?.classList.remove('engaged');
-    if (this._baseEl) this._baseEl.style.transform = '';
+    this._restStick();
   }
 
   consumeJustPressed(action) {
@@ -97,6 +109,27 @@ export class InputController {
 
   _stickRadius() {
     return this._baseEl ? this._baseEl.offsetWidth * 0.36 : 44;
+  }
+
+  // The stick's home spot (fractions of the zone, measured from the outer edge), set by the layout
+  setStickHome(home) {
+    this._home = home;
+    if (![...this._activePointers.values()].some((e) => e.type === 'stick')) this._restStick();
+  }
+
+  _homePoint() {
+    const zw = this._zoneEl.clientWidth;
+    const zh = this._zoneEl.clientHeight;
+    const h = this._home || { x: 0.5, y: 0.65 };
+    const fx = settings.stickSide === 'left' ? 1 - h.x : h.x;
+    return { x: zw * fx, y: zh * h.y };
+  }
+
+  // Park the stick at its home spot when no thumb is down
+  _restStick() {
+    if (!this._zoneEl) return;
+    const p = this._homePoint();
+    return this._placeBase(p.x, p.y);
   }
 
   _placeBase(x, y) {
@@ -121,9 +154,10 @@ export class InputController {
     let dx = clientX - (rect.left + entry.cx);
     let dy = clientY - (rect.top + entry.cy);
     let dist = Math.hypot(dx, dy);
-    // Drag past the rim and the whole stick follows your thumb (no "dead" thumb positions)
+    // Floating stick: drag past the rim and the whole stick follows your thumb (no "dead" thumb
+    // positions). A fixed stick stays put; pushing past the rim just means full deflection.
     const follow = R * 1.35;
-    if (dist > follow) {
+    if (!entry.fixed && dist > follow) {
       const k = (dist - follow) / dist;
       const moved = this._placeBase(entry.cx + dx * k, entry.cy + dy * k);
       entry.cx = moved.cx;
@@ -139,17 +173,19 @@ export class InputController {
 
     const nx = kx / R;
     const ny = ky / R;
-    const dead = 0.2;
+    const c = settings.controls || {};
+    const { dead, full } = SENSITIVITY[c.sensitivity] || SENSITIVITY.medium;
     // Proportional walk speed with a small deadzone, rescaled to 0..1
-    const ax = Math.abs(nx) < dead ? 0 : Math.sign(nx) * Math.min(1, (Math.abs(nx) - dead) / (0.85 - dead));
+    const ax = Math.abs(nx) < dead ? 0 : Math.sign(nx) * Math.min(1, (Math.abs(nx) - dead) / (full - dead));
     this.state.axisX = ax;
 
     const dirs = [];
     if (ax > 0) dirs.push('right');
     else if (ax < 0) dirs.push('left');
     // Up/down need a deliberate push so walking never accidentally triggers doors or lifts
-    if (ny < -0.55 && Math.abs(ny) > Math.abs(nx) * 0.7) dirs.push('up');
-    else if (ny > 0.6 && Math.abs(ny) > Math.abs(nx) * 0.7) dirs.push('down');
+    const up = Math.max(0.35, Math.min(0.8, c.upThreshold ?? 0.55));
+    if (ny < -up && Math.abs(ny) > Math.abs(nx) * 0.7) dirs.push('up');
+    else if (ny > up + 0.05 && Math.abs(ny) > Math.abs(nx) * 0.7) dirs.push('down');
     this._setStickDirs(entry, dirs);
   }
 
@@ -173,12 +209,97 @@ export class InputController {
       this.state.axisX = 0;
       this._setKnob(0, 0);
       this._zoneEl?.classList.remove('engaged');
-      if (this._baseEl) this._baseEl.style.transform = '';
+      this._restStick();
     } else if (entry.type === 'action') {
       this._hold(entry.action, src, false);
       entry.el?.classList.remove('active');
     } else if (entry.type === 'canvas' && entry.action) {
       this._hold(entry.action, src, false);
+    } else if (entry.type === 'gesture') {
+      clearTimeout(entry.timer);
+      if (entry.state === 'pending') this._pulseAction('fire', 70); // quick tap = snowball
+      else if (entry.state === 'fire') this._hold('fire', src, false); // release = throw the charge
+      else if (entry.state === 'jump') this._hold('jump', src, false);
+      this._gestureFx(entry, 'end');
+    }
+  }
+
+  // ---------- Gesture pad (alternative to the JUMP / FIRE buttons) ----------
+  // Swipe up = jump (hold your finger down for a full-height jump), tap = snowball,
+  // touch and hold = charge a mega-snowball (release to throw), swipe down = ground-pound / go down.
+  _bindGesturePad() {
+    const pad = document.getElementById('gesture-pad');
+    if (!pad) return;
+    this._padEl = pad;
+    pad.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.lastDevice = 'touch';
+      const r = pad.getBoundingClientRect();
+      const entry = { type: 'gesture', id: e.pointerId, x0: e.clientX, y0: e.clientY, rx: e.clientX - r.left, ry: e.clientY - r.top, state: 'pending' };
+      entry.timer = setTimeout(() => {
+        if (entry.state !== 'pending' || !this._activePointers.has(e.pointerId)) return;
+        entry.state = 'fire';
+        this._hold('fire', `ptr:${e.pointerId}`, true);
+        this._gestureFx(entry, 'hold');
+      }, HOLD_MS);
+      this._activePointers.set(e.pointerId, entry);
+      this._gestureFx(entry, 'down');
+      try { pad.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+    pad.addEventListener('pointermove', (e) => {
+      const entry = this._activePointers.get(e.pointerId);
+      if (!entry || entry.type !== 'gesture' || entry.state !== 'pending') return;
+      e.preventDefault();
+      const dx = e.clientX - entry.x0;
+      const dy = e.clientY - entry.y0;
+      if (Math.hypot(dx, dy) < SWIPE_PX) return;
+      clearTimeout(entry.timer);
+      const src = `ptr:${e.pointerId}`;
+      if (-dy > Math.abs(dx) * 0.7) {
+        entry.state = 'jump';
+        this._hold('jump', src, true);
+        this._gestureFx(entry, 'up');
+      } else if (dy > Math.abs(dx) * 0.7) {
+        entry.state = 'down';
+        this._pulseAction('down', 160);
+        this._gestureFx(entry, 'dn');
+      } else {
+        entry.state = 'none'; // sideways drag: ignore (thumb sliding around)
+      }
+    });
+    const onUp = (e) => {
+      const entry = this._activePointers.get(e.pointerId);
+      if (!entry || entry.type !== 'gesture') return;
+      e.preventDefault();
+      this._releasePointer(e.pointerId);
+    };
+    pad.addEventListener('pointerup', onUp);
+    pad.addEventListener('pointercancel', onUp);
+    pad.addEventListener('lostpointercapture', onUp);
+  }
+
+  // Touch feedback on the pad: a ring where the finger landed, tinted by what it became
+  _gestureFx(entry, kind) {
+    const pad = this._padEl;
+    if (!pad) return;
+    if (kind === 'down') {
+      const ring = document.createElement('span');
+      ring.className = 'gp-ring';
+      ring.style.left = `${entry.rx}px`;
+      ring.style.top = `${entry.ry}px`;
+      pad.appendChild(ring);
+      entry.ring = ring;
+      return;
+    }
+    const ring = entry.ring;
+    if (!ring) return;
+    if (kind === 'end') {
+      ring.classList.add('out');
+      setTimeout(() => ring.remove(), 320);
+      entry.ring = null;
+    } else {
+      ring.classList.add(`gp-${kind}`);
+      this.haptic(kind === 'hold' ? 8 : 12);
     }
   }
 
@@ -191,14 +312,19 @@ export class InputController {
     });
 
     if (this._zoneEl) {
+      requestAnimationFrame(() => this._restStick());
+      window.addEventListener('resize', () => requestAnimationFrame(() => this._restStick()));
       this._zoneEl.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         // One thumb per stick
         for (const ent of this._activePointers.values()) if (ent.type === 'stick') return;
         this.lastDevice = 'touch';
         const rect = this._zoneEl.getBoundingClientRect();
-        const placed = this._placeBase(e.clientX - rect.left, e.clientY - rect.top);
-        const entry = { type: 'stick', id: e.pointerId, dirs: [], cx: placed.cx, cy: placed.cy };
+        const fixed = settings.controls?.stickMode === 'fixed';
+        // Floating: the stick appears under your thumb. Fixed: it stays home and reads the
+        // direction from home to your thumb, wherever in the zone you touch.
+        const placed = fixed ? this._restStick() : this._placeBase(e.clientX - rect.left, e.clientY - rect.top);
+        const entry = { type: 'stick', id: e.pointerId, dirs: [], cx: placed.cx, cy: placed.cy, fixed };
         this._activePointers.set(e.pointerId, entry);
         this._zoneEl.classList.add('engaged');
         this._updateStick(entry, e.clientX, e.clientY);
@@ -243,79 +369,42 @@ export class InputController {
     bindAction('btn-jump', 'jump');
     bindAction('btn-fire', 'fire');
     bindAction('btn-rewind', 'rewind');
+    this._bindGesturePad();
 
-    // On-canvas gestures: horizontal drag = walk (relative, re-centres so reversing is instant),
-    // swipe up = jump (+ up for doors/lifts), swipe down = down, quick tap = fire.
+    // Touch camera: drag anywhere on the open play area to look around the tower and up/down
+    // (great for planning a route). The view glides back when you let go.
+    this.look = { active: false, dx: 0, dy: 0, w: 1, h: 1 };
     const canvas = document.getElementById('game-canvas');
     if (canvas) {
       canvas.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         this.lastDevice = 'touch';
-        this._activePointers.set(e.pointerId, {
-          type: 'canvas',
-          startX: e.clientX,
-          startY: e.clientY,
-          anchorX: e.clientX,
-          anchorY: e.clientY,
-          startTime: performance.now(),
-          action: null,
-          swiped: false,
-          moved: false,
-        });
+        for (const ent of this._activePointers.values()) if (ent.type === 'look') return;
+        const r = canvas.getBoundingClientRect();
+        this._activePointers.set(e.pointerId, { type: 'look', x0: e.clientX, y0: e.clientY });
+        this.look.active = true;
+        this.look.dx = 0;
+        this.look.dy = 0;
+        this.look.w = r.width;
+        this.look.h = r.height;
         try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
       });
-
       canvas.addEventListener('pointermove', (e) => {
         const entry = this._activePointers.get(e.pointerId);
-        if (!entry || entry.type !== 'canvas') return;
+        if (!entry || entry.type !== 'look') return;
         e.preventDefault();
-        const totalDx = e.clientX - entry.startX;
-        const totalDy = e.clientY - entry.startY;
-        if (Math.hypot(totalDx, totalDy) > 10) entry.moved = true;
-
-        // Vertical swipes measured from a moving anchor so you can swipe repeatedly without lifting
-        const vdy = e.clientY - entry.anchorY;
-        const vdx = e.clientX - entry.anchorX;
-        if (vdy < -30 && Math.abs(vdy) > Math.abs(vdx) * 0.9) {
-          this._pulseAction('jump', 160);
-          this._pulseAction('up', 160);
-          entry.swiped = true;
-          entry.anchorY = e.clientY;
-          entry.anchorX = e.clientX;
-        } else if (vdy > 34 && Math.abs(vdy) > Math.abs(vdx) * 0.9) {
-          this._pulseAction('down', 220);
-          entry.swiped = true;
-          entry.anchorY = e.clientY;
-          entry.anchorX = e.clientX;
-        }
-
-        // Horizontal walk: relative to an anchor that trails the finger, so reversing direction
-        // only needs a short drag back rather than all the way past the original touch point.
-        const hdx = e.clientX - entry.anchorX;
-        let next = entry.action;
-        if (hdx > 14) next = 'right';
-        else if (hdx < -14) next = 'left';
-        if (next === 'right' && hdx > 40) entry.anchorX = e.clientX - 40;
-        if (next === 'left' && hdx < -40) entry.anchorX = e.clientX + 40;
-        if (next !== entry.action) {
-          const src = `ptr:${e.pointerId}`;
-          if (entry.action) this._hold(entry.action, src, false);
-          entry.action = next;
-          if (next) this._hold(next, src, true);
-        }
+        this.look.dx = e.clientX - entry.x0;
+        this.look.dy = e.clientY - entry.y0;
       });
-
-      const onCanvasUp = (e) => {
+      const onUp = (e) => {
         const entry = this._activePointers.get(e.pointerId);
-        if (!entry || entry.type !== 'canvas') return;
-        e.preventDefault();
-        const elapsed = performance.now() - entry.startTime;
-        if (!entry.moved && !entry.swiped && elapsed < 260) this._pulseAction('fire', 120);
-        this._releasePointer(e.pointerId);
+        if (!entry || entry.type !== 'look') return;
+        this._activePointers.delete(e.pointerId);
+        this.look.active = false;
       };
-      canvas.addEventListener('pointerup', onCanvasUp);
-      canvas.addEventListener('pointercancel', onCanvasUp);
-      canvas.addEventListener('lostpointercapture', onCanvasUp);
+      canvas.addEventListener('pointerup', onUp);
+      canvas.addEventListener('pointercancel', onUp);
+      canvas.addEventListener('lostpointercapture', onUp);
     }
 
     const touchBar = document.getElementById('touch-controls');

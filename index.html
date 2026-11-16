@@ -47,9 +47,7 @@
         <div class="hud-label">HIGH SCORE</div>
         <div id="hi-score-display" class="hud-score">00000000</div>
         <div class="hud-actions">
-          <button id="btn-music" class="hud-icon-btn" type="button" aria-label="Toggle Music">🎵</button>
-          <button id="btn-sound" class="hud-icon-btn" type="button" aria-label="Toggle Sound">🔊</button>
-          <button id="btn-pause" class="hud-icon-btn" type="button" aria-label="Pause Game">⏸</button>
+          <button id="btn-pause" class="hud-icon-btn hud-menu-btn" type="button" aria-label="Pause and open the menu"><span class="hud-menu-bars" aria-hidden="true"></span></button>
         </div>
       </div>
     </header>
@@ -126,7 +124,7 @@
           </div>
 
           <div class="menu-row">
-            <button id="btn-settings" class="btn-chip" type="button">⚙ SETTINGS</button>
+            <button id="btn-settings" class="btn-chip" type="button">⚙ OPTIONS</button>
             <button id="btn-skins" class="btn-chip" type="button">🎨 POGO</button>
             <button id="btn-howto" class="btn-chip" type="button">❔ HOW TO</button>
             <button id="btn-install" class="btn-chip hidden" type="button">⬇ INSTALL</button>
@@ -157,25 +155,13 @@
 
       <!-- Settings -->
       <div id="overlay-settings" class="overlay hidden">
-        <div class="modal-card modal-scroll">
-          <div class="retro-pill">SYSTEM CONFIG</div>
-          <h2 class="modal-heading">SETTINGS</h2>
-          <div class="settings-list">
-            <label class="set-row"><span><strong>Stick on left</strong><small>Swap stick &amp; buttons</small></span><input type="checkbox" data-setting="stickLeft" /></label>
-            <label class="set-row"><span><strong>Assist mode</strong><small>Infinite lives &amp; rewind</small></span><input type="checkbox" data-setting="assist" /></label>
-            <label class="set-row"><span><strong>Classic rules</strong><small>No edge guard, rewind or checkpoints</small></span><input type="checkbox" data-setting="classic" /></label>
-            <label class="set-row"><span><strong>Mirror mode</strong><small>Every tower flipped</small></span><input type="checkbox" data-setting="mirror" /></label>
-            <label class="set-row"><span><strong>Ghost runs</strong><small>Race your best climb</small></span><input type="checkbox" data-setting="ghosts" /></label>
-            <label class="set-row"><span><strong>Diorama look</strong><small>Tilt-shift toy-world blur</small></span><input type="checkbox" data-setting="diorama" /></label>
-            <label class="set-row"><span><strong>Reduced motion</strong><small>No shake, flashes or camera swoops</small></span><input type="checkbox" data-setting="reducedMotion" /></label>
-            <label class="set-row"><span><strong>Vibration</strong><small>Haptic feedback</small></span><input type="checkbox" data-setting="haptics" /></label>
-            <label class="set-row"><span><strong>Game speed</strong><small>Slower = easier</small></span>
-              <select data-setting="gameSpeed"><option value="1">100%</option><option value="0.85">85%</option><option value="0.7">70%</option><option value="0.6">60%</option></select></label>
-            <label class="set-row"><span><strong>Graphics</strong><small>Auto adapts to your device</small></span>
-              <select data-setting="quality"><option value="auto">Auto</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label>
+        <div class="modal-card modal-options">
+          <div class="opt-head">
+            <div class="retro-pill">OPTIONS</div>
+            <button id="btn-settings-close" class="opt-close" type="button" aria-label="Close options">DONE</button>
           </div>
-          <button id="btn-reset-hints" class="btn-secondary" type="button">💡 REPLAY TUTORIAL HINTS</button>
-          <button id="btn-settings-close" class="btn-primary" type="button">DONE</button>
+          <div id="opt-tabs" class="opt-tabs" role="tablist"></div>
+          <div id="opt-body" class="opt-body"></div>
         </div>
       </div>
 
@@ -197,8 +183,7 @@
           <h2 class="modal-heading">PAUSED</h2>
           <p id="pause-tower-name" class="modal-sub">Tower 1: The Tower of Eyes</p>
           <button id="btn-resume" class="btn-primary" type="button">RESUME</button>
-          <button id="btn-pause-settings" class="btn-secondary" type="button">⚙ SETTINGS</button>
-          <button id="btn-swap" class="btn-secondary" type="button">⇄ STICK ON LEFT</button>
+          <button id="btn-pause-settings" class="btn-secondary" type="button">⚙ OPTIONS</button>
           <button id="btn-restart" class="btn-secondary" type="button">QUIT TO MENU</button>
         </div>
       </div>
@@ -249,6 +234,14 @@
     <!-- Touch Controls: action buttons + floating analog thumbstick (stick on the right by default; swappable) -->
     <footer id="touch-controls" aria-label="Touch Controls">
       <div class="action-cluster">
+        <div id="gesture-pad" class="gesture-pad" aria-label="Gesture pad: swipe up to jump, tap to fire, hold to charge, swipe down to pound">
+          <div class="gp-legend" aria-hidden="true">
+            <span><b>↑</b> SWIPE · JUMP</span>
+            <span><b>●</b> TAP · FIRE</span>
+            <span><b>◉</b> HOLD · CHARGE</span>
+            <span><b>↓</b> SWIPE · POUND</span>
+          </div>
+        </div>
         <button id="btn-rewind" class="action-btn action-rewind" type="button" aria-label="Hold to rewind time">
           <span class="action-icon">⏪</span>
           <span class="action-lbl">REWIND</span>
@@ -273,7 +266,31 @@
           <div id="stick-knob" class="stick-knob"></div>
         </div>
       </div>
+      <div id="ctl-split" class="ctl-split" aria-hidden="true"><span></span></div>
+      <div id="ctl-edit-layer" class="ctl-edit-layer hidden" aria-hidden="true"></div>
     </footer>
+
+    <!-- Control layout editor (Options > Controls > Edit layout) -->
+    <div id="ctl-editor" class="ctl-editor hidden" role="dialog" aria-label="Edit control layout">
+      <div class="ctl-ed-top">
+        <div>
+          <div class="ctl-ed-title">EDIT LAYOUT</div>
+          <div id="ctl-ed-orient" class="ctl-ed-orient">PORTRAIT LAYOUT</div>
+        </div>
+        <button id="ctl-ed-done" class="ctl-ed-done" type="button">DONE</button>
+      </div>
+      <p class="ctl-ed-help">Drag any control to move it. Drag the dashed line to resize the joystick area.</p>
+      <div class="ctl-ed-chips" role="radiogroup" aria-label="Selected control">
+        <button type="button" data-ed-select="jump">JUMP</button>
+        <button type="button" data-ed-select="fire">FIRE</button>
+        <button type="button" data-ed-select="rewind">REWIND</button>
+        <button type="button" data-ed-select="stick">JOYSTICK</button>
+      </div>
+      <label class="ctl-ed-row"><span><span id="ctl-ed-sel">JUMP</span> size</span><input id="ctl-ed-size" type="range" min="70" max="150" step="5" /><output id="ctl-ed-size-val">100%</output></label>
+      <label class="ctl-ed-row"><span>Opacity</span><input id="ctl-ed-opacity" type="range" min="35" max="100" step="5" /><output id="ctl-ed-opacity-val">100%</output></label>
+      <div id="ctl-ed-warn" class="ctl-ed-warn">⚠ Buttons this close get pressed together by accident</div>
+      <button id="ctl-ed-reset" class="ctl-ed-reset" type="button">↺ RESET TO DEFAULT</button>
+    </div>
   </div>
 
   <script type="importmap">
@@ -284,6 +301,6 @@
     }
   }
   </script>
-  <script type="module" src="src/main.js?v=9"></script>
+  <script type="module" src="src/main.js?v=10"></script>
 </body>
 </html>

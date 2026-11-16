@@ -7,6 +7,16 @@ const PROGRESS_KEY = 'tt26_progress_v2';
 
 const DEFAULT_SETTINGS = {
   stickSide: 'right', // 'right' | 'left'
+  controls: {
+    scheme: 'buttons', // 'buttons' | 'gesture' (swipe up = jump, tap = fire, hold = charge, swipe down = pound)
+    stickMode: 'floating', // 'floating' (appears under your thumb) | 'fixed'
+    sensitivity: 'medium', // 'low' | 'medium' | 'high' — how far you push for full speed
+    upThreshold: 0.55, // how far up/down the stick must go for doors & lifts (0.4 .. 0.75)
+    opacity: 1, // 0.4 .. 1
+    layout: null, // { portrait: {split, jump:{x,y,s}, fire, rewind, stick}, landscape: {...} } — see controls.js
+  },
+  musicVolume: 0.8, // 0..1
+  sfxVolume: 1, // 0..1
   classic: false, // original rules: no edge guard, no rewind, no checkpoints
   assist: false, // infinite lives + unlimited rewind
   gameSpeed: 1, // 0.6 .. 1
@@ -45,6 +55,15 @@ function save(key, value) {
 }
 
 export const settings = load(SETTINGS_KEY, DEFAULT_SETTINGS);
+settings.controls = { ...structuredClone(DEFAULT_SETTINGS.controls), ...(settings.controls || {}) };
+
+export function setControl(key, value) {
+  settings.controls = { ...settings.controls, [key]: value };
+  save(SETTINGS_KEY, settings);
+  for (const fn of listeners) fn('controls', settings.controls);
+}
+
+export const DEFAULT_CONTROLS = DEFAULT_SETTINGS.controls;
 export const progress = load(PROGRESS_KEY, DEFAULT_PROGRESS);
 
 // Migrate the old stick-side key from the previous version

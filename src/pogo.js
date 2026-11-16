@@ -212,7 +212,7 @@ const OUTLINE_MAT = new THREE.MeshBasicMaterial({ color: '#0b1226', side: THREE.
 OUTLINE_MAT.onBeforeCompile = (shader) => {
   shader.vertexShader = shader.vertexShader.replace(
     '#include <begin_vertex>',
-    '#include <begin_vertex>\ntransformed += normalize(objectNormal) * 0.021;'
+    '#include <begin_vertex>\ntransformed += normalize(normal) * 0.021;'
   );
 };
 OUTLINE_MAT.customProgramCacheKey = () => 'pogo-outline';
@@ -1030,9 +1030,9 @@ export class PogoRig {
     // ---- Waddle walk (stride driven by distance travelled) ----
     const speed = Math.abs(s.vx);
     const moving = s.onGround && speed > 0.2;
-    st.walkPhase += speed * dt * 4.2;
+    st.walkPhase += speed * dt * 4.8;
     const ph = st.walkPhase * Math.PI;
-    const stepAmt = moving ? Math.min(1, speed / 2.9) : 0;
+    const stepAmt = moving ? Math.min(1, speed / 2.3) : 0;
     for (const leg of ud.legs) {
       const sgn = leg.side < 0 ? 1 : -1;
       const swing = Math.sin(ph) * sgn * 0.13 * stepAmt;

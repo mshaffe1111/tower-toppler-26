@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { TowerFx } from './towerFx.js';
+import { createPropMaterials, buildTowerBody, buildDoor, buildLiftTrack, buildLiftPod, buildLedge, animateConveyorTextures } from './props.js';
 import { PogoRig } from './pogo.js';
 import { Ocean } from './water.js';
 import { createTowerStoneMaterial, createLedgeStoneMaterial, setWaterlineY } from './materials.js';
@@ -658,7 +659,7 @@ export class GameRenderer {
       const [oldKey, old] = this.towerCache.entries().next().value;
       if (old.group !== this.currentTowerGroup) {
         old.group.traverse((o) => {
-          if (o.isMesh && o.geometry && !this._isSharedGeo(o.geometry)) o.geometry.dispose();
+          if (o.isMesh && o.geometry && !o.geometry.userData.shared && !this._isSharedGeo(o.geometry)) o.geometry.dispose();
         });
         this.towerCache.delete(oldKey);
       }
@@ -666,408 +667,53 @@ export class GameRenderer {
 
     const pal = tower.palette;
     const group = new THREE.Group();
-    const totalH = tower.floors * FLOOR_HEIGHT;
-
-    // 1. Main 3D Cylindrical Tower Body with PBR maps
-    // Procedural cut-stone PBR (normal, AO, roughness, palette-tinted albedo, glowing runes)
-    const cylMat = createTowerStoneMaterial(pal, tower.id, tower.floors);
     this._stoneMats = this._stoneMats || new Set();
-    this._stoneMats.add(cylMat);
-    const cylMesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(TOWER_RADIUS, TOWER_RADIUS, totalH, 72, 1, false),
-      cylMat
-    );
-    cylMesh.position.y = totalH * 0.5;
-    group.add(cylMesh);
+    const mats = createPropMaterials(pal, this.chromeEnv);
+    for (const m of mats.stoneList) this._stoneMats.add(m);
 
-    // 2. Real 3D Cornice Rings every 2 floors
-    const trimMat = createLedgeStoneMaterial(new THREE.Color(pal.brickB).lerp(new THREE.Color('#b9bec8'), 0.6), {});
-    this._stoneMats.add(trimMat);
-    const collarMat = new THREE.MeshStandardMaterial({
-      color: pal.ledge,
-      emissive: pal.glow,
-      emissiveIntensity: 0.25,
-      roughness: 0.35,
-    });
-    const corniceGeo = new THREE.TorusGeometry(TOWER_RADIUS + 0.035, 0.045, 8, 48);
+    // Tower body: instanced cut stones (style per tower), string courses, crown, plinth
+    const body = buildTowerBody(tower, pal, mats, this.softDotTex, this.chromeEnv);
+    group.add(body.group);
+    for (const m of body.stoneMats) this._stoneMats.add(m);
+    const updaters = [body.update];
 
-    for (let f = 2; f < tower.floors; f += 2) {
-      const ring = new THREE.Mesh(corniceGeo, trimMat);
-      ring.rotation.x = Math.PI / 2;
-      ring.position.y = f * FLOOR_HEIGHT - 0.04;
-      group.add(ring);
-    }
-
-    // 4. Detailed 3D Crenellated Battlements + Beacon Spires at Crown
-    const crownBase = new THREE.Mesh(
-      new THREE.CylinderGeometry(TOWER_RADIUS + 0.18, TOWER_RADIUS + 0.1, 0.34, 32),
-      new THREE.MeshStandardMaterial({
-        color: pal.ledge,
-        emissive: pal.glow,
-        emissiveIntensity: 0.4,
-        metalness: 0.55,
-        roughness: 0.25,
-      })
-    );
-    crownBase.position.y = totalH + 0.16;
-    group.add(crownBase);
-
-    const merlonGeo = new THREE.BoxGeometry(0.45, 0.32, 0.24);
-    for (let m = 0; m < COLS; m += 2) {
-      const phi = m * COL_ANGLE;
-      const merlon = new THREE.Mesh(merlonGeo, trimMat);
-      merlon.position.set(
-        (TOWER_RADIUS + 0.06) * Math.sin(phi),
-        totalH + 0.46,
-        (TOWER_RADIUS + 0.06) * Math.cos(phi)
-      );
-      merlon.rotation.y = phi;
-      group.add(merlon);
-    }
-
-    const spireGeo = new THREE.ConeGeometry(0.11, 0.65, 8);
-    for (let s = 0; s < 4; s++) {
-      const phi = s * 4 * COL_ANGLE;
-      const spire = new THREE.Mesh(spireGeo, collarMat);
-      spire.position.set(
-        (TOWER_RADIUS + 0.08) * Math.sin(phi),
-        totalH + 0.72,
-        (TOWER_RADIUS + 0.08) * Math.cos(phi)
-      );
-      group.add(spire);
-    }
-
-    // 5. Recessed 3D Stone/Tech Archways + 3D Holographic Beacons on Doors & Exit
-    const doorMarkers = [];
-    const exitRings = [];
-    const markerGeo = new THREE.OctahedronGeometry(0.14, 0);
+    // Doors: carved archways with black-hole portals
     for (const door of tower.doors) {
-      const phi = (door.col + 0.5) * COL_ANGLE;
-      const dg = new THREE.Group();
-      dg.position.set(
-        (TOWER_RADIUS + 0.03) * Math.sin(phi),
-        door.floor * FLOOR_HEIGHT + 0.42,
-        (TOWER_RADIUS + 0.03) * Math.cos(phi)
-      );
-      dg.rotation.y = phi;
-
-      const pillarGeo = new THREE.BoxGeometry(0.12, 0.78, 0.18);
-      const pillarMat = new THREE.MeshStandardMaterial({ color: '#334155', metalness: 0.6, roughness: 0.3 });
-      const pL = new THREE.Mesh(pillarGeo, pillarMat);
-      pL.position.set(-0.32, -0.02, 0.04);
-      const pR = new THREE.Mesh(pillarGeo, pillarMat);
-      pR.position.set(0.32, -0.02, 0.04);
-
-      const inner = new THREE.Mesh(
-        new THREE.BoxGeometry(0.54, 0.8, 0.1),
-        new THREE.MeshBasicMaterial({ color: door.isExit ? '#713f12' : door.vault ? '#2e1065' : '#020617' })
-      );
-      const portalEnergy = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.46, 0.72),
-        new THREE.MeshBasicMaterial({
-          color: door.isExit ? '#fde047' : pal.glow,
-          transparent: true,
-          opacity: door.isExit ? 0.65 : 0.35,
-          side: THREE.DoubleSide,
-        })
-      );
-      portalEnergy.position.z = 0.06;
-
-      const archMat = new THREE.MeshStandardMaterial({
-        color: door.isExit ? '#fde047' : door.vault ? '#c084fc' : pal.glow,
-        emissive: door.isExit ? '#f59e0b' : door.vault ? '#9333ea' : pal.glow,
-        emissiveIntensity: 1.8,
-      });
-      const arch = new THREE.Mesh(
-        new THREE.TorusGeometry(0.34, 0.06, 8, 20, Math.PI),
-        archMat
-      );
-      arch.position.set(0, 0.12, 0.05);
-
-      // Floating 3D Holographic Diamond/Chevron Marker above every door
-      const marker = new THREE.Mesh(markerGeo, archMat);
-      marker.position.set(0, 0.78, 0.16);
-      dg.add(pL, pR, inner, portalEnergy, arch, marker);
-      doorMarkers.push({ mesh: marker, baseY: 0.78 });
-
-      // Tall Golden 3D Light-Pillar Beacon + Spinning Crown Ring above Exit Door
-      if (door.isExit) {
-        const beam = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.26, 0.38, 4.2, 16, 1, true),
-          new THREE.MeshBasicMaterial({
-            color: '#fde047',
-            transparent: true,
-            opacity: 0.24,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-            side: THREE.DoubleSide,
-          })
-        );
-        beam.position.set(0, 2.2, 0.1);
-        const crownRing = new THREE.Mesh(
-          new THREE.TorusGeometry(0.46, 0.045, 8, 24),
-          archMat
-        );
-        crownRing.rotation.x = Math.PI / 2;
-        crownRing.position.set(0, 1.05, 0.14);
-        dg.add(beam, crownRing);
-        exitRings.push(crownRing);
-      }
-
-      group.add(dg);
+      const d = buildDoor(door, pal, mats, this.softDotTex);
+      group.add(d.group);
+      updaters.push(d.update);
     }
 
-    // 6. 3D Elevator Shaft Dual Rails, Hovering Lift Pods & Thruster Cones
+    // Lifts: recessed track + hover platform
     const elevatorPods = [];
-    const elevatorThrusters = [];
-    const thrusterGeo = new THREE.ConeGeometry(0.14, 0.32, 10);
-    const thrusterMat = new THREE.MeshBasicMaterial({
-      color: '#67e8f9',
-      transparent: true,
-      opacity: 0.8,
-      blending: THREE.AdditiveBlending,
-    });
     for (const el of tower.elevators) {
-      const phi = (el.col + 0.5) * COL_ANGLE;
-      const r = TOWER_RADIUS + 0.3;
-      const railH = (el.maxFloor - el.minFloor) * FLOOR_HEIGHT + 0.65;
-      for (const offset of [-0.26, 0.26]) {
-        const rail = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.03, 0.03, railH, 8),
-          new THREE.MeshStandardMaterial({ color: '#94a3b8', metalness: 0.75, roughness: 0.2 })
-        );
-        const tangentX = Math.cos(phi) * offset;
-        const tangentZ = -Math.sin(phi) * offset;
-        rail.position.set(
-          r * Math.sin(phi) + tangentX,
-          (el.minFloor + el.maxFloor) * 0.5 * FLOOR_HEIGHT,
-          r * Math.cos(phi) + tangentZ
-        );
-        group.add(rail);
-      }
-
-      const pod = new THREE.Group();
-      const deck = new THREE.Mesh(
-        new THREE.BoxGeometry(0.92, 0.16, 0.66),
-        new THREE.MeshStandardMaterial({
-          color: '#38bdf8',
-          emissive: '#0284c7',
-          emissiveIntensity: 0.9,
-          metalness: 0.6,
-          roughness: 0.2,
-        })
-      );
-      const trim = new THREE.Mesh(
-        new THREE.BoxGeometry(0.96, 0.05, 0.7),
-        new THREE.MeshBasicMaterial({ color: '#e0f2fe' })
-      );
-      trim.position.y = 0.08;
-      pod.add(deck, trim);
-
-      for (const tx of [-0.26, 0.26]) {
-        const th = new THREE.Mesh(thrusterGeo, thrusterMat);
-        th.rotation.x = Math.PI;
-        th.position.set(tx, -0.22, 0);
-        pod.add(th);
-        elevatorThrusters.push(th);
-      }
-
-      pod.position.set(r * Math.sin(phi), el.startFloor * FLOOR_HEIGHT - 0.1, r * Math.cos(phi));
-      pod.rotation.y = phi;
+      group.add(buildLiftTrack(el, pal, mats));
+      const pod = buildLiftPod(el, pal, mats, this.softDotTex);
+      pod.position.y = el.startFloor * FLOOR_HEIGHT;
       group.add(pod);
       elevatorPods.push(pod);
+      updaters.push(pod.userData.update);
     }
 
-    // 7. Curved ledges that hug the tower (annular sectors), so runs of ledges join into smooth
-    //    walkways instead of flat boxes poking out at angles.
-    const LEDGE_IN = TOWER_RADIUS - 0.06;
-    const LEDGE_OUT = TOWER_RADIUS + 0.8;
-    const span = COL_ANGLE * 0.985;
-    const geoCache = this._ledgeGeoCache || (this._ledgeGeoCache = {
-      deck: createArcSlabGeometry(LEDGE_IN, LEDGE_OUT, span, 0.2, 0.03, 8),
-      lip: createArcSlabGeometry(LEDGE_OUT - 0.1, LEDGE_OUT + 0.025, span * 0.995, 0.07, 0.015, 8),
-      corbel: createArcSlabGeometry(LEDGE_IN, TOWER_RADIUS + 0.42, span * 0.7, 0.2, 0.03, 6),
-      seg: createArcSlabGeometry(LEDGE_IN, LEDGE_OUT - 0.04, span * 0.3, 0.2, 0.025, 4),
-      iceDeck: createArcSlabGeometry(LEDGE_IN, LEDGE_OUT, span, 0.17, 0.05, 8),
-    });
-    const polar = (a, r) => [r * Math.sin(a), r * Math.cos(a)];
-    const ledgeWidth = TOWER_RADIUS * COL_ANGLE * 1.12;
-    const boxGeo = new THREE.BoxGeometry(ledgeWidth * 0.86, 0.54, 0.58);
-
-    const solidMat = createLedgeStoneMaterial(new THREE.Color(pal.ledge).lerp(new THREE.Color('#c9ccd3'), 0.45), {});
-    this._stoneMats.add(solidMat);
-    const solidTopMat = new THREE.MeshStandardMaterial({
-      color: pal.ledgeTop,
-      emissive: pal.glow,
-      emissiveIntensity: 0.55,
-      roughness: 0.3,
-    });
-    const bracketMat = createLedgeStoneMaterial(new THREE.Color(pal.mortar).lerp(new THREE.Color('#5b5f68'), 0.6), {});
-    this._stoneMats.add(bracketMat);
-    const iceMat = new THREE.MeshStandardMaterial({
-      color: '#7dd3fc',
-      emissive: '#0284c7',
-      emissiveIntensity: 0.25,
-      roughness: 0.08,
-      metalness: 0.1,
-      transparent: true,
-      opacity: 0.88,
-    });
-    const iceTopMat = new THREE.MeshStandardMaterial({
-      color: '#e0f2fe',
-      emissive: '#38bdf8',
-      emissiveIntensity: 0.5,
-      roughness: 0.15,
-    });
-    const convMatR = new THREE.MeshStandardMaterial({
-      map: this.conveyorTexR,
-      emissive: '#a855f7',
-      emissiveIntensity: 0.2,
-      roughness: 0.4,
-    });
-    const convMatL = new THREE.MeshStandardMaterial({
-      map: this.conveyorTexL,
-      emissive: '#a855f7',
-      emissiveIntensity: 0.2,
-      roughness: 0.4,
-    });
-    const convTopMat = new THREE.MeshStandardMaterial({
-      color: '#e879f9',
-      emissive: '#a855f7',
-      emissiveIntensity: 0.6,
-      roughness: 0.3,
-    });
-    const crumbleTopMat = new THREE.MeshStandardMaterial({
-      color: '#fde68a',
-      emissive: '#d97706',
-      emissiveIntensity: 0.6,
-      roughness: 0.4,
-    });
-
-    const crystalGeo = new THREE.ConeGeometry(0.07, 0.3, 5);
-    const rollerGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.6, 8);
-    const conveyorRollers = [];
-
-    const withShadows = (obj, cast = true, receive = true) => {
-      obj.traverse((o) => {
-        if (o.isMesh) {
-          o.castShadow = cast;
-          o.receiveShadow = receive;
-        }
-      });
-      return obj;
-    };
-
+    // Ledges
     const ledgeMeshes = [];
     for (const l of tower.ledges) {
-      const phi = (l.col + 0.5) * COL_ANGLE;
-      const y = l.floor * FLOOR_HEIGHT;
-
-      const node = new THREE.Group();
-      node.position.set(0, y, 0);
-      node.rotation.y = phi;
-
-      if (l.type === 'box') {
-        const boxMat = new THREE.MeshStandardMaterial({
-          color: '#facc15',
-          emissive: '#ea580c',
-          emissiveIntensity: 0.55,
-          roughness: 0.28,
-          metalness: 0.45,
-        });
-        const crate = new THREE.Mesh(boxGeo, boxMat);
-        const core = new THREE.Mesh(
-          new THREE.BoxGeometry(ledgeWidth * 0.5, 0.28, 0.62),
-          new THREE.MeshBasicMaterial({ color: '#fef08a' })
-        );
-        crate.position.set(0, 0.27, TOWER_RADIUS + 0.34);
-        core.position.copy(crate.position);
-        node.add(crate, core);
-        node.userData = { baseY: y, type: l.type, mainMat: boxMat };
-      } else if (l.type === 'crumble') {
-        // 3 fractured segments with a glowing amber fault lip
-        const cMat = createLedgeStoneMaterial('#d6a256', { emissive: '#b45309', emissiveIntensity: 0.25 });
-        for (const k of [-1, 0, 1]) {
-          const seg = new THREE.Mesh(geoCache.seg, cMat);
-          seg.rotation.y = k * span * 0.335;
-          seg.rotation.z = k * 0.03;
-          node.add(seg);
-        }
-        const cap = new THREE.Mesh(geoCache.lip, crumbleTopMat);
-        cap.position.y = 0.035;
-        node.add(cap);
-        node.userData = { baseY: y, type: l.type, mainMat: cMat };
-      } else if (l.type === 'ice') {
-        const slab = new THREE.Mesh(geoCache.iceDeck, iceMat);
-        const cap = new THREE.Mesh(geoCache.lip, iceTopMat);
-        cap.position.y = 0.035;
-        node.add(slab, cap);
-        for (const k of [-0.32, 0.05, 0.3]) {
-          const shard = new THREE.Mesh(crystalGeo, iceTopMat);
-          const [sx, sz] = polar(k * span, LEDGE_OUT - 0.18);
-          shard.position.set(sx, -0.3, sz);
-          shard.rotation.z = Math.PI + k * 0.4;
-          node.add(shard);
-        }
-        node.userData = { baseY: y, type: l.type };
-      } else if (l.type === 'conveyorR' || l.type === 'conveyorL') {
-        const cMat = l.type === 'conveyorR' ? convMatR : convMatL;
-        const deck = new THREE.Mesh(geoCache.deck, cMat);
-        const cap = new THREE.Mesh(geoCache.lip, convTopMat);
-        cap.position.y = 0.035;
-        node.add(deck, cap);
-        const dir = l.type === 'conveyorR' ? 1 : -1;
-        for (const k of [-0.32, 0, 0.32]) {
-          // Wrapper aims the roller radially; the roller itself spins about its own axis
-          const holder = new THREE.Group();
-          holder.rotation.y = k * span;
-          const rol = new THREE.Mesh(rollerGeo, bracketMat);
-          rol.position.set(0, -0.12, TOWER_RADIUS + 0.4);
-          rol.rotation.x = Math.PI / 2;
-          holder.add(rol);
-          node.add(holder);
-          conveyorRollers.push({ mesh: rol, dir });
-        }
-        node.userData = { baseY: y, type: l.type };
-      } else {
-        // Solid ledge: stone deck + glowing front lip + support corbel underneath
-        const deck = new THREE.Mesh(geoCache.deck, solidMat);
-        const cap = new THREE.Mesh(geoCache.lip, solidTopMat);
-        cap.position.y = 0.035;
-        const corbel = new THREE.Mesh(geoCache.corbel, bracketMat);
-        corbel.position.y = -0.2;
-        corbel.scale.set(1, 1, 1);
-        node.add(deck, cap, corbel);
-        node.userData = { baseY: y, type: l.type };
-      }
-
-      withShadows(node, true, true);
+      const node = buildLedge(l, pal, mats);
       group.add(node);
       ledgeMeshes.push(node);
     }
 
-    // Tower plinth rising out of the sea + shadow flags for the rest of the tower group
-    const plinth = new THREE.Mesh(
-      new THREE.CylinderGeometry(TOWER_RADIUS + 0.12, TOWER_RADIUS + 0.45, 1.6, 48),
-      createLedgeStoneMaterial(new THREE.Color(pal.mortar).lerp(new THREE.Color('#4b4f58'), 0.6), {})
-    );
-    this._stoneMats.add(plinth.material);
-    plinth.position.y = -0.8;
-    plinth.receiveShadow = true;
-    group.add(plinth);
-    cylMesh.receiveShadow = true;
-    for (const pod of elevatorPods) withShadows(pod, true, true);
-
-    this._applyChrome(group);
     const cached = {
       group,
       ledgeMeshes,
       elevatorPods,
-      elevatorThrusters,
-      doorMarkers,
-      exitRings,
-      conveyorRollers,
-      cylMat,
+      elevatorThrusters: [],
+      doorMarkers: [],
+      exitRings: [],
+      conveyorRollers: [],
+      cylMat: body.coreMat,
+      updaters,
+      styleName: body.styleName,
     };
     this.towerCache.set(cacheKey, cached);
     return cached;
@@ -1654,6 +1300,23 @@ export class GameRenderer {
     su.shallowColor.value.copy(toxicShallow).lerp(cleanShallow, heal).lerp(this._tempColor.set(pal.brickA), 0.15).multiplyScalar(0.75);
     su.deepColor.value.copy(toxicDeep).lerp(cleanDeep, heal);
     const seaY = mech.kind === 'flood' ? mech.waterFloor * FLOOR_HEIGHT : -0.62;
+    // Ripples: splashes from the game, raindrops in storms, and the occasional lapping ring
+    if (state.waterEvents && state.waterEvents.length) {
+      for (const ev of state.waterEvents) {
+        const th = wrapAngle((ev.col - camCol) * COL_ANGLE);
+        const r = TOWER_RADIUS + 1.0;
+        this.ocean.addRipple(Math.sin(th) * r, Math.cos(th) * r, ev.strength, time);
+      }
+      state.waterEvents.length = 0;
+    }
+    const raining = mech.kind === 'dark' || mech.kind === 'storm' || mech.kind === 'flood';
+    this._rainT = (this._rainT || 0) - (this._realDt || 0.016);
+    if (this._rainT <= 0) {
+      this._rainT = raining ? 0.12 : 1.4;
+      const a = (Math.random() - 0.5) * 1.6;
+      const r = TOWER_RADIUS + 1.2 + Math.random() * 6;
+      this.ocean.addRipple(Math.sin(a) * r, Math.cos(a) * r, raining ? 0.35 : 0.5, time);
+    }
     this.seaMesh.position.y = seaY;
     if (this._stoneMats) setWaterlineY(this._stoneMats, seaY);
     su.sunStrength.value = 1 - (mech.darkness || 0) * 0.8;
@@ -1722,12 +1385,9 @@ export class GameRenderer {
       this.debrisPool.group.visible = false;
     }
 
-    // Animate conveyor textures & physical rollers
-    this.conveyorTexR.offset.x = -(time * 1.4) % 1;
-    this.conveyorTexL.offset.x = (time * 1.4) % 1;
-    for (const r of cached.conveyorRollers) {
-      r.mesh.rotation.y = time * 6 * r.dir;
-    }
+    // Animated props: conveyor treads, portals, lift thrusters, crown brazier
+    animateConveyorTextures(time);
+    for (const fn of cached.updaters) fn(time);
 
     // Update ledges (gone, crumble shake, box pulse)
     for (let i = 0; i < state.ledges.length; i++) {
@@ -1762,13 +1422,20 @@ export class GameRenderer {
         continue;
       }
 
-      if (l.type === 'crumble' && mesh.userData.mainMat) {
-        mesh.userData.mainMat.color.set(l.crumbling ? '#ef4444' : '#f59e0b');
-        mesh.userData.mainMat.emissive.set(l.crumbling ? '#dc2626' : '#b45309');
+      if (l.type === 'crumble') {
+        // fissures flare and the stones shudder when it's about to give way
         mesh.position.y = mesh.userData.baseY + (l.shake ? Math.sin(time * 55) * 0.05 : 0);
+        mesh.position.x = l.shake ? Math.sin(time * 47) * 0.02 : 0;
+        if (!mesh.userData.ownMat && l.crumbling) {
+          const m = mesh.children[0].material.clone();
+          mesh.traverse((o) => {
+            if (o.isMesh && o.material === mesh.children[0].material) o.material = m;
+          });
+          mesh.userData.ownMat = m;
+        }
+        if (mesh.userData.ownMat) mesh.userData.ownMat.emissiveIntensity = l.crumbling ? 2 + Math.sin(time * 30) * 1 : 0.9;
       } else if (l.type === 'box' && mesh.userData.mainMat) {
-        const flash = Math.sin(time * 10) > 0;
-        mesh.userData.mainMat.color.set(flash ? '#facc15' : '#f97316');
+        mesh.userData.mainMat.emissiveIntensity = 1.1 + Math.sin(time * 6) * 0.5;
       }
     }
 
@@ -1776,7 +1443,7 @@ export class GameRenderer {
     for (let i = 0; i < state.elevators.length; i++) {
       const el = state.elevators[i];
       const pod = cached.elevatorPods[i];
-      if (pod) pod.position.y = el.floor * FLOOR_HEIGHT - 0.1;
+      if (pod) pod.position.y = el.floor * FLOOR_HEIGHT;
     }
     const thrustPulse = 0.75 + 0.35 * Math.sin(time * 24);
     for (const th of cached.elevatorThrusters) {
@@ -1899,6 +1566,7 @@ export class GameRenderer {
         this.towerScene.remove(slot.mesh);
         slot.mesh = this._createEnemyMesh(en.type);
         slot.type = en.type;
+        slot.groundOffset = undefined;
         this.towerScene.add(slot.mesh);
       }
       const ud = slot.mesh.userData;
@@ -1906,7 +1574,9 @@ export class GameRenderer {
       slot.mesh.visible = true;
       const eTheta = wrapAngle((en.col - camCol) * COL_ANGLE);
       const er = TOWER_RADIUS + 0.4;
-      slot.mesh.position.set(er * Math.sin(eTheta), en.floor * FLOOR_HEIGHT + 0.28, er * Math.cos(eTheta));
+      // Ground enemies sit exactly on the ledge surface (measured from the model's own bounds)
+      if (slot.groundOffset === undefined) slot.groundOffset = this._enemyGroundOffset(slot.mesh, en.type);
+      slot.mesh.position.set(er * Math.sin(eTheta), en.floor * FLOOR_HEIGHT + slot.groundOffset, er * Math.cos(eTheta));
       slot.mesh.rotation.set(0, eTheta + (en.dir < 0 ? -0.5 : 0.5), 0);
 
       // Death pop: swell then vanish
@@ -2057,6 +1727,26 @@ export class GameRenderer {
     }
     this._updateEnvironment(pal, mech, heal);
     this.postfx.render({ time, focus, flash: (state.mech?.lightning || 0) * 0.35, darkness: state.mech?.darkness || 0 });
+  }
+
+  // Distance from an enemy model's origin down to its lowest point (after the group scale),
+  // so walkers/rollers/bouncers touch the ledge instead of sinking into it. Flyers keep a hover.
+  _enemyGroundOffset(mesh, type) {
+    const ground = ['roller', 'bouncer', 'chaser', 'shieldbug', 'puffer', 'splitter'];
+    if (!ground.includes(type)) return 0.28;
+    const body = mesh.userData.body || mesh;
+    const box = new THREE.Box3();
+    mesh.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(mesh.matrixWorld).invert();
+    const tmp = new THREE.Box3();
+    body.traverse((o) => {
+      if (!o.isMesh || o.userData.outline) return;
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      tmp.copy(o.geometry.boundingBox).applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld));
+      box.union(tmp);
+    });
+    if (box.isEmpty()) return 0.28;
+    return -box.min.y * mesh.scale.y + 0.005;
   }
 
   _alertTex() {

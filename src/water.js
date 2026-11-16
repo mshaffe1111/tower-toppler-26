@@ -91,6 +91,7 @@ export class Ocean {
         towerRadius: { value: towerRadius },
         swell: { value: 1 },
         sunStrength: { value: 1 },
+        ripples: { value: Array.from({ length: 12 }, () => new THREE.Vector4(0, 0, -100, 0)) },
       },
     ]);
     uniforms.normalMap.value = this.normalTex;
@@ -158,6 +159,7 @@ export class Ocean {
         uniform vec3 glowColor;
         uniform float towerRadius;
         uniform float sunStrength;
+        uniform vec4 ripples[12]; // x, z, start time, strength
         varying vec3 vWorld;
         varying vec3 vSwellN;
         varying float vHeight;
@@ -186,7 +188,28 @@ export class Ocean {
           vec3 v = viewVec / dist;
           // Ripples fade with distance to avoid shimmer at the horizon
           float detail = mix(1.0, 0.25, smoothstep(12.0, 60.0, dist));
-          vec3 n = normalize(vSwellN + vec3(rip.x, 0.0, rip.y) * 0.16 * detail);
+          // Expanding ring ripples (splashes, rain, landings) + a constant ring train rolling
+          // away from the tower base: perturb the normal along the radial direction
+          vec2 rn = vec2(0.0);
+          float ringFoam = 0.0;
+          for (int i = 0; i < 12; i++) {
+            vec4 R = ripples[i];
+            float age = time - R.z;
+            if (age < 0.0 || age > 4.0) continue;
+            vec2 dv = p - R.xy;
+            float d = length(dv) + 1e-4;
+            float c = age * 1.7;
+            float env = R.w * exp(-age * 0.9) * exp(-pow((d - c) / (0.35 + age * 0.25), 2.0));
+            float ph = (d - c) * 11.0;
+            rn += (dv / d) * cos(ph) * env * 0.9;
+            ringFoam += max(0.0, sin(ph)) * env * 0.6;
+          }
+          float rr = length(p);
+          float baseEnv = exp(-max(0.0, rr - towerRadius - 0.4) * 0.22) * smoothstep(towerRadius + 0.2, towerRadius + 0.8, rr);
+          float bph = rr * 4.2 - time * 2.4;
+          rn += (p / max(rr, 1e-3)) * cos(bph) * baseEnv * 0.32;
+          ringFoam += smoothstep(0.93, 1.0, sin(bph)) * baseEnv * 0.25;
+          vec3 n = normalize(vSwellN + vec3(rip.x + rn.x, 0.0, rip.y + rn.y) * 0.16 * detail + vec3(rn.x, 0.0, rn.y) * 0.12);
 
           // Fresnel (Schlick, water F0 = 0.02)
           float cosT = clamp(dot(n, v), 0.0, 1.0);
@@ -222,7 +245,7 @@ export class Ocean {
           float collar = smoothstep(towerRadius + 0.75, towerRadius + 0.3, r + fn * 0.35);
           float lace = smoothstep(0.55, 0.75, fn) * smoothstep(towerRadius + 2.4, towerRadius + 0.6, r);
           float crestFoam = smoothstep(0.1, 0.17, vHeight) * smoothstep(0.5, 0.8, noise(p * 2.2 + time * 0.25));
-          float foam = clamp(collar * (0.55 + fn * 0.6) + lace * 0.45 + crestFoam * 0.45, 0.0, 1.0);
+          float foam = clamp(collar * (0.55 + fn * 0.6) + lace * 0.45 + crestFoam * 0.45 + ringFoam, 0.0, 1.0);
           col = mix(col, vec3(0.8, 0.9, 0.95), foam * 0.65);
 
           gl_FragColor = vec4(col, 1.0);
@@ -248,6 +271,13 @@ export class Ocean {
     this._view = new THREE.Vector3();
     this._target = new THREE.Vector3();
     this._q = new THREE.Vector4();
+  }
+
+  // Spawn an expanding ring ripple at world (x, z)
+  addRipple(x, z, strength = 1, time = this.material.uniforms.time.value) {
+    const arr = this.material.uniforms.ripples.value;
+    this._ri = ((this._ri || 0) + 1) % arr.length;
+    arr[this._ri].set(x, z, time, strength);
   }
 
   setSize(w, h, dpr) {

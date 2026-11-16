@@ -364,7 +364,15 @@ function addWaterlineWetness(mat) {
     shader.uniforms.waterY = mat.userData.waterY || (mat.userData.waterY = { value: -0.62 });
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWorldPosW;')
-      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWorldPosW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      .replace(
+        '#include <worldpos_vertex>',
+        `#include <worldpos_vertex>
+        vec4 wpW = vec4(transformed, 1.0);
+        #ifdef USE_INSTANCING
+          wpW = instanceMatrix * wpW;
+        #endif
+        vWorldPosW = (modelMatrix * wpW).xyz;`
+      );
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWorldPosW;\nuniform float waterY;')
       .replace(
@@ -386,4 +394,156 @@ function addWaterlineWetness(mat) {
 
 export function setWaterlineY(materials, y) {
   for (const m of materials) if (m.userData.waterY) m.userData.waterY.value = y;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Brick: fired-clay face texture for the instanced brick towers. The albedo is near-white with
+// mottling and sand grains (each brick's colour comes from its instance colour); the normal map is
+// fine pitting. Every instance samples a different part of the tile so no two bricks repeat, and
+// faces turning away from the camera darken a little so the cylinder reads as round.
+// ---------------------------------------------------------------------------------------------
+const BRICK_TEX = 256;
+let BRICK_MAPS = null;
+function brickMaps() {
+  if (BRICK_MAPS) return BRICK_MAPS;
+  const N = BRICK_TEX;
+  const rand = mulberry32(4711);
+  const lat = (p) => {
+    const g = new Float32Array(p * p);
+    for (let i = 0; i < g.length; i++) g[i] = rand();
+    return (x, y) => {
+      const fx = (x / N) * p;
+      const fy = (y / N) * p;
+      const ix = Math.floor(fx);
+      const iy = Math.floor(fy);
+      const tx = fx - ix;
+      const ty = fy - iy;
+      const ux = tx * tx * (3 - 2 * tx);
+      const uy = ty * ty * (3 - 2 * ty);
+      const x0 = ix % p;
+      const x1 = (x0 + 1) % p;
+      const y0 = iy % p;
+      const y1 = (y0 + 1) % p;
+      const a = g[y0 * p + x0];
+      const b = g[y0 * p + x1];
+      const c = g[y1 * p + x0];
+      const d = g[y1 * p + x1];
+      return (a + (b - a) * ux) * (1 - uy) + (c + (d - c) * ux) * uy;
+    };
+  };
+  const n4 = lat(4);
+  const n8 = lat(8);
+  const n16 = lat(16);
+  const n32 = lat(32);
+  const n64 = lat(64);
+  const h = new Float32Array(N * N);
+  const alb = new ImageData(N, N);
+  const orm = new ImageData(N, N);
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const i = y * N + x;
+      const broad = n4(x, y) * 0.5 + n8(x, y) * 0.5;
+      const mid = n16(x, y);
+      const fine = n32(x, y) * 0.6 + n64(x, y) * 0.4;
+      const grain = rand();
+      // pits: sharp little dents
+      const pit = Math.max(0, n64(x + 31, y + 17) - 0.72) * 3.2;
+      h[i] = broad * 0.35 + mid * 0.25 + fine * 0.3 - pit * 0.6 + (grain - 0.5) * 0.06;
+      // albedo: firing variation (darker clouds), sand grains, a few dark flecks
+      let v = 0.86 + (broad - 0.5) * 0.22 + (mid - 0.5) * 0.1 + (grain - 0.5) * 0.08;
+      if (grain > 0.992) v *= 0.55;
+      v *= 1 - pit * 0.35;
+      const c = Math.max(0, Math.min(1, v));
+      alb.data[i * 4] = c * 255;
+      alb.data[i * 4 + 1] = c * 0.985 * 255;
+      alb.data[i * 4 + 2] = c * 0.97 * 255;
+      alb.data[i * 4 + 3] = 255;
+      orm.data[i * 4] = 255;
+      orm.data[i * 4 + 1] = Math.min(1, 0.78 + fine * 0.18 + pit * 0.1) * 255;
+      orm.data[i * 4 + 2] = 0;
+      orm.data[i * 4 + 3] = 255;
+    }
+  }
+  const nrm = new ImageData(N, N);
+  const k = 3.2;
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const i = y * N + x;
+      const hx = h[y * N + ((x + 1) % N)] - h[y * N + ((x - 1 + N) % N)];
+      const hy = h[((y + 1) % N) * N + x] - h[((y - 1 + N) % N) * N + x];
+      const nx = -hx * k;
+      const ny = hy * k;
+      const l = Math.hypot(nx, ny, 1);
+      nrm.data[i * 4] = ((nx / l) * 0.5 + 0.5) * 255;
+      nrm.data[i * 4 + 1] = ((ny / l) * 0.5 + 0.5) * 255;
+      nrm.data[i * 4 + 2] = ((1 / l) * 0.5 + 0.5) * 255;
+      nrm.data[i * 4 + 3] = 255;
+    }
+  }
+  const cv = (img) => {
+    const c = document.createElement('canvas');
+    c.width = N;
+    c.height = N;
+    c.getContext('2d').putImageData(img, 0, 0);
+    return c;
+  };
+  BRICK_MAPS = { map: texFrom(cv(alb), true), normalMap: texFrom(cv(nrm), false), orm: texFrom(cv(orm), false) };
+  return BRICK_MAPS;
+}
+
+export function createBrickMaterial(color = '#ffffff', { roughness = 1, emissive = '#000000', emissiveIntensity = 0, edgeDarken = 0.36 } = {}) {
+  const M = brickMaps();
+  // ~1 tile per 1.4 world units: grains ~5 mm at brick scale
+  const rep = new THREE.Vector2(0.7, 0.7);
+  const tex = (t) => {
+    const c = t.clone();
+    c.repeat.copy(rep);
+    c.needsUpdate = true;
+    return c;
+  };
+  const mat = new THREE.MeshStandardMaterial({
+    color,
+    map: tex(M.map),
+    normalMap: tex(M.normalMap),
+    normalScale: new THREE.Vector2(0.75, 0.75),
+    roughnessMap: tex(M.orm),
+    roughness,
+    metalness: 0,
+    emissive: new THREE.Color(emissive),
+    emissiveIntensity,
+  });
+  addWaterlineWetness(mat);
+  const wet = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, r) => {
+    wet(shader, r);
+    shader.uniforms.edgeDarken = { value: edgeDarken };
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <uv_vertex>',
+      `#include <uv_vertex>
+      #ifdef USE_INSTANCING
+        vec2 brickUvOff = fract(vec2(float(gl_InstanceID) * 0.6180339, float(gl_InstanceID) * 0.3819660)) * 7.0;
+        #ifdef USE_MAP
+          vMapUv += brickUvOff;
+        #endif
+        #ifdef USE_NORMALMAP
+          vNormalMapUv += brickUvOff;
+        #endif
+        #ifdef USE_ROUGHNESSMAP
+          vRoughnessMapUv += brickUvOff;
+        #endif
+      #endif`
+    );
+    shader.fragmentShader = shader.fragmentShader
+      .replace('uniform float waterY;', 'uniform float waterY;\nuniform float edgeDarken;')
+      .replace(
+        '#include <opaque_fragment>',
+        `{
+          float ndv = abs(dot(normalize(vNormal), normalize(vViewPosition)));
+          outgoingLight *= mix(1.0 - edgeDarken, 1.0, smoothstep(0.08, 0.75, ndv));
+        }
+        #include <opaque_fragment>`
+      );
+  };
+  mat.customProgramCacheKey = () => 'wetbrick';
+  return mat;
 }

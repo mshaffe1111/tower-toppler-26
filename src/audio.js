@@ -428,7 +428,7 @@ class SoundEngine {
 
     // SFX buses
     this.sfxGain = ctx.createGain();
-    this.sfxGain.gain.value = 1.0;
+    this.sfxGain.gain.value = this.sfxVol ?? 1;
     this.sfxGain.connect(this.mix);
     this.sfxReverbGain = ctx.createGain();
     this.sfxReverbGain.gain.value = 0.14;
@@ -453,7 +453,7 @@ class SoundEngine {
     this.musicIn.frequency.value = this._theme.bright;
     this.musicIn.Q.value = 0.7;
     this.musicGain = ctx.createGain();
-    this.musicGain.gain.value = this.musicEnabled ? MUSIC_LEVEL : 0;
+    this.musicGain.gain.value = this.musicEnabled ? MUSIC_LEVEL * (this.musicVol ?? 1) : 0;
     this.musicGain.connect(this.mix);
     this.musicReverbGain = ctx.createGain();
     this.musicReverbGain.gain.value = this._musicWet();
@@ -558,11 +558,24 @@ class SoundEngine {
     return this.muted;
   }
 
+  // Volume sliders from the Options menu (0..1 each). Music at 0 stops the groove entirely.
+  setVolumes(music, sfx) {
+    this.musicVol = Math.max(0, Math.min(1, music));
+    this.sfxVol = Math.max(0, Math.min(1, sfx));
+    const wantMusic = this.musicVol > 0.001;
+    if (wantMusic !== this.musicEnabled) this.toggleMusic();
+    if (this.ctx) {
+      const now = this.ctx.currentTime;
+      if (this.musicGain) this.musicGain.gain.setTargetAtTime(this.musicEnabled ? MUSIC_LEVEL * this.musicVol : 0, now, 0.04);
+      if (this.sfxGain) this.sfxGain.gain.setTargetAtTime(this.sfxVol, now, 0.03);
+    }
+  }
+
   toggleMusic() {
     this.musicEnabled = !this.musicEnabled;
     if (this.ctx) {
       const now = this.ctx.currentTime;
-      if (this.musicGain) this.musicGain.gain.setTargetAtTime(this.musicEnabled ? MUSIC_LEVEL : 0, now, 0.04);
+      if (this.musicGain) this.musicGain.gain.setTargetAtTime(this.musicEnabled ? MUSIC_LEVEL * (this.musicVol ?? 1) : 0, now, 0.04);
       if (this.musicReverbGain) this.musicReverbGain.gain.setTargetAtTime(this._musicWet(), now, 0.04);
     }
     if (!this.musicEnabled) {
