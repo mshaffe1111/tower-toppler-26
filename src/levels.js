@@ -1917,7 +1917,7 @@ export function createRebootTowers() {
   span(r2Ledges, 0, 15, 4, 'solid');
   span(r2Ledges, 1, 3, 3, 'solid');
   span(r2Ledges, 2, 6, 3, 'crumble');
-  span(r2Ledges, 3, 10, 3, 'solid');
+  span(r2Ledges, 3, 9, 4, 'solid');
   span(r2Ledges, 4, 13, 3, 'solid');
   span(r2Ledges, 8, 1, 4, 'solid');
   span(r2Ledges, 9, 13, 3, 'solid');
@@ -1925,7 +1925,7 @@ export function createRebootTowers() {
   span(r2Ledges, 10, 8, 4, 'solid');
   span(r2Ledges, 13, 2, 4, 'solid');
   span(r2Ledges, 14, 6, 3, 'crumble');
-  span(r2Ledges, 15, 10, 3, 'solid');
+  span(r2Ledges, 15, 9, 4, 'solid');
   span(r2Ledges, 16, 13, 4, 'solid');
   span(r2Ledges, 17, 1, 3, 'crumble');
   span(r2Ledges, 18, 4, 5, 'solid');
@@ -1995,7 +1995,8 @@ export function createRebootTowers() {
   span(r3Ledges, 10, 15, 3, 'solid');
   span(r3Ledges, 11, 12, 3, 'solid'); // Secret Rune Door r_t3_rune at col 13, floor 11 (f=12..14 col 13 clear!)
   span(r3Ledges, 14, 3, 4, 'solid');
-  span(r3Ledges, 15, 7, 4, 'conveyorL');
+  span(r3Ledges, 15, 7, 3, 'conveyorL');
+  tile(r3Ledges, 10, 16, 'solid');
   tile(r3Ledges, 11, 16, 'steamVent', { phasePeriod: 3.4, phaseOffset: 0.5 });
   span(r3Ledges, 17, 12, 3, 'solid');
   span(r3Ledges, 18, 15, 6, 'solid');
@@ -2045,13 +2046,13 @@ export function createRebootTowers() {
   });
 
   // --------------------------------------------------------------------------
-  // T4: BOREAL SPIRE (windForce: 1.35 + Glacier Ice + Core Lock Vault)
+  // T4: BOREAL SPIRE (windForce: 0.50 + Glacier Ice + Core Lock Vault)
   // --------------------------------------------------------------------------
   const r4Ledges = [];
   span(r4Ledges, 0, 14, 5, 'solid');
   span(r4Ledges, 1, 3, 4, 'ice');
   span(r4Ledges, 2, 7, 4, 'ice');
-  span(r4Ledges, 3, 12, 3, 'solid');
+  span(r4Ledges, 3, 11, 4, 'solid');
   span(r4Ledges, 6, 4, 4, 'ice');
   tile(r4Ledges, 5, 6, 'solid');
   span(r4Ledges, 7, 8, 4, 'solid');
@@ -2059,8 +2060,8 @@ export function createRebootTowers() {
   span(r4Ledges, 12, 9, 3, 'solid');
   span(r4Ledges, 12, 0, 4, 'solid');
   span(r4Ledges, 13, 4, 4, 'ice');
-  span(r4Ledges, 14, 9, 3, 'crumble');
-  span(r4Ledges, 15, 13, 4, 'solid');
+  span(r4Ledges, 14, 8, 4, 'crumble');
+  span(r4Ledges, 15, 12, 5, 'solid');
   span(r4Ledges, 19, 2, 5, 'ice');
   tile(r4Ledges, 4, 19, 'solid');
   span(r4Ledges, 20, 7, 2, 'solid');
@@ -2077,7 +2078,7 @@ export function createRebootTowers() {
     parTime: 38,
     spawn: { col: 0, floor: 0 },
     palette: REBOOT_PALETTES.blizzard,
-    mechanics: { windForce: 0.82, windPeriod: 6.0 },
+    mechanics: { windForce: 0.50, windPeriod: 6.0 },
     ledges: r4Ledges,
     elevators: [
       { col: 12, minFloor: 7, maxFloor: 11, startFloor: 7, speed: 1.8 },
@@ -2137,7 +2138,7 @@ export function createRebootTowers() {
   tile(r5Ledges, 1, 17, 'solid');
   span(r5Ledges, 15, 2, 3, 'solid');
   span(r5Ledges, 16, 5, 3, 'solid');
-  span(r5Ledges, 17, 9, 3, 'crumble');
+  span(r5Ledges, 17, 8, 4, 'crumble');
   span(r5Ledges, 18, 12, 3, 'solid');
   span(r5Ledges, 19, 15, 5, 'solid');
   span(r5Ledges, 20, 4, 2, 'solid');
@@ -2192,13 +2193,13 @@ export function createRebootTowers() {
   const r6Ledges = [];
   span(r6Ledges, 0, 14, 5, 'solid');
   span(r6Ledges, 1, 3, 2, 'piston', { phasePeriod: 3.2, phaseOffset: 0.0 });
-  span(r6Ledges, 2, 6, 3, 'solid');
+  span(r6Ledges, 2, 5, 4, 'solid');
   span(r6Ledges, 3, 9, 2, 'piston', { phasePeriod: 3.2, phaseOffset: 0.9 });
-  span(r6Ledges, 4, 12, 3, 'solid');
+  span(r6Ledges, 4, 11, 4, 'solid');
   span(r6Ledges, 9, 0, 4, 'solid');
   span(r6Ledges, 10, 4, 2, 'piston', { phasePeriod: 3.0, phaseOffset: 0.4 });
   span(r6Ledges, 11, 6, 2, 'piston', { phasePeriod: 3.0, phaseOffset: 1.2 });
-  span(r6Ledges, 12, 9, 4, 'solid');
+  span(r6Ledges, 12, 8, 5, 'solid');
   span(r6Ledges, 13, 13, 3, 'solid');
   span(r6Ledges, 15, 2, 4, 'solid');
   span(r6Ledges, 16, 6, 2, 'piston', { phasePeriod: 3.0, phaseOffset: 0.0 });
@@ -2218,7 +2219,7 @@ export function createRebootTowers() {
     parTime: 40,
     spawn: { col: 0, floor: 0 },
     palette: REBOOT_PALETTES.piston,
-    mechanics: { windForce: 0.36, windPeriod: 7.0 },
+    mechanics: { windForce: 0.28, windPeriod: 7.0 },
     ledges: r6Ledges,
     elevators: [
       { col: 15, minFloor: 4, maxFloor: 9, startFloor: 4, speed: 2.0 },
@@ -2256,19 +2257,19 @@ export function createRebootTowers() {
   const r7Ledges = [];
   span(r7Ledges, 0, 14, 5, 'solid');
   span(r7Ledges, 1, 3, 4, 'ice');
-  span(r7Ledges, 2, 8, 2, 'crumble');
+  span(r7Ledges, 2, 7, 4, 'crumble');
   span(r7Ledges, 3, 11, 3, 'solid');
   span(r7Ledges, 6, 3, 4, 'solid');
   span(r7Ledges, 7, 7, 4, 'conveyorR');
-  span(r7Ledges, 8, 12, 3, 'solid');
+  span(r7Ledges, 8, 11, 4, 'solid');
   span(r7Ledges, 13, 0, 4, 'solid');
-  span(r7Ledges, 14, 11, 3, 'solid'); // Rune Chamber r_t7_rune at col 12, floor 14 (f=15..16 col 12 clear!)
-  span(r7Ledges, 14, 4, 2, 'phaseBlock', { switchGroup: 'cyan', inverted: false });
+  span(r7Ledges, 14, 11, 4, 'solid'); // Rune Chamber r_t7_rune at col 12, floor 14 (f=15..16 col 12 clear!)
+  span(r7Ledges, 14, 4, 3, 'phaseBlock', { switchGroup: 'cyan', inverted: false });
   span(r7Ledges, 14, 7, 3, 'solid');
   span(r7Ledges, 17, 15, 4, 'solid');
-  span(r7Ledges, 18, 3, 3, 'crumble');
+  span(r7Ledges, 18, 3, 4, 'crumble');
   span(r7Ledges, 19, 7, 3, 'ice');
-  span(r7Ledges, 20, 10, 3, 'crumble');
+  span(r7Ledges, 20, 10, 4, 'crumble');
   span(r7Ledges, 21, 14, 5, 'solid');
   span(r7Ledges, 22, 3, 2, 'solid');
 
@@ -2284,7 +2285,7 @@ export function createRebootTowers() {
     parTime: 42,
     spawn: { col: 0, floor: 0 },
     palette: REBOOT_PALETTES.blackout,
-    mechanics: { windForce: 0.48, windPeriod: 6.5, blackoutCycle: 9.0, lightningInterval: 7.5 },
+    mechanics: { windForce: 0.38, windPeriod: 6.5, blackoutCycle: 9.0, lightningInterval: 7.5 },
     ledges: r7Ledges,
     elevators: [{ col: 15, minFloor: 8, maxFloor: 13, startFloor: 8, speed: 2.0 }],
     doors: [
@@ -2323,16 +2324,16 @@ export function createRebootTowers() {
   span(r8Ledges, 0, 14, 5, 'solid');
   span(r8Ledges, 1, 3, 4, 'ice');
   span(r8Ledges, 2, 7, 2, 'piston', { phasePeriod: 3.0, phaseOffset: 0.0 });
-  span(r8Ledges, 3, 10, 3, 'solid');
-  span(r8Ledges, 4, 13, 2, 'phaseBlock', { switchGroup: 'red', inverted: false });
+  span(r8Ledges, 3, 9, 4, 'solid');
+  span(r8Ledges, 4, 13, 3, 'phaseBlock', { switchGroup: 'red', inverted: false });
   span(r8Ledges, 4, 0, 2, 'solid');
   span(r8Ledges, 9, 3, 4, 'solid');
   span(r8Ledges, 10, 7, 4, 'conveyorR');
-  span(r8Ledges, 11, 12, 3, 'solid');
+  span(r8Ledges, 11, 11, 4, 'solid');
   span(r8Ledges, 14, 1, 7, 'solid');
   tile(r8Ledges, 3, 14, 'laserGate', { switchGroup: 'cyan', inverted: false });
   tile(r8Ledges, 3, 16, 'solid');
-  span(r8Ledges, 15, 8, 2, 'phaseBlock', { switchGroup: 'cyan', inverted: false });
+  span(r8Ledges, 15, 8, 3, 'phaseBlock', { switchGroup: 'cyan', inverted: false });
   span(r8Ledges, 16, 11, 3, 'solid');
   tile(r8Ledges, 14, 17, 'solid');
   tile(r8Ledges, 15, 17, 'steamVent', { phasePeriod: 3.2, phaseOffset: 0.6 });
@@ -2355,7 +2356,7 @@ export function createRebootTowers() {
     palette: REBOOT_PALETTES.apex,
     mechanics: {
       waterRiseRate: 0.14,
-      windForce: 0.68,
+      windForce: 0.48,
       windPeriod: 6.0,
       blackoutCycle: 11.0,
       lightningInterval: 8.0
@@ -2947,7 +2948,7 @@ function buildThemeMechanics(theme, difficulty, rng, casual = false) {
     // Peaceful exploration: zero lethal rising sea, gentle atmospheric breeze/storm only
     switch (theme) {
       case 'blizzard':
-        return { ...DEFAULT_MECHANICS, windForce: 0.38, windPeriod: 7.5 };
+        return { ...DEFAULT_MECHANICS, windForce: 0.30, windPeriod: 7.5 };
       case 'blackout':
         return { ...DEFAULT_MECHANICS, blackoutCycle: 12.0, lightningInterval: 9.5 };
       default:
@@ -2961,15 +2962,15 @@ function buildThemeMechanics(theme, difficulty, rng, casual = false) {
     case 'blizzard':
       return {
         ...DEFAULT_MECHANICS,
-        windForce: Number(Math.min(0.88, 0.65 * diffScale).toFixed(2)),
+        windForce: Number(Math.min(0.50, 0.38 * diffScale).toFixed(2)),
         windPeriod: 6.0
       };
     case 'piston':
-      return { ...DEFAULT_MECHANICS, windForce: 0.34, windPeriod: 7.0 };
+      return { ...DEFAULT_MECHANICS, windForce: 0.26, windPeriod: 7.0 };
     case 'blackout':
       return {
         ...DEFAULT_MECHANICS,
-        windForce: 0.42,
+        windForce: 0.36,
         windPeriod: 6.5,
         blackoutCycle: Number((9.5 - Math.min(2.5, difficulty * 0.25)).toFixed(1)),
         lightningInterval: Number((7.5 + rng() * 1.5).toFixed(1))
@@ -2978,7 +2979,7 @@ function buildThemeMechanics(theme, difficulty, rng, casual = false) {
       return {
         ...DEFAULT_MECHANICS,
         waterRiseRate: Number((0.10 * diffScale).toFixed(3)),
-        windForce: Number(Math.min(0.76, 0.56 * diffScale).toFixed(2)),
+        windForce: Number(Math.min(0.48, 0.35 * diffScale).toFixed(2)),
         windPeriod: 6.0,
         blackoutCycle: 11.0,
         lightningInterval: 8.0
@@ -3262,7 +3263,7 @@ export function generateProceduralTower({
       doorSeq++;
       const tStyle = !isOrig && rng() < 0.6 ? 'sparkArch' : 'stone';
 
-      tile(ledges, enterCol, curFloor, 'solid');
+      span(ledges, curFloor, dir === 1 ? wrapCol(enterCol - 1) : enterCol, 2, 'solid');
       const platStart = dir === 1 ? wrapCol(exitCol - 1) : wrapCol(exitCol - 2);
       span(ledges, targetFloor, platStart, 4, 'solid');
 
@@ -3271,6 +3272,7 @@ export function generateProceduralTower({
         { id: dB, col: exitCol, floor: targetFloor, targetId: dA, isExit: false, isVault: false, isRune: false, tunnelStyle: tStyle }
       );
 
+      if (rng() < 0.45) dir = -dir;
       curFloor = targetFloor;
       curCol = dir === 1 ? wrapCol(platStart + 3) : platStart;
       addEnemy({
@@ -3303,6 +3305,7 @@ export function generateProceduralTower({
         { id: dA, col: trueEnter, floor: curFloor, targetId: dB, isExit: false, isVault: false, isRune: false, tunnelStyle: 'stone' },
         { id: dB, col: exitCol, floor: targetFloor, targetId: dA, isExit: false, isVault: false, isRune: false, tunnelStyle: 'stone' }
       );
+      if (rng() < 0.45) dir = -dir;
       curFloor = targetFloor;
       curCol = dir === 1 ? wrapCol(platStart + 3) : platStart;
       continue;
@@ -3363,7 +3366,7 @@ export function generateProceduralTower({
         switchGroup: group,
         inverted: !nextState
       });
-      tile(ledges, gateCol, curFloor + 3, 'solid'); // cap above laserGate
+      span(ledges, curFloor + 3, dir === 1 ? preCol : gateCol, 2, 'solid'); // 2-tile lintel cap above laserGate
       const postEnd = dir === 1 ? wrapCol(corridorStart + 3) : corridorStart;
       const upStart = dir === 1 ? wrapCol(postEnd + 1) : wrapCol(postEnd - 3);
       span(ledges, curFloor + 2, upStart, 3, 'solid');
@@ -3387,7 +3390,8 @@ export function generateProceduralTower({
       const nextGroupState = !switchStateTracker[group];
       switchStateTracker[group] = nextGroupState;
 
-      const brStart = dir === 1 ? wrapCol(swCol + 2) : wrapCol(swCol - 3);
+      const brGap = mechanics.windForce > 0.35 ? 1 : 2;
+      const brStart = dir === 1 ? wrapCol(swCol + brGap) : wrapCol(swCol - brGap - 1);
       span(ledges, curFloor + 1, brStart, 2, 'phaseBlock', {
         switchGroup: group,
         inverted: !nextGroupState
@@ -3404,9 +3408,11 @@ export function generateProceduralTower({
 
     // Template 8: reversibleConveyorPuzzle (conveyorFlip switch + opposing belts)
     if (chunk === 'reversibleConveyorPuzzle' && !isOrig && remaining >= 3) {
+      const swCol = wrapCol(curCol);
+      span(ledges, curFloor, dir === 1 ? wrapCol(swCol - 1) : swCol, 2, 'solid');
       switches.push({
         id: `${key}_conv_${switchSeq++}`,
-        col: wrapCol(curCol),
+        col: swCol,
         floor: curFloor,
         group: 'conv',
         mode: 'conveyorFlip'
@@ -3424,11 +3430,12 @@ export function generateProceduralTower({
 
     // Template 9: pistonRhythmCascade (staggered 2-tile hydraulic piston pads)
     if (chunk === 'pistonRhythmCascade' && !isOrig && remaining >= 3) {
-      const p1Start = dir === 1 ? wrapCol(curCol + 2) : wrapCol(curCol - 3);
+      const pGap = mechanics.windForce > 0.35 ? 1 : 2;
+      const p1Start = dir === 1 ? wrapCol(curCol + pGap) : wrapCol(curCol - pGap - 1);
       span(ledges, curFloor + 1, p1Start, 2, 'piston', { phasePeriod: 3.1, phaseOffset: 0.0 });
       const p1End = dir === 1 ? wrapCol(p1Start + 1) : p1Start;
 
-      const p2Start = dir === 1 ? wrapCol(p1End + 2) : wrapCol(p1End - 3);
+      const p2Start = dir === 1 ? wrapCol(p1End + pGap) : wrapCol(p1End - pGap - 1);
       span(ledges, curFloor + 2, p2Start, 2, 'piston', { phasePeriod: 3.1, phaseOffset: 0.9 });
       const p2End = dir === 1 ? wrapCol(p2Start + 1) : p2Start;
 
@@ -3449,7 +3456,8 @@ export function generateProceduralTower({
       tile(ledges, vCol, curFloor + 1, 'steamVent', { phasePeriod: 3.3, phaseOffset: Number((rng() * 1.4).toFixed(2)) });
       span(ledges, curFloor + 3, dir === 1 ? wrapCol(vCol - 1) : vCol, 2, 'solid'); // 2-tile steam-launch bonus perch!
       addGear(vCol, curFloor + 3);
-      const aStart = dir === 1 ? wrapCol(vCol + 2) : wrapCol(vCol - 4);
+      const vGap = mechanics.windForce > 0.35 ? 1 : 2;
+      const aStart = dir === 1 ? wrapCol(vCol + vGap) : wrapCol(vCol - vGap - 2);
       span(ledges, curFloor + 2, aStart, 3, 'solid');
       curFloor += 2;
       curCol = dir === 1 ? wrapCol(aStart + 2) : aStart;
@@ -3458,7 +3466,8 @@ export function generateProceduralTower({
 
     // Template 11: crumbleGapCrossing (2-tile crumble bridge + 3-tile solid anchor)
     if (chunk === 'crumbleGapCrossing' && remaining >= 2) {
-      const cStart = dir === 1 ? wrapCol(curCol + 2) : wrapCol(curCol - 3);
+      const cGap = isOrig || mechanics.windForce > 0.35 ? 1 : 2;
+      const cStart = dir === 1 ? wrapCol(curCol + cGap) : wrapCol(curCol - cGap - 1);
       span(ledges, curFloor + 1, cStart, 2, 'crumble');
       const cEnd = dir === 1 ? wrapCol(cStart + 1) : cStart;
       const nextAnchor = dir === 1 ? wrapCol(cEnd + 1) : wrapCol(cEnd - 3);
@@ -3485,7 +3494,8 @@ export function generateProceduralTower({
       const cStart = dir === 1 ? wrapCol(curCol + 1) : wrapCol(curCol - 3);
       span(ledges, curFloor + 1, cStart, 3, convType);
       const endCol = dir === 1 ? wrapCol(cStart + 2) : cStart;
-      const anchorStart = dir === 1 ? wrapCol(endCol + 2) : wrapCol(endCol - 4);
+      const aGap = isOrig || mechanics.windForce > 0.35 ? 1 : 2;
+      const anchorStart = dir === 1 ? wrapCol(endCol + aGap) : wrapCol(endCol - aGap - 2);
       span(ledges, curFloor + 2, anchorStart, 3, 'solid');
 
       curFloor += 2;
@@ -3495,7 +3505,7 @@ export function generateProceduralTower({
 
     // Template 13: glacierSwitchbackAlcove (ice shelf + solid windbreak spur)
     if (chunk === 'glacierSwitchbackAlcove' && remaining >= 2) {
-      const gapStep = mechanics.windForce > 0.5 ? 1 : 2;
+      const gapStep = isOrig || mechanics.windForce > 0.35 ? 1 : 2;
       const iStart = dir === 1 ? wrapCol(curCol + gapStep) : wrapCol(curCol - gapStep - 2);
       span(ledges, curFloor + 1, iStart, 3, 'ice');
       const iEnd = dir === 1 ? wrapCol(iStart + 2) : iStart;
@@ -3508,13 +3518,11 @@ export function generateProceduralTower({
 
     // Template 14: spiralCorbelRun (+2..3 stepped stone floors + optional Secret Alcove)
     const steps = Math.min(3, remaining);
-    let lastRunStart = curCol;
     for (let s = 0; s < steps; s++) {
       curFloor += 1;
-      const stepDelta = s % 2 === 0 || mechanics.windForce > 0.5 ? 1 : 2;
+      const stepDelta = isOrig || mechanics.windForce > 0.35 || s % 2 === 0 ? 1 : 2;
       curCol = wrapCol(curCol + dir * stepDelta);
       const runStart = dir === 1 ? curCol : wrapCol(curCol - 2);
-      lastRunStart = runStart;
       span(ledges, curFloor, runStart, 3, 'solid');
       if (s === 1 && curFloor > 2) {
         const isRob = rng() < 0.35;
@@ -3530,14 +3538,14 @@ export function generateProceduralTower({
       curCol = dir === 1 ? wrapCol(runStart + 2) : runStart;
     }
 
-    let placedSecretHere = false;
     if (!secretPlaced && curFloor >= Math.floor(exitFloor * 0.45) && curFloor <= exitFloor - 3) {
-      const backCol = dir === 1 ? lastRunStart : wrapCol(lastRunStart + 2);
-      const bridgeCol = wrapCol(backCol - dir);
-      const sideCol = wrapCol(backCol - dir * 2);
-      const starCol = wrapCol(backCol - dir * 3);
-      const bStart = dir === 1 ? starCol : sideCol;
-      tile(ledges, bridgeCol, curFloor, isCasual ? 'solid' : 'crumble');
+      // Extend Secret Alcove forward (+dir) over open air so it never caps curFloor - 1!
+      const frontCol = curCol;
+      const bridgeCol = wrapCol(frontCol + dir);
+      const sideCol = wrapCol(frontCol + dir * 2);
+      const starCol = wrapCol(frontCol + dir * 3);
+      const bStart = dir === 1 ? sideCol : starCol;
+      tile(ledges, bridgeCol, curFloor, isCasual || isOrig ? 'solid' : 'crumble');
       span(ledges, curFloor, bStart, 2, 'solid');
       pushSecretDoor(sideCol, curFloor);
       collectibles.push({
@@ -3546,23 +3554,23 @@ export function generateProceduralTower({
         floor: curFloor,
         type: 'starCore'
       });
+      curCol = starCol;
       secretPlaced = true;
-      placedSecretHere = true;
     }
-
-    if (!placedSecretHere && rng() < 0.3) dir = -dir;
   }
 
   while (curFloor < exitFloor) {
     curFloor += 1;
-    const stepDelta = curFloor % 2 === 0 || mechanics.windForce > 0.5 ? 1 : 2;
+    const stepDelta = isOrig || mechanics.windForce > 0.35 || curFloor % 2 === 0 ? 1 : 2;
     curCol = wrapCol(curCol + dir * stepDelta);
     const sStart = dir === 1 ? curCol : wrapCol(curCol - 2);
     span(ledges, curFloor, sStart, 3, 'solid');
     curCol = dir === 1 ? wrapCol(sStart + 2) : sStart;
   }
 
-  const summitStart = wrapCol(curCol - 1);
+  // Extend summit terrace forward (+dir) from the approach landing [curCol-2..curCol] / [curCol..curCol+2]
+  // so exitFloor never caps exitFloor - 1!
+  const summitStart = wrapCol(curCol - 2);
   span(ledges, exitFloor, summitStart, 5, 'solid');
   const exitCol = wrapCol(summitStart + 2);
   doors.push({
@@ -3575,14 +3583,16 @@ export function generateProceduralTower({
     isRune: false,
     tunnelStyle: 'stone'
   });
-  addGear(wrapCol(summitStart + 4), exitFloor);
+  addGear(dir === 1 ? wrapCol(summitStart + 4) : summitStart, exitFloor);
+
+  const bonusStart = dir === 1 ? wrapCol(curCol + 3) : wrapCol(curCol - 4);
+  const bonusDoorCol = dir === 1 ? wrapCol(curCol + 3) : wrapCol(curCol - 3);
+  const bonusStarCol = dir === 1 ? wrapCol(curCol + 4) : wrapCol(curCol - 4);
 
   if (!secretPlaced) {
-    const bonusStart = wrapCol(summitStart - 3);
-    const bonusDoorCol = wrapCol(summitStart - 2);
     span(ledges, exitFloor, bonusStart, 2, 'solid');
     pushSecretDoor(bonusDoorCol, exitFloor);
-    collectibles.push({ id: `${key}_star`, col: bonusStart, floor: exitFloor, type: 'starCore' });
+    collectibles.push({ id: `${key}_star`, col: bonusStarCol, floor: exitFloor, type: 'starCore' });
   } else {
     // Ensure mid-tower Rune Door has an unobstructed exterior wall plaque bay (df + 1..2 within +-1 col)
     const runeEntry = doors.find((d) => d.isRune);
@@ -3595,14 +3605,12 @@ export function generateProceduralTower({
         );
       };
       if (bayBlocked(runeEntry.col) && bayBlocked(runeEntry.col + 1) && bayBlocked(runeEntry.col - 1)) {
-        const bonusStart = wrapCol(summitStart - 3);
-        const bonusDoorCol = wrapCol(summitStart - 2);
         span(ledges, exitFloor, bonusStart, 2, 'solid');
         runeEntry.col = bonusDoorCol;
         runeEntry.floor = exitFloor;
         const starItem = collectibles.find((c) => c.id === `${key}_star`);
         if (starItem) {
-          starItem.col = bonusStart;
+          starItem.col = bonusStarCol;
           starItem.floor = exitFloor;
         }
       }
@@ -3802,33 +3810,37 @@ function repairProceduralTower(tower, exitCol, exitFloor) {
     }
   };
 
-  // Build a guaranteed +1 spiral staircase ending directly at (exitCol, exitFloor)
+  // Build a guaranteed 2-column-wide non-overlapping +1 spiral staircase ending directly at (exitCol, exitFloor)
   const sf = Math.round(tower.spawn.floor);
-  const stairColAt = new Map();
+  const stairPairAt = new Map();
   for (let f = exitFloor; f >= sf; f--) {
-    stairColAt.set(f, wrapCol(exitCol - (exitFloor - f)));
+    const d = exitFloor - f;
+    stairPairAt.set(f, [wrapCol(exitCol - 2 * d - 1), wrapCol(exitCol - 2 * d)]);
   }
 
-  // Horizontal walk on spawnFloor from spawn.col -> stairColAt.get(sf) (df=0 requires no overhead clearance)
-  const startStairCol = stairColAt.get(sf);
+  // Horizontal walk on spawnFloor from spawn.col -> stairPairAt.get(sf)[0] (df=0 requires no overhead clearance)
+  const [startStairBack] = stairPairAt.get(sf);
   let hc = wrapCol(tower.spawn.col);
   placeSolidAt(hc, sf);
-  while (hc !== startStairCol) {
-    const d = colDist(hc, startStairCol);
+  while (hc !== startStairBack) {
+    const d = colDist(hc, startStairBack);
     hc = wrapCol(hc + Math.sign(d));
     placeSolidAt(hc, sf);
   }
+  placeSolidAt(wrapCol(hc + 1), sf);
 
-  // Place each spiral step and clear the headroom cell directly above its launch step
+  // Place each 2-column spiral step [cBack, cFront] and clear headroom directly above both tiles
   for (let f = sf; f <= exitFloor; f++) {
-    const sc = stairColAt.get(f);
-    placeSolidAt(sc, f);
+    const [cBack, cFront] = stairPairAt.get(f);
+    placeSolidAt(cBack, f);
+    placeSolidAt(cFront, f);
     if (f < exitFloor) {
-      forceClearStepAndLaser(sc, f + 1);
+      forceClearStepAndLaser(cBack, f + 1);
+      forceClearStepAndLaser(cFront, f + 1);
     }
   }
 
-  // Place any secret Rune/Vault door on the +1 side of exitCol on exitFloor (never capping stairColAt(exitFloor-1)!)
+  // Place any secret Rune/Vault door on the +1 side of exitCol on exitFloor (never capping stairPairAt(exitFloor-1)!)
   let secretOffset = 2;
   for (const sd of doors) {
     if (!sd.isRune && !sd.isVault) continue;

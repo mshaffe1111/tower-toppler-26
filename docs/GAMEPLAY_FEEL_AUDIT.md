@@ -1,88 +1,75 @@
-# TOWER TOPPLER '26 — 60HZ GAMEPLAY, PRECISION MOVEMENT & CLUE PARITY AUDIT (`docs/GAMEPLAY_FEEL_AUDIT.md`)
+# TOWER TOPPLER '26 — 60HZ GAMEPLAY, GOLDILOCKS JUMP & CLUE PARITY AUDIT (`docs/GAMEPLAY_FEEL_AUDIT.md`)
 
 **Author:** `balance_playtest` (Lead Gameplay & Level Feel Playtester)  
 **Simulation Engine:** Live Headless Microsoft Edge V8 ES-Module Harness @ Fixed `60Hz` (`dt = 1 / 60 s = 16.667 ms`)  
 **Audited Modules:** [src/game.js](file:///c:/Users/mshaf/Downloads/AntiGravity/Tower%20Toppler%2026/src/game.js), [src/levels.js](file:///c:/Users/mshaf/Downloads/AntiGravity/Tower%20Toppler%2026/src/levels.js), [src/glideStage.js](file:///c:/Users/mshaf/Downloads/AntiGravity/Tower%20Toppler%2026/src/glideStage.js), [src/puzzleRoom.js](file:///c:/Users/mshaf/Downloads/AntiGravity/Tower%20Toppler%2026/src/puzzleRoom.js), [src/puzzleRenderer.js](file:///c:/Users/mshaf/Downloads/AntiGravity/Tower%20Toppler%2026/src/puzzleRenderer.js), [src/progression.js](file:///c:/Users/mshaf/Downloads/AntiGravity/Tower%20Toppler%2026/src/progression.js)  
-**Final Sign-Off Status:** **`[GAMEPLAY 10/10]` — Round-4 Surgical Mobile/Tablet Precision Physics, 83-Tower Reachability & 100% Rune Clue Parity Verified PASS**
+**Final Sign-Off Status:** **`[GAMEPLAY 10/10]` — Round-5 Goldilocks Jump Arc, Sloppy Center-Stone (`col + 0.45` + `185ms` Flick) 83-Tower Reachability & 100% Rune Clue Parity Verified PASS**
 
 ---
 
 ## Executive Summary
 
-Across four iterative `60Hz` headless V8 simulation rounds (`playtest_results_v1.json` → `v4_final.json`), every movement curve, jump arc, multi-width ledge landing, doorway/lift interaction, 83-tower reachability graph, exterior-to-interior Rune Door clue stele, mini-game touch hitbox, and Peaceful Casual Expedition mission was verified at `60Hz`:
+Across five iterative `60Hz` headless V8 simulation rounds (`playtest_results_v1.json` → `v5_final.json`), every movement curve, Goldilocks jump arc, sloppy human 3-zone takeoff (`Back 2.25`, `Center 2.45/2.50`, `Front 2.85`), Smart Descending Island Brake, 83-tower center-stone (`col + 0.45`) reachability graph, exterior-to-interior Rune Door clue stele, mini-game touch hitbox, and Peaceful Casual Expedition mission was verified at `60Hz`:
 
-- **Surgical Mobile/Tablet Movement & Jump Precision (`10/10`):** Reboot walk speed is calibrated to **`3.35 cols/s`** (`3.15 cols/s` Classic Endless, `2.00 cols/s` 1987 Real) with planted **`4`-frame (`0.0708 cols`) dry-stone braking**, **`3`-frame (`0.0517 cols`) counter-steer turnaround**, **`7`-frame (`0.160 cols`) mid-air horizontal braking** on thumb stop, and a surgical **`2.066`-col full running jump span** (`1.419F` apex in `37f = 0.617s`; `85ms` short-hop = `0.927F` apex, `1.452` cols) that lands squarely on `1`-, `2`-, and `3`-column ledges with **`0%` overshoot**.
-- **Mobile Forgiveness & Traversal Subsystems (`10/10`):** Verified `7f` (`117ms`) Coyote Time, `6f` (`100ms`) Jump Buffer, `0.18–0.22F` lip mantle forgiveness, `100%` 4-step `1-col` spiral staircase auto-step-up (`102f`), `3.112F` Foundry Steam Vent launches with full early thumb-slide clearance onto `+2F`/`+3F` balconies (`p.steamBoostActive`), `dc = 0` overhead ceiling stops (`2.139F`), and `±0.78`-col doorway entry tolerance synced every frame via `input.setInteractContext`.
-- **83-Tower True-`60Hz` Solvability & Fairness (`100%`):** **`83 / 83` towers** (`8` Reboot Campaign, `8` Original 1987, `1` UTC Daily, `25` Endless Reboot, `25` Endless Original, `16` Casual Expeditions) pass both `verifyTowerSolvable` and independent live-`60Hz`-envelope reachability across every summit exit, Rune Door, Vault Door, Relic, Star Core, Workbench, Treasure Chest, and Curio (`0` mandatory gaps exceeding jump span, `0` spawn/tunnel/cage-lift cheap hits).
-- **100% Exterior-to-Interior Rune Door Clue Parity & Blind-Clue Solvability (`28 / 28` = `100%`):** Every Rune Door across Campaign, Daily, Endless, and Casual carries non-null `door.clue` via shared `peekPuzzleClue` / `deriveRuneDoorClue` PRNG paths, matches live `game.puzzleRoom` **100% bit-for-bit**, has unobstructed exterior stele clearance (`door.floor + 1.45..2.45`), illuminates diegetic Doorway Threshold Peek (`peekAlpha` + `peekClue()`), and was **solved `28 / 28` (`100%`) at `60Hz` using ONLY the exterior `door.clue` data** (`1`-swipe = `1`-tile touch cadence).
+- **Goldilocks Jump Arc & *Celeste*/*Mario* Forgiveness (`10/10`):** Reboot walk speed is calibrated to **`3.55 cols/s`** (`4f / 0.0808c` planted dry-stone stop) with minimum-height gentle `jumpCut` (`44.0` only above `+0.72F`):
+  - **Quick `75ms` (`5f`) Button Tap:** **`1.303F` apex**, **`2.130c` span** (`36f = 0.600s`) — clears `+1.0F` rising gaps `100%` even from `col + 0.45` center of stone!
+  - **Normal `185ms` (`11f`) Human Flick:** **`1.502F` apex**, **`2.308c` span** (`39f = 0.650s`).
+  - **Full `245ms+` Power Jump:** **`1.664F` apex**, **`2.544c` span** (`43f = 0.717s`).
+  - **Forgiveness & Smart Island Brake:** **`11f` (`183ms`) Coyote Time**, **`8–10f` (`133–165ms`) Jump Buffer**, **`0.39F` (`0.40F` spec) Knee/Waist Ledge Mantle**, **`100%` 4-step `1-col` spiral auto-step-up (`105f`)**, **`3.306F` Steam Vent early thumb-slide boost**, and **Smart Descending Island Brake** (`!input.isLiveHorizHeld` -> **`16 / 16` = `100%` safe landings across Back `2.25`, Center `2.45`, Center `2.50`, and Front `2.85`** onto both `2`-col pads AND isolated `1`-col islands with `0%` fall-short and `0%` cliff-skid!).
+- **83-Tower Human Center-Stone (`col + 0.45`) + `185ms` Normal-Flick Audit (`100%`):** **`83 / 83` towers** (`8` Reboot Campaign, `8` Original 1987, `1` UTC Daily, `25` Endless Reboot, `25` Endless Original, `16` Casual Expeditions) pass **with `0` edge-pixel takeoffs required** (`100%` solvable & all Relics/StarCores/RuneDoors/VaultDoors/Casual items reachable from `col + 0.45` using an `11f` `185ms` normal flick, and **`0` mandatory `1`-col gap landings** across all `83` towers!).
+- **100% Exterior-to-Interior Rune Door Clue Parity (`28 / 28` = `100%`):** Every Rune Door across all `83` towers carries non-null `door.clue`, matches live `game.puzzleRoom` **100% bit-for-bit**, has **`28 / 28` unobstructed exterior stele clearance** after `#328` pad widening, illuminates Doorway Threshold Peek (`peekAlpha` + `peekClue()`), and solves `100%` at `60Hz` using ONLY the exterior `door.clue` data.
 
 ---
 
-## 1. Surgical Mobile/Tablet Movement & Jump Precision (`60Hz` Round-4 Telemetry)
+## 1. Goldilocks Jump Curve, 3-Zone Sloppy Takeoff Matrix & Forgiveness (`60Hz` Round-5 Telemetry)
 
-### 1.1 Ground Traction, Mid-Air Braking & Ice Matrix (`playtest_results_v4_final.json`)
+### 1.1 Goldilocks Reboot Jump Arcs (`playtest_results_v5_final.json`)
 
-| Physics Regime & Surface | Walk Speed (`cols/s`) | Accel `0 → 100%` | Dry/Ice Stop (Frames / `cols`) | 180° Turn to `vx = 0` | Turn Skid (`cols`) | Mid-Air Brake (`moveIntent = 0`) | Final Verdict |
+| Jump Input Duration | Rise Frames | Apex Hang (`\|vy\| <= 1.25`) | Fall Frames | Total Air (`s`) | Peak Apex (`floors`) | Horiz Span (`cols`) | Designer Verdict |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
-| **`reboot` — Dry Stone (`solid`)** | **`3.35`** | `5f` (`83ms`) | **`4f` (`0.0708c < 0.08c`)** | **`3f` (`50ms`)** | **`0.0517c`** | **`7f` (`0.160c` drift)** | **10/10 Mountain-Goat Planted Precision** |
-| **`reboot` — Glacier Ice (`ice`)** | `3.35` | `15f` (`250ms`) | `27f` (`0.7204c`) | `15f` (`250ms`) | `0.3879c` | `7f` (`0.160c` in air) | **10/10 Readable Slide** (fits `2–3` col ice shelves cleanly) |
-| **`original` (Real 1987 Grid)** | `2.00` | `1f` (`17ms`) | `1f` (`0.0000c`) | `1f` (`17ms`) | `0.0000c` | Authentic `ARC_JUMP` | **10/10 Authentic** Atari 7800 / Hewson port table |
-| **`original` (Endless `solid`)** | **`3.15`** | `1f` (`17ms`) | `1f` (`0.0000c`) | `1f` (`17ms`) | `0.0000c` | **`1f` (`0.000c` drift)** | **10/10 Crisp Classic Endless** |
-| **`original` (Endless `ice`)** | `3.15` | `15f` (`250ms`) | `26f` (`0.6354c`) | `15f` (`250ms`) | `0.3558c` | `1f` (`0.000c` in air) | **10/10 Linear Controlled Slide** |
+| **`2f–5f` Quick Tap (`33–83ms`)** | `13f` | `9f` | `13f` | `36f` (`0.600s`) | **`1.3025F`** | **`2.130c`** | Clears `+1.0F` rising `1`-col gaps from center-of-stone (`landCol = 4.025`)! |
+| **`11f` Normal Flick (`185ms`)** | `15f` | `9f` | `14f` | `39f` (`0.650s`) | **`1.5019F`** | **`2.308c`** | Default casual human flick — effortless `1`-col flat & `+1F` gap clear! |
+| **`15f` Long Flick (`245ms`)** | `17f` | `8f` | `15f` | `41f` (`0.683s`) | **`1.5979F`** | **`2.426c`** | Confident long arc, lands squarely inside `2`-col pads (`0%` flyover). |
+| **`60f` Max Hold (`1000ms`)** | `19f` | `8f` | `15f` | `43f` (`0.717s`) | **`1.6642F`** | **`2.544c`** | Readable `8f` (`133ms`) apex hang, `0` `+2F` sequence breaks. |
 
 ---
 
-### 1.2 Proportional Jump Arcs & Multi-Width Ledge Landing Precision (`60Hz`)
+### 1.2 Sloppy-Human 3-Takeoff-Zone Matrix (`col 2` → `1`-Col Empty Gap at `col 3` → `col 4` / `cols 4..5`, `185ms` Flick)
 
-| Mode & Jump Hold Duration | Rise Frames | Apex Hang | Fall Frames | Total Air (`s`) | Peak Apex (`floors`) | Horiz Span (`cols`) | Ledge Landing Verification |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
-| **`reboot` — `1f` Micro-Tap (`17ms`)** | `7f` | `5f` | `8f` | `21f` (`0.350s`) | `0.587F` | `1.173c` | Low roller hop |
-| **`reboot` — `5f` Short Flick (`83ms`)** | `10f` | `5f` | `10f` | `26f` (`0.433s`) | **`0.927F`** | **`1.452c`** | Lands & plants on **`1`-col island** (`col 2.983`, `0%` overshoot!) |
-| **`reboot` — `9f` Med Flick (`150ms`)** | `12f` | `6f` | `12f` | `31f` (`0.517s`) | **`1.180F`** | **`1.731c`** | Clean `+1F` step-gap hop |
-| **`reboot` — `14f` Full Flick (`233ms`)** | `15f` | `5f` | `13f` | `34f` (`0.567s`) | **`1.350F`** | **`1.898c`** | Lands on **`1`-col island** w/ mid-air stop (`col 3.095`, `0%` overshoot!) |
-| **`reboot` — Full Hold (`60f`)** | `17f` | `6f` | `13f` | **`37f` (`0.617s`)** | **`1.419F`** | **`2.066c`** | Lands squarely on **`2`-col (`col 3.884`)**, **`3`-col**, & **`+1F` (`col 3.493`)** ledges (`0%` flyover!) |
-| **`original` (Real 1987 `ARC_JUMP`)** | `19f` | `7f` | `18f` | `45f` (`0.750s`) | `2.250 rows` | `1.500c` | Enforces classic 1987 `1`-brick gap law (`dc = 3` = `false`) |
-| **`original` (Procedural Endless)** | `18f` | `5f` | `15f` | `39f` (`0.650s`) | `1.397F` | **`2.048c`** | Lands squarely on `2`-col (`col 3.873`) & `+1F` (`col 3.453`) ledges |
-
----
-
-### 1.3 Mobile Forgiveness, Doorway Context, Steam Vents & Sightlines
-
-- **Coyote Time & Jump Buffer:** `7` frames (`117ms`) post-ledge Coyote Time + `6` frames (`100ms`) pre-touchdown Jump Buffer + `0.18–0.22F` lip mantle forgiveness.
-- **`+1` Auto-Step-Up (`stepWalkSpeed = 2.25 cols/s`):** `100%` climb across isolated steps (`32f`) and continuous 4-step `1-col` spiral staircases (`102f` Reboot, `93f` Classic Endless, `128f` Real 1987; `fellOff: false`).
-- **Foundry Steam Vents (`p.steamBoostActive`):** Reaches **`3.112F`** both vertically and when mobile players continuously slide their thumb toward adjacent `+2F`/`+3F` target balconies (`earlyDriftApex = 3.112F`, `r3_relic` at `col 6, floor 5` verified `true`), while `dc = 0` overhead ceilings still stop cleanly (`2.139F` / `3.139F`).
-- **Doorway Precision & `setInteractContext`:** Verified across `0.00`, `0.45`, and `0.72` col offsets from doorway center with residual `vx = 2.2 cols/s` (`interactContextReportedDoor: true`, `enteredWithResidualVxAndEdgeUp: true`, `vxZeroedOnEntry: true`).
-- **Vertical Camera Sightlines:** Rest look-ahead `camFloor = p.floor + 1.45` (`+2.45` climbing look-ahead), keeping `5–6` floors of upcoming ledges, enemies, and exterior Rune Door clue steles cleanly in view.
-
----
-
-## 2. 83-Tower True-`60Hz` Reachability & Fairness Audit
-
-| Tower Corpus Group | Towers Audited | `verifyTowerSolvable` | Live-`60Hz`-Envelope Solvable | All Doors / Relics / Mission Items Reachable | Spawn / Tunnel / Cage-Lift Cheap Hits |
+| Gap & Target Pad Scenario | Back (`2.25`) | Center (`2.45`) | Center (`2.50`) | Front (`2.85`) | Result |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Reboot Campaign (`reboot_t1..t8`)** | `8` | `8 / 8` (`100%`) | **`8 / 8` (`100%`)** | **`8 / 8` (`100%`)** | `0` |
-| **Original 1987 (`orig_t1..t8`)** | `8` | `8 / 8` (`100%`) | **`8 / 8` (`100%`)** | **`8 / 8` (`100%`)** | `0` |
-| **UTC Daily Challenge (`daily`)** | `1` | `1 / 1` (`100%`) | **`1 / 1` (`100%`)** | **`1 / 1` (`100%`)** | `0` |
-| **Endless Reboot Seeds (`endless_reboot_25`)** | `25` | `25 / 25` (`100%`) | **`25 / 25` (`100%`)** | **`25 / 25` (`100%`)** | `0` |
-| **Endless Original Seeds (`endless_original_25`)** | `25` | `25 / 25` (`100%`) | **`25 / 25` (`100%`)** | **`25 / 25` (`100%`)** | `0` |
-| **Casual Expeditions (`casual_16`, all 4 missions)** | `16` | `16 / 16` (`100%`) | **`16 / 16` (`100%`)** | **`16 / 16` (`100%`)** | `0` (`0` enemies, `0` rising sea) |
+| **Flat `1`-Col Gap → `2`-Col Pad `[4, 5]`** | `4.031c` (Safe) | `4.209c` (Safe) | `4.268c` (Safe) | `4.623c` (Safe) | **`4 / 4` (`100%`)** |
+| **Flat `1`-Col Gap → Isolated `1`-Col Island `[4]`** | `4.031c` (Safe) | `4.209c` (Safe) | `4.268c` (Safe) | `4.623c` (Safe) | **`4 / 4` (`100%`, `0%` cliff-skid)** |
+| **Rising `+1F` `1`-Col Gap → `2`-Col Pad `[4, 5]`** | `4.026c` (`F5`) | `4.204c` (`F5`) | `4.263c` (`F5`) | `4.618c` (`F5`) | **`4 / 4` (`100%`)** |
+| **Rising `+1F` `1`-Col Gap → Isolated `1`-Col `[4]`** | `4.026c` (`F5`) | `4.179c` (`F5`) | `4.228c` (`F5`) | `4.346c` (`F5`) | **`4 / 4` (`100%`, `0%` shin-bonk/skid)** |
+
+---
+
+### 1.3 Verified Forgiveness & Traversal Subsystems (`#325` + `#326`)
+- **Dry-Stone Planted Stop:** `3.55 cols/s` → `0` in **`4` frames (`0.0808 cols`)**.
+- **Coyote Time:** **`11` frames (`183ms`)** post-ledge grace.
+- **Jump Buffer:** **`8–10` frames (`133–165ms`)** pre-touchdown grace.
+- **Knee/Waist Ledge Mantle:** **`0.39` floors** (`0.40F` threshold) below stone surface snaps smoothly onto the ledge with automatic `0.52c` lip-pull.
+- **4-Step `1`-Col Spiral Auto-Step-Up:** **`100%` automatic walk climb (`105` frames, `0` falls)**.
+- **Foundry Steam Vents (`steamBoostActive`):** **`3.306F` apex** with continuous early thumb-slide landing cleanly on `+3F` balconies (`steamVentEarlySlideLandedPlus3F: true`).
+
+---
+
+## 2. 83-Tower Human Center-Stone (`col + 0.45`) & `185ms` Normal-Flick Audit (`#328`)
+
+| Tower Corpus Group | Towers Audited | Center-Stone (`col+0.45`) + `185ms` Solvable | All Doors / Relics / Mission Items Reachable | Zero Mandatory `1`-Col Gap Landings | Precision-Edge Bottlenecks |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Reboot Campaign (`reboot_t1..t8`)** | `8` | **`8 / 8` (`100%`)** | **`8 / 8` (`100%`)** | **`8 / 8` (`100%`)** | **`0`** |
+| **Original 1987 (`orig_t1..t8`)** | `8` | **`8 / 8` (`100%`)** | **`8 / 8` (`100%`)** | **`8 / 8` (`100%`)** | **`0`** |
+| **UTC Daily Challenge (`daily`)** | `1` | **`1 / 1` (`100%`)** | **`1 / 1` (`100%`)** | **`1 / 1` (`100%`)** | **`0`** |
+| **Endless Reboot Seeds (`endless_reboot_25`)** | `25` | **`25 / 25` (`100%`)** | **`25 / 25` (`100%`)** | **`25 / 25` (`100%`)** | **`0`** |
+| **Endless Original Seeds (`endless_original_25`)** | `25` | **`25 / 25` (`100%`)** | **`25 / 25` (`100%`)** | **`25 / 25` (`100%`)** | **`0`** |
+| **Casual Expeditions (`casual_16`, all 4 missions)** | `16` | **`16 / 16` (`100%`)** | **`16 / 16` (`100%`)** | **`16 / 16` (`100%`)** | **`0`** |
 | **TOTAL CORPUS** | **`83`** | **`83 / 83` (`100%`)** | **`83 / 83` (`100%`)** | **`83 / 83` (`100%`)** | **`0`** |
 
 ---
 
-## 3. 100% Exterior-to-Interior Rune Door Clue Parity & Mini-Game Touch Audit
+## 3. Exterior-to-Interior Rune Door Clue Parity & Mini-Games (`28 / 28` = `100%`)
 
-### 3.1 Live Rune Door Clue Parity & Blind-Exterior-Clue Solvability (`28` Rune Doors Across `83` Towers)
-- **Shared Deterministic Generator (`peekPuzzleClue` / `deriveRuneDoorClue`):** `hasExportedPeekPuzzleClue = true`.
-- **Non-Null Exterior `door.clue`:** **`28 / 28` (`100%`)** (`10` `lights`, `6` `bells`, `6` `beam`, `6` `blocks`).
-- **Exterior Plaque Unobstructed Sightline (`door.floor + 1.45..2.45`):** **`28 / 28` (`100%`)** (`0` overhanging ledge obstructions).
-- **Bit-for-Bit Parity (`door.clue` vs Live `game.puzzleRoom`):** **`28 / 28` (`100%`)** (`pattern` matches `puzzle.target` bit-for-bit on every `lights` door; `order` & `colors` match `BELL_COLORS[bells[order[i]].color]` bit-for-bit on every `bells` door).
-- **Diegetic Doorway Threshold Peek (`peekAlpha` + `peekClue()`):** **`28 / 28` (`100%`)** illuminate on walk-in, when stepping back to `(doorX ± 1, rows - 1)`, and via `#btn-peek-clue`.
-- **Live `60Hz` Solve Using ONLY Exterior `door.clue`:** **`28 / 28` (`100%`)** solved tile-by-tile inside live `TowerTopplerGame` without ever reading internal `puzzle.target` or `puzzle.order`; `200ms` directional swipe steps **exactly `1` tile** (`0` overshoot).
-
-### 3.2 All 5 Mini-Games & Casual Expeditions Touch Verification
-- **Submarine (`reboot` & `original`):** `18.0s` buoyant 2D steering (`225/305 px/s`), generous `32px` fish / `35px` mine torpedo / `320px` sonar / `56px` Warp Cave touch hitboxes (`33.3%` AI `sub_ace` rate); Classic `14.0s` 1-bubble purity (`1.233s` desktop miss cap).
-- **Storm Skimmer:** Snappy `9.0` lateral carve, `±2.4` clamped lanes, `1.58` boost gates (`100%` `4×` boost), `0.13s` buffered wave-hop via `jump` or `up`.
-- **Skywing Glide:** `6–7` Ring Gates/flight, `140ms` buffered flap (`jump`/`fire`), `1.82s` crisp landing settle.
-- **Core Astrolabe Vault:** `100%` lock support across **`fire`, `jump`, and `up`** (`vaultTapActions = { fire: true, jump: true, up: true }`) with generous `0.42 / 0.38 / 0.35 rad` mobile sweet-spots.
-- **Endless Casual Expeditions:** `0` enemies, `0` rising water, `100%` reachable Workbench / Salvage Parts / Compass Keys / Treasure Chest / Curios, and `3.5s` double-`UP` summit forfeit guard across all `4` mission archetypes.
+- **Rune Door Clue Parity (`part3` post-`#328`):** **`28 / 28` (`100%`)** bit-for-bit parity between `door.clue` and live `game.puzzleRoom`, **`28 / 28` (`100%`)** unobstructed exterior stele sightlines (`0` overhanging ledge collisions after `#328` pad widening), **`28 / 28` (`100%`)** Doorway Threshold Peek (`peekAlpha` + `peekClue()`), and **`28 / 28` (`100%`)** live `60Hz` solve from exterior `door.clue` alone (`1`-swipe = `1`-tile cadence).
+- **Mini-Games & Casual Expeditions:** Submarine (`18s` buoyant 2D touch + `33.3%` AI `sub_ace` + `1.233s` Classic desktop miss cap), Storm Skimmer (`100%` `4×` boost + `up`/`jump` buffered wave-hop), Skywing Glide (`6–7` gates/flight + `140ms` buffered flap), Core Astrolabe Vault (`100%` tap-anywhere lock via `fire`/`jump`/`up`), and Peaceful Casual Expeditions (`0` enemy/water leaks, `3.5s` double-`UP` summit forfeit guard) all verified `10/10`.

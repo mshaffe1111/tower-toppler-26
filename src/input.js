@@ -37,28 +37,26 @@ const GESTURE_VERT_REVERSAL_PX = 18;
 const GESTURE_VERT_MAX_LEASH_PX = 60;
 const GESTURE_VERT_DOMINANCE = 1.12;
 
-// Standstill upward jump flick thresholds (away from doorways)
-const GESTURE_FLICK_DY_PX = -30;
-const GESTURE_FLICK_MAX_MS = 125;
-const GESTURE_FLICK_VELOCITY_Y = -560; // px/s (upward is negative)
+// Standstill upward jump flick thresholds (away from doorways — #323 confident standard flick)
+const GESTURE_FLICK_DY_PX = -26;
+const GESTURE_FLICK_MAX_MS = 135;
+const GESTURE_FLICK_VELOCITY_Y = -430; // px/s (upward is negative)
 
-// Running / diagonal upward jump flick thresholds (e.g. dx=+36, dy=-36 away from door or across gap)
-const GESTURE_RUN_FLICK_DY_PX = -24;
-const GESTURE_RUN_FLICK_MAX_MS = 130;
-const GESTURE_RUN_FLICK_VELOCITY_Y = -330; // px/s
-const GESTURE_RUN_FLICK_MIN_SLOPE = 0.52; // >= 27.5° upward elevation
+// Running / diagonal upward jump flick thresholds (#323: |dy| >= 20..22px fires confident standard jump!)
+const GESTURE_RUN_FLICK_DY_PX = -20;
+const GESTURE_RUN_FLICK_MAX_MS = 140;
+const GESTURE_RUN_FLICK_VELOCITY_Y = -290; // px/s
+const GESTURE_RUN_FLICK_MIN_SLOPE = 0.50; // >= 26.5° upward elevation
+const GESTURE_DIAG_FLICK_MIN_DX_PX = 11; // away from doors, >=11px diagonal flick commits horizontal jump drive
 
-// Proportional flick jump hold tiers (replaces forced 315ms max-jump pulse!)
-const GESTURE_FLICK_SHORT_MS = 85; // |dy| < 42px -> surgical 1-gap low hop
-const GESTURE_FLICK_MED_DY_PX = 42;
-const GESTURE_FLICK_MED_MS = 150; // 42..59px -> medium jump
-const GESTURE_FLICK_LONG_DY_PX = 60;
-const GESTURE_FLICK_LONG_MS = 230; // >= 60px -> full 2-col jump
+// Confident 2-tier flick jump holds (#323: eliminates starved 85ms stubby tier!)
+const GESTURE_FLICK_STD_MS = 185; // Normal flick (20..45px) -> 185ms standard jump (clears +1F & 1-col gaps from stone center!)
+const GESTURE_FLICK_LONG_DY_PX = 46; // >= 46px -> full 245ms jump
+const GESTURE_FLICK_LONG_MS = 245;
 
-// Proportional post-flick ballistic horizontal commit targets (measured from lastFlickTime; expires before touchdown -> vxEnd = 0!)
-const GESTURE_FLICK_COMMIT_SHORT_MS = 355;
-const GESTURE_FLICK_COMMIT_MED_MS = 405;
-const GESTURE_FLICK_COMMIT_LONG_MS = 465;
+// Proportional post-flick ballistic horizontal commit targets (measured from lastFlickTime; paired with isLiveHorizHeld=false & Smart Island Brake!)
+const GESTURE_FLICK_COMMIT_STD_MS = 565;
+const GESTURE_FLICK_COMMIT_LONG_MS = 620;
 const GESTURE_HORIZ_CARRY_MS = 36;
 const GESTURE_FLICK_REARM_PX = 14;
 const GESTURE_FLICK_REARM_MS = 145;
@@ -115,6 +113,7 @@ export class InputController {
     this.interactKind = '';
     this._gameMode = '';
     this.gameMode = 'tower';
+    this.isLiveHorizHeld = false;
 
     // Internal Tilt Tracking
     this._tiltListenerAttached = false;
@@ -216,6 +215,7 @@ export class InputController {
           entry.analogX = 0;
           entry.anchorX = entry.lastX;
           entry.extremeX = entry.lastX;
+          this._releaseGestureJumpHold(entry);
           if (entry.midAirStopTimer !== null) {
             clearTimeout(entry.midAirStopTimer);
             entry.midAirStopTimer = null;
@@ -463,6 +463,7 @@ export class InputController {
     this.state.fire = false;
     this.state.analogX = 0;
     this.state.analogY = 0;
+    this.isLiveHorizHeld = false;
 
     this.clearFrame();
   }
@@ -533,8 +534,19 @@ export class InputController {
   _resolveFlickHoldMs(dyUp) {
     const absDy = Math.abs(dyUp);
     if (absDy >= GESTURE_FLICK_LONG_DY_PX) return GESTURE_FLICK_LONG_MS;
-    if (absDy >= GESTURE_FLICK_MED_DY_PX) return GESTURE_FLICK_MED_MS;
-    return GESTURE_FLICK_SHORT_MS;
+    return GESTURE_FLICK_STD_MS;
+  }
+
+  _releaseGestureJumpHold(entry) {
+    if (entry) {
+      if (entry.jumpTimer !== undefined && entry.jumpTimer !== null) {
+        clearTimeout(entry.jumpTimer);
+        entry.jumpTimer = null;
+      }
+      entry.jumpHeld = false;
+      entry.jumpHoldRemainingSec = 0;
+    }
+    this._cancelJumpPulse();
   }
 
   _latchHorizCarry(dir, analogX, durationMs = GESTURE_HORIZ_CARRY_MS) {
@@ -578,6 +590,7 @@ export class InputController {
     let down = this._heldKeys.has('down') || this._downPulseActive;
     let jump = this._heldKeys.has('jump') || this._jumpPulseActive;
     let fire = this._heldKeys.has('fire') || this._firePulseActive;
+    let liveHorizHeld = this._heldKeys.has('left') || this._heldKeys.has('right');
 
     let analogX = (right ? 1 : 0) - (left ? 1 : 0);
     let analogY = (down ? 1 : 0) - (up ? 1 : 0);
@@ -589,9 +602,11 @@ export class InputController {
       } else if (entry.type === 'dpad') {
         if (entry.dir === 'left') {
           left = true;
+          liveHorizHeld = true;
           analogX = -1;
         } else if (entry.dir === 'right') {
           right = true;
+          liveHorizHeld = true;
           analogX = 1;
         } else if (entry.dir === 'up') {
           up = true;
@@ -601,15 +616,27 @@ export class InputController {
           analogY = 1;
         }
       } else if (entry.type === 'joystick') {
-        if (entry.left) left = true;
-        if (entry.right) right = true;
+        if (entry.left) {
+          left = true;
+          liveHorizHeld = true;
+        }
+        if (entry.right) {
+          right = true;
+          liveHorizHeld = true;
+        }
         if (entry.up) up = true;
         if (entry.down) down = true;
         if (Math.abs(entry.analogX) > Math.abs(analogX)) analogX = entry.analogX;
         if (Math.abs(entry.analogY) > Math.abs(analogY)) analogY = entry.analogY;
       } else if (entry.type === 'gesture') {
-        if (entry.left) left = true;
-        if (entry.right) right = true;
+        if (entry.left) {
+          left = true;
+          liveHorizHeld = true;
+        }
+        if (entry.right) {
+          right = true;
+          liveHorizHeld = true;
+        }
         if (entry.vertDir === 'up') up = true;
         if (entry.vertDir === 'down') down = true;
         if (entry.jumpHeld) jump = true;
@@ -624,14 +651,22 @@ export class InputController {
     }
 
     if (this.controlMode === 'tilt' && !left && !right) {
-      if (this._tiltLeft) left = true;
-      if (this._tiltRight) right = true;
+      if (this._tiltLeft) {
+        left = true;
+        liveHorizHeld = true;
+      }
+      if (this._tiltRight) {
+        right = true;
+        liveHorizHeld = true;
+      }
       if (Math.abs(this._tiltAnalogX) > Math.abs(analogX)) {
         analogX = this._tiltAnalogX;
       }
     }
 
-    // Apply brief (<=36ms) horizontal carry ONLY when no active pointer/key overrides
+    this.isLiveHorizHeld = Boolean(liveHorizHeld);
+
+    // Apply post-flick ballistic horizontal commit ONLY when no live pointer/key overrides
     if (!left && !right && this._horizCarryDir !== 0) {
       if (this._horizCarryDir < 0) left = true;
       else if (this._horizCarryDir > 0) right = true;
@@ -744,7 +779,7 @@ export class InputController {
     }, durationMs);
   }
 
-  _triggerJumpPulse(durationMs = GESTURE_FLICK_MED_MS, extendOnly = false) {
+  _triggerJumpPulse(durationMs = GESTURE_FLICK_STD_MS, extendOnly = false) {
     if (this._jumpPulseTimer !== null) {
       clearTimeout(this._jumpPulseTimer);
     }
@@ -943,6 +978,8 @@ export class InputController {
       anchorX: x,
       extremeX: x,
       horizDir: 0,
+      horizStartTime: 0,
+      wasRunningBeforeFlick: false,
       left: false,
       right: false,
       analogX: 0,
@@ -990,6 +1027,7 @@ export class InputController {
         entry.analogX = 0;
         entry.anchorX = entry.lastX;
         entry.extremeX = entry.lastX;
+        this._releaseGestureJumpHold(entry);
         this._recomputeState(true);
       }
     }, GESTURE_MIDAIR_STOP_IDLE_MS);
@@ -1071,7 +1109,10 @@ export class InputController {
         entry.horizDir = -1;
         dx = x - entry.anchorX;
       } else if (!isSteepVertStep && recoil >= GESTURE_RECOIL_STOP_PX) {
-        // Deliberate thumb recoil brake -> immediate neutral stop!
+        // Deliberate thumb recoil brake -> immediate neutral stop & early jump release!
+        if (entry.flickLatched || entry.postFlickActive) {
+          this._releaseGestureJumpHold(entry);
+        }
         entry.anchorX = x;
         entry.extremeX = x;
         entry.horizDir = 0;
@@ -1092,7 +1133,10 @@ export class InputController {
         entry.horizDir = 1;
         dx = x - entry.anchorX;
       } else if (!isSteepVertStep && recoil >= GESTURE_RECOIL_STOP_PX) {
-        // Deliberate thumb recoil brake -> immediate neutral stop!
+        // Deliberate thumb recoil brake -> immediate neutral stop & early jump release!
+        if (entry.flickLatched || entry.postFlickActive) {
+          this._releaseGestureJumpHold(entry);
+        }
         entry.anchorX = x;
         entry.extremeX = x;
         entry.horizDir = 0;
@@ -1105,7 +1149,7 @@ export class InputController {
       }
     }
 
-    // Mid-air post-flick thumb stop: if finger stops moving horizontally after flick, brake immediately
+    // Mid-air post-flick thumb stop: if finger stops moving horizontally after flick, brake & drop immediately
     if (
       (entry.flickLatched || entry.postFlickActive) &&
       entry.horizDir !== 0 &&
@@ -1118,22 +1162,36 @@ export class InputController {
       entry.horizDir = 0;
       entry.postFlickActive = false;
       entry.lastFlickHoldMs = 0;
+      this._releaseGestureJumpHold(entry);
       dx = 0;
     }
 
     if (Math.abs(dx) > activeHorizDeadzone) {
       this._clearHorizCarry();
-      entry.horizDir = dx < 0 ? -1 : 1;
+      const nextHorizDir = dx < 0 ? -1 : 1;
+      if (nextHorizDir !== entry.horizDir) {
+        entry.horizStartTime = now;
+      }
+      entry.horizDir = nextHorizDir;
       const rawMag = Math.min(1, (Math.abs(dx) - activeHorizDeadzone) / GESTURE_HORIZ_FULL_SPAN_PX);
-      const mag = 0.28 + 0.72 * rawMag;
+      const baseMag = 0.28 + 0.72 * rawMag;
+      const mag = entry.flickLatched || entry.postFlickActive ? Math.max(0.98, baseMag) : baseMag;
       entry.analogX = entry.horizDir * mag;
       entry.left = entry.horizDir < 0;
       entry.right = entry.horizDir > 0;
       if (entry.flickLatched || entry.postFlickActive) {
         this._scheduleMidAirStopWatchdog(entry);
       }
+    } else if ((entry.flickLatched || entry.postFlickActive) && entry.horizDir !== 0) {
+      // Preserve committed diagonal flick horizontal drive even when |dx| was 11..15px!
+      this._clearHorizCarry();
+      entry.analogX = entry.horizDir;
+      entry.left = entry.horizDir < 0;
+      entry.right = entry.horizDir > 0;
+      this._scheduleMidAirStopWatchdog(entry);
     } else {
       entry.horizDir = 0;
+      entry.horizStartTime = 0;
       entry.postFlickActive = false;
       entry.lastFlickHoldMs = 0;
       entry.extremeX = x;
@@ -1270,10 +1328,9 @@ export class InputController {
     }
 
     // -------------------------------------------------------------------------
-    // 3B. Proportional Upward FLICK -> Precision Jump ONLY
-    //     - Short flick (< 42px) -> 85ms surgical 1-gap hop
-    //     - Medium flick (42..59px) -> 150ms medium jump
-    //     - Power flick (>= 60px) -> 230ms full jump
+    // 3B. Confident 2-Tier Upward FLICK -> Standard / Full Jump (#323)
+    //     - Normal flick (20..45px) -> 185ms hold + 430ms ballistic commit
+    //     - Long flick (>= 46px) -> 245ms full hold + 485ms ballistic commit
     // -------------------------------------------------------------------------
     const hasOtherWalk = this._hasOtherGestureHorizPointer(entry);
     const isDiagonalAwayFromDoor =
@@ -1281,7 +1338,10 @@ export class InputController {
       Math.abs(dxUp) >= GESTURE_INTERACT_MAX_DX_PX &&
       Math.abs(dxUp) > Math.abs(dyUp) * 0.85;
 
-    const isRunningStroke = entry.horizDir !== 0 || Math.abs(dxUp) >= 16 || isDiagonalAwayFromDoor;
+    const isRunningStroke =
+      entry.horizDir !== 0 ||
+      (!this._isDoorOrLiftContext() && Math.abs(dxUp) >= GESTURE_DIAG_FLICK_MIN_DX_PX) ||
+      isDiagonalAwayFromDoor;
     const standstillFlick =
       !this._isDoorOrLiftContext() &&
       !isRunningStroke &&
@@ -1294,9 +1354,9 @@ export class InputController {
     const secondaryThumbFlick =
       hasOtherWalk &&
       !this._isDoorOrLiftContext() &&
-      dyUp <= -22 &&
+      dyUp <= GESTURE_RUN_FLICK_DY_PX &&
       dtUpMs <= GESTURE_RUN_FLICK_MAX_MS &&
-      vy <= -320 &&
+      vy <= GESTURE_RUN_FLICK_VELOCITY_Y &&
       Math.abs(vy) >= Math.abs(vx) * 0.65;
 
     const runningDiagFlick =
@@ -1322,6 +1382,23 @@ export class InputController {
       }
 
       const holdMs = this._resolveFlickHoldMs(dyUp);
+      const alreadyWalking = entry.horizDir !== 0 && entry.horizStartTime > 0 && now - entry.horizStartTime >= 75;
+      if (
+        !this._isDoorOrLiftContext() &&
+        !hasOtherWalk &&
+        entry.horizDir === 0 &&
+        Math.abs(dxUp) >= GESTURE_DIAG_FLICK_MIN_DX_PX
+      ) {
+        entry.horizDir = dxUp < 0 ? -1 : 1;
+        entry.horizStartTime = now;
+        entry.extremeX = x;
+      }
+      if (entry.horizDir !== 0) {
+        entry.left = entry.horizDir < 0;
+        entry.right = entry.horizDir > 0;
+        entry.analogX = entry.horizDir * Math.max(0.98, Math.abs(entry.analogX));
+      }
+      entry.wasRunningBeforeFlick = alreadyWalking;
       entry.flickLatched = true;
       entry.flickHoldMs = holdMs;
       entry.flickPeakY = y;
@@ -1651,9 +1728,8 @@ export class InputController {
       return;
     }
 
-    // Proportional remaining ballistic horizontal commit from lastFlickTime (355ms / 405ms / 465ms;
-    // expires before touchdown so vxEnd = 0 on 1-col & 2-col ledges with 0% undershoot / 0% overshoot,
-    // and gives 0ms extra carry if held >= targetCommitMs or stopped mid-air!)
+    // Confident remaining ballistic horizontal commit from lastFlickTime (#323: 430ms normal / 485ms long;
+    // paired with input.isLiveHorizHeld = false so Smart Descending Island Brake settles cleanly onto 1-col & 2-col islands!)
     if (
       !isCancel &&
       gmode === 'tower' &&
@@ -1661,16 +1737,14 @@ export class InputController {
       entry.horizDir !== 0 &&
       (entry.idleHorizSec || 0) < GESTURE_MIDAIR_STOP_IDLE_MS / 1000
     ) {
-      const holdMs = entry.lastFlickHoldMs || entry.flickHoldMs || GESTURE_FLICK_SHORT_MS;
-      const targetCommitMs =
-        holdMs >= GESTURE_FLICK_LONG_MS
-          ? GESTURE_FLICK_COMMIT_LONG_MS
-          : holdMs >= GESTURE_FLICK_MED_MS
-            ? GESTURE_FLICK_COMMIT_MED_MS
-            : GESTURE_FLICK_COMMIT_SHORT_MS;
+      const holdMs = entry.lastFlickHoldMs || entry.flickHoldMs || GESTURE_FLICK_STD_MS;
+      const baseCommitMs =
+        holdMs >= GESTURE_FLICK_LONG_MS ? GESTURE_FLICK_COMMIT_LONG_MS : GESTURE_FLICK_COMMIT_STD_MS;
+      const targetCommitMs = entry.wasRunningBeforeFlick ? baseCommitMs - 70 : baseCommitMs;
       const elapsedSinceFlick = Math.max(0, now - (entry.lastFlickTime || entry.flickLatchTime || now));
       const carryMs = Math.round(Math.max(0, targetCommitMs - elapsedSinceFlick));
-      if (carryMs > 0) this._latchHorizCarry(entry.horizDir, entry.analogX, carryMs);
+      const carryAnalogX = entry.horizDir * Math.max(0.98, Math.abs(entry.analogX || 1));
+      if (carryMs > 0) this._latchHorizCarry(entry.horizDir, carryAnalogX, carryMs);
       else this._clearHorizCarry();
       return;
     }
@@ -2186,7 +2260,7 @@ export class InputController {
         if (entry.startX < vw * 0.5) {
           this._triggerFirePulse(GESTURE_FIRE_PULSE_MS);
         } else {
-          this._triggerJumpPulse(GESTURE_FLICK_SHORT_MS);
+          this._triggerJumpPulse(GESTURE_FLICK_STD_MS);
         }
       }
     }

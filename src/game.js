@@ -1950,15 +1950,50 @@ export class TowerTopplerGame {
       else if (moveIntent > 0.08) p.facing = 1;
     }
 
-    const moveSpeed = isRealOrig ? ORIG_WALK_SPEED : isReboot ? 3.35 : 3.15;
-    const stepWalkSpeed = !isRealOrig && p.stepHopActive && !p.onGround ? 2.25 : moveSpeed;
+    const moveSpeed = isRealOrig ? ORIG_WALK_SPEED : isReboot ? 3.55 : 3.38;
+    const stepWalkSpeed = !isRealOrig && p.stepHopActive && !p.onGround ? 2.35 : moveSpeed;
+    const rawLiveHeld =
+      typeof this.input?.isLiveHorizHeld === 'function'
+        ? this.input.isLiveHorizHeld()
+        : typeof this.input?.isLiveHorizHeld === 'boolean'
+        ? this.input.isLiveHorizHeld
+        : Math.abs(moveIntent) > 0.05;
+    const liveHorizHeld = Boolean(rawLiveHeld && Math.abs(moveIntent) > 0.05);
+
+    // Smart Descending Island Brake: when descending over a walkable stone with an open drop-off ahead
+    // and the player's thumb already lifted (post-flick ballistic carry or neutral), settle onto the stone!
+    let descendingIslandBrake = false;
+    const horizSign = Math.abs(p.vx) > 0.15 ? Math.sign(p.vx) : Math.sign(moveIntent);
+    if (!isRealOrig && !p.onGround && !p.tumbling && p.vy < -0.5 && horizSign !== 0 && !liveHorizHeld) {
+      const underAirLedge = this.ledges.find(
+        (l) =>
+          this._isWalkableLedge(l) &&
+          Math.abs(colDist(p.col, l.col + 0.5)) < 0.44 &&
+          p.floor >= l.floor - 0.05 &&
+          p.floor - l.floor <= 0.62
+      );
+      if (underAirLedge && underAirLedge.type !== 'ice') {
+        const adjCol = wrapCol(underAirLedge.col + horizSign);
+        const hasAdjStone = this.ledges.some(
+          (n) =>
+            this._isWalkableLedge(n) &&
+            wrapCol(n.col) === adjCol &&
+            Math.abs(n.floor - underAirLedge.floor) <= 0.6
+        );
+        if (!hasAdjStone) {
+          descendingIslandBrake = true;
+        }
+      }
+    }
+
+    const effectiveMoveIntent = descendingIslandBrake ? 0 : moveIntent;
     const targetVx = p.tumbling
       ? 0
       : isRealOrig
-      ? moveIntent !== 0
-        ? Math.sign(moveIntent) * ORIG_WALK_SPEED
+      ? effectiveMoveIntent !== 0
+        ? Math.sign(effectiveMoveIntent) * ORIG_WALK_SPEED
         : 0
-      : moveIntent * stepWalkSpeed;
+      : effectiveMoveIntent * stepWalkSpeed;
 
     // 1987 Slippery ('slideR' / 'slideL'): pushes Pogo at +-2.0 cols/s only when idle/shooting
     const slidePush =
@@ -1978,25 +2013,29 @@ export class TowerTopplerGame {
     } else if ((p.knockbackTimer || 0) <= 0 && !p.tumbling) {
       if (isReboot) {
         const desiredVx = targetVx + convPush + slidePush + windPush;
-        const isCounterSteer = moveIntent * p.vx < -0.1;
+        const isCounterSteer = effectiveMoveIntent * p.vx < -0.1;
         const rate = !p.onGround
-          ? Math.abs(moveIntent) > 0.05
-            ? 36.0
-            : 30.0
+          ? descendingIslandBrake
+            ? 34.0
+            : Math.abs(effectiveMoveIntent) > 0.05
+            ? 38.0
+            : 28.0
           : isIce
-          ? Math.abs(moveIntent) > 0.05
-            ? 13.5
+          ? Math.abs(effectiveMoveIntent) > 0.05
+            ? 14.0
             : 7.5
-          : Math.abs(moveIntent) > 0.05
+          : Math.abs(effectiveMoveIntent) > 0.05
           ? isCounterSteer
-            ? 72.0
-            : 42.0
+            ? 74.0
+            : 44.0
           : 58.0;
         p.vx = approach(p.vx, desiredVx, rate * dt);
       } else {
         const desiredOrigVx = targetVx + convPush + slidePush;
-        if (isIce && p.onGround) {
-          const iceRate = Math.abs(moveIntent) > 0.05 ? 13.0 : 7.5;
+        if (!p.onGround && descendingIslandBrake) {
+          p.vx = approach(p.vx, desiredOrigVx, 34.0 * dt);
+        } else if (isIce && p.onGround) {
+          const iceRate = Math.abs(effectiveMoveIntent) > 0.05 ? 13.5 : 7.5;
           p.vx = approach(p.vx, desiredOrigVx, iceRate * dt);
         } else {
           p.vx = desiredOrigVx;
@@ -2215,7 +2254,7 @@ export class TowerTopplerGame {
     const wantsUpInteract =
       !p.tumbling &&
       (p.onGround || p.coyoteTimer > 0) &&
-      (upEdge || (Boolean(inp.up) && !this._upDoorLatch && Math.abs(p.vx) <= 3.65));
+      (upEdge || (Boolean(inp.up) && !this._upDoorLatch && Math.abs(p.vx) <= 3.85));
 
     if (wantsUpInteract) {
       const wbNear =
@@ -2396,9 +2435,9 @@ export class TowerTopplerGame {
       }
     }
 
-    // Coyote time & Jump buffering (generous 130ms mobile grace window)
-    const coyoteWindow = isRealOrig ? 0.12 : 0.13;
-    const bufferWindow = 0.13;
+    // Coyote time & Jump buffering (generous 185ms coyote / 165ms buffer mobile grace window)
+    const coyoteWindow = isRealOrig ? 0.12 : 0.185;
+    const bufferWindow = isRealOrig ? 0.13 : 0.165;
     if (p.onGround && !p.tumbling) {
       p.coyoteTimer = coyoteWindow;
     } else {
@@ -2443,7 +2482,7 @@ export class TowerTopplerGame {
           p.vy = 7.5;
           p.arc = makeArc('jump', p.floor, p.vx, ARC_JUMP.length, ARC_JUMP);
         } else {
-          p.vy = isReboot ? 9.05 : 8.3;
+          p.vy = isReboot ? 9.50 : 9.10;
         }
         p.jumpCutEligible = true;
         p.stepHopActive = false;
@@ -2462,7 +2501,7 @@ export class TowerTopplerGame {
     }
 
     // Classic Auto-Step-Up (+1 floor stair hop OR resting bottom lift platform!)
-    if (!p.tumbling && p.onGround && Math.abs(targetVx) > 0 && (p.stepUpCooldown || 0) <= 0) {
+    if (!p.tumbling && p.onGround && Math.abs(moveIntent) > 0.05 && (p.stepUpCooldown || 0) <= 0) {
       const stepFloor = Math.round(p.floor) + 1;
       const blockedOverhead = this.ledges.some(
         (b) =>
@@ -2474,14 +2513,14 @@ export class TowerTopplerGame {
       if (!blockedOverhead) {
         const stepLedge =
           this.ledges.find((l) => {
-            if (!this._isWalkableLedge(l) || Math.abs(l.floor - stepFloor) > 0.22) return false;
+            if (!this._isWalkableLedge(l) || Math.abs(l.floor - stepFloor) > 0.30) return false;
             const dc = colDist(p.col, l.col + 0.5);
-            return Math.sign(dc) === p.facing && Math.abs(dc) > 0.14 && Math.abs(dc) <= 0.62;
+            return Math.sign(dc) === p.facing && Math.abs(dc) > 0.12 && Math.abs(dc) <= 0.76;
           }) ||
           this.elevators.find((el) => {
-            if (Math.abs(el.floor - stepFloor) > 0.22) return false;
+            if (Math.abs(el.floor - stepFloor) > 0.30) return false;
             const dc = colDist(p.col, el.col + 0.5);
-            return Math.sign(dc) === p.facing && Math.abs(dc) > 0.14 && Math.abs(dc) <= 0.62;
+            return Math.sign(dc) === p.facing && Math.abs(dc) > 0.12 && Math.abs(dc) <= 0.76;
           });
         if (stepLedge) {
           if (isRealOrig) {
@@ -2489,9 +2528,9 @@ export class TowerTopplerGame {
             p.vy = 5.6;
             p.arc = makeArc('climb', p.floor, p.vx, ARC_CLIMB.length, ARC_CLIMB);
           } else {
-            p.vy = isReboot ? 7.8 : 6.6;
-            if (Math.abs(p.vx) > 2.25) {
-              p.vx = Math.sign(p.vx) * 2.25;
+            p.vy = isReboot ? 7.8 : 6.8;
+            if (Math.abs(p.vx) > 2.35) {
+              p.vx = Math.sign(p.vx) * 2.35;
             }
           }
           p.jumpCutEligible = false;
@@ -2746,21 +2785,23 @@ export class TowerTopplerGame {
         if (isRealOrig) {
           p.vy = Math.max(-ORIG_MAX_FALL, p.vy - ORIG_FALL_G * dt);
         } else if (isReboot) {
-          let grav = 27.5;
-          if (p.vy > 1.2 && !inp.jump && p.jumpCutEligible) {
-            grav = p.vy > 5.5 ? 78.0 : 62.0;
-          } else if (Math.abs(p.vy) <= 1.0) {
-            grav = 19.5;
-          } else if (p.vy < -1.0) {
-            grav = 42.5;
+          const risen = p.floor - (p.jumpStartFloor ?? p.floor);
+          let grav = 26.0;
+          if (p.vy > 1.25 && !inp.jump && p.jumpCutEligible && (risen >= 0.72 || p.vy < 6.6)) {
+            grav = 44.0;
+          } else if (Math.abs(p.vy) <= 1.25) {
+            grav = 16.5;
+          } else if (p.vy < -1.25) {
+            grav = 37.5;
           }
-          p.vy = Math.max(-15.5, p.vy - grav * dt);
+          p.vy = Math.max(-15.0, p.vy - grav * dt);
         } else {
-          const origGrav = p.vy < -1.0 ? 32.0 : 23.5;
-          p.vy = Math.max(-14.5, p.vy - origGrav * dt);
-          if (!inp.jump && p.vy > 1.6 && p.jumpCutEligible) {
-            p.vy = Math.max(1.5, p.vy - 34.0 * dt);
+          const risenOrig = p.floor - (p.jumpStartFloor ?? p.floor);
+          let origGrav = p.vy < -1.1 ? 36.0 : Math.abs(p.vy) <= 1.1 ? 17.5 : 25.5;
+          if (p.vy > 1.2 && !inp.jump && p.jumpCutEligible && (risenOrig >= 0.72 || p.vy < 6.2)) {
+            origGrav = 42.0;
           }
+          p.vy = Math.max(-14.5, p.vy - origGrav * dt);
         }
         p.floor += p.vy * dt;
       }
@@ -2849,17 +2890,23 @@ export class TowerTopplerGame {
         }
       }
 
-      // Forgiving ledge-edge mantle (0.22F lip snap for Reboot & non-real classic)
-      if (!isRealOrig && !p.onGround && p.vy <= 1.8 && (Math.abs(p.vx) > 0.18 || Math.abs(moveIntent) > 0.05)) {
-        const approachDir = Math.abs(p.vx) > 0.18 ? Math.sign(p.vx) : Math.sign(moveIntent);
+      // Generous knee/waist ledge-edge mantle (0.40F lip snap for Reboot & non-real classic)
+      if (!isRealOrig && !p.onGround && p.vy <= 2.6 && (Math.abs(p.vx) > 0.14 || Math.abs(moveIntent) > 0.05)) {
+        const approachDir = Math.abs(p.vx) > 0.14 ? Math.sign(p.vx) : Math.sign(moveIntent);
+        const maxMantleRise = (p.jumpStartFloor ?? p.floor) + (p.steamBoostActive ? 3.45 : 1.55);
         const mantleLedge = this.ledges.find((l) => {
           if (!this._isWalkableLedge(l)) return false;
+          if (l.floor > maxMantleRise) return false;
           const floorGap = l.floor - p.floor;
-          if (floorGap <= 0 || floorGap > 0.22) return false;
+          if (floorGap <= 0 || floorGap > 0.40) return false;
           const dc = colDist(p.col, l.col + 0.5);
-          return Math.abs(dc) < 0.76 && approachDir === Math.sign(dc);
+          return Math.abs(dc) < 0.84 && approachDir === Math.sign(dc);
         });
         if (mantleLedge) {
+          const dc = colDist(p.col, mantleLedge.col + 0.5);
+          if (Math.abs(dc) > 0.56) {
+            p.col = wrapCol(mantleLedge.col + 0.5 - Math.sign(dc) * 0.52);
+          }
           p.floor = mantleLedge.floor;
           p.vy = 0;
           p.jumpCutEligible = false;
@@ -2867,6 +2914,13 @@ export class TowerTopplerGame {
           p.steamBoostActive = false;
           p.onGround = true;
           p.landImpact = Math.max(p.landImpact, 0.35);
+          if (!liveHorizHeld) {
+            const adjCol = wrapCol(mantleLedge.col + approachDir);
+            const hasAdj = this.ledges.some(
+              (n) => this._isWalkableLedge(n) && wrapCol(n.col) === adjCol && Math.abs(n.floor - mantleLedge.floor) <= 0.6
+            );
+            if (!hasAdj) p.vx = 0;
+          }
           sound?.stepUp?.();
           this._registerLedgeStand(mantleLedge);
         }
@@ -2960,8 +3014,15 @@ export class TowerTopplerGame {
     p.stepHopActive = false;
     p.steamBoostActive = false;
 
-    // Plantar Ledge Grip: when landing on dry stone with neutral thumb, plant boots cleanly!
+    // Plantar Ledge Grip & Cliff Island Assist: when landing on dry stone with neutral thumb
+    // (or post-flick ballistic carry onto a stone with an open drop-off ahead), plant boots cleanly!
     const neutralHoriz = !inp || (!inp.left && !inp.right && Math.abs(inp.analogX || 0) <= 0.08);
+    const rawLive =
+      typeof this.input?.isLiveHorizHeld === 'function'
+        ? this.input.isLiveHorizHeld()
+        : typeof this.input?.isLiveHorizHeld === 'boolean'
+        ? this.input.isLiveHorizHeld
+        : !neutralHoriz;
     const isDryStone =
       !this._isRealOriginal() &&
       (!landed ||
@@ -2970,9 +3031,20 @@ export class TowerTopplerGame {
           landed.type !== 'conveyorL' &&
           landed.type !== 'slideR' &&
           landed.type !== 'slideL'));
-    if (neutralHoriz && isDryStone && !wasOnGround) {
-      p.vx *= 0.2;
-      if (Math.abs(p.vx) < 0.5) p.vx = 0;
+    if (isDryStone && !wasOnGround) {
+      if (neutralHoriz) {
+        p.vx *= 0.2;
+        if (Math.abs(p.vx) < 0.5) p.vx = 0;
+      } else if (!rawLive && landed && Math.abs(p.vx) > 0.1) {
+        const adjCol = wrapCol(landed.col + Math.sign(p.vx));
+        const hasAdj = this.ledges.some(
+          (n) => this._isWalkableLedge(n) && wrapCol(n.col) === adjCol && Math.abs(n.floor - landed.floor) <= 0.6
+        );
+        if (!hasAdj) {
+          p.vx *= 0.15;
+          if (Math.abs(p.vx) < 0.55) p.vx = 0;
+        }
+      }
     }
     if (!wasOnGround && prevVy < -1.4) {
       const impact = Math.min(1, Math.abs(prevVy) / (isReboot ? 13 : 10));
