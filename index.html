@@ -3,164 +3,765 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <meta name="theme-color" content="#050814" />
+  <meta name="theme-color" content="#060a14" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>Tower Toppler '26 — Atari 7800 Reimagined</title>
+  <title>Tower Toppler '26 — Operation Nebulus</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23060a14'/%3E%3Cpath fill='%236bf2ff' fill-rule='evenodd' d='M16 4C9.5 4 5 8.8 5 15c0 5.7 4.8 12.2 11 13 6.2-.8 11-7.3 11-13 0-6.2-4.5-11-11-11Zm-7.2 10c.4-1.3 2.5-1 4.4.1 1.7 1 2.5 2.6 1.8 3.6-.6 1-2.6.9-4.4-.1-1.7-1-2.2-2.4-1.8-3.6Zm14.4 0c.4 1.2-.1 2.6-1.8 3.6-1.8 1-3.8 1.1-4.4.1-.7-1 .1-2.6 1.8-3.6 1.9-1.1 4-1.4 4.4-.1Z'/%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;600;700;800;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div id="app">
-    <!-- Top Glassmorphic Arcade HUD -->
-    <header id="hud" aria-label="Game Status">
-      <div class="hud-left">
-        <div class="hud-label">PLAYER ONE</div>
-        <div id="score-display" class="hud-score">00000000</div>
-        <div id="lives-display" class="hud-lives" aria-label="Lives"></div>
-      </div>
+  <!-- Shared Bespoke Vector Symbol Definitions (Zero Emojis) -->
+  <svg width="0" height="0" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
+    <defs>
+      <!-- Precision 8-Tooth Brass Gear -->
+      <symbol id="ico-gear" viewBox="0 0 24 24">
+        <path fill="currentColor" fill-rule="evenodd" d="M10.6 2.1h2.8l.4 2.2c.6.2 1.2.4 1.7.8l1.9-1.2 2 2-1.2 1.9c.4.5.6 1.1.8 1.7l2.2.4v2.8l-2.2.4c-.2.6-.4 1.2-.8 1.7l1.2 1.9-2 2-1.9-1.2c-.5.4 1.1-.6-1.7.8l-.4 2.2h-2.8l-.4-2.2a7.2 7.2 0 0 1-1.7-.8l-1.9 1.2-2-2 1.2-1.9a7.2 7.2 0 0 1-.8-1.7l-2.2-.4v-2.8l2.2-.4c.2-.6.4-1.2.8-1.7L4.6 5.9l2-2 1.9 1.2c.5-.4 1.1-.6 1.7-.8l.4-2.2ZM12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z"/>
+      </symbol>
+      <!-- Faceted Crystalline Star Core -->
+      <symbol id="ico-star" viewBox="0 0 24 24">
+        <path fill="currentColor" d="M12 1.6 14.9 8.7l7.5.7-5.7 4.9 1.7 7.4L12 17.8l-6.4 3.9 1.7-7.4-5.7-4.9 7.5-.7L12 1.6Z"/>
+      </symbol>
+      <!-- Hollow Star Core -->
+      <symbol id="ico-star-empty" viewBox="0 0 24 24">
+        <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" d="M12 2.4 14.6 8.9l6.9.6-5.2 4.5 1.6 6.8L12 17.2l-5.9 3.6 1.6-6.8-5.2-4.5 6.9-.6L12 2.4Z"/>
+      </symbol>
+      <!-- Summit Monolith Crown -->
+      <symbol id="ico-crown" viewBox="0 0 24 24">
+        <path fill="currentColor" d="M3 18.5h18v2H3v-2Zm1.2-2L2.5 7.2l5.2 3.6L12 4.2l4.3 6.6 5.2-3.6-1.7 9.3H4.2Z"/>
+      </symbol>
+      <!-- Trophy Chalice -->
+      <symbol id="ico-trophy" viewBox="0 0 24 24">
+        <path fill="currentColor" d="M6 3h12v2h3v3.5c0 2.5-1.8 4.6-4.3 4.9A6.02 6.02 0 0 1 13 16.9V19h3.5v2h-9v-2H11v-2.1a6.02 6.02 0 0 1-3.7-3.5C4.8 13.1 3 11 3 8.5V5h3V3Zm-1 4v1.5c0 1.3.9 2.5 2.1 2.8V7H5Zm14 0h-2.1v4.3c1.2-.3 2.1-1.5 2.1-2.8V7Z"/>
+      </symbol>
+      <!-- Nautical Astrolabe Sea Chart Compass -->
+      <symbol id="ico-map" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="1.6"/>
+        <path fill="currentColor" d="M12 4.2 14.1 9.9 19.8 12l-5.7 2.1L12 19.8l-2.1-5.7L4.2 12l5.7-2.1L12 4.2Z"/>
+      </symbol>
+      <!-- Amphibian Pogo Silhouette Crest -->
+      <symbol id="ico-pogo" viewBox="0 0 24 26">
+        <path fill="currentColor" fill-rule="evenodd" d="M12 1.5C6.1 1.5 2 5.9 2 11.6C2 16.8 6.4 23.6 12 24.5C17.6 23.6 22 16.8 22 11.6C22 5.9 17.9 1.5 12 1.5ZM5.4 10.6C5.8 9.4 7.7 9.7 9.4 10.7C11.0 11.6 11.7 13.1 11.1 14.0C10.5 14.9 8.7 14.8 7.1 13.9C5.5 13.0 5.0 11.7 5.4 10.6ZM18.6 10.6C19.0 11.7 18.5 13.0 16.9 13.9C15.3 14.8 13.5 14.9 12.9 14.0C12.3 13.1 13.0 11.6 14.6 10.7C16.3 9.7 18.2 9.4 18.6 10.6Z"/>
+      </symbol>
+      <!-- Close Crosshair -->
+      <symbol id="ico-close" viewBox="0 0 24 24">
+        <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/>
+      </symbol>
+      <!-- Faceted Prestige Diamond -->
+      <symbol id="ico-diamond" viewBox="0 0 24 24">
+        <path fill="currentColor" fill-opacity="0.25" d="M6.5 3.5h11L22 9.5 12 21 2 9.5l4.5-6Z"/>
+        <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" d="M6.5 3.5h11L22 9.5 12 21 2 9.5l4.5-6ZM2 9.5h20M6.5 3.5 9.2 9.5 12 21l2.8-11.5 2.7-6"/>
+      </symbol>
+      <!-- Etched Destructo Inc. Relic Lore Tablet -->
+      <symbol id="ico-relic" viewBox="0 0 24 24">
+        <path fill="currentColor" fill-opacity="0.18" d="M6 2.8h9.5L19 6.3V20a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 20V4.3A1.5 1.5 0 0 1 6.5 2.8Z"/>
+        <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" d="M6.5 2.8h9L19 6.3V20a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 20V4.3A1.5 1.5 0 0 1 6.5 2.8ZM8.5 9h7M8.5 12.5h7M8.5 16h4.5"/>
+      </symbol>
+      <!-- Cryo-Blaster Emitter -->
+      <symbol id="ico-blaster" viewBox="0 0 24 24">
+        <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M3 10h11l2.5-2h3.5v5h-3.5L14 11H8.5l-1.8 5.5H4.2L5.5 11H3v-1Zm17.5.5h2.5"/>
+      </symbol>
+      <!-- Tinker Workbench Wrench -->
+      <symbol id="ico-craft" viewBox="0 0 24 24">
+        <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M14.7 6.3a4.5 4.5 0 0 0-5.8 5.8L4 17l3 3 4.9-4.9a4.5 4.5 0 0 0 5.8-5.8l-2.6 2.6-2-2 1.6-3.6Z"/>
+      </symbol>
+      <!-- Ornate Compass Treasure Key -->
+      <symbol id="ico-key" viewBox="0 0 24 24">
+        <circle cx="8" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12.2 12H21v3.2M17.5 12v2.6"/>
+      </symbol>
+      <!-- Crystalline Exploration Curio -->
+      <symbol id="ico-curio" viewBox="0 0 24 24">
+        <path fill="currentColor" fill-opacity="0.22" d="M12 2.2 19 8.5l-2.8 12.3H7.8L5 8.5 12 2.2Z"/>
+        <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" d="M12 2.2 19 8.5l-2.8 12.3H7.8L5 8.5 12 2.2ZM12 2.2v18.6M5 8.5h14"/>
+      </symbol>
+      <!-- Cinematic Slate / Replay Play Badge -->
+      <symbol id="ico-film" viewBox="0 0 24 24">
+        <rect x="3" y="5" width="18" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.7"/>
+        <path fill="currentColor" d="M10 9l6 3-6 3V9Z"/>
+      </symbol>
+      <!-- Simulation Portal Astrolabe -->
+      <symbol id="ico-arcade" viewBox="0 0 24 24">
+        <polygon points="12,2.4 20.3,7.2 20.3,16.8 12,21.6 3.7,16.8 3.7,7.2" fill="currentColor" fill-opacity="0.16" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+        <path fill="currentColor" d="M10 8.5l6.2 3.5L10 15.5v-7Z"/>
+      </symbol>
+    </defs>
+  </svg>
 
-      <div class="hud-center">
-        <div class="hud-tower-row">
-          <span id="dir-arrow" class="dir-arrow" title="Exit direction">▲</span>
-          <span id="tower-badge" class="tower-badge">T1</span>
-        </div>
-        <div class="timer-shell">
-          <div id="timer-display" class="hud-timer">090:0</div>
-        </div>
-      </div>
-
-      <div class="hud-right">
-        <div class="hud-label">HIGH SCORE</div>
-        <div id="hi-score-display" class="hud-score">00000000</div>
-        <div class="hud-actions">
-          <button id="btn-music" class="hud-icon-btn" type="button" aria-label="Toggle Music">🎵</button>
-          <button id="btn-sound" class="hud-icon-btn" type="button" aria-label="Toggle Sound">🔊</button>
-          <button id="btn-pause" class="hud-icon-btn" type="button" aria-label="Pause Game">⏸</button>
-        </div>
-      </div>
-    </header>
-
-    <!-- Main 60fps Cylindrical Tower / Submarine Canvas -->
+  <div id="app" data-era="reboot" data-control-mode="gesture" data-title-open="true">
+    <!-- Full-Bleed 100vw x 100dvh 3D Stage -->
     <main id="stage-wrap">
       <canvas id="game-canvas"></canvas>
 
-      <!-- Vertical Tower Altitude Meter -->
-      <div id="altitude-meter" class="altitude-meter" aria-label="Tower Altitude">
-        <div class="alt-crown">👑</div>
+      <!-- Right-Edge Vertical Tower Altitude & Rising Sea Meter -->
+      <div id="altitude-meter" class="altitude-meter hidden" aria-label="Tower Altitude">
+        <div class="alt-crown" title="Summit Exit">
+          <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-crown"/></svg>
+        </div>
         <div class="alt-track">
+          <div id="alt-water" class="alt-water" title="Rising Sea Level"></div>
           <div id="alt-fill" class="alt-fill"></div>
           <div id="alt-pip" class="alt-pip"></div>
         </div>
       </div>
 
       <!-- Contextual Action Prompt Pill -->
-      <div id="action-prompt" class="action-prompt hidden">▲ ENTER PORTAL</div>
+      <div id="action-prompt" class="action-prompt hidden">ENTER DOORWAY</div>
 
-      <!-- Floating Toast for Tower Name / Bonus -->
+      <!-- Cinematic Sector / Tower Toast Banner -->
       <div id="stage-banner" class="stage-banner hidden">
-        <div id="banner-sub" class="banner-sub">TOWER 1</div>
-        <div id="banner-title" class="banner-title">THE TOWER OF EYES</div>
+        <div id="banner-sub" class="banner-sub">SECTOR I • STORM APPROACH</div>
+        <div id="banner-title" class="banner-title">WATCHTOWER OF THE MIST</div>
       </div>
 
-      <!-- Hero Title / Start Overlay -->
-      <div id="overlay-title" class="overlay overlay-hero">
-        <div class="modal-card modal-hero">
-          <div class="retro-pill">ATARI 7800 CLASSIC • 2026 EDITION</div>
-          <h1 class="game-title">
-            <span class="title-top">TOWER</span>
-            <span class="title-bot">TOPPLER <span class="title-yr">'26</span></span>
-          </h1>
-          <p class="game-tagline">
-            Scale 8 rotating 3D towers on planet Nebulus, dodge mutant molecules, fire your snowball gun, and pilot the MK.7 Mini-Submarine!
-          </p>
-
-          <div class="controls-preview">
-            <div class="ctrl-item"><span class="ctrl-badge">🕹️</span> <strong>D-Pad / Drag</strong> Walk, Doors &amp; Lifts</div>
-            <div class="ctrl-item"><span class="ctrl-badge">▲</span> <strong>JUMP / Swipe</strong> Hop Gaps &amp; Ledges</div>
-            <div class="ctrl-item"><span class="ctrl-badge">❄️</span> <strong>FIRE / Tap</strong> Snowball &amp; Call Lift</div>
-          </div>
-
-          <button id="btn-start" class="btn-primary btn-launch" type="button">
-            <span class="btn-glow"></span>
-            <span class="btn-text">LAUNCH MISSION</span>
-          </button>
-
-          <div class="tower-select-row">
-            <label for="start-tower">DROP ZONE</label>
-            <select id="start-tower">
-              <option value="0">1. The Tower of Eyes</option>
-              <option value="1">2. The Realm of Robots</option>
-              <option value="2">3. Trap of Tricks</option>
-              <option value="3">4. Slippery Slide</option>
-              <option value="4">5. Broken Path</option>
-              <option value="5">6. Swimmer's Delight</option>
-              <option value="6">7. Nasty One</option>
-              <option value="7">8. Edge of Doom</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <!-- Pause Overlay -->
-      <div id="overlay-pause" class="overlay hidden">
-        <div class="modal-card">
-          <div class="retro-pill">SYSTEM STANDBY</div>
-          <h2 class="modal-heading">PAUSED</h2>
-          <p id="pause-tower-name" class="modal-sub">Tower 1: The Tower of Eyes</p>
-          <button id="btn-resume" class="btn-primary" type="button">RESUME</button>
-          <button id="btn-restart" class="btn-secondary" type="button">RESTART MISSION</button>
-        </div>
-      </div>
-
-      <!-- Game Over / Victory Overlay -->
-      <div id="overlay-gameover" class="overlay hidden">
-        <div class="modal-card">
-          <div id="go-badge" class="retro-pill">MISSION ENDED</div>
-          <h2 id="go-title" class="modal-heading">GAME OVER</h2>
-          <div class="final-stats">
-            <div class="stat-box">
-              <span class="stat-lbl">FINAL SCORE</span>
-              <span id="go-score" class="stat-val">0</span>
-            </div>
-            <div class="stat-box">
-              <span class="stat-lbl">HIGH SCORE</span>
-              <span id="go-hi" class="stat-val">0</span>
-            </div>
-          </div>
-          <button id="btn-play-again" class="btn-primary" type="button">PLAY AGAIN</button>
+      <!-- Trophy Unlock Toast -->
+      <div id="trophy-toast" class="trophy-toast hidden" role="status" aria-live="polite">
+        <span class="trophy-toast-icon">
+          <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-trophy"/></svg>
+        </span>
+        <div class="trophy-toast-body">
+          <span id="trophy-toast-kicker" class="trophy-toast-lbl">TROPHY UNLOCKED • +5 PTS</span>
+          <span id="trophy-toast-title" class="trophy-toast-title">Monolith Breaker</span>
         </div>
       </div>
     </main>
 
-    <!-- Pro Mobile Touch Controls -->
+    <!-- Floating Transparent Reference-Matched Top HUD -->
+    <header id="hud" aria-label="Game Status">
+      <!-- Top-Left: PLAYER ONE + Score + Alien-Frog SVG Lives -->
+      <div class="hud-left">
+        <div class="hud-label">PLAYER ONE</div>
+        <div id="score-display" class="hud-score">00000000</div>
+        <div id="lives-display" class="hud-lives" aria-label="Lives"></div>
+      </div>
+
+      <!-- Top-Center: TIME + Amber Readout + Depleting SVG Circular Ring Gauge -->
+      <div class="hud-center">
+        <div class="hud-time-cluster">
+          <div class="hud-time-stack">
+            <span class="hud-time-label">TIME</span>
+            <div id="timer-display" class="hud-timer">095</div>
+            <div class="hud-tower-meta">
+              <span id="dir-arrow" class="dir-arrow" title="Exit direction">
+                <svg class="ico-dir" viewBox="0 0 12 12"><path d="M2 8.5L6 3.5L10 8.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <span id="tower-badge" class="tower-badge">T1</span>
+            </div>
+          </div>
+          <div class="timer-ring-wrap">
+            <svg id="timer-ring" class="timer-ring" viewBox="0 0 48 48" aria-hidden="true">
+              <circle class="timer-ring-outer" cx="24" cy="24" r="22.2" />
+              <circle class="timer-ring-track" cx="24" cy="24" r="19" />
+              <circle id="timer-ring-arc" class="timer-ring-arc" cx="24" cy="24" r="19" />
+            </svg>
+          </div>
+        </div>
+        <div id="mission-status-pill" class="mission-status-pill hidden"></div>
+      </div>
+
+      <!-- Top-Right: Ghosted HIGH SCORE + Gears & Hairline Vector Utility Pills -->
+      <div class="hud-right">
+        <div class="hud-label hud-label-ghost">HIGH SCORE</div>
+        <div id="hi-score-display" class="hud-score hud-score-ghost">00000000</div>
+        <div class="hud-utility-row">
+          <span class="gears-pill" title="Golden Gears">
+            <svg class="ico-svg ico-gear-gold" viewBox="0 0 24 24"><use href="#ico-gear"/></svg>
+            <span id="gears-display">0</span>
+          </span>
+          <button id="btn-era-toggle" class="hud-icon-btn hud-pill-btn" type="button" title="Switch Era ('26 / '87)">'26</button>
+          <button id="btn-ctrl-mode" class="hud-icon-btn hud-pill-btn" type="button" aria-label="Switch Control Scheme" title="Switch Control Scheme"></button>
+          <button id="btn-music" class="hud-icon-btn" type="button" aria-label="Toggle Music" title="Toggle Music"></button>
+          <button id="btn-sound" class="hud-icon-btn" type="button" aria-label="Toggle Sound" title="Toggle Sound"></button>
+          <button id="btn-pause" class="hud-icon-btn" type="button" aria-label="Pause Game" title="Pause">
+            <svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="7" y="5" width="3.2" height="14" rx="1" fill="currentColor" />
+              <rect x="13.8" y="5" width="3.2" height="14" rx="1" fill="currentColor" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Minimal Hairline Ghosted Touch Controls -->
     <footer id="touch-controls" aria-label="Touch Controls">
+      <div class="corner-bracket corner-bl" aria-hidden="true"></div>
+      <div class="corner-bracket corner-br" aria-hidden="true"></div>
+
       <div class="touch-left">
+        <!-- Mode 1: Tuned Gesture Minimal Corner Reticle -->
+        <div class="gesture-hint" aria-hidden="true">
+          <svg class="gesture-reticle-svg" viewBox="0 0 28 28">
+            <circle cx="14" cy="14" r="11.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="4 3"/>
+            <path d="M9 14h10M14 9v10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+          <span class="gesture-glyph">SLIDE • FLICK • TAP</span>
+        </div>
+
+        <!-- Mode 2: Virtual Analog Joystick -->
+        <div id="joystick-zone" class="joystick-zone" role="group" aria-label="Virtual Joystick">
+          <div id="joystick-ring" class="joystick-ring">
+            <span class="joy-tick joy-n"></span>
+            <span class="joy-tick joy-e"></span>
+            <span class="joy-tick joy-s"></span>
+            <span class="joy-tick joy-w"></span>
+            <div id="joystick-puck" class="joystick-puck"></div>
+          </div>
+        </div>
+
+        <!-- Mode 3: Hairline 4-Way Slide D-Pad -->
         <div id="dpad" class="dpad" role="group" aria-label="Directional Pad">
           <div class="dpad-ring" aria-hidden="true"></div>
-          <button class="dpad-btn dpad-up" data-dir="up" type="button" aria-label="Up">▲</button>
-          <button class="dpad-btn dpad-left" data-dir="left" type="button" aria-label="Left">◀</button>
+          <button class="dpad-btn dpad-up" data-dir="up" type="button" aria-label="Up">
+            <svg class="dpad-chev" viewBox="0 0 16 16"><path d="M3.5 10.5L8 5.5l4.5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button class="dpad-btn dpad-left" data-dir="left" type="button" aria-label="Left">
+            <svg class="dpad-chev" viewBox="0 0 16 16"><path d="M10.5 3.5L5.5 8l5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
           <div class="dpad-center" aria-hidden="true">
             <div id="dpad-puck" class="dpad-puck"></div>
           </div>
-          <button class="dpad-btn dpad-right" data-dir="right" type="button" aria-label="Right">▶</button>
-          <button class="dpad-btn dpad-down" data-dir="down" type="button" aria-label="Down">▼</button>
+          <button class="dpad-btn dpad-right" data-dir="right" type="button" aria-label="Right">
+            <svg class="dpad-chev" viewBox="0 0 16 16"><path d="M5.5 3.5L10.5 8l-5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button class="dpad-btn dpad-down" data-dir="down" type="button" aria-label="Down">
+            <svg class="dpad-chev" viewBox="0 0 16 16"><path d="M3.5 5.5L8 10.5l4.5-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+
+        <!-- Mode 4: Tilt / Motion Spirit Level + Calibrate -->
+        <div class="tilt-cluster">
+          <div id="tilt-bar" class="tilt-bar" aria-label="Tilt Roll Indicator">
+            <span class="tilt-center-mark"></span>
+            <div id="tilt-puck" class="tilt-puck"></div>
+          </div>
+          <button id="btn-calibrate-tilt" class="tilt-cal-btn" type="button">CALIBRATE</button>
         </div>
       </div>
 
+      <!-- Hairline Right-Corner Bespoke Action Reticles -->
       <div class="touch-right">
-        <button id="btn-fire" class="action-btn action-fire" type="button" aria-label="Fire Snowball">
-          <span class="action-icon">❄️</span>
-          <span class="action-lbl">FIRE</span>
+        <button id="btn-fire" class="action-btn action-fire" type="button" aria-label="Fire Cryo-Blaster">
+          <svg class="reticle-svg" viewBox="0 0 44 44" aria-hidden="true">
+            <circle cx="22" cy="22" r="18.5" fill="none" stroke="currentColor" stroke-width="1.4" />
+            <circle cx="22" cy="22" r="13.5" fill="none" stroke="currentColor" stroke-width="0.8" stroke-dasharray="3 3" opacity="0.7" />
+            <g stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <line x1="22" y1="13.5" x2="22" y2="30.5" />
+              <line x1="14.6" y1="17.7" x2="29.4" y2="26.3" />
+              <line x1="29.4" y1="17.7" x2="14.6" y2="26.3" />
+            </g>
+            <circle cx="22" cy="22" r="2.2" fill="currentColor" />
+          </svg>
+          <span class="action-lbl">CRYO</span>
         </button>
         <button id="btn-jump" class="action-btn action-jump" type="button" aria-label="Jump">
-          <span class="action-icon">▲</span>
+          <svg class="reticle-svg" viewBox="0 0 48 48" aria-hidden="true">
+            <circle cx="24" cy="24" r="20.5" fill="none" stroke="currentColor" stroke-width="1.5" />
+            <path d="M16.5 25.5L24 17.5L31.5 25.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            <path d="M19 30.5L24 25.2L29 30.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.75" />
+          </svg>
           <span class="action-lbl">JUMP</span>
         </button>
       </div>
     </footer>
+
+    <!-- ================= DIEGETIC AAA CONSOLE OVERLAYS ================= -->
+
+    <!-- 1. Full-Bleed Live 3D Diorama Start Screen (Zero Center Box, Zero Blur) -->
+    <div id="overlay-title" class="overlay overlay-hero">
+      <!-- Hidden synced accessibility / contract hooks -->
+      <div class="sr-only" aria-hidden="true">
+        <span id="title-sub-era">OPERATION NEBULUS '26</span>
+        <p id="title-tagline">Scale 8 storm-lashed oceanic monoliths.</p>
+        <label for="start-tower">Sector</label>
+        <select id="start-tower"></select>
+        <input id="toggle-zen" type="checkbox" />
+        <label for="select-control-mode">Controls</label>
+        <select id="select-control-mode">
+          <option value="gesture">TUNED GESTURE</option>
+          <option value="joystick">VIRTUAL STICK</option>
+          <option value="dpad">CLASSIC D-PAD</option>
+          <option value="tilt">MOTION TILT</option>
+        </select>
+      </div>
+
+      <!-- (a) Top Diegetic Command Bar: Sculpted Era Medallion + Astrolabe Tuning Pill -->
+      <div class="title-top-bar">
+        <div class="era-switcher era-medallion-switch" role="tablist" aria-label="Game Era">
+          <button class="era-tab active" data-era-select="reboot" type="button" role="tab" aria-selected="true">
+            '26 REBOOT
+          </button>
+          <button class="era-tab" data-era-select="original" type="button" role="tab" aria-selected="false">
+            '87 CLASSIC
+          </button>
+        </div>
+
+        <div class="title-gear-wrap">
+          <button id="btn-title-settings" class="title-settings-btn" type="button" aria-expanded="false" aria-controls="title-settings-drawer" title="Controls, Zen &amp; Audio">
+            <svg class="ico-svg ico-gear-gold" viewBox="0 0 24 24"><use href="#ico-gear"/></svg>
+            <span id="title-ctrl-glyph" class="title-ctrl-glyph"></span>
+            <span id="title-ctrl-code" class="title-ctrl-code">GESTURE</span>
+          </button>
+
+          <!-- Diegetic Radial / Chamfered Tuning Popover -->
+          <div id="title-settings-drawer" class="title-settings-drawer title-radial-popover hidden" role="region" aria-label="Mission Tuning">
+            <span class="popover-section-lbl">ZEN &amp; AUDIO</span>
+            <button id="btn-zen-pill" class="zen-pill-btn" type="button" aria-pressed="false">
+              <span id="zen-pill-label">CASUAL ZEN • OFF</span>
+              <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-curio"/></svg>
+            </button>
+            <div class="ctrl-pills-grid">
+              <button id="btn-title-music" class="ctrl-pill-btn" type="button" aria-label="Toggle Music" title="Toggle Music"></button>
+              <button id="btn-title-sound" class="ctrl-pill-btn" type="button" aria-label="Toggle Sound" title="Toggle Sound"></button>
+            </div>
+
+            <span class="popover-section-lbl">TOUCH CONTROLS</span>
+            <div class="ctrl-pills-grid" role="radiogroup" aria-label="Touch Control Scheme">
+              <button class="ctrl-pill-btn active" data-ctrl-pick="gesture" type="button">
+                <span class="ctrl-pill-ico" data-ctrl-ico="gesture"></span>
+                <span>GESTURE</span>
+              </button>
+              <button class="ctrl-pill-btn" data-ctrl-pick="joystick" type="button">
+                <span class="ctrl-pill-ico" data-ctrl-ico="joystick"></span>
+                <span>STICK</span>
+              </button>
+              <button class="ctrl-pill-btn" data-ctrl-pick="dpad" type="button">
+                <span class="ctrl-pill-ico" data-ctrl-ico="dpad"></span>
+                <span>D-PAD</span>
+              </button>
+              <button class="ctrl-pill-btn" data-ctrl-pick="tilt" type="button">
+                <span class="ctrl-pill-ico" data-ctrl-ico="tilt"></span>
+                <span>TILT</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- (b) Sculpted Chiseled Stone-and-Brass Box-Art Crest -->
+      <div id="title-crest-stage" class="title-crest-stage" role="banner" aria-label="Tower Toppler Operation Nebulus"></div>
+
+      <!-- (c) 100% Crystal-Clear Center Live 3D Diorama Window (Tap Pogo / Watchtower to Deploy!) -->
+      <div id="title-diorama-stage" class="title-diorama-stage" role="button" tabindex="0" aria-label="Tap Live 3D Watchtower Diorama to Ascend"></div>
+
+      <!-- (d) Bottom Sculpted Astrolabe Command Dock -->
+      <div class="title-command-dock">
+        <!-- Expandable 3-Spire Illustrated Expeditions Triptych -->
+        <div id="expeditions-drawer" class="expeditions-drawer is-floating hidden" role="region" aria-label="Monolith Expeditions">
+          <div class="expeditions-header-row">
+            <span class="expeditions-kicker">3 MONOLITH EXPEDITIONS</span>
+            <button id="btn-close-expeditions" class="btn-icon-close" type="button" aria-label="Close Expeditions">
+              <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-close"/></svg>
+            </button>
+          </div>
+          <div class="expedition-spires-row">
+            <button id="btn-daily" class="expedition-spire-card mode-card" type="button">
+              <div id="spire-art-daily" style="display:contents" aria-hidden="true"></div>
+              <div class="spire-copy">
+                <span class="mode-card-kicker">UTC SEEDED</span>
+                <span class="mode-card-title">DAILY TOWER</span>
+                <span id="daily-meta" class="mode-card-meta">20F CLIMB</span>
+              </div>
+            </button>
+
+            <button id="btn-endless" class="expedition-spire-card mode-card" type="button">
+              <div id="spire-art-endless" style="display:contents" aria-hidden="true"></div>
+              <div class="spire-copy">
+                <span class="mode-card-kicker">ABYSSAL ROGUE</span>
+                <span class="mode-card-title">ENDLESS ABYSS</span>
+                <span id="endless-meta" class="mode-card-meta">INFINITE</span>
+              </div>
+            </button>
+
+            <button id="btn-casual-endless" class="expedition-spire-card mode-card mode-card-casual" type="button">
+              <div id="spire-art-casual" style="display:contents" aria-hidden="true"></div>
+              <div class="spire-copy">
+                <span class="mode-card-kicker">ZERO FOES • CRAFT</span>
+                <span class="mode-card-title">ENDLESS CASUAL</span>
+                <span id="casual-meta" class="mode-card-meta">CURIOS</span>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Central Sculpted Astrolabe Hero Play Medallion + Tappable Sector Crown Ribbon -->
+        <div class="hero-play-wrap">
+          <button id="btn-hero-sector" class="hero-sector-ribbon" type="button" title="Open Archipelago Sea Chart">
+            <svg class="ico-svg ico-cyan" viewBox="0 0 24 24"><use href="#ico-map"/></svg>
+            <span id="hero-sector-name" class="hero-sector-name">T1 • WATCHTOWER OF THE MIST</span>
+            <span id="selected-tower-stars" class="tower-stars-inline" title="Earned Sector Star Cores"></span>
+          </button>
+
+          <button id="btn-start" class="hero-play-medallion btn-primary btn-launch" type="button">
+            <div id="play-medallion-svg" style="display:contents" aria-hidden="true"></div>
+            <span id="hero-play-kicker" class="hero-play-sub">SECTOR I • OPERATION NEBULUS</span>
+            <span id="hero-play-label" class="btn-text">ASCEND MONOLITH</span>
+          </button>
+        </div>
+
+        <!-- Curved 5-Crest Sculpted Stone-and-Brass Medallion Dock -->
+        <nav class="diegetic-dock-row" aria-label="Sanctum Navigation">
+          <button id="btn-expeditions" class="dock-crest-btn" type="button" aria-expanded="false" aria-controls="expeditions-drawer">
+            <span class="dock-crest-icon">
+              <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-crown"/></svg>
+            </span>
+            <span class="dock-crest-lbl">EXPEDITIONS</span>
+            <span class="dock-crest-badge meta-badge">3</span>
+          </button>
+
+          <button id="btn-worlds" class="dock-crest-btn" type="button" title="Archipelago Sea Chart">
+            <span class="dock-crest-icon">
+              <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-map"/></svg>
+            </span>
+            <span class="dock-crest-lbl">SEA CHART</span>
+            <span id="worlds-dock-badge" class="dock-crest-badge meta-badge">1/8</span>
+          </button>
+
+          <button id="btn-minigames" class="dock-crest-btn" type="button" title="3D Simulations Arcade">
+            <span class="dock-crest-icon">
+              <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-arcade"/></svg>
+            </span>
+            <span class="dock-crest-lbl">ARCADE</span>
+            <span class="dock-crest-badge meta-badge">5</span>
+          </button>
+
+          <button id="btn-wardrobe" class="dock-crest-btn" type="button" title="Armory &amp; 3D Wardrobe">
+            <span class="dock-crest-icon">
+              <svg class="ico-svg" viewBox="0 0 24 26"><use href="#ico-pogo"/></svg>
+            </span>
+            <span class="dock-crest-lbl">ARMORY</span>
+            <span id="wardrobe-btn-badge" class="dock-crest-badge meta-badge">1/8</span>
+          </button>
+
+          <button id="btn-trophies" class="dock-crest-btn" type="button" title="Reliquary &amp; Honors">
+            <span class="dock-crest-icon">
+              <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-trophy"/></svg>
+            </span>
+            <span class="dock-crest-lbl">RELIQUARY</span>
+            <span id="trophies-btn-badge" class="dock-crest-badge meta-badge">0 PTS</span>
+          </button>
+        </nav>
+      </div>
+    </div>
+
+    <!-- 2. Nautical Storm & Abyssal Sonar Archipelago Sea Chart -->
+    <div id="overlay-worlds" class="overlay hidden">
+      <div class="modal-card modal-wide sea-chart-modal">
+        <span class="card-corner cc-tl" aria-hidden="true"></span>
+        <span class="card-corner cc-tr" aria-hidden="true"></span>
+        <span class="card-corner cc-bl" aria-hidden="true"></span>
+        <span class="card-corner cc-br" aria-hidden="true"></span>
+
+        <div class="modal-header-row modal-header-compact">
+          <div>
+            <div id="worlds-kicker" class="retro-pill">OPERATION NEBULUS • SEA CHART</div>
+            <h2 class="modal-heading">ARCHIPELAGO CHART</h2>
+          </div>
+          <div class="header-right-cluster">
+            <span id="worlds-stars-pill" class="stars-pill">0 / 24</span>
+            <button id="btn-close-worlds" class="btn-icon-close" type="button" aria-label="Close Sea Chart">
+              <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-close"/></svg>
+            </button>
+          </div>
+        </div>
+        <div id="worlds-map-list" class="worlds-map-list"></div>
+      </div>
+    </div>
+
+    <!-- 3. Live 3D Spotlight Armory & Horizontal Medallion Carousel (Top 64% Clear) -->
+    <div id="overlay-wardrobe" class="overlay overlay-drawer hidden">
+      <div class="modal-card modal-wide modal-drawer armory-dock">
+        <div class="modal-header-row modal-header-compact">
+          <div>
+            <div class="retro-pill">LIVE 3D SPOTLIGHT</div>
+            <h2 class="modal-heading">ARMORY &amp; FORGE</h2>
+          </div>
+          <div class="header-right-cluster">
+            <span class="gears-pill gears-pill-lg">
+              <svg class="ico-svg ico-gear-gold" viewBox="0 0 24 24"><use href="#ico-gear"/></svg>
+              <span id="wardrobe-gears">0</span>
+            </span>
+            <button id="btn-close-wardrobe" class="btn-icon-close" type="button" aria-label="Close Armory">
+              <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-close"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="sub-tabs-row" role="tablist" aria-label="Armory Category">
+          <button class="sub-tab-btn active" data-wardrobe-tab="skins" type="button" role="tab" aria-selected="true">
+            <svg class="ico-svg" viewBox="0 0 24 26"><use href="#ico-pogo"/></svg>
+            <span id="wardrobe-skins-tab-lbl">POGO SKINS (8)</span>
+          </button>
+          <button class="sub-tab-btn" data-wardrobe-tab="blaster" type="button" role="tab" aria-selected="false">
+            <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-blaster"/></svg>
+            <span id="wardrobe-blaster-tab-lbl">CRYO-BLASTER FX (6)</span>
+          </button>
+        </div>
+
+        <div id="wardrobe-grid" class="wardrobe-grid armory-carousel"></div>
+        <div id="blaster-fx-grid" class="wardrobe-grid armory-carousel hidden"></div>
+      </div>
+    </div>
+
+    <!-- 4. Sunken Brass Reliquary: 100 Trophies (1,000 PTS), Relic Stele Tablets & Curios -->
+    <div id="overlay-trophies" class="overlay hidden">
+      <div class="modal-card modal-wide modal-tall reliquary-modal">
+        <span class="card-corner cc-tl" aria-hidden="true"></span>
+        <span class="card-corner cc-tr" aria-hidden="true"></span>
+        <span class="card-corner cc-bl" aria-hidden="true"></span>
+        <span class="card-corner cc-br" aria-hidden="true"></span>
+
+        <div class="modal-header-row modal-header-compact">
+          <div>
+            <div class="retro-pill">SUNKEN BRASS RELIQUARY</div>
+            <h2 class="modal-heading">HONORS &amp; ARCHIVES</h2>
+          </div>
+          <div class="header-right-cluster">
+            <span id="total-stars-display" class="stars-pill">0 / 48</span>
+            <button id="btn-close-trophies" class="btn-icon-close" type="button" aria-label="Close Reliquary">
+              <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-close"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- 0 / 1,000 PTS Trophy Score Progress Bar -->
+        <div class="trophy-score-banner">
+          <div class="ts-top-row">
+            <span id="trophy-rank-lbl" class="ts-rank">RANK • AMPHIBIOUS CADET</span>
+            <span id="trophy-pts-display" class="ts-pts">0 / 1,000 PTS (0/100)</span>
+          </div>
+          <div class="ts-track">
+            <div id="trophy-pts-fill" class="ts-fill"></div>
+          </div>
+        </div>
+
+        <!-- View Tabs: 100 Trophies vs 8/8 Relics vs 12/12 Exploration Curios -->
+        <div class="sub-tabs-row sub-tabs-3" role="tablist" aria-label="Reliquary View">
+          <button class="sub-tab-btn active" data-trophy-view="trophies" type="button" role="tab" aria-selected="true">
+            <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-trophy"/></svg>
+            <span id="trophies-view-tab-lbl">TROPHIES (0/100)</span>
+          </button>
+          <button class="sub-tab-btn" data-trophy-view="relics" type="button" role="tab" aria-selected="false">
+            <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-relic"/></svg>
+            <span id="relics-view-tab-lbl">RELICS (0/8)</span>
+          </button>
+          <button class="sub-tab-btn" data-trophy-view="curios" type="button" role="tab" aria-selected="false">
+            <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-curio"/></svg>
+            <span id="curios-view-tab-lbl">CURIOS (0/12)</span>
+          </button>
+        </div>
+
+        <!-- Tier Filter Pills (All / Aluminum / Copper / Platinum / Diamond) -->
+        <div id="trophy-tier-filters" class="tier-filters-row" role="group" aria-label="Filter by Trophy Tier">
+          <button class="tier-pill active" data-tier-filter="all" type="button">ALL (100)</button>
+          <button class="tier-pill tier-pill-aluminum" data-tier-filter="aluminum" type="button">ALUM (50)</button>
+          <button class="tier-pill tier-pill-copper" data-tier-filter="copper" type="button">COPPER (30)</button>
+          <button class="tier-pill tier-pill-platinum" data-tier-filter="platinum" type="button">PLAT (15)</button>
+          <button class="tier-pill tier-pill-diamond" data-tier-filter="diamond" type="button">DIAMOND (5)</button>
+        </div>
+
+        <div id="trophies-grid" class="trophies-grid"></div>
+        <div id="relic-codex-list" class="relic-codex-list hidden"></div>
+        <div id="curio-codex-list" class="relic-codex-list hidden"></div>
+      </div>
+    </div>
+
+    <!-- 5. 5-Simulation Illustrated Arched Diorama Portals Arcade -->
+    <div id="overlay-minigames" class="overlay hidden">
+      <div class="modal-card modal-wide arcade-modal">
+        <span class="card-corner cc-tl" aria-hidden="true"></span>
+        <span class="card-corner cc-tr" aria-hidden="true"></span>
+        <span class="card-corner cc-bl" aria-hidden="true"></span>
+        <span class="card-corner cc-br" aria-hidden="true"></span>
+
+        <div class="modal-header-row modal-header-compact">
+          <div>
+            <div class="retro-pill">5 PLAYABLE 3D DIORAMAS</div>
+            <h2 class="modal-heading">SIMULATION PORTALS</h2>
+          </div>
+          <button id="btn-close-minigames" class="btn-icon-close" type="button" aria-label="Close Arcade">
+            <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-close"/></svg>
+          </button>
+        </div>
+
+        <div class="minigames-list arcade-portals-list">
+          <!-- 1. MK.7 Sub-Hunter -->
+          <button class="arcade-portal-card minigame-launch-card" data-minigame="submarine" type="button">
+            <div data-portal-art="submarine" style="display:contents" aria-hidden="true"></div>
+            <div class="mg-info">
+              <div class="portal-kicker">ABYSSAL TRENCH • SONAR &amp; CRYO</div>
+              <div class="mg-title">MK.7 SUB-HUNTER</div>
+              <div class="mg-desc">Pilot the manta bathysphere through bioluminescent reefs, encase abyssal fauna, and breach the sunken Warp Cavern.</div>
+            </div>
+            <span class="portal-play-crest mg-play-tag">PLAY</span>
+          </button>
+
+          <!-- 2. The Glide (Sky-Wing) -->
+          <button class="arcade-portal-card minigame-launch-card" data-minigame="glide" type="button">
+            <div data-portal-art="glide" style="display:contents" aria-hidden="true"></div>
+            <div class="mg-info">
+              <div class="portal-kicker">SUMMIT THERMAL • ARCHIPELAGO</div>
+              <div class="mg-title">THE GLIDE (SKY-WING)</div>
+              <div class="mg-desc">Dive off toppling monolith crowns across storm-lashed sea stacks, ride firefly updrafts, and chain 4X Celestial Gates.</div>
+            </div>
+            <span class="portal-play-crest mg-play-tag">PLAY</span>
+          </button>
+
+          <!-- 3. Hydro-Skimmer Run -->
+          <button class="arcade-portal-card minigame-launch-card" data-minigame="skimmer" type="button">
+            <div data-portal-art="skimmer" style="display:contents" aria-hidden="true"></div>
+            <div class="mg-info">
+              <div class="portal-kicker">HIGH-SPEED SWELL SLALOM</div>
+              <div class="mg-title">HYDRO-SKIMMER RUN</div>
+              <div class="mg-desc">Carve howling ocean swells through brass planetary Boost Gates, launch off curling storm crests, and shatter salvage mines.</div>
+            </div>
+            <span class="portal-play-crest mg-play-tag">PLAY</span>
+          </button>
+
+          <!-- 4. Rune-Door Secret Chambers -->
+          <button class="arcade-portal-card minigame-launch-card" data-minigame="puzzle" type="button">
+            <div data-portal-art="puzzle" style="display:contents" aria-hidden="true"></div>
+            <div class="mg-info">
+              <div class="portal-kicker">FLOODED TORCHLIT SANCTUM</div>
+              <div class="mg-title">RUNE PUZZLE CHAMBER</div>
+              <div class="mg-desc">Decipher ancient rune tile matrices, harmonic bronze bells, refracting prism mirror beams, and monolith pressure seals.</div>
+            </div>
+            <span class="portal-play-crest mg-play-tag">PLAY</span>
+          </button>
+
+          <!-- 5. Core Lock Vault -->
+          <button class="arcade-portal-card minigame-launch-card" data-minigame="vault" type="button">
+            <div data-portal-art="vault" style="display:contents" aria-hidden="true"></div>
+            <div class="mg-info">
+              <div class="portal-kicker">3-RING CLOCKWORK ASTROLABE</div>
+              <div class="mg-title">CORE LOCK VAULT</div>
+              <div class="mg-desc">Align three counter-rotating burnished-gold and amethyst astrolabe rings under pressure to extract ancient Star Cores.</div>
+            </div>
+            <span class="portal-play-crest mg-play-tag">PLAY</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. Sculpted Heraldic Pause Crest -->
+    <div id="overlay-pause" class="overlay hidden">
+      <div class="modal-card heraldic-banner pause-banner">
+        <span class="card-corner cc-tl" aria-hidden="true"></span>
+        <span class="card-corner cc-tr" aria-hidden="true"></span>
+        <span class="card-corner cc-bl" aria-hidden="true"></span>
+        <span class="card-corner cc-br" aria-hidden="true"></span>
+
+        <div class="retro-pill">CHRONOMETER SUSPENDED</div>
+        <h2 class="modal-heading">MISSION PAUSED</h2>
+        <p id="pause-tower-name" class="modal-sub">Sector 1: Watchtower of the Mist</p>
+
+        <!-- Hidden synced select preserved for contract compatibility -->
+        <select id="pause-control-mode" class="sr-only" aria-hidden="true" tabindex="-1">
+          <option value="gesture">TUNED GESTURE</option>
+          <option value="joystick">VIRTUAL STICK</option>
+          <option value="dpad">CLASSIC D-PAD</option>
+          <option value="tilt">MOTION TILT</option>
+        </select>
+
+        <div class="pause-settings-box">
+          <div class="pause-ctrl-head">
+            <span class="config-lbl">CONTROL SCHEME</span>
+            <button id="btn-pause-calibrate" class="btn-calibrate-sm hidden" type="button" title="Zero Neutral Tilt Angle">CALIBRATE TILT</button>
+          </div>
+          <div class="pause-ctrl-pills" role="radiogroup" aria-label="Control Scheme">
+            <button class="ctrl-scheme-pill active" data-pause-ctrl="gesture" type="button">
+              <span class="ctrl-pill-ico" data-ctrl-ico="gesture"></span>
+              <span>GESTURE</span>
+            </button>
+            <button class="ctrl-scheme-pill" data-pause-ctrl="joystick" type="button">
+              <span class="ctrl-pill-ico" data-ctrl-ico="joystick"></span>
+              <span>STICK</span>
+            </button>
+            <button class="ctrl-scheme-pill" data-pause-ctrl="dpad" type="button">
+              <span class="ctrl-pill-ico" data-ctrl-ico="dpad"></span>
+              <span>D-PAD</span>
+            </button>
+            <button class="ctrl-scheme-pill" data-pause-ctrl="tilt" type="button">
+              <span class="ctrl-pill-ico" data-ctrl-ico="tilt"></span>
+              <span>TILT</span>
+            </button>
+          </div>
+        </div>
+
+        <button id="btn-resume" class="btn-primary" type="button">RESUME ASCENT</button>
+        <div class="pause-btn-pair">
+          <button id="btn-restart" class="btn-secondary" type="button">RESTART</button>
+          <button id="btn-pause-title" class="btn-secondary" type="button">SANCTUM</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. Sculpted Heraldic Game Over / Victory Crest -->
+    <div id="overlay-gameover" class="overlay hidden">
+      <div id="gameover-card" class="modal-card heraldic-banner gameover-banner" data-outcome="defeat">
+        <span class="card-corner cc-tl" aria-hidden="true"></span>
+        <span class="card-corner cc-tr" aria-hidden="true"></span>
+        <span class="card-corner cc-bl" aria-hidden="true"></span>
+        <span class="card-corner cc-br" aria-hidden="true"></span>
+
+        <div id="go-badge" class="retro-pill">MISSION ENDED</div>
+        <h2 id="go-title" class="modal-heading">GAME OVER</h2>
+
+        <div class="final-stats">
+          <div class="stat-box">
+            <span class="stat-lbl">FINAL SCORE</span>
+            <span id="go-score" class="stat-val">0</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-lbl">HIGH SCORE</span>
+            <span id="go-hi" class="stat-val">0</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-lbl">STAR CORES</span>
+            <span id="go-stars" class="stat-val stat-stars"></span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-lbl">GOLDEN GEARS</span>
+            <span id="go-gears" class="stat-val stat-gears">0</span>
+          </div>
+        </div>
+
+        <button id="btn-play-again" class="btn-primary" type="button">ASCEND AGAIN</button>
+        <button id="btn-back-title" class="btn-secondary" type="button">RETURN TO SANCTUM</button>
+      </div>
+    </div>
+
+    <!-- 8. Letterboxed In-Engine 3D Cinematic Cutscene Overlay -->
+    <div id="overlay-cutscene" class="cutscene-overlay hidden" role="dialog" aria-label="Story Cutscene">
+      <div class="cinema-bar cinema-bar-top">
+        <div class="cinema-top-meta">
+          <span id="cutscene-act-pill" class="cinema-act-pill">PROLOGUE • OPERATION NEBULUS</span>
+          <span id="cutscene-title" class="cinema-scene-title">DROP INTO NEBULUS</span>
+        </div>
+        <button id="btn-cutscene-skip" class="btn-cinema-skip" type="button">SKIP ››</button>
+      </div>
+
+      <!-- Crystal-clear center window showcasing live sweeping 3D WebGL crane shot -->
+      <div id="cutscene-tap-stage" class="cinema-stage-window" title="Tap to advance"></div>
+
+      <div class="cinema-bar cinema-bar-bottom">
+        <div id="cutscene-comms-box" class="cinema-comms-card" data-speaker="mara">
+          <div id="cutscene-portrait" class="cinema-portrait" aria-hidden="true"></div>
+          <div class="cinema-dialogue-col">
+            <div class="cinema-speaker-row">
+              <span id="cutscene-speaker" class="cinema-speaker-name">COMMANDER MARA • ORBITAL HQ</span>
+              <span id="cutscene-step-dots" class="cinema-step-dots"></span>
+            </div>
+            <p id="cutscene-text" class="cinema-dialogue-text"></p>
+            <div class="cinema-footer-row">
+              <button id="btn-cutscene-next" class="btn-cinema-next" type="button">NEXT ›</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script type="importmap">
@@ -171,6 +772,6 @@
     }
   }
   </script>
-  <script type="module" src="src/main.js?v=6"></script>
+  <script type="module" src="src/main.js"></script>
 </body>
 </html>

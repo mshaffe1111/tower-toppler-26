@@ -1,10 +1,120 @@
+// ============================================================================
+// TOWER TOPPLER '26 — LEAD GRAPHICS COMPOSITOR (`src/renderer.js`)
+// Composes all 8 dedicated WebGL2 Dual-Era ('reboot' & 'original') subsystems:
+//   1. `CinematicPostFX` (`./postfx.js`): 4-pass HDR ACES Filmic + Selective Bloom + Vignette
+//   2. `StormAtmosphere` (`./stormSky.js`): GLSL Moonlit Storm Sky Dome, Clouds, Fireflies & Weather
+//   3. `Ocean` (`./water.js`): Real-time Planar-Reflecting GLSL Fresnel Ocean & Moon Glitter
+//   4. `TowerFluidAndSparkVFX` (`./oceanVfx.js`): Surf Apron, Sea-Spray, Mist & Ballistic Sparks
+//   5. `towerArchitecture.js`: Curved Beveled 3D Masonry `InstancedMesh` Courses, Ledges & Lifts
+//   6. `EnemyVisualPool` (`./enemyRig.js`): `.glb` + Articulated Procedural Creatures & Cryo-Ice Blocks
+//   7. `SubRenderer` (`./subRenderer.js`): Living Caustics, 124-Boid Fauna, `reboot_sub_mk7.glb` + `PogoRig`
+//   8. `SkimmerRenderer`, `VaultRenderer`, `GlideRenderer`, `PuzzleRenderer`: Full 3D Mini-Stages
+// ============================================================================
+
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { mergeGeometries as _rawMergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { PogoRig } from './pogo.js';
 import { COLS } from './levels.js';
+import { GlideRenderer } from './glideRenderer.js';
+import { PuzzleRenderer } from './puzzleRenderer.js';
+import { CinematicPostFX } from './postfx.js';
+import { EnemyVisualPool } from './enemyRig.js';
+import { StormAtmosphere } from './stormSky.js';
+import { TowerFluidAndSparkVFX } from './oceanVfx.js';
+import {
+  buildDetailedTowerGroup,
+  updateTowerArchitecture,
+  disposeTowerArchitecture,
+  resolveRebootTheme as resolveArchTheme,
+} from './towerArchitecture.js';
+import { SkimmerRenderer } from './skimmerRenderer.js';
+import { VaultRenderer } from './vaultRenderer.js';
+import { Ocean } from './water.js';
+import { SubRenderer } from './subRenderer.js';
 
 const TWO_PI = Math.PI * 2;
 const COL_ANGLE = TWO_PI / COLS;
 const TOWER_RADIUS = 2.55;
 const FLOOR_HEIGHT = 1.0;
+const STEP_ORIGINAL = 0.43; // Authentic 1987/7800 step-row world height (ORIGIN_CLASSIC_AUDIT.md §3.3)
+
+const BLASTER_FX_STYLES = {
+  standard_cryo: {
+    core: '#e0f2fe',
+    emissive: '#38bdf8',
+    muzzle: '#7dd3fc',
+    trail: '#bae6fd',
+    ring: null,
+    shape: 'icosa',
+  },
+  emerald_plasma: {
+    core: '#ecfdf5',
+    emissive: '#10b981',
+    muzzle: '#34d399',
+    trail: '#6ee7b7',
+    ring: '#5efce8',
+    shape: 'icosa',
+  },
+  solar_ember: {
+    core: '#fef9c3',
+    emissive: '#f97316',
+    muzzle: '#fbbf24',
+    trail: '#fdba74',
+    ring: '#fde047',
+    shape: 'icosa',
+  },
+  amethyst_void: {
+    core: '#fae8ff',
+    emissive: '#a855f7',
+    muzzle: '#e879f9',
+    trail: '#d8b4fe',
+    ring: '#c084fc',
+    shape: 'prism',
+  },
+  retro_voxel: {
+    core: '#ffffff',
+    emissive: '#22d3ee',
+    muzzle: '#fde047',
+    trail: '#67e8f9',
+    ring: null,
+    shape: 'voxel',
+  },
+  diamond_prism: {
+    core: '#ffffff',
+    emissive: '#67e8f9',
+    muzzle: '#f0abfc',
+    trail: '#a5f3fc',
+    ring: '#fde047',
+    shape: 'prism',
+    prismatic: true,
+  },
+};
+
+const CRYO_DEFAULT_HEXES = new Set([
+  '#e0f2fe',
+  '#bae6fd',
+  '#7dd3fc',
+  '#38bdf8',
+  '#67e8f9',
+  '#a5f3fc',
+  '#cffafe',
+]);
+
+function mergeRigidGeos(parts) {
+  const normalized = parts.map((g) => (g.index ? g.toNonIndexed() : g));
+  const merged = _rawMergeGeometries(normalized, false);
+  for (let i = 0; i < parts.length; i++) {
+    if (normalized[i] !== parts[i]) normalized[i].dispose();
+    parts[i].dispose();
+  }
+  return merged;
+}
+
+function getTowerStepHeight(tower, isOrig) {
+  return isOrig && tower?.real ? STEP_ORIGINAL : FLOOR_HEIGHT;
+}
 
 function wrapAngle(a) {
   let res = a % TWO_PI;
@@ -13,140 +123,90 @@ function wrapAngle(a) {
   return res;
 }
 
-function getShakeOffset(shake, time) {
-  if (!shake) return { x: 0, y: 0 };
+function writeShakeOffset(shake, time, out) {
+  if (!shake) {
+    out.x = 0;
+    out.y = 0;
+    return out;
+  }
   if (typeof shake === 'object') {
-    return { x: (shake.x || 0) * 0.025, y: (shake.y || 0) * 0.025 };
+    out.x = (shake.x || 0) * 0.022;
+    out.y = (shake.y || 0) * 0.022;
+    return out;
   }
-  const mag = (Number(shake) || 0) * 0.025;
-  if (mag <= 0.001) return { x: 0, y: 0 };
-  return {
-    x: Math.sin(time * 73.7) * mag,
-    y: Math.cos(time * 61.3) * mag * 0.85,
-  };
+  const mag = (Number(shake) || 0) * 0.022;
+  if (mag <= 0.001) {
+    out.x = 0;
+    out.y = 0;
+    return out;
+  }
+  out.x = Math.sin(time * 73.7) * mag;
+  out.y = Math.cos(time * 61.3) * mag * 0.85;
+  return out;
 }
 
-function createBrickTextures(pal) {
-  const size = 512;
-  const colCanvas = document.createElement('canvas');
-  colCanvas.width = size;
-  colCanvas.height = size;
-  const ctx = colCanvas.getContext('2d');
-
-  const bumpCanvas = document.createElement('canvas');
-  bumpCanvas.width = size;
-  bumpCanvas.height = size;
-  const bCtx = bumpCanvas.getContext('2d');
-
-  const roughCanvas = document.createElement('canvas');
-  roughCanvas.width = size;
-  roughCanvas.height = size;
-  const rCtx = roughCanvas.getContext('2d');
-
-  const emCanvas = document.createElement('canvas');
-  emCanvas.width = size;
-  emCanvas.height = size;
-  const eCtx = emCanvas.getContext('2d');
-
-  // Deep recessed mortar
-  ctx.fillStyle = pal.mortar;
-  ctx.fillRect(0, 0, size, size);
-  bCtx.fillStyle = '#141414';
-  bCtx.fillRect(0, 0, size, size);
-  rCtx.fillStyle = '#e0e0e0';
-  rCtx.fillRect(0, 0, size, size);
-  eCtx.fillStyle = '#000000';
-  eCtx.fillRect(0, 0, size, size);
-
-  const cols = 32;
-  const rows = 16;
-  const bw = size / cols;
-  const bh = size / rows;
-
-  for (let r = 0; r < rows; r++) {
-    const offset = (r % 2) * (bw * 0.5);
-    for (let c = -1; c <= cols; c++) {
-      const x = c * bw + offset + 2.5;
-      const y = r * bh + 2.5;
-      const w = bw - 5;
-      const h = bh - 5;
-
-      const base = (c + r) % 2 === 0 ? pal.brickA : pal.brickB;
-      ctx.fillStyle = base;
-      ctx.fillRect(x, y, w, h);
-
-      // High-contrast bevels & sci-fi panel seam
-      ctx.fillStyle = 'rgba(255,255,255,0.26)';
-      ctx.fillRect(x, y, w, 3);
-      ctx.fillRect(x, y, 2.5, h);
-      ctx.fillStyle = 'rgba(0,0,0,0.42)';
-      ctx.fillRect(x, y + h - 3, w, 3);
-      ctx.fillRect(x + w - 2.5, y, 2.5, h);
-
-      // Corner rivets
-      ctx.fillStyle = 'rgba(255,255,255,0.22)';
-      ctx.fillRect(x + 4, y + 4, 2, 2);
-      ctx.fillRect(x + w - 6, y + 4, 2, 2);
-
-      // Bump & roughness variation
-      bCtx.fillStyle = '#dcdcdc';
-      bCtx.fillRect(x, y, w, h);
-      bCtx.fillStyle = '#ffffff';
-      bCtx.fillRect(x + 2, y + 2, w - 4, 4);
-
-      rCtx.fillStyle = (c + r) % 2 === 0 ? '#888888' : '#686868';
-      rCtx.fillRect(x, y, w, h);
-
-      // Glowing sci-fi runic seam accents
-      if ((c + r * 3) % 5 === 0) {
-        eCtx.fillStyle = pal.glow;
-        eCtx.fillRect(x + w * 0.18, y + h * 0.45, w * 0.64, 2.5);
-      }
-    }
-  }
-
-  const map = new THREE.CanvasTexture(colCanvas);
-  map.wrapS = THREE.RepeatWrapping;
-  map.wrapT = THREE.RepeatWrapping;
-  map.colorSpace = THREE.SRGBColorSpace;
-
-  const bumpMap = new THREE.CanvasTexture(bumpCanvas);
-  bumpMap.wrapS = THREE.RepeatWrapping;
-  bumpMap.wrapT = THREE.RepeatWrapping;
-
-  const roughnessMap = new THREE.CanvasTexture(roughCanvas);
-  roughnessMap.wrapS = THREE.RepeatWrapping;
-  roughnessMap.wrapT = THREE.RepeatWrapping;
-
-  const emissiveMap = new THREE.CanvasTexture(emCanvas);
-  emissiveMap.wrapS = THREE.RepeatWrapping;
-  emissiveMap.wrapT = THREE.RepeatWrapping;
-
-  return { map, bumpMap, roughnessMap, emissiveMap };
-}
-
-function createConveyorTexture(dir = 1) {
+function createGlowDotTexture() {
   const canvas = document.createElement('canvas');
-  canvas.width = 128;
+  canvas.width = 64;
   canvas.height = 64;
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#6b21a8';
-  ctx.fillRect(0, 0, 128, 64);
-
-  ctx.strokeStyle = '#f5d0fe';
-  ctx.lineWidth = 6;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  for (let x = 16; x < 128; x += 32) {
-    ctx.beginPath();
-    ctx.moveTo(x - 8 * dir, 16);
-    ctx.lineTo(x + 8 * dir, 32);
-    ctx.lineTo(x - 8 * dir, 48);
-    ctx.stroke();
-  }
+  const g = ctx.createRadialGradient(32, 32, 1, 32, 32, 30);
+  g.addColorStop(0, 'rgba(255, 255, 255, 1)');
+  g.addColorStop(0.28, 'rgba(220, 252, 255, 0.78)');
+  g.addColorStop(0.62, 'rgba(125, 235, 255, 0.22)');
+  g.addColorStop(1, 'rgba(125, 235, 255, 0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
   const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function createRelicTabletTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 192;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#091322';
+  ctx.fillRect(0, 0, 128, 192);
+
+  // Outer etched circuit-rune border
+  ctx.strokeStyle = '#5efce8';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(10, 10, 108, 172);
+  ctx.strokeStyle = 'rgba(250, 204, 21, 0.75)';
+  ctx.lineWidth = 1.6;
+  ctx.strokeRect(17, 17, 94, 158);
+
+  // Central Nebulus Monolith & Hologram Eye Emblem
+  ctx.strokeStyle = '#5efce8';
+  ctx.lineWidth = 3.2;
+  ctx.beginPath();
+  ctx.arc(64, 62, 22, 0, TWO_PI);
+  ctx.stroke();
+
+  ctx.fillStyle = '#fde047';
+  ctx.beginPath();
+  ctx.moveTo(64, 46);
+  ctx.lineTo(76, 62);
+  ctx.lineTo(64, 78);
+  ctx.lineTo(52, 62);
+  ctx.closePath();
+  ctx.fill();
+
+  // Etched Destructo Inc. data log glyph bars
+  const rows = [102, 116, 130, 144, 158];
+  const widths = [74, 58, 68, 46, 62];
+  for (let i = 0; i < rows.length; i++) {
+    const ry = rows[i];
+    const rw = widths[i];
+    ctx.fillStyle = i % 2 === 0 ? '#5efce8' : '#38bdf8';
+    ctx.fillRect(27, ry, rw * 0.58, 4.5);
+    ctx.fillRect(27 + rw * 0.66, ry, rw * 0.34, 4.5);
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
@@ -156,7 +216,7 @@ function createPopupTexture(text, color) {
   canvas.width = 256;
   canvas.height = 64;
   const ctx = canvas.getContext('2d');
-  ctx.font = '900 30px Orbitron, sans-serif';
+  ctx.font = '900 28px Orbitron, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.lineWidth = 7;
@@ -174,6 +234,28 @@ export class GameRenderer {
     this.canvas = canvas;
     this.width = 360;
     this.height = 540;
+    this.era = 'reboot';
+    this.skinId = 'default_amphibian';
+    this.blasterFxId = 'standard_cryo';
+    this.cutsceneCam = null;
+    this._cutscenePhaseSmooth = 0;
+    this._lastCutsceneKind = '';
+    this._lastTime = 0;
+    this._skyStateProxy = {};
+
+    // Adaptive Dynamic Resolution Scaling (Auto-DPR for locked 60fps on mobile)
+    this.maxDpr = Math.min((typeof window !== 'undefined' && window.devicePixelRatio) || 1, 1.75);
+    this.currentDpr = this.maxDpr;
+    this._frameEmaMs = 16.6;
+    this._slowFrameCount = 0;
+    this._lastPerfNow = 0;
+
+    // Delegated specialist stage renderers ('submarine', 'skimmer', 'glide', 'puzzle', 'vault')
+    this.subRenderer = null;
+    this.skimmerRenderer = null;
+    this.glideRenderer = null;
+    this.puzzleRenderer = null;
+    this.vaultRenderer = null;
 
     this.webgl = new THREE.WebGLRenderer({
       canvas,
@@ -181,180 +263,747 @@ export class GameRenderer {
       powerPreference: 'high-performance',
     });
     this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
-    this.webgl.toneMappingExposure = 0.92;
-    this.webgl.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.webgl.toneMappingExposure = 0.98;
+    this.webgl.shadowMap.enabled = true;
+    this.webgl.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.webgl.shadowMap.autoUpdate = false;
+    this.webgl.setPixelRatio(this.currentDpr);
 
+    this._initEnvironment();
+    this._initSharedAssets();
     this._initTowerScene();
-    this._initSubScene();
+    this._initPostProcessing();
+    this._loadBlenderAssets();
   }
 
-  _renderWithComposer(scene, camera) {
+  _ensureSubRenderer() {
+    if (this.subRenderer) return this.subRenderer;
+    this.subRenderer = new SubRenderer(this.webgl, {
+      softDotTex: this.glowDotTex,
+      era: this.era,
+      skinId: this.skinId,
+      blasterFxId: this.blasterFxId,
+      showHud: false,
+    });
+    this.subRenderer.resize?.(this.width, this.height);
+    this.subRenderer.setEra?.(this.era);
+    this.subRenderer.setSkin?.(this.skinId);
+    this.subRenderer.setBlasterFx?.(this.blasterFxId);
+    return this.subRenderer;
+  }
+
+  _ensureGlideRenderer() {
+    if (this.glideRenderer) return this.glideRenderer;
+    this.glideRenderer = new GlideRenderer(this.webgl, {
+      softDotTex: this.glowDotTex,
+      skinId: this.skinId,
+      era: this.era,
+    });
+    this.glideRenderer.resize?.(this.width, this.height, this.currentDpr);
+    this.glideRenderer.setEra?.(this.era);
+    this.glideRenderer.setSkin?.(this.skinId);
+    this.glideRenderer.prewarm?.();
+    return this.glideRenderer;
+  }
+
+  _ensurePuzzleRenderer() {
+    if (this.puzzleRenderer) return this.puzzleRenderer;
+    this.puzzleRenderer = new PuzzleRenderer(this.webgl, {
+      softDotTex: this.glowDotTex,
+      skinId: this.skinId,
+      era: this.era,
+    });
+    this.puzzleRenderer.resize?.(this.width, this.height, this.currentDpr);
+    this.puzzleRenderer.setEra?.(this.era);
+    this.puzzleRenderer.setSkin?.(this.skinId);
+    this.puzzleRenderer.prewarm?.();
+    return this.puzzleRenderer;
+  }
+
+  _ensureSkimmerRenderer() {
+    if (this.skimmerRenderer) return this.skimmerRenderer;
+    this.skimmerRenderer = new SkimmerRenderer(this.webgl, {
+      width: this.width,
+      height: this.height,
+      dpr: this.currentDpr,
+      era: this.era,
+      skinId: this.skinId,
+      blasterFxId: this.blasterFxId,
+      envMap: this.envTex,
+      softDotTex: this.glowDotTex,
+    });
+    this.skimmerRenderer.resize?.(this.width, this.height, this.currentDpr);
+    this.skimmerRenderer.setEra?.(this.era);
+    this.skimmerRenderer.setSkin?.(this.skinId);
+    this.skimmerRenderer.setBlasterFx?.(this.blasterFxId);
+    this.skimmerRenderer.prewarm?.();
+    return this.skimmerRenderer;
+  }
+
+  _ensureVaultRenderer() {
+    if (this.vaultRenderer) return this.vaultRenderer;
+    this.vaultRenderer = new VaultRenderer(this.webgl, {
+      width: this.width,
+      height: this.height,
+      dpr: this.currentDpr,
+      era: this.era,
+      envMap: this.envTex,
+      softDotTex: this.glowDotTex,
+    });
+    this.vaultRenderer.resize?.(this.width, this.height, this.currentDpr);
+    this.vaultRenderer.setEra?.(this.era);
+    this.vaultRenderer.prewarm?.();
+    return this.vaultRenderer;
+  }
+
+  _initEnvironment() {
+    this.envTex = null;
+    try {
+      const pmrem = new THREE.PMREMGenerator(this.webgl);
+      const roomEnv = new RoomEnvironment();
+      this.envTex = pmrem.fromScene(roomEnv, 0.04).texture;
+      roomEnv.dispose();
+      pmrem.dispose();
+    } catch {
+      this.envTex = null;
+    }
+  }
+
+  _initSharedAssets() {
+    this.glowDotTex = createGlowDotTexture();
+    this.relicTabletTex = createRelicTabletTexture();
+
+    this.sharedParticleGeo = new THREE.BoxGeometry(0.13, 0.13, 0.13);
+    this.sharedSnowballGeo = new THREE.IcosahedronGeometry(0.15, 1);
+    this.sharedVoxelGeo = new THREE.BoxGeometry(0.21, 0.21, 0.21);
+    this.sharedPrismGeo = new THREE.OctahedronGeometry(0.185, 0);
+    this.sharedFxRingGeo = new THREE.TorusGeometry(0.23, 0.018, 6, 20);
+    this.sharedTrailDotGeo = new THREE.SphereGeometry(0.065, 8, 8);
+
+    // Merged single-draw-call comet trail cluster (1 draw call instead of 3 per snowball!)
+    const trailParts = [];
+    const orbitParts = [];
+    for (let t = 1; t <= 3; t++) {
+      const sc = 1.0 - t * 0.22;
+      const tp = new THREE.SphereGeometry(0.065 * sc, 8, 8);
+      tp.translate(-t * 0.145, 0, -0.02 * t);
+      trailParts.push(tp);
+
+      const ang = ((t - 1) * TWO_PI) / 3;
+      const op = new THREE.SphereGeometry(0.065 * sc, 8, 8);
+      op.translate(Math.cos(ang) * 0.24, Math.sin(ang) * 0.09, Math.sin(ang) * 0.2);
+      orbitParts.push(op);
+    }
+    this.sharedTrailClusterGeo = mergeRigidGeos(trailParts);
+    this.sharedOrbitalTrailGeo = mergeRigidGeos(orbitParts);
+    this.sharedTrailClusterGeo.userData.shared = true;
+    this.sharedOrbitalTrailGeo.userData.shared = true;
+
+    // Merged single-draw-call Golden Gear geometry (1 draw call instead of 7!)
+    const gearParts = [new THREE.TorusGeometry(0.17, 0.055, 8, 16)];
+    for (let t = 0; t < 6; t++) {
+      const ang = (t / 6) * TWO_PI;
+      const tg = new THREE.BoxGeometry(0.06, 0.08, 0.06);
+      tg.rotateZ(ang);
+      tg.translate(Math.cos(ang) * 0.22, Math.sin(ang) * 0.22, 0);
+      gearParts.push(tg);
+    }
+    this.sharedGearGeo = mergeRigidGeos(gearParts);
+    this.sharedGearGeo.userData.shared = true;
+    this.sharedGearMat = new THREE.MeshStandardMaterial({
+      color: '#fbbf24',
+      emissive: '#b45309',
+      emissiveIntensity: 0.55,
+      metalness: 0.85,
+      roughness: 0.2,
+    });
+    this.sharedGearMat.userData.shared = true;
+
+    for (const g of [
+      this.sharedParticleGeo,
+      this.sharedSnowballGeo,
+      this.sharedVoxelGeo,
+      this.sharedPrismGeo,
+      this.sharedFxRingGeo,
+      this.sharedTrailDotGeo,
+    ]) {
+      g.userData.shared = true;
+    }
+
+    this.sharedSnowballMat = new THREE.MeshStandardMaterial({
+      color: '#e0f2fe',
+      emissive: '#38bdf8',
+      emissiveIntensity: 1.4,
+      roughness: 0.12,
+      metalness: 0.2,
+    });
+    this.sharedFxRingMat = new THREE.MeshBasicMaterial({
+      color: '#5efce8',
+      transparent: true,
+      opacity: 0.85,
+    });
+    this.sharedTrailDotMat = new THREE.MeshBasicMaterial({
+      color: '#bae6fd',
+      transparent: true,
+      opacity: 0.58,
+    });
+    this.sharedHaloSpriteMat = new THREE.SpriteMaterial({
+      map: this.glowDotTex,
+      color: '#7dd3fc',
+      transparent: true,
+      opacity: 0.62,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    for (const m of [
+      this.sharedSnowballMat,
+      this.sharedFxRingMat,
+      this.sharedTrailDotMat,
+      this.sharedHaloSpriteMat,
+    ]) {
+      m.userData.shared = true;
+    }
+
+    this.popupPool = [];
+    this._skyBaseReboot = new THREE.Color('#060a14');
+    this._fogBaseReboot = new THREE.Color('#0b1526');
+    this._skyBaseOrig = new THREE.Color('#040a20');
+    this._fogBaseOrig = new THREE.Color('#071430');
+    this._tempColor = new THREE.Color();
+    this._prismColor = new THREE.Color();
+
+    // Zero-allocation per-frame scratch math objects
+    this._ndcVec = new THREE.Vector3();
+    this._rayDir = new THREE.Vector3();
+    this._shakeVec = { x: 0, y: 0 };
+    this._worldPt = { x: 0, y: 0 };
+    this._debrisDummy = new THREE.Object3D();
+
+    this.glbModels = {};
+    this._rebootPropsVersion = 0;
+    this._collectibleMats = new Map();
+  }
+
+  _prepareGlbScene(scene) {
+    // Clamp HDR emission strengths and mark shared GLB templates so cache eviction never disposes live programs
+    scene.traverse((obj) => {
+      if (obj.geometry) {
+        obj.geometry.userData = obj.geometry.userData || {};
+        obj.geometry.userData.shared = true;
+      }
+      if (!obj.isMesh || !obj.material) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const m of mats) {
+        if (!m) continue;
+        m.userData = m.userData || {};
+        m.userData.shared = true;
+        if (typeof m.emissiveIntensity === 'number' && m.emissiveIntensity > 1.85) {
+          m.emissiveIntensity = 1.85;
+        }
+      }
+    });
+    return scene;
+  }
+
+  _loadBlenderAssets() {
+    let loader;
+    try {
+      loader = new GLTFLoader();
+    } catch {
+      return;
+    }
+
+    // Tower architectural props (`enemyRig`, `subRenderer`, `skimmerRenderer`, `glideRenderer`, `puzzleRenderer`
+    // manage and cache their own `.glb` assets directly to eliminate duplicate network/VRAM loads)
+    const specs = [
+      { key: 'corbel_ledge', url: 'assets/models/corbel_ledge.glb' },
+      { key: 'cage_elevator', url: 'assets/models/cage_elevator.glb' },
+    ];
+
+    for (const sp of specs) {
+      loader.load(
+        sp.url,
+        (gltf) => {
+          if (!gltf || !gltf.scene) return;
+          this.glbModels[sp.key] = this._prepareGlbScene(gltf.scene);
+          this._rebootPropsVersion++;
+        },
+        undefined,
+        () => {
+          // Graceful procedural fallback when running offline
+        }
+      );
+    }
+  }
+
+  _initPostProcessing() {
+    this.postfx = null;
+    try {
+      this.postfx = new CinematicPostFX(this.webgl, this.width, this.height, this.currentDpr);
+      this.postfx.setEra(this.era);
+    } catch {
+      this.postfx = null;
+    }
+  }
+
+  _renderWithComposer(scene, camera, opts) {
+    if (this.postfx) {
+      try {
+        this.postfx.render(scene, camera, opts);
+        return;
+      } catch {
+        this.postfx = null;
+      }
+    }
     this.webgl.render(scene, camera);
+  }
+
+  setEra(era) {
+    const next = era === 'original' ? 'original' : 'reboot';
+    if (this.era === next) return;
+    this.era = next;
+    const isOrig = next === 'original';
+
+    this.webgl.toneMappingExposure = isOrig ? 1.06 : 0.98;
+    if (this.towerScene) {
+      this.towerScene.environmentIntensity = isOrig ? 0.52 : 0.14;
+    }
+    if (this.postfx) this.postfx.setEra(next);
+    if (this.stormSky) this.stormSky.setEra(next);
+    if (this.ocean) this.ocean.setEra(next, this._lastOceanBiome || 'moonlit_storm');
+    if (this.oceanVfx) this.oceanVfx.setEra(next);
+    if (this.enemyVisuals) this.enemyVisuals.setEra(next);
+    if (this.pogoRig) this.pogoRig.setEraStyle(next);
+    this.subRenderer?.setEra?.(next);
+    this.glideRenderer?.setEra?.(next);
+    this.puzzleRenderer?.setEra?.(next);
+    this.skimmerRenderer?.setEra?.(next);
+    this.vaultRenderer?.setEra?.(next);
+  }
+
+  setSkin(skinId) {
+    if (!skinId || this.skinId === skinId) return;
+    this.skinId = skinId;
+    if (this.pogoRig) this.pogoRig.setSkin(skinId);
+    this.subRenderer?.setSkin?.(skinId);
+    this.glideRenderer?.setSkin?.(skinId);
+    this.puzzleRenderer?.setSkin?.(skinId);
+    this.skimmerRenderer?.setSkin?.(skinId);
+  }
+
+  setBlasterFx(fxId) {
+    const resolved = fxId && BLASTER_FX_STYLES[fxId] ? fxId : 'standard_cryo';
+    this.blasterFxId = resolved;
+    this.subRenderer?.setBlasterFx?.(resolved);
+    this.skimmerRenderer?.setBlasterFx?.(resolved);
+  }
+
+  setCutsceneCam(cfg = null) {
+    this.cutsceneCam = cfg && cfg.active ? cfg : null;
+  }
+
+  _syncBlasterFxMaterials(time = 0) {
+    const fx = BLASTER_FX_STYLES[this.blasterFxId] || BLASTER_FX_STYLES.standard_cryo;
+    if (fx.prismatic) {
+      const hue = (time * 0.42) % 1;
+      this._prismColor.setHSL(hue, 0.92, 0.68);
+      this.sharedSnowballMat.color.set('#ffffff');
+      this.sharedSnowballMat.emissive.copy(this._prismColor);
+      this.sharedHaloSpriteMat.color.copy(this._prismColor);
+      this.sharedTrailDotMat.color.setHSL((hue + 0.16) % 1, 0.9, 0.72);
+      this.sharedFxRingMat.color.setHSL((hue + 0.48) % 1, 0.95, 0.65);
+    } else {
+      this.sharedSnowballMat.color.set(fx.core);
+      this.sharedSnowballMat.emissive.set(fx.emissive);
+      this.sharedHaloSpriteMat.color.set(fx.muzzle);
+      this.sharedTrailDotMat.color.set(fx.trail);
+      if (fx.ring) this.sharedFxRingMat.color.set(fx.ring);
+    }
+    return fx;
+  }
+
+  _applyPixelRatio(dpr) {
+    this.webgl.setPixelRatio(dpr);
+    this.webgl.setSize(this.width, this.height, false);
+    if (this.postfx) {
+      this.postfx.resize(this.width, this.height, dpr);
+    }
+    if (this.ocean) {
+      this.ocean.setSize(this.width, this.height, dpr);
+    }
+    this.subRenderer?.resize?.(this.width, this.height);
+    this.glideRenderer?.resize?.(this.width, this.height, dpr);
+    this.puzzleRenderer?.resize?.(this.width, this.height, dpr);
+    this.skimmerRenderer?.resize?.(this.width, this.height, dpr);
+    this.vaultRenderer?.resize?.(this.width, this.height, dpr);
+  }
+
+  _trackFramePerformance() {
+    const now = performance.now();
+    if (this._lastPerfNow > 0) {
+      const frameMs = now - this._lastPerfNow;
+      if (frameMs > 0 && frameMs < 200) {
+        this._frameEmaMs = this._frameEmaMs * 0.92 + frameMs * 0.08;
+        if (this._frameEmaMs > 19.0 && this.currentDpr > 1.0) {
+          this._slowFrameCount++;
+          if (this._slowFrameCount >= 45) {
+            this.currentDpr = this.currentDpr > 1.25 ? 1.25 : 1.0;
+            this._applyPixelRatio(this.currentDpr);
+            this._slowFrameCount = 0;
+            this._frameEmaMs = 16.6;
+          }
+        } else if (this._slowFrameCount > 0) {
+          this._slowFrameCount--;
+        }
+      }
+    }
+    this._lastPerfNow = now;
+  }
+
+  resize(w, h, dpr = 1) {
+    this.width = w;
+    this.height = h;
+    this.maxDpr = Math.min(dpr, 1.75);
+    this.currentDpr = this.maxDpr;
+    this._slowFrameCount = 0;
+    this._frameEmaMs = 16.6;
+    this._applyPixelRatio(this.currentDpr);
+
+    const aspect = Math.max(0.4, w / Math.max(1, h));
+    if (this.towerCam) {
+      this.towerCam.aspect = aspect;
+      this.towerCam.updateProjectionMatrix();
+    }
+  }
+
+  renderScene(state) {
+    if (!state) return;
+    this._trackFramePerformance();
+    if (state.era && state.era !== this.era) {
+      this.setEra(state.era);
+    }
+    if (state.player?.skinId && state.player.skinId !== this.skinId) {
+      this.setSkin(state.player.skinId);
+    }
+    const nextFx = state.player?.blasterFxId || state.blasterFxId;
+    if (nextFx && nextFx !== this.blasterFxId) {
+      this.setBlasterFx(nextFx);
+    }
+    const activeMode = state.mode === 'paused' ? (state.pausedFrom || 'tower') : state.mode;
+    if (activeMode === 'submarine') {
+      this.renderSubmarineScene(state);
+    } else if (activeMode === 'skimmer') {
+      this.renderSkimmerScene(state);
+    } else if (activeMode === 'glide') {
+      this.renderGlideScene(state);
+    } else if (activeMode === 'puzzle') {
+      this.renderPuzzleScene(state);
+    } else if (activeMode === 'vault') {
+      this.renderVaultScene(state);
+    } else if (state.tower) {
+      this.renderTowerScene(state);
+    }
   }
 
   _initTowerScene() {
     this.towerScene = new THREE.Scene();
-    this.towerScene.background = new THREE.Color('#030816');
-    this.towerScene.fog = new THREE.Fog('#050d1f', 20, 58);
+    this.towerScene.background = new THREE.Color('#060a14');
+    this.towerScene.fog = new THREE.Fog('#0b1526', 28, 88);
+    if (this.envTex) {
+      this.towerScene.environment = this.envTex;
+      this.towerScene.environmentIntensity = this.era === 'original' ? 0.52 : 0.14;
+    }
 
-    this.towerCam = new THREE.PerspectiveCamera(46, 360 / 540, 0.1, 140);
+    this.towerCam = new THREE.PerspectiveCamera(52, 360 / 540, 0.1, 220);
 
-    // Balanced high-contrast 3-point lighting (no washed-out white fill/bloom)
-    const hemi = new THREE.HemisphereLight('#38bdf8', '#020617', 0.5);
-    this.hemiLight = hemi;
-    this.towerScene.add(hemi);
+    // Reference-matched Moonlit Chiaroscuro 3-Point Rig + 1536x1536 PCFSoftShadowMap
+    this.hemiLight = new THREE.HemisphereLight('#385278', '#050b14', 0.54);
+    this.towerScene.add(this.hemiLight);
 
-    const keyLight = new THREE.DirectionalLight('#f8fafc', 1.15);
-    keyLight.position.set(8, 14, 10);
-    this.towerScene.add(keyLight);
+    this.keyLight = new THREE.DirectionalLight('#d8eaff', 2.08);
+    this.keyLight.position.set(6.8, 10.6, 8.2);
+    this.keyLight.castShadow = true;
+    this.keyLight.shadow.mapSize.set(1536, 1536);
+    this.keyLight.shadow.camera.near = 2.0;
+    this.keyLight.shadow.camera.far = 25.0;
+    this.keyLight.shadow.camera.left = -5.4;
+    this.keyLight.shadow.camera.right = 5.4;
+    this.keyLight.shadow.camera.top = 7.6;
+    this.keyLight.shadow.camera.bottom = -7.6;
+    this.keyLight.shadow.bias = -0.0005;
+    this.keyLight.shadow.normalBias = 0.024;
+    this.keyLight.shadow.radius = 2.0;
+    this.towerScene.add(this.keyLight);
+    this.towerScene.add(this.keyLight.target);
 
-    const fillLight = new THREE.DirectionalLight('#1e3a8a', 0.28);
-    fillLight.position.set(-6, 3, 10);
-    this.towerScene.add(fillLight);
+    this.fillLight = new THREE.DirectionalLight('#2dd4bf', 0.34);
+    this.fillLight.position.set(-7.0, 2.2, 7.5);
+    this.towerScene.add(this.fillLight);
 
-    const rimLight = new THREE.DirectionalLight('#38bdf8', 0.75);
-    rimLight.position.set(-9, 6, -6);
-    this.rimLight = rimLight;
-    this.towerScene.add(rimLight);
+    this.rimLight = new THREE.DirectionalLight('#7dd3fc', 0.86);
+    this.rimLight.position.set(-8.0, 6.2, -7.2);
+    this.towerScene.add(this.rimLight);
 
-    this.heroLight = new THREE.PointLight('#38bdf8', 0.65, 6);
+    // Back-right moonlight specular water-glint source
+    this.moonGlintLight = new THREE.DirectionalLight('#cbe3ff', 1.38);
+    this.moonGlintLight.position.set(3.2, 7.5, -12.0);
+    this.towerScene.add(this.moonGlintLight);
+
+    this.heroLight = new THREE.PointLight('#7be8ff', 0.38, 5.5);
     this.towerScene.add(this.heroLight);
 
-    // 3D Starfield
-    const starCount = 420;
-    const starPos = new Float32Array(starCount * 3);
-    const starCol = new Float32Array(starCount * 3);
-    const c1 = new THREE.Color('#e0f2fe');
-    const c2 = new THREE.Color('#a5f3fc');
-    const c3 = new THREE.Color('#f5d0fe');
-    for (let i = 0; i < starCount; i++) {
-      const ang = Math.random() * TWO_PI;
-      const dist = 24 + Math.random() * 28;
-      starPos[i * 3] = Math.cos(ang) * dist;
-      starPos[i * 3 + 1] = -8 + Math.random() * 44;
-      starPos[i * 3 + 2] = Math.sin(ang) * dist - 10;
-      const col = i % 5 === 0 ? c2 : i % 9 === 0 ? c3 : c1;
-      starCol[i * 3] = col.r;
-      starCol[i * 3 + 1] = col.g;
-      starCol[i * 3 + 2] = col.b;
-    }
-    const starGeo = new THREE.BufferGeometry();
-    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-    starGeo.setAttribute('color', new THREE.BufferAttribute(starCol, 3));
-    const starMat = new THREE.PointsMaterial({
-      size: 0.22,
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.9,
+    // Localized Front-Hemisphere Accent PointLight Pool on Wet Stone (complements enemyRig _dynLights + cageLight + forgeLights)
+    this.amberPoolLight = new THREE.PointLight('#ff9428', 0, 6.2, 1.7);
+    this.towerScene.add(this.amberPoolLight);
+
+    // Custom GLSL Moonlit Storm Sky Dome, Rim-Lined Storm Clouds, Archipelago Horizons, 96 Fireflies & Weather (`src/stormSky.js`)
+    this.stormSky = new StormAtmosphere(this.towerScene, {
+      towerRadius: TOWER_RADIUS,
+      floorHeight: FLOOR_HEIGHT,
     });
-    this.starPoints = new THREE.Points(starGeo, starMat);
-    this.towerScene.add(this.starPoints);
+    this.stormSky.setEra(this.era);
 
-    // Distant Nebulus Ringed Planet
-    const planetGroup = new THREE.Group();
-    planetGroup.position.set(7.5, 11, -22);
-    const planetMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(2.1, 24, 24),
-      new THREE.MeshStandardMaterial({
-        color: '#38bdf8',
-        emissive: '#0284c7',
-        emissiveIntensity: 0.6,
-        roughness: 0.35,
-      })
-    );
-    const ringMesh = new THREE.Mesh(
-      new THREE.TorusGeometry(3.4, 0.16, 8, 48),
-      new THREE.MeshBasicMaterial({ color: '#bae6fd', transparent: true, opacity: 0.5 })
-    );
-    ringMesh.rotation.x = Math.PI * 0.38;
-    ringMesh.rotation.y = 0.3;
-    planetGroup.add(planetMesh, ringMesh);
-    this.planetGroup = planetGroup;
-    this.planetMesh = planetMesh;
-    this.planetRing = ringMesh;
-    this.towerScene.add(planetGroup);
+    // Real-Time Planar-Reflecting GLSL Fresnel Ocean (`src/water.js`: `segments: 64` = 8,192 tris + 4 normal layers + moon glitter)
+    this.ocean = new Ocean(this.webgl, {
+      towerRadius: TOWER_RADIUS,
+      preset: 'moonlit_storm',
+      era: this.era,
+      size: 185,
+      segments: 64,
+      waterY: -0.55,
+    });
+    this.ocean.setSize(this.width, this.height, this.currentDpr);
+    this.towerScene.add(this.ocean.mesh);
+    this._lastOceanBiome = 'mist';
+    this._lastOceanKey = '';
 
-    // Multi-Octave Animated 3D Toxic Ocean Plane + Tower Foam Collar
-    const seaGeo = new THREE.PlaneGeometry(50, 28, 44, 22);
-    seaGeo.rotateX(-Math.PI / 2);
-    this.seaBaseY = new Float32Array(seaGeo.attributes.position.count);
-    for (let i = 0; i < this.seaBaseY.length; i++) {
-      this.seaBaseY[i] = seaGeo.attributes.position.getY(i);
-    }
-    this.seaMesh = new THREE.Mesh(
-      seaGeo,
-      new THREE.MeshStandardMaterial({
-        color: '#0369a1',
-        emissive: '#0284c7',
-        emissiveIntensity: 0.08,
-        roughness: 0.25,
-        metalness: 0.5,
-        flatShading: true,
-      })
-    );
-    this.seaMesh.position.set(0, -0.68, -2);
-    this.towerScene.add(this.seaMesh);
+    // Crashing Whitewater Surf, Volumetric Doorway Mist & Ballistic Bouncing Furnace Sparks (`src/oceanVfx.js`)
+    this.oceanVfx = new TowerFluidAndSparkVFX(this.towerScene);
+    this.oceanVfx.setEra(this.era);
 
-    this.foamRing = new THREE.Mesh(
-      new THREE.TorusGeometry(TOWER_RADIUS + 0.22, 0.08, 10, 48),
-      new THREE.MeshBasicMaterial({ color: '#38bdf8', transparent: true, opacity: 0.45 })
-    );
-    this.foamRing.rotation.x = Math.PI / 2;
-    this.foamRing.position.set(0, -0.56, 0);
-    this.towerScene.add(this.foamRing);
-
-    // Tower cache & dynamic pools
+    // Tower Cache & Dynamic Object Pools
     this.towerCache = new Map();
     this.currentTowerGroup = null;
-    this.conveyorTexR = createConveyorTexture(1);
-    this.conveyorTexL = createConveyorTexture(-1);
 
-    this.pogoGroup = this._buildPogoMesh();
-    this.towerScene.add(this.pogoGroup);
+    // Next-Gen Hierarchical Skeletal PogoRig + Cryo-Shield + Landing Ring + Tunnel Vortex
+    this.pogoRig = new PogoRig(this.skinId);
+    this._lastPogoShadowKey = null;
+    this._trimPogoShadows();
+    this.towerScene.add(this.pogoRig.group);
 
-    // 3D Tunnel Portal Vortex when Pogo traverses a tunnel
+    this.shieldBubble = new THREE.Mesh(
+      new THREE.SphereGeometry(0.56, 20, 16),
+      new THREE.MeshStandardMaterial({
+        color: '#67e8f9',
+        emissive: '#0ea5e9',
+        emissiveIntensity: 0.65,
+        transparent: true,
+        opacity: 0.28,
+        roughness: 0.08,
+      })
+    );
+    this.shieldBubble.visible = false;
+    this.towerScene.add(this.shieldBubble);
+
     this.tunnelVortexGroup = this._buildTunnelVortex();
     this.towerScene.add(this.tunnelVortexGroup);
 
-    // 3D Landing Target / Shadow Ring projected beneath Pogo
     this.landingRingGroup = this._buildLandingRing();
     this.towerScene.add(this.landingRingGroup);
 
-    this._skyBaseColor = new THREE.Color('#020512');
-    this._fogBaseColor = new THREE.Color('#061024');
-    this._tempColor = new THREE.Color();
+    this.muzzleFlashGroup = this._buildMuzzleFlashGroup();
+    this.towerScene.add(this.muzzleFlashGroup);
 
-    this.enemyPool = [];
+    this.wardrobeFxOrb = this._buildSnowballFxNode(true);
+    this.wardrobeFxOrb.visible = false;
+    this.towerScene.add(this.wardrobeFxOrb);
+
+    this.enemyVisuals = new EnemyVisualPool(this.towerScene, { chromeEnv: this.envTex });
+    this.enemyVisuals.setEra(this.era);
+
+    // Dedicated container groups so planar reflection pass toggles dynamic pools in O(1)
+    this.collectibleGroup = new THREE.Group();
+    this.snowballGroup = new THREE.Group();
+    this.particleGroup = new THREE.Group();
+    this.popupGroup = new THREE.Group();
+    this.towerScene.add(this.collectibleGroup, this.snowballGroup, this.particleGroup, this.popupGroup);
+
     this.snowballPool = [];
+    for (let i = 0; i < 2; i++) {
+      const fxNode = this._buildSnowballFxNode();
+      fxNode.visible = false;
+      this.snowballGroup.add(fxNode);
+      this.snowballPool.push(fxNode);
+    }
+    for (let i = 0; i < 2; i++) {
+      const spMat = new THREE.SpriteMaterial({
+        map: createPopupTexture(i === 0 ? '+100' : '+250', '#fde047'),
+        transparent: true,
+        depthTest: false,
+      });
+      const sp = new THREE.Sprite(spMat);
+      sp.visible = false;
+      this.popupGroup.add(sp);
+      this.popupPool.push({ sprite: sp, key: `${i === 0 ? '+100' : '+250'}_#fde047` });
+    }
+    this.collectiblePool = [];
     this.particlePool = [];
-    this.popupPool = [];
+    this._initParticleInstancer(96);
     this.debrisPool = this._buildDebrisPool();
-    this.towerScene.add(this.debrisPool.group);
+    this.towerScene.add(this.debrisPool.inst);
+  }
 
-    this.sharedParticleGeo = new THREE.BoxGeometry(0.14, 0.14, 0.14);
-    this.sharedSnowballGeo = new THREE.IcosahedronGeometry(0.16, 1);
-    this.sharedSnowballMat = new THREE.MeshStandardMaterial({
-      color: '#ffffff',
-      emissive: '#7dd3fc',
-      emissiveIntensity: 1.5,
-      roughness: 0.1,
+  _trimPogoShadows() {
+    const rig = this.pogoRig;
+    const b = rig?.bones;
+    if (!rig?.group || !b) return;
+    const keepBones = new Set([b.chest, b.head, b.backpack, b.thighL, b.thighR, b.footL, b.footR]);
+    const allBones = new Set(Object.values(b));
+    rig.group.traverse((obj) => {
+      if (!obj.isMesh) return;
+      let p = obj.parent;
+      while (p && p !== rig.group && !allBones.has(p)) {
+        p = p.parent;
+      }
+      const m = Array.isArray(obj.material) ? obj.material[0] : obj.material;
+      obj.castShadow = Boolean(keepBones.has(p) && m && !m.transparent && !m.isMeshBasicMaterial);
     });
+    this._lastPogoShadowKey = b.chest?.children?.[0] || null;
+  }
+
+  _trimEnemyShadows() {
+    const root = this.enemyVisuals?.root;
+    if (!root) return;
+    const kids = root.children;
+    for (let i = 0; i < kids.length; i++) {
+      const rig = kids[i];
+      if (!rig || !rig.isGroup) continue;
+      const bodyRoot = rig.userData?.body || rig;
+      const sigKey = bodyRoot.children?.[0] || bodyRoot;
+      if (rig._shadowTrimKey === sigKey) continue;
+      rig._shadowTrimKey = sigKey;
+
+      const cryoNode = rig.userData?.cryoIce || null;
+      let best1 = null;
+      let best1Weight = 0;
+      let best2 = null;
+      let best2Weight = 0;
+
+      rig.traverse((o) => {
+        if (!o.isMesh) return;
+        o.castShadow = false;
+        let p = o;
+        while (p && p !== rig) {
+          if (p === cryoNode) return;
+          p = p.parent;
+        }
+        const m = Array.isArray(o.material) ? o.material[0] : o.material;
+        if (!m || m.transparent || m.isMeshBasicMaterial) return;
+        const geo = o.geometry;
+        const w = geo?.index ? geo.index.count : geo?.attributes?.position?.count || 0;
+        if (w > best1Weight) {
+          best2 = best1;
+          best2Weight = best1Weight;
+          best1 = o;
+          best1Weight = w;
+        } else if (w > best2Weight) {
+          best2 = o;
+          best2Weight = w;
+        }
+      });
+
+      if (best1) best1.castShadow = true;
+      if (best2 && best2Weight >= Math.max(180, best1Weight * 0.52)) {
+        best2.castShadow = true;
+      }
+    }
+  }
+
+  _initParticleInstancer(maxCount = 96) {
+    this._maxParticles = maxCount;
+    this.particleInstGeo = this.sharedParticleGeo.clone();
+    this._particleAlphas = new Float32Array(maxCount);
+    this._particleAlphaAttr = new THREE.InstancedBufferAttribute(this._particleAlphas, 1);
+    this._particleAlphaAttr.setUsage(THREE.DynamicDrawUsage);
+    this.particleInstGeo.setAttribute('aAlpha', this._particleAlphaAttr);
+
+    this.particleInstMat = new THREE.MeshBasicMaterial({
+      color: '#ffffff',
+      transparent: true,
+      depthWrite: false,
+    });
+    this.particleInstMat.onBeforeCompile = (shader) => {
+      shader.vertexShader =
+        'attribute float aAlpha;\nvarying float vPartAlpha;\n' +
+        shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvPartAlpha = aAlpha;');
+      shader.fragmentShader =
+        'varying float vPartAlpha;\n' +
+        shader.fragmentShader.replace(
+          '#include <dithering_fragment>',
+          'gl_FragColor.a *= vPartAlpha;\n#include <dithering_fragment>'
+        );
+    };
+
+    this.particleInst = new THREE.InstancedMesh(this.particleInstGeo, this.particleInstMat, maxCount);
+    this.particleInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.particleInst.frustumCulled = false;
+    this.particleInst.count = 0;
+    this.particleInst.visible = false;
+    this._tempColor.set('#ffffff');
+    for (let i = 0; i < maxCount; i++) {
+      this.particleInst.setColorAt(i, this._tempColor);
+    }
+    if (this.particleInst.instanceColor) {
+      this.particleInst.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    }
+    this.particleGroup.add(this.particleInst);
+  }
+
+  _buildMuzzleFlashGroup() {
+    const g = new THREE.Group();
+    g.visible = false;
+    const core = new THREE.Mesh(this.sharedPrismGeo, this.sharedSnowballMat);
+    core.scale.setScalar(0.75);
+    const flare = new THREE.Sprite(this.sharedHaloSpriteMat);
+    flare.scale.set(0.85, 0.85, 1);
+    g.add(core, flare);
+    g.userData = { core, flare };
+    return g;
+  }
+
+  _buildSnowballFxNode(isOrbital = false) {
+    const g = new THREE.Group();
+    const icosa = new THREE.Mesh(this.sharedSnowballGeo, this.sharedSnowballMat);
+    const voxel = new THREE.Mesh(this.sharedVoxelGeo, this.sharedSnowballMat);
+    const prism = new THREE.Mesh(this.sharedPrismGeo, this.sharedSnowballMat);
+    const ring = new THREE.Mesh(this.sharedFxRingGeo, this.sharedFxRingMat);
+    const halo = new THREE.Sprite(this.sharedHaloSpriteMat);
+    halo.scale.set(0.58, 0.58, 1);
+
+    const trailCluster = new THREE.Mesh(
+      isOrbital ? this.sharedOrbitalTrailGeo : this.sharedTrailClusterGeo,
+      this.sharedTrailDotMat
+    );
+
+    g.add(icosa, voxel, prism, ring, halo, trailCluster);
+    g.userData = { icosa, voxel, prism, ring, halo, trailCluster };
+    return g;
   }
 
   _buildLandingRing() {
     const g = new THREE.Group();
     const shadow = new THREE.Mesh(
-      new THREE.CircleGeometry(0.26, 20),
+      new THREE.CircleGeometry(0.25, 20),
       new THREE.MeshBasicMaterial({ color: '#020617', transparent: true, opacity: 0.55, depthWrite: false })
     );
     shadow.rotation.x = -Math.PI / 2;
 
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.28, 0.36, 24),
+      new THREE.RingGeometry(0.27, 0.34, 24),
       new THREE.MeshBasicMaterial({
-        color: '#38bdf8',
+        color: '#5efce8',
         transparent: true,
-        opacity: 0.85,
+        opacity: 0.72,
         side: THREE.DoubleSide,
         depthWrite: false,
       })
@@ -371,1209 +1020,494 @@ export class GameRenderer {
     const g = new THREE.Group();
     g.visible = false;
     const outerRing = new THREE.Mesh(
-      new THREE.TorusGeometry(0.42, 0.045, 8, 24),
-      new THREE.MeshBasicMaterial({ color: '#38bdf8', transparent: true, opacity: 0.9 })
+      new THREE.TorusGeometry(0.4, 0.04, 8, 24),
+      new THREE.MeshBasicMaterial({ color: '#5efce8', transparent: true, opacity: 0.85 })
     );
     const innerRing = new THREE.Mesh(
-      new THREE.TorusGeometry(0.26, 0.035, 8, 20),
-      new THREE.MeshBasicMaterial({ color: '#fde047', transparent: true, opacity: 0.85 })
+      new THREE.TorusGeometry(0.25, 0.03, 8, 20),
+      new THREE.MeshBasicMaterial({ color: '#fbbf24', transparent: true, opacity: 0.8 })
     );
     const core = new THREE.Mesh(
-      new THREE.CircleGeometry(0.22, 20),
-      new THREE.MeshBasicMaterial({
-        color: '#a5f3fc',
-        transparent: true,
-        opacity: 0.55,
-        side: THREE.DoubleSide,
-      })
+      new THREE.CircleGeometry(0.21, 20),
+      new THREE.MeshBasicMaterial({ color: '#bae6fd', transparent: true, opacity: 0.45, side: THREE.DoubleSide })
     );
     g.add(outerRing, innerRing, core);
     g.userData = { outerRing, innerRing, core };
     return g;
   }
 
-  _buildPogoMesh() {
-    const g = new THREE.Group();
-
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: '#4ade80',
-      emissive: '#16a34a',
-      emissiveIntensity: 0.14,
-      roughness: 0.35,
-      metalness: 0.15,
-    });
-
-    // Sculpted LatheGeometry torso (pear-shaped athletic frog hero)
-    const lathePts = [
-      new THREE.Vector2(0.01, 0.12),
-      new THREE.Vector2(0.24, 0.16),
-      new THREE.Vector2(0.35, 0.34),
-      new THREE.Vector2(0.32, 0.54),
-      new THREE.Vector2(0.23, 0.68),
-      new THREE.Vector2(0.01, 0.72),
-    ];
-    const body = new THREE.Mesh(new THREE.LatheGeometry(lathePts, 20), bodyMat);
-    g.add(body);
-
-    // Sculpted Belly Armor Plate
-    const belly = new THREE.Mesh(
-      new THREE.SphereGeometry(0.23, 16, 12),
-      new THREE.MeshStandardMaterial({ color: '#dcfce7', roughness: 0.3, metalness: 0.1 })
-    );
-    belly.scale.set(0.7, 1.05, 0.92);
-    belly.position.set(0.17, 0.36, 0);
-    g.add(belly);
-
-    // Backpack Cryo-Tank with glowing cyan energy core
-    const tank = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.11, 0.11, 0.32, 12),
-      new THREE.MeshStandardMaterial({ color: '#475569', metalness: 0.8, roughness: 0.2 })
-    );
-    tank.position.set(-0.28, 0.42, 0);
-    const tankCore = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.06, 0.06, 0.22, 10),
-      new THREE.MeshBasicMaterial({ color: '#38bdf8' })
-    );
-    tankCore.position.set(-0.34, 0.42, 0);
-    g.add(tank, tankCore);
-
-    // Spring Antennae + glowing orbs
-    const stalkGeo = new THREE.CylinderGeometry(0.025, 0.035, 0.24, 8);
-    const tipMat = new THREE.MeshStandardMaterial({
-      color: '#bef264',
-      emissive: '#4ade80',
-      emissiveIntensity: 0.9,
-      roughness: 0.15,
-    });
-    for (const zSide of [-0.14, 0.14]) {
-      const stalk = new THREE.Mesh(stalkGeo, bodyMat);
-      stalk.position.set(-0.04, 0.78, zSide);
-      stalk.rotation.x = zSide * 1.4;
-      const tip = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 10), tipMat);
-      tip.position.set(-0.04, 0.91, zSide * 1.3);
-      g.add(stalk, tip);
-    }
-
-    // Articulated Legs & Boots
-    const bootMat = new THREE.MeshStandardMaterial({ color: '#0f766e', metalness: 0.45, roughness: 0.3 });
-    const makeLeg = (zOff) => {
-      const lg = new THREE.Group();
-      lg.position.set(0, 0.16, zOff);
-      const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.12, 8), bodyMat);
-      shin.position.y = -0.05;
-      const boot = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.1, 0.15), bootMat);
-      boot.position.set(0.04, -0.11, 0);
-      lg.add(shin, boot);
-      return lg;
-    };
-    const footL = makeLeg(-0.14);
-    const footR = makeLeg(0.14);
-    g.add(footL, footR);
-    g.userData.footL = footL;
-    g.userData.footR = footR;
-
-    // Detailed 3D Eyes (sclera, iris, pupil, eyelid)
-    const eyeGroup = new THREE.Group();
-    eyeGroup.position.set(0.18, 0.6, 0);
-    const scleraMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.1 });
-    const irisMat = new THREE.MeshStandardMaterial({ color: '#0ea5e9', emissive: '#0284c7', emissiveIntensity: 0.4 });
-    const pupilMat = new THREE.MeshBasicMaterial({ color: '#090d16' });
-    const lidMat = new THREE.MeshStandardMaterial({ color: '#22c55e', roughness: 0.3 });
-
-    const makeEye = (zOff) => {
-      const eg = new THREE.Group();
-      eg.position.z = zOff;
-      const sc = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 12), scleraMat);
-      const ir = new THREE.Mesh(new THREE.SphereGeometry(0.072, 10, 10), irisMat);
-      ir.position.set(0.058, 0, 0);
-      const pu = new THREE.Mesh(new THREE.SphereGeometry(0.042, 8, 8), pupilMat);
-      pu.position.set(0.088, 0, 0);
-      const lid = new THREE.Mesh(
-        new THREE.SphereGeometry(0.118, 12, 8, 0, TWO_PI, 0, Math.PI * 0.55),
-        lidMat
-      );
-      lid.scale.y = 0.05;
-      eg.add(sc, ir, pu, lid);
-      eg.userData.lid = lid;
-      return eg;
-    };
-    const eyeL = makeEye(-0.11);
-    const eyeR = makeEye(0.11);
-    eyeGroup.add(eyeL, eyeR);
-    g.add(eyeGroup);
-    g.userData.eyeL = eyeL;
-    g.userData.eyeR = eyeR;
-
-    // 2-Tone Cryo-Blaster
-    const barrel = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.085, 0.11, 0.32, 12),
-      new THREE.MeshStandardMaterial({ color: '#334155', metalness: 0.85, roughness: 0.2 })
-    );
-    barrel.rotation.z = -Math.PI / 2;
-    barrel.position.set(0.35, 0.42, 0);
-    const cryoChamber = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.095, 0.095, 0.12, 12),
-      new THREE.MeshStandardMaterial({ color: '#38bdf8', emissive: '#0ea5e9', emissiveIntensity: 1.2 })
-    );
-    cryoChamber.rotation.z = -Math.PI / 2;
-    cryoChamber.position.set(0.33, 0.42, 0);
-    const muzzle = new THREE.Mesh(
-      new THREE.SphereGeometry(0.1, 10, 10),
-      new THREE.MeshBasicMaterial({ color: '#e0f2fe' })
-    );
-    muzzle.position.set(0.53, 0.42, 0);
-    const muzzleLight = new THREE.PointLight('#67e8f9', 0, 4.2);
-    muzzleLight.position.set(0.6, 0.42, 0);
-    g.add(barrel, cryoChamber, muzzle, muzzleLight);
-    g.userData.barrel = barrel;
-    g.userData.cryoChamber = cryoChamber;
-    g.userData.muzzle = muzzle;
-    g.userData.muzzleLight = muzzleLight;
-
-    return g;
-  }
-
   _buildDebrisPool() {
-    const group = new THREE.Group();
-    group.visible = false;
-    const chunks = [];
-    const geo = new THREE.BoxGeometry(0.28, 0.22, 0.24);
-    const mat = new THREE.MeshStandardMaterial({ color: '#60a5fa', roughness: 0.45, metalness: 0.2 });
-    for (let i = 0; i < 28; i++) {
-      const m = new THREE.Mesh(geo, mat);
-      m.userData = {
-        rx: ((i % 9) - 4) * 0.72,
+    // Single InstancedMesh for all 30 topple masonry chunks (1 draw call instead of 30!)
+    const geo = new THREE.BoxGeometry(0.32, 0.24, 0.26);
+    const mat = new THREE.MeshStandardMaterial({ color: '#3b4266', roughness: 0.65, metalness: 0.15 });
+    const inst = new THREE.InstancedMesh(geo, mat, 30);
+    inst.visible = false;
+    const meta = [];
+    for (let i = 0; i < 30; i++) {
+      meta.push({
+        rx: ((i % 9) - 4) * 0.74,
         rz: ((i % 5) - 2) * 0.65,
-        speed: 0.7 + (i % 5) * 0.25,
-        rot: (i % 2 === 0 ? 1 : -1) * (2.5 + (i % 4)),
-      };
-      group.add(m);
-      chunks.push(m);
+        speed: 0.68 + (i % 5) * 0.24,
+        rot: (i % 2 === 0 ? 1 : -1) * (2.4 + (i % 4)),
+      });
     }
-    return { group, chunks, mat };
+    return { inst, geo, mat, meta };
   }
 
-  _getOrBuildTowerGroup(tower) {
-    if (this.towerCache.has(tower.id)) {
-      return this.towerCache.get(tower.id);
+  _getOrBuildTowerGroup(tower, era) {
+    const isOrig = era === 'original';
+    const isRealOrig = Boolean(isOrig && tower.real);
+    const rbTheme = isOrig ? 'classic' : resolveArchTheme(tower);
+    const propVer = isOrig ? 0 : this._rebootPropsVersion;
+    const clue = tower.clue;
+    const clueSig = clue
+      ? `${clue.kind}_${clue.col}_${clue.floor}_${clue.n || ''}_${(clue.pattern || clue.order || []).join('')}`
+      : 'noclue';
+    const basePrefix = `${era}_${isRealOrig ? 'real' : 'std'}_${rbTheme}_`;
+    const towerSuffix = `_${tower.key || tower.id}_${clueSig}`;
+    const cacheKey = `${basePrefix}p${propVer}${towerSuffix}`;
+    if (this.towerCache.has(cacheKey)) {
+      return this.towerCache.get(cacheKey);
     }
 
-    const pal = tower.palette;
-    const group = new THREE.Group();
-    const totalH = tower.floors * FLOOR_HEIGHT;
-
-    // 1. Main 3D Cylindrical Tower Body with PBR maps
-    const tex = createBrickTextures(pal);
-    tex.map.repeat.set(1, tower.floors / 4);
-    tex.bumpMap.repeat.set(1, tower.floors / 4);
-    tex.roughnessMap.repeat.set(1, tower.floors / 4);
-    tex.emissiveMap.repeat.set(1, tower.floors / 4);
-
-    const cylMat = new THREE.MeshStandardMaterial({
-      map: tex.map,
-      bumpMap: tex.bumpMap,
-      bumpScale: 0.12,
-      roughnessMap: tex.roughnessMap,
-      emissive: pal.glow,
-      emissiveMap: tex.emissiveMap,
-      emissiveIntensity: 0.12,
-      roughness: 0.68,
-      metalness: 0.18,
-    });
-    const cylMesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(TOWER_RADIUS, TOWER_RADIUS, totalH, 48, 1, false),
-      cylMat
-    );
-    cylMesh.position.y = totalH * 0.5;
-    group.add(cylMesh);
-
-    // 2. Real 3D Cornice Rings every 2 floors
-    const trimMat = new THREE.MeshStandardMaterial({
-      color: pal.brickB,
-      metalness: 0.35,
-      roughness: 0.48,
-    });
-    const collarMat = new THREE.MeshStandardMaterial({
-      color: pal.ledge,
-      emissive: pal.glow,
-      emissiveIntensity: 0.25,
-      roughness: 0.35,
-    });
-    const corniceGeo = new THREE.TorusGeometry(TOWER_RADIUS + 0.035, 0.045, 8, 48);
-
-    for (let f = 2; f < tower.floors; f += 2) {
-      const ring = new THREE.Mesh(corniceGeo, trimMat);
-      ring.rotation.x = Math.PI / 2;
-      ring.position.y = f * FLOOR_HEIGHT - 0.04;
-      group.add(ring);
-    }
-
-    // 3. Subtle Vertical Pilaster Ribs (no blinding vertical neon bars)
-    const ribGeo = new THREE.BoxGeometry(0.12, totalH, 0.08);
-    for (let k = 0; k < 8; k++) {
-      const phi = (k * 2 + 0.5) * COL_ANGLE;
-      const rib = new THREE.Mesh(ribGeo, trimMat);
-      rib.position.set(
-        (TOWER_RADIUS + 0.02) * Math.sin(phi),
-        totalH * 0.5,
-        (TOWER_RADIUS + 0.02) * Math.cos(phi)
-      );
-      rib.rotation.y = phi;
-      group.add(rib);
-    }
-
-    // 4. Detailed 3D Crenellated Battlements + Beacon Spires at Crown
-    const crownBase = new THREE.Mesh(
-      new THREE.CylinderGeometry(TOWER_RADIUS + 0.18, TOWER_RADIUS + 0.1, 0.34, 32),
-      new THREE.MeshStandardMaterial({
-        color: pal.ledge,
-        emissive: pal.glow,
-        emissiveIntensity: 0.4,
-        metalness: 0.55,
-        roughness: 0.25,
-      })
-    );
-    crownBase.position.y = totalH + 0.16;
-    group.add(crownBase);
-
-    const merlonGeo = new THREE.BoxGeometry(0.45, 0.32, 0.24);
-    for (let m = 0; m < COLS; m += 2) {
-      const phi = m * COL_ANGLE;
-      const merlon = new THREE.Mesh(merlonGeo, trimMat);
-      merlon.position.set(
-        (TOWER_RADIUS + 0.06) * Math.sin(phi),
-        totalH + 0.46,
-        (TOWER_RADIUS + 0.06) * Math.cos(phi)
-      );
-      merlon.rotation.y = phi;
-      group.add(merlon);
-    }
-
-    const spireGeo = new THREE.ConeGeometry(0.11, 0.65, 8);
-    for (let s = 0; s < 4; s++) {
-      const phi = s * 4 * COL_ANGLE;
-      const spire = new THREE.Mesh(spireGeo, collarMat);
-      spire.position.set(
-        (TOWER_RADIUS + 0.08) * Math.sin(phi),
-        totalH + 0.72,
-        (TOWER_RADIUS + 0.08) * Math.cos(phi)
-      );
-      group.add(spire);
-    }
-
-    // 5. Recessed 3D Stone/Tech Archways + 3D Holographic Beacons on Doors & Exit
-    const doorMarkers = [];
-    const exitRings = [];
-    const markerGeo = new THREE.OctahedronGeometry(0.14, 0);
-    for (const door of tower.doors) {
-      const phi = (door.col + 0.5) * COL_ANGLE;
-      const dg = new THREE.Group();
-      dg.position.set(
-        (TOWER_RADIUS + 0.03) * Math.sin(phi),
-        door.floor * FLOOR_HEIGHT + 0.42,
-        (TOWER_RADIUS + 0.03) * Math.cos(phi)
-      );
-      dg.rotation.y = phi;
-
-      const pillarGeo = new THREE.BoxGeometry(0.12, 0.78, 0.18);
-      const pillarMat = new THREE.MeshStandardMaterial({ color: '#334155', metalness: 0.6, roughness: 0.3 });
-      const pL = new THREE.Mesh(pillarGeo, pillarMat);
-      pL.position.set(-0.32, -0.02, 0.04);
-      const pR = new THREE.Mesh(pillarGeo, pillarMat);
-      pR.position.set(0.32, -0.02, 0.04);
-
-      const inner = new THREE.Mesh(
-        new THREE.BoxGeometry(0.54, 0.8, 0.1),
-        new THREE.MeshBasicMaterial({ color: door.isExit ? '#713f12' : '#020617' })
-      );
-      const portalEnergy = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.46, 0.72),
-        new THREE.MeshBasicMaterial({
-          color: door.isExit ? '#fde047' : pal.glow,
-          transparent: true,
-          opacity: door.isExit ? 0.65 : 0.35,
-          side: THREE.DoubleSide,
-        })
-      );
-      portalEnergy.position.z = 0.06;
-
-      const archMat = new THREE.MeshStandardMaterial({
-        color: door.isExit ? '#fde047' : pal.glow,
-        emissive: door.isExit ? '#f59e0b' : pal.glow,
-        emissiveIntensity: 1.8,
-      });
-      const arch = new THREE.Mesh(
-        new THREE.TorusGeometry(0.34, 0.06, 8, 20, Math.PI),
-        archMat
-      );
-      arch.position.set(0, 0.12, 0.05);
-
-      // Floating 3D Holographic Diamond/Chevron Marker above every door
-      const marker = new THREE.Mesh(markerGeo, archMat);
-      marker.position.set(0, 0.78, 0.16);
-      dg.add(pL, pR, inner, portalEnergy, arch, marker);
-      doorMarkers.push({ mesh: marker, baseY: 0.78 });
-
-      // Tall Golden 3D Light-Pillar Beacon + Spinning Crown Ring above Exit Door
-      if (door.isExit) {
-        const beam = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.26, 0.38, 4.2, 16, 1, true),
-          new THREE.MeshBasicMaterial({
-            color: '#fde047',
-            transparent: true,
-            opacity: 0.24,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-            side: THREE.DoubleSide,
-          })
-        );
-        beam.position.set(0, 2.2, 0.1);
-        const crownRing = new THREE.Mesh(
-          new THREE.TorusGeometry(0.46, 0.045, 8, 24),
-          archMat
-        );
-        crownRing.rotation.x = Math.PI / 2;
-        crownRing.position.set(0, 1.05, 0.14);
-        dg.add(beam, crownRing);
-        exitRings.push(crownRing);
+    // Evict any stale pre-GLB (`p0`/`p1`) entry for this exact tower so zero GPU geometries leak
+    for (const [k, old] of this.towerCache.entries()) {
+      if (k !== cacheKey && k.startsWith(basePrefix) && k.endsWith(towerSuffix) && old.group !== this.currentTowerGroup) {
+        disposeTowerArchitecture(old);
+        this.towerCache.delete(k);
       }
-
-      group.add(dg);
     }
 
-    // 6. 3D Elevator Shaft Dual Rails, Hovering Lift Pods & Thruster Cones
-    const elevatorPods = [];
-    const elevatorThrusters = [];
-    const thrusterGeo = new THREE.ConeGeometry(0.14, 0.32, 10);
-    const thrusterMat = new THREE.MeshBasicMaterial({
-      color: '#67e8f9',
-      transparent: true,
-      opacity: 0.8,
-      blending: THREE.AdditiveBlending,
-    });
-    for (const el of tower.elevators) {
-      const phi = (el.col + 0.5) * COL_ANGLE;
-      const r = TOWER_RADIUS + 0.3;
-      const railH = (el.maxFloor - el.minFloor) * FLOOR_HEIGHT + 0.65;
-      for (const offset of [-0.26, 0.26]) {
-        const rail = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.03, 0.03, railH, 8),
-          new THREE.MeshStandardMaterial({ color: '#94a3b8', metalness: 0.75, roughness: 0.2 })
-        );
-        const tangentX = Math.cos(phi) * offset;
-        const tangentZ = -Math.sin(phi) * offset;
-        rail.position.set(
-          r * Math.sin(phi) + tangentX,
-          (el.minFloor + el.maxFloor) * 0.5 * FLOOR_HEIGHT,
-          r * Math.cos(phi) + tangentZ
-        );
-        group.add(rail);
-      }
-
-      const pod = new THREE.Group();
-      const deck = new THREE.Mesh(
-        new THREE.BoxGeometry(0.92, 0.16, 0.66),
-        new THREE.MeshStandardMaterial({
-          color: '#38bdf8',
-          emissive: '#0284c7',
-          emissiveIntensity: 0.9,
-          metalness: 0.6,
-          roughness: 0.2,
-        })
-      );
-      const trim = new THREE.Mesh(
-        new THREE.BoxGeometry(0.96, 0.05, 0.7),
-        new THREE.MeshBasicMaterial({ color: '#e0f2fe' })
-      );
-      trim.position.y = 0.08;
-      pod.add(deck, trim);
-
-      for (const tx of [-0.26, 0.26]) {
-        const th = new THREE.Mesh(thrusterGeo, thrusterMat);
-        th.rotation.x = Math.PI;
-        th.position.set(tx, -0.22, 0);
-        pod.add(th);
-        elevatorThrusters.push(th);
-      }
-
-      pod.position.set(r * Math.sin(phi), el.startFloor * FLOOR_HEIGHT - 0.1, r * Math.cos(phi));
-      pod.rotation.y = phi;
-      group.add(pod);
-      elevatorPods.push(pod);
-    }
-
-    // 7. 3D Cantilever Ledges (Support Bracket + Beveled Deck + Glowing Top Rail)
-    const ledgeWidth = TOWER_RADIUS * COL_ANGLE * 1.12;
-    const ledgeGeo = new THREE.BoxGeometry(ledgeWidth, 0.18, 0.66);
-    const topRailGeo = new THREE.BoxGeometry(ledgeWidth * 1.03, 0.06, 0.7);
-    const bracketGeo = new THREE.BoxGeometry(ledgeWidth * 0.35, 0.22, 0.42);
-    const boxGeo = new THREE.BoxGeometry(ledgeWidth * 0.86, 0.54, 0.58);
-
-    const solidMat = new THREE.MeshStandardMaterial({
-      color: pal.ledge,
-      emissive: pal.glow,
-      emissiveIntensity: 0.12,
-      roughness: 0.42,
-      metalness: 0.35,
-    });
-    const solidTopMat = new THREE.MeshStandardMaterial({
-      color: pal.ledgeTop,
-      emissive: pal.glow,
-      emissiveIntensity: 0.22,
-      roughness: 0.28,
-    });
-    const bracketMat = new THREE.MeshStandardMaterial({
-      color: '#334155',
-      metalness: 0.6,
-      roughness: 0.4,
-    });
-    const iceMat = new THREE.MeshStandardMaterial({
-      color: '#38bdf8',
-      emissive: '#0284c7',
-      emissiveIntensity: 0.2,
-      roughness: 0.15,
-      metalness: 0.2,
-      transparent: true,
-      opacity: 0.85,
-    });
-    const iceTopMat = new THREE.MeshStandardMaterial({
-      color: '#bae6fd',
-      emissive: '#38bdf8',
-      emissiveIntensity: 0.25,
-      roughness: 0.2,
-    });
-    const convMatR = new THREE.MeshStandardMaterial({
-      map: this.conveyorTexR,
-      emissive: '#a855f7',
-      emissiveIntensity: 0.2,
-      roughness: 0.4,
-    });
-    const convMatL = new THREE.MeshStandardMaterial({
-      map: this.conveyorTexL,
-      emissive: '#a855f7',
-      emissiveIntensity: 0.2,
-      roughness: 0.4,
-    });
-    const convTopMat = new THREE.MeshStandardMaterial({
-      color: '#e879f9',
-      emissive: '#a855f7',
-      emissiveIntensity: 0.25,
-      roughness: 0.3,
-    });
-    const crumbleTopMat = new THREE.MeshStandardMaterial({
-      color: '#fbbf24',
-      emissive: '#d97706',
-      emissiveIntensity: 0.25,
-      roughness: 0.4,
-    });
-
-    const crystalGeo = new THREE.ConeGeometry(0.08, 0.28, 5);
-    const rollerGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.68, 8);
-    const segGeo = new THREE.BoxGeometry(ledgeWidth * 0.3, 0.18, 0.64);
-    const conveyorRollers = [];
-
-    const ledgeMeshes = [];
-    for (const l of tower.ledges) {
-      const phi = (l.col + 0.5) * COL_ANGLE;
-      const r = TOWER_RADIUS + 0.34;
-      const y = l.type === 'box' ? l.floor * FLOOR_HEIGHT + 0.27 : l.floor * FLOOR_HEIGHT - 0.11;
-
-      const node = new THREE.Group();
-      node.position.set(r * Math.sin(phi), y, r * Math.cos(phi));
-      node.rotation.y = phi;
-
-      if (l.type === 'box') {
-        const boxMat = new THREE.MeshStandardMaterial({
-          color: '#facc15',
-          emissive: '#ea580c',
-          emissiveIntensity: 0.65,
-          roughness: 0.28,
-          metalness: 0.45,
-        });
-        const crate = new THREE.Mesh(boxGeo, boxMat);
-        const core = new THREE.Mesh(
-          new THREE.BoxGeometry(ledgeWidth * 0.5, 0.28, 0.62),
-          new THREE.MeshBasicMaterial({ color: '#fef08a' })
-        );
-        node.add(crate, core);
-        node.userData = { baseY: y, type: l.type, mainMat: boxMat };
-      } else if (l.type === 'crumble') {
-        // 3 fractured stone segments with glowing amber fault core
-        const cMat = new THREE.MeshStandardMaterial({
-          color: '#f59e0b',
-          emissive: '#b45309',
-          emissiveIntensity: 0.4,
-          roughness: 0.6,
-        });
-        for (const sx of [-0.32, 0, 0.32]) {
-          const seg = new THREE.Mesh(segGeo, cMat);
-          seg.position.x = sx * ledgeWidth;
-          node.add(seg);
+    // Bound cache size for Endless mode & Campaign sector transitions
+    if (this.towerCache.size > 10) {
+      for (const [oldestKey, oldEntry] of this.towerCache.entries()) {
+        if (oldEntry && oldEntry.group !== this.currentTowerGroup) {
+          disposeTowerArchitecture(oldEntry);
+          this.towerCache.delete(oldestKey);
+          break;
         }
-        const cap = new THREE.Mesh(topRailGeo, crumbleTopMat);
-        cap.position.y = 0.09;
-        node.add(cap);
-        node.userData = { baseY: y, type: l.type, mainMat: cMat };
-      } else if (l.type === 'ice') {
-        const slab = new THREE.Mesh(ledgeGeo, iceMat);
-        const cap = new THREE.Mesh(topRailGeo, iceTopMat);
-        cap.position.y = 0.09;
-        node.add(slab, cap);
-        for (const cx of [-0.3, 0.08, 0.34]) {
-          const shard = new THREE.Mesh(crystalGeo, iceTopMat);
-          shard.position.set(cx * ledgeWidth, -0.14, 0.2);
-          shard.rotation.z = Math.PI + cx * 0.4;
-          node.add(shard);
-        }
-        node.userData = { baseY: y, type: l.type };
-      } else if (l.type === 'conveyorR' || l.type === 'conveyorL') {
-        const cMat = l.type === 'conveyorR' ? convMatR : convMatL;
-        const deck = new THREE.Mesh(ledgeGeo, cMat);
-        const cap = new THREE.Mesh(topRailGeo, convTopMat);
-        cap.position.y = 0.09;
-        node.add(deck, cap);
-        const dir = l.type === 'conveyorR' ? 1 : -1;
-        for (const rx of [-0.32, 0, 0.32]) {
-          const rol = new THREE.Mesh(rollerGeo, bracketMat);
-          rol.rotation.x = Math.PI / 2;
-          rol.position.set(rx * ledgeWidth, -0.02, 0.02);
-          node.add(rol);
-          conveyorRollers.push({ mesh: rol, dir });
-        }
-        node.userData = { baseY: y, type: l.type };
-      } else {
-        // Solid cantilever ledge with underside support bracket
-        const deck = new THREE.Mesh(ledgeGeo, solidMat);
-        const cap = new THREE.Mesh(topRailGeo, solidTopMat);
-        cap.position.y = 0.09;
-        const bracket = new THREE.Mesh(bracketGeo, bracketMat);
-        bracket.position.set(0, -0.17, -0.14);
-        bracket.rotation.x = 0.45;
-        node.add(deck, cap, bracket);
-        node.userData = { baseY: y, type: l.type };
       }
-
-      group.add(node);
-      ledgeMeshes.push(node);
     }
 
-    const cached = {
-      group,
-      ledgeMeshes,
-      elevatorPods,
-      elevatorThrusters,
-      doorMarkers,
-      exitRings,
-      conveyorRollers,
-      cylMat,
-    };
-    this.towerCache.set(tower.id, cached);
+    const cached = buildDetailedTowerGroup(tower, era, {
+      corbel_ledge: this.glbModels.corbel_ledge || null,
+      cage_elevator: this.glbModels.cage_elevator || null,
+      useOceanVfx: true,
+    });
+    this.towerCache.set(cacheKey, cached);
     return cached;
   }
 
-  _createEnemyMesh(type) {
+  _getCollectibleMat(key, factory) {
+    let mat = this._collectibleMats.get(key);
+    if (!mat) {
+      mat = factory();
+      mat.userData = mat.userData || {};
+      mat.userData.shared = true;
+      this._collectibleMats.set(key, mat);
+    }
+    return mat;
+  }
+
+  _disposeCollectibleMesh(root, forceMaterials = false) {
+    if (!root) return;
+    const seenMats = forceMaterials ? new Set() : null;
+    root.traverse((obj) => {
+      if (obj.geometry && !obj.geometry.userData?.shared) {
+        obj.geometry.dispose();
+      }
+      if (forceMaterials) {
+        const mats = Array.isArray(obj.material) ? obj.material : obj.material ? [obj.material] : [];
+        for (const m of mats) {
+          if (m && !m.userData?.shared && !seenMats.has(m)) {
+            seenMats.add(m);
+            m.dispose();
+          }
+        }
+      }
+    });
+  }
+
+  _buildCollectibleMesh(type) {
     const g = new THREE.Group();
-    if (type === 'molecule') {
-      const core = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(0.14, 0),
-        new THREE.MeshBasicMaterial({ color: '#ffffff' })
+    if (type === 'starCore') {
+      const star = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.24, 0),
+        this._getCollectibleMat(
+          'starCore:star',
+          () =>
+            new THREE.MeshStandardMaterial({
+              color: '#fde047',
+              emissive: '#f59e0b',
+              emissiveIntensity: 1.2,
+              roughness: 0.1,
+              metalness: 0.4,
+            })
+        )
       );
-      g.add(core);
-      const colors = ['#ff2a85', '#fbbf24', '#00f0ff'];
-      const atoms = [];
-      for (let i = 0; i < 3; i++) {
-        const a = new THREE.Mesh(
-          new THREE.SphereGeometry(0.13, 12, 12),
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(0.32, 0.025, 8, 24),
+        this._getCollectibleMat('starCore:ring', () => new THREE.MeshBasicMaterial({ color: '#5efce8' }))
+      );
+      g.add(star, ring);
+      g.userData.ring = ring;
+    } else if (type === 'relic') {
+      // 3D Etched Ancient Stone & Hologram Data Tablet (Nebulus Lore Relic)
+      const tabletMat = this._getCollectibleMat(
+        'relic:tablet',
+        () =>
           new THREE.MeshStandardMaterial({
-            color: colors[i],
-            emissive: colors[i],
-            emissiveIntensity: 1.0,
+            color: '#1e2638',
+            roughness: 0.44,
+            metalness: 0.36,
+          })
+      );
+      const goldTrimMat = this._getCollectibleMat(
+        'relic:goldTrim',
+        () =>
+          new THREE.MeshStandardMaterial({
+            color: '#eab308',
+            emissive: '#b45309',
+            emissiveIntensity: 0.35,
+            metalness: 0.86,
+            roughness: 0.22,
+          })
+      );
+      const glyphMat = this._getCollectibleMat(
+        'relic:glyph',
+        () =>
+          new THREE.MeshStandardMaterial({
+            map: this.relicTabletTex,
+            emissive: '#ffffff',
+            emissiveMap: this.relicTabletTex,
+            emissiveIntensity: 1.25,
+            roughness: 0.18,
+          })
+      );
+
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(0.29, 0.42, 0.065), tabletMat);
+      const topCap = new THREE.BoxGeometry(0.33, 0.045, 0.085);
+      topCap.translate(0, 0.22, 0);
+      const botPlinth = new THREE.BoxGeometry(0.34, 0.05, 0.09);
+      botPlinth.translate(0, -0.22, 0);
+      const trimMesh = new THREE.Mesh(mergeRigidGeos([topCap, botPlinth]), goldTrimMat);
+
+      const fGeo = new THREE.PlaneGeometry(0.24, 0.34);
+      fGeo.translate(0, 0, 0.035);
+      const bGeo = new THREE.PlaneGeometry(0.24, 0.34);
+      bGeo.rotateY(Math.PI);
+      bGeo.translate(0, 0, -0.035);
+      const facesMesh = new THREE.Mesh(mergeRigidGeos([fGeo, bGeo]), glyphMat);
+
+      const holoRing = new THREE.Mesh(
+        new THREE.TorusGeometry(0.29, 0.016, 8, 28),
+        this._getCollectibleMat(
+          'relic:holoRing',
+          () => new THREE.MeshBasicMaterial({ color: '#5efce8', transparent: true, opacity: 0.78 })
+        )
+      );
+      holoRing.rotation.x = Math.PI * 0.35;
+
+      const holoGem = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.065, 0),
+        this._getCollectibleMat('relic:holoGem', () => new THREE.MeshBasicMaterial({ color: '#fde047' }))
+      );
+      holoGem.position.y = 0.32;
+
+      const aura = new THREE.Sprite(
+        this._getCollectibleMat(
+          'relic:aura',
+          () =>
+            new THREE.SpriteMaterial({
+              map: this.glowDotTex,
+              color: '#5efce8',
+              transparent: true,
+              opacity: 0.46,
+              blending: THREE.AdditiveBlending,
+              depthWrite: false,
+            })
+        )
+      );
+      aura.scale.set(0.85, 0.95, 1);
+
+      g.add(slab, trimMesh, facesMesh, holoRing, holoGem, aura);
+      g.userData = { holoRing, holoGem };
+    } else if (type === 'salvage_part') {
+      // 3D Brass Shaft + Wound Copper Induction Coils + Glowing Cyan Prism Core
+      const shaft = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.048, 0.048, 0.38, 10),
+        this._getCollectibleMat(
+          'salvage:shaft',
+          () => new THREE.MeshStandardMaterial({ color: '#eab308', metalness: 0.88, roughness: 0.2 })
+        )
+      );
+      shaft.rotation.z = 0.42;
+
+      const coilMat = this._getCollectibleMat(
+        'salvage:coil',
+        () =>
+          new THREE.MeshStandardMaterial({
+            color: '#ea580c',
+            emissive: '#9a3412',
+            emissiveIntensity: 0.35,
+            metalness: 0.85,
+            roughness: 0.22,
+          })
+      );
+      const coilParts = [];
+      for (const cy of [-0.09, 0, 0.09]) {
+        const cg = new THREE.TorusGeometry(0.13, 0.026, 8, 20);
+        cg.rotateX(Math.PI / 2);
+        cg.translate(0, cy, 0);
+        coilParts.push(cg);
+      }
+      const coilsMesh = new THREE.Mesh(mergeRigidGeos(coilParts), coilMat);
+      coilsMesh.rotation.z = 0.42;
+
+      const prismCore = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.105, 0),
+        this._getCollectibleMat(
+          'salvage:prism',
+          () =>
+            new THREE.MeshStandardMaterial({
+              color: '#5efce8',
+              emissive: '#06b6d4',
+              emissiveIntensity: 1.35,
+              roughness: 0.12,
+            })
+        )
+      );
+      const aura = new THREE.Sprite(
+        this._getCollectibleMat(
+          'salvage:aura',
+          () =>
+            new THREE.SpriteMaterial({
+              map: this.glowDotTex,
+              color: '#fbbf24',
+              transparent: true,
+              opacity: 0.42,
+              blending: THREE.AdditiveBlending,
+              depthWrite: false,
+            })
+        )
+      );
+      aura.scale.set(0.75, 0.75, 1);
+
+      g.add(shaft, coilsMesh, prismCore, aura);
+      g.userData = { holoGem: prismCore };
+    } else if (type === 'compass_key') {
+      // 3D Glowing Ornate Golden Compass Key with Cyan Star Jewel
+      const keyGoldMat = this._getCollectibleMat(
+        'key:gold',
+        () =>
+          new THREE.MeshStandardMaterial({
+            color: '#fde047',
+            emissive: '#f59e0b',
+            emissiveIntensity: 0.88,
+            metalness: 0.88,
             roughness: 0.15,
           })
-        );
-        g.add(a);
-        atoms.push(a);
-      }
-      const ring1 = new THREE.Mesh(
-        new THREE.TorusGeometry(0.32, 0.022, 6, 24),
-        new THREE.MeshBasicMaterial({ color: '#67e8f9', transparent: true, opacity: 0.75 })
       );
-      ring1.rotation.x = Math.PI * 0.35;
-      const ring2 = new THREE.Mesh(
-        new THREE.TorusGeometry(0.32, 0.022, 6, 24),
-        new THREE.MeshBasicMaterial({ color: '#f472b6', transparent: true, opacity: 0.7 })
+      const bow = new THREE.TorusGeometry(0.13, 0.03, 8, 22);
+      bow.translate(0, 0.13, 0);
+      const stem = new THREE.CylinderGeometry(0.025, 0.025, 0.28, 8);
+      stem.translate(0, -0.11, 0);
+      const bitTop = new THREE.BoxGeometry(0.09, 0.034, 0.03);
+      bitTop.translate(0.048, -0.17, 0);
+      const bitBot = new THREE.BoxGeometry(0.11, 0.038, 0.03);
+      bitBot.translate(0.056, -0.225, 0);
+      const keyBody = new THREE.Mesh(mergeRigidGeos([bow, stem, bitTop, bitBot]), keyGoldMat);
+
+      const starJewel = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.068, 0),
+        this._getCollectibleMat(
+          'key:jewel',
+          () =>
+            new THREE.MeshStandardMaterial({
+              color: '#5efce8',
+              emissive: '#0ea5e9',
+              emissiveIntensity: 1.35,
+              roughness: 0.1,
+            })
+        )
       );
-      ring2.rotation.y = Math.PI * 0.35;
-      g.add(ring1, ring2);
-      g.userData.atoms = atoms;
-      g.userData.ring1 = ring1;
-      g.userData.ring2 = ring2;
-    } else if (type === 'roller') {
-      const ball = new THREE.Mesh(
-        new THREE.SphereGeometry(0.26, 16, 14),
-        new THREE.MeshStandardMaterial({
-          color: '#f97316',
-          emissive: '#9a3412',
-          emissiveIntensity: 0.45,
-          metalness: 0.8,
-          roughness: 0.2,
-        })
+      starJewel.position.y = 0.13;
+
+      const aura = new THREE.Sprite(
+        this._getCollectibleMat(
+          'key:aura',
+          () =>
+            new THREE.SpriteMaterial({
+              map: this.glowDotTex,
+              color: '#fde047',
+              transparent: true,
+              opacity: 0.5,
+              blending: THREE.AdditiveBlending,
+              depthWrite: false,
+            })
+        )
       );
-      const band = new THREE.Mesh(
-        new THREE.TorusGeometry(0.26, 0.038, 8, 20),
-        new THREE.MeshBasicMaterial({ color: '#fef08a' })
+      aura.scale.set(0.82, 0.88, 1);
+
+      g.add(keyBody, starJewel, aura);
+    } else if (type === 'curio') {
+      // 3D Glowing Crystal / Ancient Astrolabe Artifact Orb
+      const orb = new THREE.Mesh(
+        new THREE.IcosahedronGeometry(0.165, 1),
+        this._getCollectibleMat(
+          'curio:orb',
+          () =>
+            new THREE.MeshStandardMaterial({
+              color: '#c084fc',
+              emissive: '#8b5cf6',
+              emissiveIntensity: 1.2,
+              roughness: 0.08,
+              metalness: 0.3,
+            })
+        )
       );
-      const boltGeo = new THREE.SphereGeometry(0.05, 8, 8);
-      const boltMat = new THREE.MeshStandardMaterial({ color: '#cbd5e1', metalness: 0.9, roughness: 0.2 });
-      for (const side of [-0.25, 0.25]) {
-        const b = new THREE.Mesh(boltGeo, boltMat);
-        b.position.z = side;
-        ball.add(b);
-      }
-      ball.add(band);
-      g.add(ball);
-      g.userData.ball = ball;
-    } else if (type === 'bouncer') {
-      const spring = new THREE.Mesh(
-        new THREE.TorusGeometry(0.14, 0.035, 8, 16),
-        new THREE.MeshStandardMaterial({ color: '#fde047', metalness: 0.7, roughness: 0.25 })
+      const gimbalMat = this._getCollectibleMat(
+        'curio:gimbal',
+        () =>
+          new THREE.MeshStandardMaterial({
+            color: '#f59e0b',
+            emissive: '#b45309',
+            emissiveIntensity: 0.4,
+            metalness: 0.88,
+            roughness: 0.18,
+          })
       );
-      spring.rotation.x = Math.PI / 2;
-      spring.position.y = -0.2;
-      const body = new THREE.Mesh(
-        new THREE.SphereGeometry(0.25, 16, 14),
-        new THREE.MeshStandardMaterial({
-          color: '#ef4444',
-          emissive: '#991b1b',
-          emissiveIntensity: 0.55,
-          roughness: 0.2,
-        })
+      const holoRing = new THREE.Mesh(new THREE.TorusGeometry(0.225, 0.02, 8, 24), gimbalMat);
+      const gimbalRing2 = new THREE.Mesh(
+        new THREE.TorusGeometry(0.26, 0.015, 8, 24),
+        this._getCollectibleMat(
+          'curio:ring2',
+          () => new THREE.MeshBasicMaterial({ color: '#5efce8', transparent: true, opacity: 0.82 })
+        )
       );
-      g.add(spring, body);
+      gimbalRing2.rotation.y = Math.PI * 0.5;
+
+      const aura = new THREE.Sprite(
+        this._getCollectibleMat(
+          'curio:aura',
+          () =>
+            new THREE.SpriteMaterial({
+              map: this.glowDotTex,
+              color: '#e879f9',
+              transparent: true,
+              opacity: 0.48,
+              blending: THREE.AdditiveBlending,
+              depthWrite: false,
+            })
+        )
+      );
+      aura.scale.set(0.85, 0.85, 1);
+
+      g.add(orb, holoRing, gimbalRing2, aura);
+      g.userData = { holoRing, gimbalRing2 };
     } else {
-      // 'eye'
-      const housing = new THREE.Mesh(
-        new THREE.TorusGeometry(0.25, 0.035, 8, 20),
-        new THREE.MeshStandardMaterial({ color: '#475569', metalness: 0.8, roughness: 0.2 })
-      );
-      const sclera = new THREE.Mesh(
-        new THREE.SphereGeometry(0.25, 16, 14),
-        new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.12 })
-      );
-      sclera.scale.set(1.12, 0.88, 0.85);
-      const iris = new THREE.Mesh(
-        new THREE.SphereGeometry(0.13, 12, 12),
-        new THREE.MeshStandardMaterial({
-          color: '#ec4899',
-          emissive: '#db2777',
-          emissiveIntensity: 1.0,
-        })
-      );
-      iris.position.z = 0.15;
-      const pupil = new THREE.Mesh(
-        new THREE.SphereGeometry(0.06, 8, 8),
-        new THREE.MeshBasicMaterial({ color: '#090d16' })
-      );
-      pupil.position.z = 0.24;
-      g.add(housing, sclera, iris, pupil);
-      g.userData.iris = iris;
-      g.userData.pupil = pupil;
+      // Single-draw-call merged Golden Gear (`this.sharedGearGeo` + `this.sharedGearMat`)
+      g.add(new THREE.Mesh(this.sharedGearGeo, this.sharedGearMat));
     }
     return g;
   }
 
-  _initSubScene() {
-    this.subScene = new THREE.Scene();
-    this.subScene.background = new THREE.Color('#02182b');
-    this.subScene.fog = new THREE.FogExp2('#03243f', 0.042);
-    if (this.envTex) {
-      this.subScene.environment = this.envTex;
-      this.subScene.environmentIntensity = 0.75;
-    }
-
-    this.subCam = new THREE.PerspectiveCamera(46, 360 / 540, 0.1, 80);
-    this.subCam.position.set(0, 0, 12);
-
-    this.subScene.add(new THREE.HemisphereLight('#38bdf8', '#02101e', 0.65));
-    const subKey = new THREE.DirectionalLight('#bae6fd', 1.05);
-    subKey.position.set(4, 10, 8);
-    this.subScene.add(subKey);
-
-    // Volumetric Underwater Light Shafts
-    this.lightShafts = [];
-    const shaftGeo = new THREE.PlaneGeometry(1.6, 16);
-    for (let i = 0; i < 5; i++) {
-      const mat = new THREE.MeshBasicMaterial({
-        color: '#38bdf8',
-        transparent: true,
-        opacity: 0.09,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      });
-      const m = new THREE.Mesh(shaftGeo, mat);
-      m.position.set((i - 2) * 3.2, 1.5, -4 - (i % 2) * 2);
-      m.rotation.z = -0.22;
-      this.subScene.add(m);
-      this.lightShafts.push(m);
-    }
-
-    // Seabed + Glowing Alien Coral Clusters
-    const bedGeo = new THREE.PlaneGeometry(24, 12, 24, 8);
-    bedGeo.rotateX(-Math.PI / 2);
-    const pos = bedGeo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      pos.setY(i, Math.sin(pos.getX(i) * 0.7) * 0.35 + Math.cos(pos.getZ(i) * 0.9) * 0.25);
-    }
-    bedGeo.computeVertexNormals();
-    const bed = new THREE.Mesh(
-      bedGeo,
-      new THREE.MeshStandardMaterial({ color: '#06263d', roughness: 0.85, flatShading: true })
-    );
-    bed.position.set(0, -4.4, -2);
-    this.subScene.add(bed);
-
-    const coralColors = ['#ec4899', '#22d3ee', '#a855f7', '#fbbf24'];
-    for (let c = 0; c < 10; c++) {
-      const coral = new THREE.Mesh(
-        new THREE.ConeGeometry(0.18 + (c % 3) * 0.08, 0.7 + (c % 4) * 0.25, 6),
-        new THREE.MeshStandardMaterial({
-          color: coralColors[c % coralColors.length],
-          emissive: coralColors[c % coralColors.length],
-          emissiveIntensity: 0.5,
-          roughness: 0.4,
-        })
-      );
-      coral.position.set(-7 + c * 1.55, -4.1, -1.5 - (c % 3) * 0.9);
-      this.subScene.add(coral);
-    }
-
-    // Sculpted LatheGeometry MK.7 Mini-Submarine
-    const subG = new THREE.Group();
-    const hullPts = [
-      new THREE.Vector2(0.01, -0.78),
-      new THREE.Vector2(0.24, -0.62),
-      new THREE.Vector2(0.38, -0.2),
-      new THREE.Vector2(0.38, 0.28),
-      new THREE.Vector2(0.24, 0.65),
-      new THREE.Vector2(0.01, 0.78),
-    ];
-    const hullGeo = new THREE.LatheGeometry(hullPts, 20);
-    hullGeo.rotateZ(-Math.PI / 2);
-    const hull = new THREE.Mesh(
-      hullGeo,
-      new THREE.MeshStandardMaterial({ color: '#e2e8f0', metalness: 0.72, roughness: 0.2 })
-    );
-
-    const stripe = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.395, 0.395, 0.14, 18),
-      new THREE.MeshStandardMaterial({ color: '#38bdf8', emissive: '#0284c7', emissiveIntensity: 1.1 })
-    );
-    stripe.rotation.z = Math.PI / 2;
-
-    const dome = new THREE.Mesh(
-      new THREE.SphereGeometry(0.28, 16, 12, 0, TWO_PI, 0, Math.PI * 0.5),
-      new THREE.MeshStandardMaterial({
-        color: '#7dd3fc',
-        transparent: true,
-        opacity: 0.65,
-        roughness: 0.05,
-        metalness: 0.1,
-      })
-    );
-    dome.position.set(0.16, 0.26, 0);
-
-    const pogoHead = new THREE.Mesh(
-      new THREE.SphereGeometry(0.14, 12, 12),
-      new THREE.MeshStandardMaterial({ color: '#4ade80', emissive: '#16a34a', emissiveIntensity: 0.35 })
-    );
-    pogoHead.position.set(0.16, 0.31, 0);
-
-    // Side hydroplanes & tail fin
-    const finMat = new THREE.MeshStandardMaterial({ color: '#0284c7', metalness: 0.6, roughness: 0.3 });
-    const tailFin = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.42, 0.06), finMat);
-    tailFin.position.set(-0.62, 0.18, 0);
-
-    const propGroup = new THREE.Group();
-    propGroup.position.set(-0.82, 0, 0);
-    const bladeMat = new THREE.MeshStandardMaterial({ color: '#fbbf24', metalness: 0.7, roughness: 0.25 });
-    for (let b = 0; b < 3; b++) {
-      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.28, 0.09), bladeMat);
-      blade.rotation.x = (b * TWO_PI) / 3;
-      blade.position.y = Math.cos(blade.rotation.x) * 0.12;
-      blade.position.z = Math.sin(blade.rotation.x) * 0.12;
-      propGroup.add(blade);
-    }
-
-    const cone = new THREE.Mesh(
-      new THREE.ConeGeometry(0.75, 2.8, 16, 1, true),
-      new THREE.MeshBasicMaterial({
-        color: '#fde047',
-        transparent: true,
-        opacity: 0.18,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      })
-    );
-    cone.rotation.z = Math.PI / 2;
-    cone.position.set(2.05, 0, 0);
-
-    subG.add(hull, stripe, dome, pogoHead, tailFin, propGroup, cone);
-    subG.userData.prop = propGroup;
-    this.subGroup = subG;
-    this.subScene.add(subG);
-
-    // Sub HUD Progress Bar Sprite
-    this.subHudCanvas = document.createElement('canvas');
-    this.subHudCanvas.width = 512;
-    this.subHudCanvas.height = 64;
-    this.subHudTex = new THREE.CanvasTexture(this.subHudCanvas);
-    this.subHudTex.colorSpace = THREE.SRGBColorSpace;
-    this.subHudSprite = new THREE.Sprite(
-      new THREE.SpriteMaterial({ map: this.subHudTex, transparent: true, depthTest: false })
-    );
-    this.subScene.add(this.subHudSprite);
-
-    this.subFishPool = [];
-    this.subBubblePool = [];
-    this.subParticlePool = [];
-  }
-
-  resize(w, h, dpr = 1) {
-    this.width = w;
-    this.height = h;
-    const clampedDpr = Math.min(dpr, 2);
-    this.webgl.setPixelRatio(clampedDpr);
-    this.webgl.setSize(w, h, false);
-
-    if (this.composer) {
-      this.composer.setPixelRatio(clampedDpr);
-      this.composer.setSize(w, h);
-    }
-    if (this.bloomPass) {
-      this.bloomPass.resolution.set(w, h);
-    }
-
-    const aspect = Math.max(0.4, w / Math.max(1, h));
-    this.towerCam.aspect = aspect;
-    this.towerCam.updateProjectionMatrix();
-
-    this.subCam.aspect = aspect;
-    this.subCam.updateProjectionMatrix();
-  }
-
   _screenToWorld(x, y, cam, zPlane = 0) {
+    cam.updateMatrixWorld();
+    const ndcX = (x / Math.max(1, this.width)) * 2 - 1;
+    const ndcY = 1 - (y / Math.max(1, this.height)) * 2;
+    this._ndcVec.set(ndcX, ndcY, 0.5).unproject(cam);
+    this._rayDir.copy(this._ndcVec).sub(cam.position);
+    const dz = this._rayDir.z;
+    const out = this._worldPt;
+    if (Math.abs(dz) > 1e-5) {
+      const t = (zPlane - cam.position.z) / dz;
+      out.x = cam.position.x + this._rayDir.x * t;
+      out.y = cam.position.y + this._rayDir.y * t;
+      return out;
+    }
     const dist = cam.position.z - zPlane;
     const halfH = Math.tan(THREE.MathUtils.degToRad(cam.fov * 0.5)) * dist;
     const halfW = halfH * cam.aspect;
-    return {
-      x: (x / this.width - 0.5) * 2 * halfW + cam.position.x,
-      y: (0.5 - y / this.height) * 2 * halfH + cam.position.y,
-    };
+    out.x = (x / Math.max(1, this.width) - 0.5) * 2 * halfW + cam.position.x;
+    out.y = (0.5 - y / Math.max(1, this.height)) * 2 * halfH + cam.position.y;
+    return out;
   }
 
-  _syncParticles(pool, scene, particles, cam, zPlane) {
-    while (pool.length < particles.length) {
-      const m = new THREE.Mesh(
-        this.sharedParticleGeo,
-        new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true })
-      );
-      scene.add(m);
-      pool.push(m);
+  _syncParticles(_pool, _container, particles, cam, zPlane, camCol = 0, isTower = false, fh = FLOOR_HEIGHT) {
+    const inst = this.particleInst;
+    if (!inst) return;
+    const list = particles || [];
+    if (list.length === 0) {
+      inst.count = 0;
+      inst.visible = false;
+      return;
     }
-    for (let i = 0; i < pool.length; i++) {
-      const m = pool[i];
-      if (i >= particles.length) {
-        m.visible = false;
-        continue;
+    const fx = BLASTER_FX_STYLES[this.blasterFxId] || BLASTER_FX_STYLES.standard_cryo;
+    const tintCryo = this.blasterFxId !== 'standard_cryo';
+    const dm = this._debrisDummy;
+    dm.rotation.set(0, 0, 0);
+    let visCount = 0;
+
+    for (let i = 0; i < list.length && visCount < this._maxParticles; i++) {
+      const p = list[i];
+      const alpha = Math.max(0, Math.min(1, p.life / Math.max(0.001, p.maxLife || 1)));
+      if (alpha <= 0.005) continue;
+
+      if (isTower && p.col != null && p.floor != null) {
+        const theta = wrapAngle((p.col - camCol) * COL_ANGLE);
+        if (Math.abs(theta) > 1.58) continue;
+        const r = TOWER_RADIUS + 0.45;
+        dm.position.set(r * Math.sin(theta), p.floor * fh, r * Math.cos(theta));
+      } else {
+        const wp = this._screenToWorld(p.x || 0, p.y || 0, cam, zPlane);
+        dm.position.set(wp.x, wp.y, zPlane);
       }
-      const p = particles[i];
-      m.visible = true;
-      const wp = this._screenToWorld(p.x, p.y, cam, zPlane);
-      m.position.set(wp.x, wp.y, zPlane);
-      const s = Math.max(0.3, (p.size || 4) * 0.22);
-      m.scale.setScalar(s);
-      m.material.color.set(p.color || '#ffffff');
-      m.material.opacity = Math.max(0, p.life / (p.maxLife || 1));
+
+      const s = Math.max(0.25, (p.size || 4) * 0.2);
+      dm.scale.setScalar(s);
+      dm.updateMatrix();
+      inst.setMatrixAt(visCount, dm.matrix);
+
+      const rawHex = typeof p.color === 'string' ? p.color.toLowerCase() : '#ffffff';
+      if (tintCryo && CRYO_DEFAULT_HEXES.has(rawHex)) {
+        if (fx.prismatic) {
+          this._tempColor.setHSL(((i * 0.13) + (this._lastTime * 0.5)) % 1, 0.92, 0.7);
+        } else {
+          this._tempColor.set(i % 2 === 0 ? fx.trail : fx.muzzle);
+        }
+      } else {
+        this._tempColor.set(p.color || '#ffffff');
+      }
+      inst.setColorAt(visCount, this._tempColor);
+      this._particleAlphas[visCount] = alpha;
+      visCount++;
+    }
+
+    inst.count = visCount;
+    inst.visible = visCount > 0;
+    if (visCount > 0) {
+      inst.instanceMatrix.needsUpdate = true;
+      if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+      this._particleAlphaAttr.needsUpdate = true;
     }
   }
 
-  renderTowerScene(state) {
-    const { tower, player, camCol, camFloor, time, particles, snowballs, topple } = state;
-    const pal = tower.palette;
-    const aspect = this.towerCam.aspect;
-    const camZ = aspect < 0.78 ? Math.min(12.4, 10.2 * (0.78 / Math.max(0.45, aspect))) : 10.2;
-    const camY = (player.floor * 0.4 + camFloor * 0.6) * FLOOR_HEIGHT + 0.15;
-    const shake = getShakeOffset(state.shake, time);
-
-    this.towerCam.position.set(shake.x, camY + shake.y, camZ);
-    this.towerCam.lookAt(shake.x, camY - 0.25 + shake.y, 0);
-
-    // Dynamic Per-Tower Biome Sky, Fog, Planet & Ocean Tinting
-    this._tempColor.set(pal.mortar);
-    this.towerScene.background.copy(this._skyBaseColor).lerp(this._tempColor, 0.38);
-    this._tempColor.set(pal.brickA);
-    this.towerScene.fog.color.copy(this._fogBaseColor).lerp(this._tempColor, 0.28);
-    this.hemiLight.color.set(pal.ledge);
-    this.rimLight.color.set(pal.glow);
-    this.planetMesh.material.color.set(pal.ledge);
-    this.planetMesh.material.emissive.set(pal.glow);
-    this.seaMesh.material.emissive.set(pal.glow);
-    this.seaMesh.material.emissiveIntensity = 0.12 + Math.sin(time * 2.4) * 0.04;
-    this.foamRing.material.color.set(pal.glow);
-
-    // Swap cached tower group if tower changed
-    const cached = this._getOrBuildTowerGroup(tower);
-    if (this.currentTowerGroup !== cached.group) {
-      if (this.currentTowerGroup) this.towerScene.remove(this.currentTowerGroup);
-      this.currentTowerGroup = cached.group;
-      this.towerScene.add(this.currentTowerGroup);
-    }
-
-    // Rotate tower cylinder around Y so camCol faces +Z
-    const tg = cached.group;
-    tg.rotation.y = -camCol * COL_ANGLE;
-
-    // Tower topple animation
-    if (topple.active) {
-      tg.position.y = -topple.progress * tower.floors * FLOOR_HEIGHT * 1.05;
-      tg.rotation.z = Math.sin(time * 38) * 0.045 * (1 - topple.progress) + topple.progress * 0.14;
-      tg.position.x = Math.sin(time * 48) * 0.16 * (1 - topple.progress);
-
-      this.debrisPool.group.visible = true;
-      this.debrisPool.mat.color.set(pal.brickA);
-      for (const ch of this.debrisPool.chunks) {
-        const d = ch.userData;
-        ch.position.x = d.rx + Math.sin(time * 3 + d.rx) * 0.6 * topple.progress;
-        ch.position.y = Math.max(-0.5, (1 - ((topple.progress * d.speed) % 1)) * 6);
-        ch.position.z = TOWER_RADIUS + 0.4 + d.rz * 0.4;
-        ch.rotation.set(time * d.rot, time * d.rot * 0.7, 0);
-      }
-    } else {
-      tg.position.set(0, 0, 0);
-      tg.rotation.z = 0;
-      this.debrisPool.group.visible = false;
-    }
-
-    // Animate conveyor textures & physical rollers
-    this.conveyorTexR.offset.x = -(time * 1.4) % 1;
-    this.conveyorTexL.offset.x = (time * 1.4) % 1;
-    for (const r of cached.conveyorRollers) {
-      r.mesh.rotation.y = time * 6 * r.dir;
-    }
-
-    // Update ledges (gone, crumble shake, box pulse)
-    for (let i = 0; i < state.ledges.length; i++) {
-      const l = state.ledges[i];
-      const mesh = cached.ledgeMeshes[i];
-      if (!mesh) continue;
-      mesh.visible = !l.gone;
-      if (!mesh.visible) continue;
-
-      if (l.type === 'crumble' && mesh.userData.mainMat) {
-        mesh.userData.mainMat.color.set(l.crumbling ? '#ef4444' : '#f59e0b');
-        mesh.userData.mainMat.emissive.set(l.crumbling ? '#dc2626' : '#b45309');
-        mesh.position.y = mesh.userData.baseY + (l.shake ? Math.sin(time * 55) * 0.05 : 0);
-      } else if (l.type === 'box' && mesh.userData.mainMat) {
-        const flash = Math.sin(time * 10) > 0;
-        mesh.userData.mainMat.color.set(flash ? '#facc15' : '#f97316');
-      }
-    }
-
-    // Update elevator pods, thruster cones & holographic door/exit beacons
-    for (let i = 0; i < state.elevators.length; i++) {
-      const el = state.elevators[i];
-      const pod = cached.elevatorPods[i];
-      if (pod) pod.position.y = el.floor * FLOOR_HEIGHT - 0.1;
-    }
-    const thrustPulse = 0.75 + 0.35 * Math.sin(time * 24);
-    for (const th of cached.elevatorThrusters) {
-      th.scale.set(1, thrustPulse, 1);
-    }
-    for (let i = 0; i < cached.doorMarkers.length; i++) {
-      const dm = cached.doorMarkers[i];
-      dm.mesh.position.y = dm.baseY + Math.sin(time * 4 + i) * 0.08;
-      dm.mesh.rotation.y = time * 2.4 + i;
-    }
-    for (const er of cached.exitRings) {
-      er.rotation.z = time * 3.2;
-      er.scale.setScalar(1 + Math.sin(time * 5) * 0.08);
-    }
-
-    // Update Pogo 3D Hero + Muzzle Flash + Tunnel Vortex + Landing Ring
-    const pTheta = wrapAngle((player.col - camCol) * COL_ANGLE);
-    const pr = TOWER_RADIUS + 0.38;
-    const px = pr * Math.sin(pTheta);
-    const pz = pr * Math.cos(pTheta);
-    const py = player.floor * FLOOR_HEIGHT + (topple.active ? tg.position.y : 0);
-
-    const inTunnel = Boolean(player.hidden && player.tunnelTimer > 0 && !topple.active);
-    this.tunnelVortexGroup.visible = inTunnel;
-    if (inTunnel) {
-      this.tunnelVortexGroup.position.set(px, py + 0.42, pz);
-      this.tunnelVortexGroup.rotation.y = pTheta;
-      this.tunnelVortexGroup.userData.outerRing.rotation.z = time * 8;
-      this.tunnelVortexGroup.userData.innerRing.rotation.z = -time * 11;
-      const vScale = 0.85 + 0.25 * Math.sin(time * 18);
-      this.tunnelVortexGroup.scale.setScalar(vScale);
-    }
-
-    const pogoVisible = !player.hidden && !topple.active;
-    this.pogoGroup.visible = pogoVisible;
-    this.landingRingGroup.visible = pogoVisible;
-    if (pogoVisible) {
-      const moving = player.onGround && Math.abs(player.vx) > 0.2;
-      const bob = moving ? Math.abs(Math.sin(time * 18)) * 0.08 : 0;
-      const stride = moving ? Math.sin(time * 18) * 0.14 : 0;
-
-      this.pogoGroup.position.set(px, py + bob, pz);
-      // Angle Pogo 3/4 toward the camera (+Z) so both big eyes, belly & blaster are clearly visible!
-      const faceYaw = player.facing < 0 ? Math.PI - 0.42 : 0.42;
-      this.pogoGroup.rotation.y = pTheta + faceYaw;
-      const sx = player.squashX || 1;
-      const sy = player.squashY || 1;
-      this.pogoGroup.scale.set(sx, sy, sx);
-
-      this.pogoGroup.userData.footL.position.x = stride;
-      this.pogoGroup.userData.footR.position.x = -stride;
-
-      const blinking = (time * 0.75) % 4.4 > 4.22;
-      const lidScaleY = blinking ? 1.0 : 0.05;
-      this.pogoGroup.userData.eyeL.userData.lid.scale.y = lidScaleY;
-      this.pogoGroup.userData.eyeR.userData.lid.scale.y = lidScaleY;
-
-      const mf = Math.max(0, player.muzzleFlash != null ? player.muzzleFlash : player.fireCooldown > 0.1 ? 0.1 : 0);
-      const flashRatio = Math.min(1, mf / 0.14);
-      this.pogoGroup.userData.barrel.position.x = 0.35 - flashRatio * 0.08;
-      this.pogoGroup.userData.cryoChamber.position.x = 0.33 - flashRatio * 0.08;
-      this.pogoGroup.userData.muzzle.scale.setScalar(0.75 + flashRatio * 1.35);
-      this.pogoGroup.userData.muzzleLight.intensity = flashRatio * 2.6;
-
-      this.heroLight.position.set(px, py + 0.8, pz + 0.8);
-      this.heroLight.color.set(pal.glow);
-
-      // Landing Target / Shadow Ring at player.landingFloor
-      const lf = player.landingFloor != null ? player.landingFloor : -0.55;
-      const dist = Math.max(0, player.floor - lf);
-      this.landingRingGroup.position.set(px, lf * FLOOR_HEIGHT + 0.03, pz);
-      const ringScale = Math.max(0.55, 1.15 - dist * 0.12);
-      this.landingRingGroup.scale.setScalar(ringScale);
-      const overSea = lf <= -0.5;
-      this.landingRingGroup.userData.ring.material.color.set(overSea ? '#f43f5e' : '#38bdf8');
-      this.landingRingGroup.userData.ring.material.opacity = Math.max(0.25, 0.9 - dist * 0.16);
-    }
-
-    // Update Enemies
-    while (this.enemyPool.length < state.enemies.length) {
-      const en = state.enemies[this.enemyPool.length];
-      const m = this._createEnemyMesh(en.type);
-      this.towerScene.add(m);
-      this.enemyPool.push({ mesh: m, type: en.type });
-    }
-    for (let i = 0; i < this.enemyPool.length; i++) {
-      const slot = this.enemyPool[i];
-      if (i >= state.enemies.length || state.enemies[i].dead) {
-        slot.mesh.visible = false;
-        continue;
-      }
-      const en = state.enemies[i];
-      if (slot.type !== en.type) {
-        this.towerScene.remove(slot.mesh);
-        slot.mesh = this._createEnemyMesh(en.type);
-        slot.type = en.type;
-        this.towerScene.add(slot.mesh);
-      }
-      slot.mesh.visible = !(en.stunTimer > 0 && Math.floor(time * 16) % 2 === 0);
-      const eTheta = wrapAngle((en.col - camCol) * COL_ANGLE);
-      const er = TOWER_RADIUS + 0.36;
-      slot.mesh.position.set(er * Math.sin(eTheta), en.floor * FLOOR_HEIGHT + 0.28, er * Math.cos(eTheta));
-      slot.mesh.rotation.y = eTheta;
-
-      if (en.type === 'molecule' && slot.mesh.userData.atoms) {
-        const rot = time * 4.2 * (en.dir || 1);
-        slot.mesh.userData.atoms.forEach((a, idx) => {
-          const ang = rot + (idx * TWO_PI) / 3;
-          a.position.set(Math.cos(ang) * 0.2, Math.sin(ang) * 0.2, 0);
-        });
-        slot.mesh.userData.ring1.rotation.z = time * 2.5;
-        slot.mesh.userData.ring2.rotation.x = -time * 2.1;
-      } else if (en.type === 'roller' && slot.mesh.userData.ball) {
-        slot.mesh.userData.ball.rotation.z -= 0.14 * (en.dir || 1);
-      } else if (en.type === 'bouncer') {
-        const hop = Math.sin(time * 9 + (en.phase || 0));
-        slot.mesh.scale.set(1 - hop * 0.14, 1 + hop * 0.14, 1 - hop * 0.14);
-      } else if (en.type === 'eye' && slot.mesh.userData.iris) {
-        const lookX = (en.dir || 1) * 0.06;
-        slot.mesh.userData.iris.position.x = lookX;
-        slot.mesh.userData.pupil.position.x = lookX * 1.3;
-      }
-    }
-
-    // Update Snowballs
-    while (this.snowballPool.length < snowballs.length) {
-      const m = new THREE.Mesh(this.sharedSnowballGeo, this.sharedSnowballMat);
-      this.towerScene.add(m);
-      this.snowballPool.push(m);
-    }
-    for (let i = 0; i < this.snowballPool.length; i++) {
-      const m = this.snowballPool[i];
-      if (i >= snowballs.length) {
-        m.visible = false;
-        continue;
-      }
-      const sb = snowballs[i];
-      m.visible = true;
-      const st = wrapAngle((sb.col - camCol) * COL_ANGLE);
-      const sr = TOWER_RADIUS + 0.38;
-      m.position.set(sr * Math.sin(st), sb.floor * FLOOR_HEIGHT + 0.28, sr * Math.cos(st));
-      m.rotation.set(time * 6, time * 8, 0);
-    }
-
-    // Multi-octave Animated 3D Toxic Ocean waves + Foam Ring
-    const seaPos = this.seaMesh.geometry.attributes.position;
-    for (let i = 0; i < seaPos.count; i++) {
-      const x = seaPos.getX(i);
-      const z = seaPos.getZ(i);
-      const wave =
-        Math.sin(x * 0.65 + time * 3.8) * 0.14 +
-        Math.cos(z * 0.8 + time * 2.9) * 0.08 +
-        Math.sin((x + z) * 1.4 - time * 5.2) * 0.04;
-      seaPos.setY(i, this.seaBaseY[i] + wave);
-    }
-    seaPos.needsUpdate = true;
-    this.seaMesh.geometry.computeVertexNormals();
-    this.foamRing.scale.setScalar(1 + Math.sin(time * 4) * 0.025);
-
-    // Parallax stars & planet
-    this.starPoints.rotation.y = -camCol * COL_ANGLE * 0.15;
-    this.planetGroup.rotation.y = time * 0.12;
-
-    // Particles & Popups
-    this._syncParticles(this.particlePool, this.towerScene, particles, this.towerCam, TOWER_RADIUS + 0.6);
-    this._syncPopups(state.popups || [], camCol, this.towerScene, this.towerCam, true);
-
-    this._renderWithComposer(this.towerScene, this.towerCam);
-  }
-
-  _syncPopups(popups, camCol, scene, cam, isTower) {
-    while (this.popupPool.length < popups.length) {
-      const sp = new THREE.Sprite(
-        new THREE.SpriteMaterial({ transparent: true, depthTest: false })
-      );
-      scene.add(sp);
+  _syncPopups(popups, camCol, container, cam, isTower, fh = FLOOR_HEIGHT) {
+    const list = popups || [];
+    while (this.popupPool.length < list.length) {
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false }));
+      container.add(sp);
       this.popupPool.push({ sprite: sp, key: '' });
     }
     for (let i = 0; i < this.popupPool.length; i++) {
       const slot = this.popupPool[i];
-      if (i >= popups.length) {
+      if (i >= list.length) {
         slot.sprite.visible = false;
         continue;
       }
-      const pop = popups[i];
-      if (slot.sprite.parent !== scene) {
-        scene.add(slot.sprite);
-      }
+      const pop = list[i];
+      if (slot.sprite.parent !== container) container.add(slot.sprite);
       const key = `${pop.text}_${pop.color}`;
       if (slot.key !== key) {
         if (slot.sprite.material.map) slot.sprite.material.map.dispose();
@@ -1581,14 +1515,14 @@ export class GameRenderer {
         slot.sprite.material.needsUpdate = true;
         slot.key = key;
       }
-      const t = 1 - Math.max(0, pop.life / (pop.maxLife || 1));
+      const t = 1 - Math.max(0, pop.life / Math.max(0.001, pop.maxLife || 1));
       slot.sprite.visible = true;
       slot.sprite.material.opacity = Math.max(0, 1 - t * t);
 
       if (isTower && pop.col != null && pop.floor != null) {
         const theta = wrapAngle((pop.col - camCol) * COL_ANGLE);
         const r = TOWER_RADIUS + 0.85;
-        slot.sprite.position.set(r * Math.sin(theta), pop.floor * FLOOR_HEIGHT + 0.6 + t * 0.85, r * Math.cos(theta));
+        slot.sprite.position.set(r * Math.sin(theta), pop.floor * fh + 0.65 * fh + t * 0.85, r * Math.cos(theta));
         slot.sprite.scale.set(1.6, 0.4, 1);
       } else if (pop.x != null && pop.y != null) {
         const wp = this._screenToWorld(pop.x, pop.y, cam, 1.5);
@@ -1600,127 +1534,882 @@ export class GameRenderer {
     }
   }
 
+  renderTowerScene(state) {
+    const { tower, player, camCol = 0, camFloor = 2, time = 0 } = state;
+    if (!tower) return;
+
+    const era = state.era || this.era || 'reboot';
+    if (era !== this.era) this.setEra(era);
+    if (player?.skinId && player.skinId !== this.skinId) this.setSkin(player.skinId);
+    const reqBlasterFx = player?.blasterFxId || state.blasterFxId;
+    if (reqBlasterFx && reqBlasterFx !== this.blasterFxId) this.setBlasterFx(reqBlasterFx);
+    const activeFx = this._syncBlasterFxMaterials(time);
+
+    const dt = Math.min(0.05, Math.max(0.001, time - this._lastTime || 0.016));
+    this._lastTime = time;
+
+    const isOrig = era === 'original';
+    const isRealOrig = Boolean(isOrig && tower.real);
+    const fh = getTowerStepHeight(tower, isOrig);
+    const pal = tower.palette || {};
+    const aspect = this.towerCam.aspect;
+    const isWardrobe = Boolean(state.wardrobeSpotlight && player);
+    const cutscene =
+      !isWardrobe && state.cutsceneCam?.active
+        ? state.cutsceneCam
+        : !isWardrobe && this.cutsceneCam?.active
+        ? this.cutsceneCam
+        : null;
+    const isCutscene = Boolean(cutscene);
+    const isTitleShowcase =
+      !isWardrobe &&
+      !isCutscene &&
+      (Boolean(state.titleShowcase) || (state.titleShowcase !== false && state.mode === 'title'));
+
+    // Smoothly damp discrete dialogue-step phase jumps into a fluid Steadicam crane/orbit glide
+    let csEase = 0;
+    let csKind = '';
+    if (isCutscene) {
+      csKind = cutscene.kind || 'prologue';
+      const rawPhase = Math.max(0, Math.min(1, Number(cutscene.phase) || 0));
+      if (this._lastCutsceneKind !== csKind) {
+        this._lastCutsceneKind = csKind;
+        this._cutscenePhaseSmooth = rawPhase;
+      } else {
+        this._cutscenePhaseSmooth += (rawPhase - this._cutscenePhaseSmooth) * Math.min(1, dt * 4.2);
+      }
+      const sp = this._cutscenePhaseSmooth;
+      csEase = sp * sp * (3 - 2 * sp);
+    } else {
+      this._lastCutsceneKind = '';
+    }
+
+    const pBaseCol = player ? player.col : 0.5;
+    const csOrbitCols = isCutscene
+      ? csKind === 'epilogue'
+        ? Math.sin(time * 0.65) * 0.55 * (1 - csEase * 0.5)
+        : (csKind === 'sector2' || csKind === 'sector4' ? 2.6 : -2.6) * (1 - csEase) + Math.sin(time * 0.45) * 0.14
+      : 0;
+    const effCamCol = isWardrobe
+      ? pBaseCol
+      : isCutscene
+      ? pBaseCol + csOrbitCols
+      : isTitleShowcase
+      ? pBaseCol + Math.sin(time * 0.32) * 0.36 - 0.1
+      : camCol;
+
+    // 18-deg long-lens on 1987 `tower.real` vs 50-deg Start-Screen Diorama vs 52-deg wide Lighthouse Reboot perspective
+    const wantFov =
+      isRealOrig && !isWardrobe && !isCutscene && !isTitleShowcase
+        ? 18
+        : isWardrobe || isCutscene
+        ? 48
+        : isTitleShowcase
+        ? 50
+        : isOrig
+        ? 48
+        : 52;
+    if (this.towerCam.fov !== wantFov) {
+      this.towerCam.fov = wantFov;
+      this.towerCam.updateProjectionMatrix();
+    }
+
+    let camZ;
+    if (isRealOrig && !isWardrobe && !isCutscene && !isTitleShowcase) {
+      const halfTan = Math.tan(THREE.MathUtils.degToRad(9));
+      const lens = Math.tan(THREE.MathUtils.degToRad(24)) / halfTan;
+      camZ = Math.max(9.6 * lens, Math.min(18.0 * lens, 3.75 / (halfTan * Math.max(0.43, aspect))));
+    } else if (!isOrig && !isWardrobe && !isCutscene && !isTitleShowcase) {
+      // Wide Reboot framing (~58% tower width so veiled moon, storm clouds, fireflies & crashing surf flank BOTH sides)
+      camZ = aspect < 0.88 ? Math.min(20.2, 10.6 * (0.86 / Math.max(0.45, aspect))) : 10.6;
+    } else {
+      camZ = aspect < 0.82 ? Math.min(18.0, 9.6 * (0.80 / Math.max(0.43, aspect))) : 9.6;
+    }
+    let camY = camFloor * fh + (isRealOrig ? 0.85 : isOrig ? 1.15 : 0.82);
+    const shake = writeShakeOffset(state.shake, time, this._shakeVec);
+
+    if (isWardrobe) {
+      const pFloorY = (player.floor || 0) * fh;
+      this.towerCam.position.set(0, pFloorY + 0.04, TOWER_RADIUS + 2.55);
+      this.towerCam.lookAt(0, pFloorY + 0.04, TOWER_RADIUS + 0.38);
+    } else if (isTitleShowcase) {
+      // Heroic low-angle Start-Screen Diorama framing Pogo + Watchtower + Surf inside crystal-clear 24%..68% window
+      const pFloorY = (player?.floor || 0) * fh;
+      const showcaseZ = aspect < 0.88 ? Math.min(16.4, 8.9 * (0.86 / Math.max(0.45, aspect))) : 9.2;
+      const showcaseX = Math.sin(time * 0.32) * 0.42;
+      camY = pFloorY + 0.65 + Math.sin(time * 0.55) * 0.06;
+      camZ = showcaseZ;
+      this.towerCam.position.set(showcaseX, camY, showcaseZ);
+      this.towerCam.lookAt(0, pFloorY + 1.82, TOWER_RADIUS * 0.35);
+    } else if (isCutscene) {
+      const pFloorY = (player?.floor || 0) * fh;
+      const towerTopY = Math.max(12, tower.floors * fh);
+      const heroCloseZ = aspect < 0.82 ? TOWER_RADIUS + 4.35 : TOWER_RADIUS + 3.45;
+      const breatheY = Math.sin(time * 0.85) * 0.05;
+
+      if (csKind === 'epilogue') {
+        const pull = Math.max(0, (csEase - 0.45) / 0.55);
+        const cz = (TOWER_RADIUS + 3.25) * (1 - pull) + (camZ * 0.92) * pull;
+        const cx = Math.sin(time * 0.72) * (1.25 * (1 - pull * 0.5));
+        camY = pFloorY + 0.62 + pull * 2.4 + breatheY;
+        this.towerCam.position.set(cx, camY, cz);
+        this.towerCam.lookAt(0, pFloorY + 0.28 + pull * 1.1, (TOWER_RADIUS + 0.38) * (1 - pull * 0.7));
+      } else if (csKind === 'sector2') {
+        const startY = pFloorY + 0.55;
+        const midSweepY = towerTopY * 0.42 * Math.sin(csEase * Math.PI) * 0.55;
+        camY = startY + midSweepY + csEase * 0.18 + breatheY;
+        const cz = (camZ * 0.96) * (1 - csEase) + heroCloseZ * csEase;
+        const lookY = (towerTopY * 0.44) * (1 - csEase) + (pFloorY + 0.26) * csEase;
+        const lookZ = (TOWER_RADIUS + 0.36) * csEase;
+        this.towerCam.position.set(Math.sin(time * 0.5) * 0.3 * (1 - csEase), camY, cz);
+        this.towerCam.lookAt(0, lookY, lookZ);
+      } else if (csKind === 'sector3') {
+        const startY = towerTopY * 0.72;
+        camY = startY * (1 - csEase) + (pFloorY + 0.72) * csEase + breatheY;
+        const cz = (camZ * 0.98) * (1 - csEase) + heroCloseZ * csEase;
+        const lookY = (towerTopY * 0.56) * (1 - csEase) + (pFloorY + 0.26) * csEase;
+        this.towerCam.position.set(-0.45 * (1 - csEase), camY, cz);
+        this.towerCam.lookAt(0, lookY, (TOWER_RADIUS + 0.36) * csEase);
+      } else if (csKind === 'sector4') {
+        const startY = towerTopY * 0.56;
+        camY = startY * (1 - csEase) + (pFloorY + 0.72) * csEase + breatheY;
+        const cz = (camZ * 1.05) * (1 - csEase) + heroCloseZ * csEase;
+        const lookY = (towerTopY * 0.38) * (1 - csEase) + (pFloorY + 0.26) * csEase;
+        this.towerCam.position.set(0.55 * (1 - csEase), camY, cz);
+        this.towerCam.lookAt(0, lookY, (TOWER_RADIUS + 0.36) * csEase);
+      } else {
+        const startY = towerTopY * 0.58;
+        camY = startY * (1 - csEase) + (pFloorY + 0.72) * csEase + breatheY;
+        const cz = (camZ * 1.08) * (1 - csEase) + heroCloseZ * csEase;
+        const lookY = (towerTopY * 0.38) * (1 - csEase) + (pFloorY + 0.26) * csEase;
+        this.towerCam.position.set(-0.6 * (1 - csEase), camY, cz);
+        this.towerCam.lookAt(0, lookY, (TOWER_RADIUS + 0.36) * csEase);
+      }
+    } else if (!isOrig) {
+      // Subtle upward lighthouse perspective tilt matching reference composition
+      this.towerCam.position.set(shake.x, camY + shake.y, camZ);
+      this.towerCam.lookAt(shake.x, camY + 0.38 + shake.y, 0);
+    } else {
+      this.towerCam.position.set(shake.x, camY + shake.y, camZ);
+      this.towerCam.lookAt(shake.x, camY - 0.1 + shake.y, 0);
+    }
+
+    // Era Sky, Chiaroscuro Shadows, Blackout & Lightning Modulation (`StormAtmosphere` GLSL dome + weather)
+    const blackout = Math.max(0, Math.min(1, state.blackoutFactor || 0));
+    const lightning = Math.max(0, Math.min(1.5, state.lightningFlash || 0));
+    const lightMult = Math.max(0.16, 1 - blackout * 0.82) + lightning * 1.9;
+    const shadowFocusY = isWardrobe
+      ? (player.floor || 0) * fh
+      : isTitleShowcase
+      ? (player?.floor || 0) * fh + 2.0
+      : camY;
+
+    if (isOrig) {
+      this._tempColor.set(pal.mortar || '#091536');
+      this.towerScene.background.copy(this._skyBaseOrig).lerp(this._tempColor, 0.35);
+      this.towerScene.fog.color.copy(this._fogBaseOrig).lerp(this._tempColor, 0.25);
+      this.towerScene.fog.near = isRealOrig ? camZ + 10 : 32;
+      this.towerScene.fog.far = isRealOrig ? camZ + 68 : 85;
+
+      this.hemiLight.color.set('#7dd3fc');
+      this.hemiLight.groundColor.set('#0b1926');
+      this.hemiLight.intensity = 0.78;
+      this.keyLight.color.set('#ffffff');
+      this.keyLight.intensity = 1.42;
+      this.keyLight.castShadow = false;
+      this.keyLight.position.set(7.5, shadowFocusY + 10.0, 8.5);
+      this.keyLight.target.position.set(0, shadowFocusY, 0);
+      this.keyLight.target.updateMatrixWorld();
+      this.fillLight.color.set('#93c5fd');
+      this.fillLight.intensity = 0.55;
+      this.rimLight.color.set(pal.glow || '#38bdf8');
+      this.rimLight.intensity = 0.85;
+      this.amberPoolLight.intensity = 0;
+    } else {
+      this._tempColor.set(pal.skyTop || pal.mortar || '#060a14');
+      this.towerScene.background.copy(this._skyBaseReboot).lerp(this._tempColor, 0.45);
+      if (lightning > 0.05) {
+        this._tempColor.set('#64748b');
+        this.towerScene.background.lerp(this._tempColor, Math.min(0.65, lightning * 0.5));
+      }
+      this._tempColor.set(pal.fog || '#0b1526');
+      this.towerScene.fog.color.copy(this._fogBaseReboot).lerp(this._tempColor, 0.5);
+      this.towerScene.fog.near = Math.max(26, camZ + 9);
+      this.towerScene.fog.far = Math.max(82, camZ + 70);
+
+      this.hemiLight.color.set('#385278');
+      this.hemiLight.groundColor.set('#050b14');
+      this.hemiLight.intensity = 0.54 * lightMult;
+      this.keyLight.color.set(isCutscene && csKind === 'epilogue' ? '#fde68a' : '#d8eaff');
+      this.keyLight.intensity = (isCutscene && csKind === 'epilogue' ? 2.18 : 2.08) * lightMult;
+      this.keyLight.castShadow = true;
+      this.keyLight.position.set(6.8, shadowFocusY + 8.6, 8.2);
+      this.keyLight.target.position.set(0, shadowFocusY, 0);
+      this.keyLight.target.updateMatrixWorld();
+      this.fillLight.color.set(isCutscene && csKind === 'epilogue' ? '#fbbf24' : '#2dd4bf');
+      this.fillLight.intensity = 0.34 * lightMult;
+      this.rimLight.color.set(pal.glow || '#7dd3fc');
+      this.rimLight.intensity = 0.86 * lightMult;
+      if (isCutscene && csKind === 'epilogue') {
+        this._tempColor.set('#1e1b4b');
+        this.towerScene.background.lerp(this._tempColor, 0.35 + csEase * 0.25);
+      }
+    }
+
+    let showcaseState = state;
+    if (isTitleShowcase && !state.titleShowcase) {
+      const sp = this._skyStateProxy;
+      sp.tower = state.tower;
+      sp.era = era;
+      sp.camCol = effCamCol;
+      sp.camFloor = camFloor;
+      sp.waterFloor = state.waterFloor;
+      sp.windCurrent = state.windCurrent;
+      sp.ledges = state.ledges;
+      sp.topple = state.topple;
+      sp.player = state.player;
+      sp.blackoutFactor = state.blackoutFactor;
+      sp.lightningFlash = state.lightningFlash;
+      sp.titleShowcase = true;
+      showcaseState = sp;
+    }
+
+    if (this.stormSky) {
+      this.stormSky.update(showcaseState, this.towerCam, time, dt);
+      if (isWardrobe) {
+        if (this.stormSky.fireflyPoints) this.stormSky.fireflyPoints.visible = false;
+        if (this.stormSky.weatherPoints) this.stormSky.weatherPoints.visible = false;
+        if (this.stormSky.streakLines) this.stormSky.streakLines.visible = false;
+        if (this.stormSky.seaSprayPoints) this.stormSky.seaSprayPoints.visible = false;
+        if (this.stormSky.flankMistMesh) this.stormSky.flankMistMesh.visible = false;
+      }
+    }
+
+    // Swap cached Tower 3D Group + Pre-compile shaders to eliminate first-frame hitches
+    const cached = this._getOrBuildTowerGroup(tower, era);
+    if (this.currentTowerGroup !== cached.group) {
+      if (this.currentTowerGroup) this.towerScene.remove(this.currentTowerGroup);
+      this.currentTowerGroup = cached.group;
+      this.towerScene.add(this.currentTowerGroup);
+      if (this.oceanVfx) {
+        this.oceanVfx.rebuildForTower(tower, fh, TOWER_RADIUS);
+      }
+      if (!cached.compiled) {
+        try {
+          this.webgl.compile(this.towerScene, this.towerCam);
+        } catch {
+          // Ignore compile fallback if driver unsupported
+        }
+        cached.compiled = true;
+      }
+    }
+
+    const tg = cached.group;
+    tg.rotation.y = -effCamCol * COL_ANGLE;
+
+    // Tower Topple Sequence (1 InstancedMesh draw call for all 30 masonry debris chunks)
+    const topple = state.topple || { active: false, progress: 0 };
+    if (topple.active) {
+      tg.position.y = -topple.progress * tower.floors * fh * 1.05;
+      tg.rotation.z = Math.sin(time * 38) * 0.045 * (1 - topple.progress) + topple.progress * 0.14;
+      tg.position.x = Math.sin(time * 48) * 0.16 * (1 - topple.progress);
+
+      const dp = this.debrisPool;
+      dp.inst.visible = true;
+      dp.mat.color.set(pal.brickA || '#2e3158');
+      const dm = this._debrisDummy;
+      for (let i = 0; i < dp.meta.length; i++) {
+        const d = dp.meta[i];
+        dm.position.set(
+          d.rx + Math.sin(time * 3 + d.rx) * 0.6 * topple.progress,
+          camY - 3 + Math.max(-0.5, (1 - ((topple.progress * d.speed) % 1)) * 7),
+          TOWER_RADIUS + 0.4 + d.rz * 0.4
+        );
+        dm.rotation.set(time * d.rot, time * d.rot * 0.7, 0);
+        dm.updateMatrix();
+        dp.inst.setMatrixAt(i, dm.matrix);
+      }
+      dp.inst.instanceMatrix.needsUpdate = true;
+    } else {
+      tg.position.set(0, 0, 0);
+      tg.rotation.z = 0;
+      this.debrisPool.inst.visible = false;
+    }
+
+    // Animate 3D Beveled Masonry Architecture, Ledges, Lifts, Switches, Clues, Rune Doors, Workbench & Chest (`src/towerArchitecture.js`)
+    updateTowerArchitecture(cached, state, time, dt);
+
+    // Update Collectibles (front-cylinder & vertical frustum culled + leak-free type swap!)
+    const collectibles = state.collectibles || [];
+    while (this.collectiblePool.length < collectibles.length) {
+      const cDef = collectibles[this.collectiblePool.length];
+      const cm = this._buildCollectibleMesh(cDef.type);
+      this.collectibleGroup.add(cm);
+      this.collectiblePool.push({ mesh: cm, type: cDef.type });
+    }
+    for (let i = 0; i < this.collectiblePool.length; i++) {
+      const slot = this.collectiblePool[i];
+      if (i >= collectibles.length || collectibles[i].collected) {
+        slot.mesh.visible = false;
+        continue;
+      }
+      const colItem = collectibles[i];
+      if (slot.type !== colItem.type) {
+        this.collectibleGroup.remove(slot.mesh);
+        this._disposeCollectibleMesh(slot.mesh);
+        slot.mesh = this._buildCollectibleMesh(colItem.type);
+        slot.type = colItem.type;
+        this.collectibleGroup.add(slot.mesh);
+      }
+      const ct = wrapAngle((colItem.col + 0.5 - effCamCol) * COL_ANGLE);
+      if (Math.abs(ct) > 1.56 || Math.abs(colItem.floor - camFloor) > (isRealOrig ? 20 : 12)) {
+        slot.mesh.visible = false;
+        continue;
+      }
+      slot.mesh.visible = true;
+      const cr = TOWER_RADIUS + 0.38;
+      slot.mesh.position.set(
+        cr * Math.sin(ct),
+        colItem.floor * fh + 0.42 + Math.sin(time * 3.5 + i) * 0.08 + (topple.active ? tg.position.y : 0),
+        cr * Math.cos(ct)
+      );
+      slot.mesh.rotation.y = ct + time * (colItem.type === 'relic' ? 1.9 : 2.6);
+      if (slot.mesh.userData.holoRing) {
+        slot.mesh.userData.holoRing.rotation.x = Math.PI * 0.35 + Math.sin(time * 2.8 + i) * 0.24;
+        slot.mesh.userData.holoRing.rotation.z = time * 2.4;
+      }
+      if (slot.mesh.userData.gimbalRing2) {
+        slot.mesh.userData.gimbalRing2.rotation.y = -time * 3.1;
+        slot.mesh.userData.gimbalRing2.rotation.x = Math.cos(time * 2.2 + i) * 0.45;
+      }
+      if (slot.mesh.userData.holoGem) {
+        slot.mesh.userData.holoGem.rotation.y = -time * 3.8;
+        if (colItem.type === 'relic') {
+          slot.mesh.userData.holoGem.position.y = 0.31 + Math.sin(time * 4.5 + i) * 0.025;
+        }
+      }
+    }
+
+    // Update Skeletal PogoRig, Shield, Muzzle Flash, Wardrobe Blaster Preview, Tunnel Vortex & Landing Ring
+    this.muzzleFlashGroup.visible = false;
+    this.wardrobeFxOrb.visible = false;
+    if (player) {
+      const pTheta = wrapAngle((player.col - effCamCol) * COL_ANGLE);
+      const pr = TOWER_RADIUS + 0.38;
+      const px = pr * Math.sin(pTheta);
+      const pz = pr * Math.cos(pTheta);
+      const py = player.floor * fh + (topple.active ? tg.position.y : 0);
+
+      const inTunnel = Boolean(player.hidden && player.tunnelTimer > 0 && !topple.active);
+      this.tunnelVortexGroup.visible = inTunnel;
+      if (inTunnel) {
+        this.tunnelVortexGroup.position.set(px, py + 0.42, pz);
+        this.tunnelVortexGroup.rotation.y = pTheta;
+        this.tunnelVortexGroup.userData.outerRing.rotation.z = time * 8;
+        this.tunnelVortexGroup.userData.innerRing.rotation.z = -time * 11;
+      }
+
+      const pogoVisible = !player.hidden && !topple.active;
+      this.pogoRig.group.visible = pogoVisible;
+      this.landingRingGroup.visible = pogoVisible && !isWardrobe && !isCutscene && !isTitleShowcase;
+      this.shieldBubble.visible = Boolean(pogoVisible && player.shield);
+
+      if (pogoVisible) {
+        this.pogoRig.group.position.set(px, py, pz);
+        this.pogoRig.group.rotation.y =
+          pTheta + (isWardrobe ? Math.sin(time * 0.85) * 0.55 : isTitleShowcase ? Math.sin(time * 0.65) * 0.22 : 0);
+        const mf = player.muzzleFlash || 0;
+        this.pogoRig.update(dt, {
+          time,
+          vx: player.vx || 0,
+          vy: player.vy || 0,
+          facing: player.facing || 1,
+          onGround: Boolean(player.onGround),
+          onElevator: player.onElevator,
+          squashX: player.squashX || 1,
+          squashY: player.squashY || 1,
+          landImpact: player.landImpact || 0,
+          muzzleFlash: mf,
+          hurtTimer: player.hurtTimer || 0,
+          invuln: isWardrobe || isCutscene || isTitleShowcase || state.mode === 'title' ? 0 : player.invuln || 0,
+          enteringDoor: player.enteringDoor || 0,
+          victory: state.mode === 'victory' || (isCutscene && csKind === 'epilogue'),
+        });
+        if ((this.pogoRig.bones?.chest?.children?.[0] || null) !== this._lastPogoShadowKey) {
+          this._trimPogoShadows();
+        }
+
+        if (mf > 0.01 && !isWardrobe) {
+          const facingDir = player.facing || 1;
+          const mTheta = pTheta + facingDir * 0.13;
+          const mr = TOWER_RADIUS + 0.46;
+          const flashScale = Math.min(1.35, 0.55 + mf * 4.5);
+          this.muzzleFlashGroup.visible = true;
+          this.muzzleFlashGroup.position.set(mr * Math.sin(mTheta), py + 0.42, mr * Math.cos(mTheta));
+          this.muzzleFlashGroup.scale.setScalar(flashScale);
+          this.muzzleFlashGroup.rotation.set(time * 14, mTheta, time * 18);
+          this.heroLight.color.set(activeFx.prismatic ? this._prismColor : activeFx.muzzle);
+          this.heroLight.intensity = 1.05;
+        } else {
+          this.heroLight.color.set('#7be8ff');
+          this.heroLight.intensity = blackout > 0.2 ? 0.78 : isTitleShowcase ? 0.54 : 0.36;
+        }
+        this.heroLight.position.set(px, py + 1.05, pz + 1.15);
+
+        if (isWardrobe) {
+          const wUd = this.wardrobeFxOrb.userData;
+          this.wardrobeFxOrb.visible = true;
+          this.wardrobeFxOrb.position.set(0.27, py + 0.46 + Math.sin(time * 3.2) * 0.03, TOWER_RADIUS + 0.46);
+          this.wardrobeFxOrb.scale.setScalar(0.36);
+          wUd.icosa.visible = activeFx.shape === 'icosa';
+          wUd.voxel.visible = activeFx.shape === 'voxel';
+          wUd.prism.visible = activeFx.shape === 'prism';
+          wUd.ring.visible = Boolean(activeFx.ring);
+          wUd.icosa.rotation.set(time * 3.5, time * 4.8, 0);
+          wUd.voxel.rotation.set(time * 2.8, time * 3.6, 0);
+          wUd.prism.rotation.set(time * 3.2, time * 5.0, 0);
+          wUd.ring.rotation.set(Math.PI * 0.3 + time * 3.0, time * 4.2, 0);
+          wUd.trailCluster.rotation.set(Math.sin(time * 2.4) * 0.18, time * 4.2, 0);
+        }
+
+        if (this.shieldBubble.visible) {
+          this.shieldBubble.position.set(px, py + 0.44, pz);
+          this.shieldBubble.rotation.y = time * 1.8;
+        }
+
+        const waterFl = state.waterFloor != null ? state.waterFloor : -0.55;
+        const lf = player.landingFloor != null ? player.landingFloor : waterFl;
+        const dist = Math.max(0, (player.floor - lf) * fh);
+        this.landingRingGroup.position.set(px, lf * fh + 0.03, pz);
+        this.landingRingGroup.scale.setScalar(Math.max(0.55, 1.12 - dist * 0.11));
+        const overSea = lf <= waterFl + 0.08;
+        this.landingRingGroup.userData.ring.material.color.set(overSea ? '#fb7185' : '#5efce8');
+        this.landingRingGroup.userData.ring.material.opacity = Math.max(0.22, 0.78 - dist * 0.14);
+      }
+    }
+
+    // Update Enemies via Next-Gen `EnemyVisualPool` (`src/enemyRig.js`) + Hull-Only Shadow Trim
+    if (this.enemyVisuals) {
+      this.enemyVisuals.syncEnemies(
+        state.enemies,
+        effCamCol,
+        fh,
+        TOWER_RADIUS,
+        time,
+        topple.active ? tg.position.y : 0
+      );
+      if (!isOrig) {
+        this._trimEnemyShadows();
+      }
+    }
+
+    // Update Zero-Allocation Front-Hemisphere Architectural PointLight Pool on Wet Stone
+    // (Complements oceanVfx sparkArch PointLights + enemyRig _dynLights)
+    if (!isOrig && !isWardrobe) {
+      const toppleOffY = topple.active ? tg.position.y : 0;
+      let bestDist = 999;
+      let poolX = 0;
+      let poolY = 0;
+      let poolZ = 0;
+      let poolHex = '#ffaa2b';
+      let poolBaseInt = 1.85;
+
+      const pods = cached.elevatorPods;
+      if (pods) {
+        for (let i = 0; i < pods.length; i++) {
+          const pod = pods[i];
+          const pCol = pod.userData?.col;
+          if (pCol == null) continue;
+          const eTheta = wrapAngle((pCol + 0.5 - effCamCol) * COL_ANGLE);
+          if (Math.abs(eTheta) > 1.32) continue;
+          const ey = pod.position.y + 0.55 + toppleOffY;
+          const dist = Math.abs(ey - shadowFocusY) + Math.abs(eTheta) * 1.45;
+          if (dist < bestDist) {
+            bestDist = dist;
+            const lr = TOWER_RADIUS + 0.68;
+            poolX = lr * Math.sin(eTheta);
+            poolY = ey;
+            poolZ = lr * Math.cos(eTheta);
+            poolHex = '#ffaa2b';
+            poolBaseInt = 1.88;
+          }
+        }
+      }
+      const doors = tower.doors;
+      if (doors) {
+        for (let i = 0; i < doors.length; i++) {
+          const d = doors[i];
+          const isRuneDoor = Boolean(d.isRune || d.rune);
+          const isVaultDoor = Boolean(d.isVault || d.vault);
+          if (!d.isExit && !isRuneDoor && !isVaultDoor) continue;
+          const dTheta = wrapAngle((d.col + 0.5 - effCamCol) * COL_ANGLE);
+          if (Math.abs(dTheta) > 1.32) continue;
+          const dy = d.floor * fh + 0.46 + toppleOffY;
+          const dist = Math.abs(dy - shadowFocusY) + Math.abs(dTheta) * 1.5;
+          if (dist + 0.25 < bestDist) {
+            bestDist = dist;
+            const lr = TOWER_RADIUS + 0.62;
+            poolX = lr * Math.sin(dTheta);
+            poolY = dy;
+            poolZ = lr * Math.cos(dTheta);
+            poolHex = isRuneDoor ? '#2efce0' : isVaultDoor ? '#c026ff' : '#ffb020';
+            poolBaseInt = 1.65;
+          }
+        }
+      }
+      if (bestDist < 9.5) {
+        this.amberPoolLight.color.set(poolHex);
+        this.amberPoolLight.intensity = poolBaseInt * lightMult;
+        this.amberPoolLight.position.set(poolX, poolY, poolZ);
+      } else {
+        this.amberPoolLight.intensity = 0;
+      }
+    } else if (isWardrobe) {
+      this.amberPoolLight.intensity = 0;
+    }
+
+    // Update Snowballs / Cryo-Bolts
+    const snowballs = state.snowballs || [];
+    while (this.snowballPool.length < snowballs.length) {
+      const fxNode = this._buildSnowballFxNode();
+      this.snowballGroup.add(fxNode);
+      this.snowballPool.push(fxNode);
+    }
+    for (let i = 0; i < this.snowballPool.length; i++) {
+      const m = this.snowballPool[i];
+      if (i >= snowballs.length) {
+        m.visible = false;
+        continue;
+      }
+      const sb = snowballs[i];
+      const st = wrapAngle((sb.col - effCamCol) * COL_ANGLE);
+      if (Math.abs(st) > 1.58) {
+        m.visible = false;
+        continue;
+      }
+      m.visible = true;
+      const sr = TOWER_RADIUS + 0.38;
+      m.position.set(sr * Math.sin(st), sb.floor * fh + (isRealOrig ? 0.32 : 0.28), sr * Math.cos(st));
+      m.rotation.y = st;
+
+      const ud = m.userData;
+      ud.icosa.visible = activeFx.shape === 'icosa';
+      ud.voxel.visible = activeFx.shape === 'voxel';
+      ud.prism.visible = activeFx.shape === 'prism';
+      ud.ring.visible = Boolean(activeFx.ring);
+      ud.icosa.rotation.set(time * 6, time * 8, 0);
+      ud.voxel.rotation.set(time * 7, time * 9, 0);
+      ud.prism.rotation.set(time * 6, time * 10, 0);
+      ud.ring.rotation.set(Math.PI * 0.32 + time * 6, time * 8, 0);
+
+      const sbDir = sb.dir || (sb.vx >= 0 ? 1 : -1);
+      ud.trailCluster.scale.x = sbDir;
+      ud.trailCluster.position.y = Math.sin(time * 22 + i) * 0.02;
+    }
+
+    // Real-Time Planar-Reflecting GLSL Fresnel Ocean (`src/water.js`) + Dynamic Rising Waterline (`state.waterFloor`)
+    const waterY = (state.waterFloor != null ? state.waterFloor : -0.55) * fh;
+    if (this.moonGlintLight) {
+      this.moonGlintLight.intensity = isOrig ? 0.85 : 1.38 * lightMult;
+    }
+    if (this.ocean) {
+      const oceanBiome = isOrig ? 'original_hd' : resolveArchTheme(tower);
+      const oceanKey = `${era}_${oceanBiome}`;
+      if (this._lastOceanKey !== oceanKey) {
+        this._lastOceanKey = oceanKey;
+        this._lastOceanBiome = oceanBiome;
+        this.ocean.setEra(era, oceanBiome);
+      }
+      if (!isOrig && this.stormSky) {
+        this.ocean.setMoonlight({ direction: this.stormSky.getMoonDirection() });
+      }
+      this.ocean.update(time, {
+        waterY,
+        lightningFlash: lightning,
+        towerRadius: TOWER_RADIUS,
+      });
+    }
+
+    if (this.oceanVfx) {
+      if (isWardrobe) {
+        this.oceanVfx.setVisible?.(false);
+      } else {
+        this.oceanVfx.setVisible?.(true);
+        this.oceanVfx.update(showcaseState, effCamCol, time, dt);
+      }
+    }
+
+    this._syncParticles(this.particlePool, this.particleGroup, state.particles, this.towerCam, TOWER_RADIUS + 0.55, effCamCol, true, fh);
+    this._syncPopups(state.popups, effCamCol, this.popupGroup, this.towerCam, true, fh);
+    this.collectibleGroup.visible = !isWardrobe;
+    if (isWardrobe && this.enemyVisuals?.root) {
+      this.enemyVisuals.root.visible = false;
+    }
+
+    // Planar Water Reflection Pass (culling fine micro-props & dynamic pools so reflection renders only sky + moon + monolith)
+    if (this.ocean) {
+      const prevWeatherVis = this.stormSky?.weatherPoints?.visible ?? false;
+      const prevStreakVis = this.stormSky?.streakLines?.visible ?? false;
+      const prevSprayVis = this.stormSky?.seaSprayPoints?.visible ?? false;
+      const prevFireflyVis = this.stormSky?.fireflyPoints?.visible ?? false;
+      const prevFlankMistVis = this.stormSky?.flankMistMesh?.visible ?? false;
+      const prevEnemyRootVis = this.enemyVisuals?.root?.visible ?? !isWardrobe;
+      const prevPogoVis = this.pogoRig.group.visible;
+      const prevShieldVis = this.shieldBubble.visible;
+      const prevRingVis = this.landingRingGroup.visible;
+      const prevTunnelVis = this.tunnelVortexGroup.visible;
+      const prevFlashVis = this.muzzleFlashGroup.visible;
+      const prevWardrobeVis = this.wardrobeFxOrb.visible;
+      const prevDebrisVis = this.debrisPool.inst.visible;
+      const prevVfxVis = this.oceanVfx?.group?.visible ?? !isWardrobe;
+      const prevCollectibleVis = this.collectibleGroup.visible;
+      const prevKeyShadow = this.keyLight.castShadow;
+
+      try {
+        this.keyLight.castShadow = false;
+        cached.setReflectionPass?.(true);
+        if (this.enemyVisuals) {
+          if (this.enemyVisuals.setReflectionPass) this.enemyVisuals.setReflectionPass(true);
+          else if (this.enemyVisuals.root) this.enemyVisuals.root.visible = false;
+        }
+        this.stormSky?.setReflectionPass(true);
+        if (this.stormSky?.seaSprayPoints) this.stormSky.seaSprayPoints.visible = false;
+        if (this.stormSky?.fireflyPoints) this.stormSky.fireflyPoints.visible = false;
+        this.pogoRig.group.visible = false;
+        this.shieldBubble.visible = false;
+        this.landingRingGroup.visible = false;
+        this.tunnelVortexGroup.visible = false;
+        this.muzzleFlashGroup.visible = false;
+        this.wardrobeFxOrb.visible = false;
+        this.debrisPool.inst.visible = false;
+        this.oceanVfx?.setVisible?.(false);
+        this.collectibleGroup.visible = false;
+        this.snowballGroup.visible = false;
+        this.particleGroup.visible = false;
+        this.popupGroup.visible = false;
+
+        this.ocean.updateReflection(this.towerScene, this.towerCam);
+      } finally {
+        cached.setReflectionPass?.(false);
+        if (this.enemyVisuals) {
+          if (this.enemyVisuals.setReflectionPass) this.enemyVisuals.setReflectionPass(isWardrobe);
+          if (this.enemyVisuals.root) this.enemyVisuals.root.visible = prevEnemyRootVis;
+        }
+        this.stormSky?.setReflectionPass(false);
+        if (this.stormSky?.weatherPoints) this.stormSky.weatherPoints.visible = prevWeatherVis;
+        if (this.stormSky?.streakLines) this.stormSky.streakLines.visible = prevStreakVis;
+        if (this.stormSky?.seaSprayPoints) this.stormSky.seaSprayPoints.visible = prevSprayVis;
+        if (this.stormSky?.fireflyPoints) this.stormSky.fireflyPoints.visible = prevFireflyVis;
+        if (this.stormSky?.flankMistMesh) this.stormSky.flankMistMesh.visible = prevFlankMistVis;
+        this.pogoRig.group.visible = prevPogoVis;
+        this.shieldBubble.visible = prevShieldVis;
+        this.landingRingGroup.visible = prevRingVis;
+        this.tunnelVortexGroup.visible = prevTunnelVis;
+        this.muzzleFlashGroup.visible = prevFlashVis;
+        this.wardrobeFxOrb.visible = prevWardrobeVis;
+        this.debrisPool.inst.visible = prevDebrisVis;
+        this.oceanVfx?.setVisible?.(prevVfxVis);
+        this.collectibleGroup.visible = prevCollectibleVis;
+        this.snowballGroup.visible = true;
+        this.particleGroup.visible = true;
+        this.popupGroup.visible = true;
+        this.keyLight.castShadow = prevKeyShadow;
+      }
+    }
+
+    if (!isOrig) {
+      this.webgl.shadowMap.needsUpdate = true;
+    }
+    this._renderWithComposer(this.towerScene, this.towerCam);
+  }
+
   renderSubmarineScene(state) {
-    const { sub, time, particles } = state;
-    const shake = getShakeOffset(state.shake, time);
-    this.subCam.position.set(shake.x, shake.y, 12);
+    if (!state?.sub && !state?.subStage) return;
+    if (state.era && state.era !== this.era) this.setEra(state.era);
+    const nextSkin = state.player?.skinId || state.skinId;
+    if (nextSkin && nextSkin !== this.skinId) this.setSkin(nextSkin);
+    const reqBlasterFx = state.player?.blasterFxId || state.blasterFxId;
+    if (reqBlasterFx && reqBlasterFx !== this.blasterFxId) this.setBlasterFx(reqBlasterFx);
 
-    // Light shafts drift
-    for (let i = 0; i < this.lightShafts.length; i++) {
-      const m = this.lightShafts[i];
-      m.position.x = (((i * 3.5 - time * 0.9) % 17.5) + 17.5) % 17.5 - 8.75;
+    const sr = this._ensureSubRenderer();
+    if (!sr) return;
+    if (typeof state.showSubHud === 'boolean') {
+      sr.showHud = state.showSubHud;
     }
+    const time = state.time ?? state.subStage?.t ?? state.sub?.timer ?? 0;
+    this._lastTime = time;
+    sr.render(state, {
+      time,
+      particles: state.particles,
+      popups: state.popups,
+      shake: state.shake,
+      era: this.era,
+      skinId: this.skinId,
+      blasterFxId: this.blasterFxId,
+    });
+  }
 
-    // Submarine position
-    const sw = this._screenToWorld(sub.x, sub.y, this.subCam, 0);
-    this.subGroup.position.set(sw.x, sw.y, 0);
-    this.subGroup.rotation.z = Math.sin(time * 4) * 0.04;
-    this.subGroup.userData.prop.rotation.x = time * 28;
+  renderSkimmerScene(state) {
+    if (!state?.skimmer) return;
+    if (state.era && state.era !== this.era) this.setEra(state.era);
+    const nextSkin = state.player?.skinId || state.skinId;
+    if (nextSkin && nextSkin !== this.skinId) this.setSkin(nextSkin);
+    const reqBlasterFx = state.player?.blasterFxId || state.blasterFxId;
+    if (reqBlasterFx && reqBlasterFx !== this.blasterFxId) this.setBlasterFx(reqBlasterFx);
 
-    // Articulated 3D Alien Fish
-    while (this.subFishPool.length < sub.fish.length) {
-      const fg = new THREE.Group();
-      const bodyMat = new THREE.MeshStandardMaterial({ color: '#f472b6', emissive: '#db2777', emissiveIntensity: 0.55 });
-      const body = new THREE.Mesh(new THREE.SphereGeometry(0.28, 14, 12), bodyMat);
-      body.scale.set(1.45, 0.85, 0.65);
+    const sr = this._ensureSkimmerRenderer();
+    if (!sr) return;
+    sr.render(state, { postfx: this.postfx });
+  }
 
-      const dorsal = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.24, 6), bodyMat);
-      dorsal.position.set(0.05, 0.24, 0);
-      dorsal.rotation.z = 0.35;
+  renderGlideScene(state) {
+    const stage = state?.glideStage || state?.glide;
+    if (!stage) return;
+    if (state.era && state.era !== this.era) this.setEra(state.era);
+    const nextSkin = state.player?.skinId || state.skinId;
+    if (nextSkin && nextSkin !== this.skinId) this.setSkin(nextSkin);
 
-      const tail = new THREE.Mesh(
-        new THREE.ConeGeometry(0.22, 0.38, 8),
-        new THREE.MeshStandardMaterial({ color: '#f472b6', emissive: '#db2777', emissiveIntensity: 0.45 })
-      );
-      tail.rotation.z = -Math.PI / 2;
-      tail.position.set(0.45, 0, 0);
+    const gr = this._ensureGlideRenderer();
+    if (!gr) return;
+    const time = state.time || 0;
+    const dt = Math.min(0.05, Math.max(0.001, time - this._lastTime || 0.016));
+    this._lastTime = time;
 
-      const eye = new THREE.Mesh(
-        new THREE.SphereGeometry(0.06, 8, 8),
-        new THREE.MeshBasicMaterial({ color: '#ffffff' })
-      );
-      eye.position.set(-0.22, 0.06, 0.14);
-
-      const bubble = new THREE.Mesh(
-        new THREE.SphereGeometry(0.55, 16, 14),
-        new THREE.MeshStandardMaterial({
-          color: '#a5f3fc',
-          emissive: '#38bdf8',
-          emissiveIntensity: 0.3,
-          transparent: true,
-          opacity: 0.34,
-          roughness: 0.05,
-        })
-      );
-      fg.add(body, dorsal, tail, eye, bubble);
-      fg.userData = { body, tail, bubble };
-      this.subScene.add(fg);
-      this.subFishPool.push(fg);
+    const prevAutoClear = this.webgl.autoClear;
+    const prevToneMapping = this.webgl.toneMapping;
+    const prevExposure = this.webgl.toneMappingExposure;
+    try {
+      this.webgl.setRenderTarget(null);
+      gr.render(stage, {
+        time,
+        dt,
+        particles: state.particles,
+        popups: state.popups,
+        shake: state.shake,
+        era: this.era,
+        skinId: this.skinId,
+        player: state.player,
+      });
+    } finally {
+      this.webgl.setRenderTarget(null);
+      this.webgl.autoClear = prevAutoClear;
+      this.webgl.toneMapping = prevToneMapping;
+      this.webgl.toneMappingExposure = prevExposure;
     }
-    for (let i = 0; i < this.subFishPool.length; i++) {
-      const fg = this.subFishPool[i];
-      if (i >= sub.fish.length || sub.fish[i].caught) {
-        fg.visible = false;
-        continue;
+  }
+
+  renderPuzzleScene(state) {
+    const room = state?.puzzleRoom || state?.puzzle;
+    if (!room) return;
+    if (state.era && state.era !== this.era) this.setEra(state.era);
+    const nextSkin = state.player?.skinId || state.skinId;
+    if (nextSkin && nextSkin !== this.skinId) this.setSkin(nextSkin);
+
+    const pr = this._ensurePuzzleRenderer();
+    if (!pr) return;
+    const time = state.time || 0;
+    const dt = Math.min(0.05, Math.max(0.001, time - this._lastTime || 0.016));
+    this._lastTime = time;
+
+    const prevAutoClear = this.webgl.autoClear;
+    const prevToneMapping = this.webgl.toneMapping;
+    const prevExposure = this.webgl.toneMappingExposure;
+    const prevShadowAuto = this.webgl.shadowMap.autoUpdate;
+    try {
+      this.webgl.setRenderTarget(null);
+      this.webgl.shadowMap.autoUpdate = true;
+      this.webgl.shadowMap.needsUpdate = true;
+      pr.render(room, {
+        time,
+        dt,
+        particles: state.particles,
+        popups: state.popups,
+        shake: state.shake,
+        era: this.era,
+        skinId: this.skinId,
+        player: state.player,
+      });
+    } finally {
+      this.webgl.setRenderTarget(null);
+      this.webgl.autoClear = prevAutoClear;
+      this.webgl.toneMapping = prevToneMapping;
+      this.webgl.toneMappingExposure = prevExposure;
+      this.webgl.shadowMap.autoUpdate = prevShadowAuto;
+    }
+  }
+
+  renderVaultScene(state) {
+    if (!state?.vault) return;
+    if (state.era && state.era !== this.era) this.setEra(state.era);
+
+    const vr = this._ensureVaultRenderer();
+    if (!vr) return;
+    vr.render(state, { postfx: this.postfx });
+  }
+
+  dispose() {
+    if (this.towerCache) {
+      for (const entry of this.towerCache.values()) {
+        disposeTowerArchitecture(entry);
       }
-      const f = sub.fish[i];
-      fg.visible = true;
-      const fw = this._screenToWorld(f.x, f.y, this.subCam, 0);
-      fg.position.set(fw.x, fw.y, 0);
-      fg.userData.body.material.color.set(f.color);
-      fg.userData.body.material.emissive.set(f.color);
-      fg.userData.tail.material.color.set(f.color);
-      fg.userData.tail.rotation.y = Math.sin(time * 12 + f.x * 0.1) * 0.45;
-      fg.userData.bubble.visible = !!f.bubbled;
+      this.towerCache.clear();
     }
-
-    // Bubbles
-    while (this.subBubblePool.length < sub.bubbles.length) {
-      const b = new THREE.Mesh(
-        new THREE.SphereGeometry(0.16, 12, 12),
-        new THREE.MeshStandardMaterial({
-          color: '#e0f2fe',
-          emissive: '#38bdf8',
-          emissiveIntensity: 0.65,
-          transparent: true,
-          opacity: 0.7,
-        })
-      );
-      this.subScene.add(b);
-      this.subBubblePool.push(b);
+    for (let i = 0; i < this.collectiblePool.length; i++) {
+      this._disposeCollectibleMesh(this.collectiblePool[i].mesh, false);
     }
-    for (let i = 0; i < this.subBubblePool.length; i++) {
-      const bMesh = this.subBubblePool[i];
-      if (i >= sub.bubbles.length) {
-        bMesh.visible = false;
-        continue;
+    this.collectiblePool.length = 0;
+    if (this._collectibleMats) {
+      for (const mat of this._collectibleMats.values()) {
+        mat?.dispose();
       }
-      bMesh.visible = true;
-      const bw = this._screenToWorld(sub.bubbles[i].x, sub.bubbles[i].y, this.subCam, 0);
-      bMesh.position.set(bw.x, bw.y, 0);
+      this._collectibleMats.clear();
     }
+    this.particleInstGeo?.dispose();
+    this.particleInstMat?.dispose();
+    this.particlePool.length = 0;
+    for (let i = 0; i < this.popupPool.length; i++) {
+      this.popupPool[i].sprite.material?.map?.dispose();
+      this.popupPool[i].sprite.material?.dispose();
+    }
+    this.popupPool.length = 0;
 
-    // Update Top HUD Progress Bar
-    const pct = Math.min(1, sub.timer / Math.max(0.01, sub.duration));
-    const hCtx = this.subHudCanvas.getContext('2d');
-    hCtx.clearRect(0, 0, 512, 64);
-    hCtx.fillStyle = 'rgba(15, 23, 42, 0.75)';
-    hCtx.fillRect(16, 8, 480, 14);
-    hCtx.fillStyle = '#38bdf8';
-    hCtx.fillRect(16, 8, Math.max(6, 480 * pct), 14);
-    hCtx.fillStyle = '#e0f2fe';
-    hCtx.font = 'bold 18px Orbitron, sans-serif';
-    hCtx.textAlign = 'center';
-    hCtx.fillText('MK.7 MINI-SUBMARINE • CATCH BUBBLED FISH!', 256, 46);
-    this.subHudTex.needsUpdate = true;
+    this.stormSky?.dispose?.();
+    this.ocean?.dispose?.();
+    this.oceanVfx?.dispose?.();
+    this.enemyVisuals?.dispose?.();
+    this.postfx?.dispose?.();
+    this.pogoRig?.dispose?.();
+    this.subRenderer?.dispose?.();
+    this.skimmerRenderer?.dispose?.();
+    this.vaultRenderer?.dispose?.();
+    this.glideRenderer?.dispose?.();
+    this.puzzleRenderer?.dispose?.();
 
-    const hudPos = this._screenToWorld(this.width * 0.5, 28, this.subCam, 2);
-    this.subHudSprite.position.set(hudPos.x, hudPos.y, 2);
-    this.subHudSprite.scale.set(6.2, 0.78, 1);
+    this.debrisPool?.geo?.dispose();
+    this.debrisPool?.mat?.dispose();
+    this.shieldBubble?.geometry?.dispose();
+    this.shieldBubble?.material?.dispose();
+    this._disposeCollectibleMesh(this.landingRingGroup, true);
+    this._disposeCollectibleMesh(this.tunnelVortexGroup, true);
 
-    this._syncParticles(this.subParticlePool, this.subScene, particles, this.subCam, 0.5);
-    this._syncPopups(state.popups || [], 0, this.subScene, this.subCam, false);
-
-    this._renderWithComposer(this.subScene, this.subCam);
+    this.sharedParticleGeo?.dispose();
+    this.sharedSnowballGeo?.dispose();
+    this.sharedVoxelGeo?.dispose();
+    this.sharedPrismGeo?.dispose();
+    this.sharedFxRingGeo?.dispose();
+    this.sharedTrailDotGeo?.dispose();
+    this.sharedTrailClusterGeo?.dispose();
+    this.sharedOrbitalTrailGeo?.dispose();
+    this.sharedGearGeo?.dispose();
+    this.sharedSnowballMat?.dispose();
+    this.sharedFxRingMat?.dispose();
+    this.sharedTrailDotMat?.dispose();
+    this.sharedHaloSpriteMat?.dispose();
+    this.sharedGearMat?.dispose();
+    this.glowDotTex?.dispose();
+    this.relicTabletTex?.dispose();
+    this.keyLight?.shadow?.map?.dispose?.();
+    this.envTex?.dispose();
+    this.webgl?.dispose();
   }
 }
