@@ -4841,8 +4841,19 @@ export class GlideRenderer {
     }
     const bonus = Math.round(disp);
     const pr = Math.min(2, this.gl.getPixelRatio ? this.gl.getPixelRatio() : 1);
-    const panelW = Math.min(this.width - 20, 520);
+    const wide = this.width / this.height > 1.15;
+    const panelW = wide ? Math.min(this.width * 0.275, 258) : Math.min(this.width - 20, 520);
     const panelH = 54;
+    const hudTop = wide ? (this.height >= 600 ? 86 : 80) : HUD_TOP_OFFSET;
+    const panelLeft = wide ? this.width - 12 - panelW : (this.width - panelW) * 0.5;
+    const x0 = 30;
+    const x1 = panelW - 40;
+    const y = 41;
+    this.hudPanel.scale.set(panelW, panelH, 1);
+    this.hudPanel.position.set(panelLeft + panelW * 0.5, -(hudTop + panelH / 2), 0);
+    this._trackX0 = panelLeft + x0;
+    this._trackX1 = panelLeft + x1;
+    this._trackY = hudTop + y;
     const lan = stage.collected || 0;
     const gates = stage.gatesPassed || 0;
     const dist = Math.max(0, Math.round((1 - clamp(stage.progress || 0, 0, 1)) * 48)) / 10;
@@ -4851,7 +4862,10 @@ export class GlideRenderer {
     if (
       d &&
       d.W === panelW &&
+      d.H === panelH &&
+      d.top === hudTop &&
       d.vw === this.width &&
+      d.vh === this.height &&
       d.pr === pr &&
       d.lan === lan &&
       d.gates === gates &&
@@ -4862,11 +4876,14 @@ export class GlideRenderer {
       return;
     }
     if (!d) {
-      d = this._hudDrawn = { W: 0, vw: 0, pr: 0, lan: -1, gates: -1, bonus: -1, dist: -1, glow: '' };
+      d = this._hudDrawn = { W: 0, H: 0, top: 0, vw: 0, vh: 0, pr: 0, lan: -1, gates: -1, bonus: -1, dist: -1, glow: '' };
     }
-    const sizeChanged = d.W !== panelW || d.pr !== pr;
+    const sizeChanged = d.W !== panelW || d.H !== panelH || d.pr !== pr;
     d.W = panelW;
+    d.H = panelH;
+    d.top = hudTop;
     d.vw = this.width;
+    d.vh = this.height;
     d.pr = pr;
     d.lan = lan;
     d.gates = gates;
@@ -4916,42 +4933,34 @@ export class GlideRenderer {
     this._txt(ctx, `${dist.toFixed(1)} KM`, panelW / 2, 24, '#f8fafc', 'center');
 
     ctx.font = this._font(700, 7.5);
-    this._txt(ctx, 'SKY BONUS', panelW - 16, 12, 'rgba(255, 228, 77, 0.9)', 'right', 0);
+    this._txt(ctx, 'SKY BONUS', panelW - 14, 11, 'rgba(255, 228, 77, 0.9)', 'right', 0);
     if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
-    ctx.font = this._font(800, 14);
-    this._txt(ctx, bonus.toLocaleString('en-US'), panelW - 16, 25, '#ffe44d', 'right');
+    ctx.font = this._font(800, wide ? 12.5 : 13.5);
+    this._txt(ctx, bonus.toLocaleString('en-US'), panelW - 14, 23, '#ffe44d', 'right');
 
-    const x0 = 30;
-    const x1 = panelW - 42;
-    const y = 40;
     ctx.fillStyle = 'rgba(2, 6, 16, 0.55)';
     this._roundRect(ctx, x0 - 2, y - 3.5, x1 - x0 + 4, 7, 3.5);
     ctx.fill();
     ctx.strokeStyle = 'rgba(123, 232, 255, 0.28)';
     ctx.stroke();
 
+    const iconTop = 35;
     ctx.fillStyle = '#64748b';
-    ctx.fillRect(12, 36, 10, 10);
-    ctx.fillRect(11, 33, 2.5, 3.5);
-    ctx.fillRect(15.5, 33, 2.5, 3.5);
-    ctx.fillRect(20, 33, 2.5, 3.5);
+    ctx.fillRect(12, iconTop + 2, 10, 9);
+    ctx.fillRect(11, iconTop - 1, 2.5, 3);
+    ctx.fillRect(15.5, iconTop - 1, 2.5, 3);
+    ctx.fillRect(20, iconTop - 1, 2.5, 3);
 
     ctx.fillStyle = '#1e293b';
-    ctx.fillRect(panelW - 32, 31, 12, 17);
+    ctx.fillRect(panelW - 30, iconTop - 2, 12, 15);
     ctx.strokeStyle = glow;
     ctx.lineWidth = 1.2;
-    ctx.strokeRect(panelW - 32, 31, 12, 17);
+    ctx.strokeRect(panelW - 30, iconTop - 2, 12, 15);
     ctx.fillStyle = glow;
-    ctx.fillRect(panelW - 29, 34, 2.5, 3.5);
-    ctx.fillRect(panelW - 25, 34, 2.5, 3.5);
+    ctx.fillRect(panelW - 27, iconTop + 1, 2.5, 3);
+    ctx.fillRect(panelW - 23, iconTop + 1, 2.5, 3);
 
     this._hudTex.needsUpdate = true;
-    const panelLeft = (this.width - panelW) * 0.5;
-    this.hudPanel.scale.set(panelW, panelH, 1);
-    this.hudPanel.position.set(this.width / 2, -(HUD_TOP_OFFSET + panelH / 2), 0);
-    this._trackX0 = panelLeft + x0;
-    this._trackX1 = panelLeft + x1;
-    this._trackY = HUD_TOP_OFFSET + y;
   }
 
   _comboTexFor(mult) {
@@ -7180,9 +7189,10 @@ export class GlideRenderer {
       }
       const since = (stage.t || 0) - (stage.comboPulseT ?? -10);
       const pulse = 1 + 0.42 * Math.exp(-Math.max(0, since) * 7) * Math.cos(since * 18);
-      const R = 52 * (0.6 + 0.4 * easeOutBack(ca)) * pulse;
+      const wide = this.width / this.height > 1.15;
+      const R = (wide ? 42 : 52) * (0.6 + 0.4 * easeOutBack(ca)) * pulse;
       const cx = this.width - 42;
-      const cy = -(HUD_TOP_OFFSET + 88);
+      const cy = -(wide ? (this.height >= 600 ? 170 : 164) : HUD_TOP_OFFSET + 88);
       this.comboRing.scale.set(R, R, 1);
       this.comboRing.position.set(cx, cy, 0);
       this.comboText.scale.set(R * 0.92, R * 0.92, 1);

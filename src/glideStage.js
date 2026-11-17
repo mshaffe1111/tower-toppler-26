@@ -22,9 +22,9 @@ const PERFECT_BONUS = 750;
 const HIT_PENALTY = 100;
 const NEAR_MISS_POINTS = 50;
 const MAX_MULT = 4;
-const COMBO_WINDOW = 2.4;
+const COMBO_WINDOW = 2.55;
 const MAX_VFX = 48;
-const FLAP_CD = 0.62;
+const FLAP_CD = 0.46; // buoyant, responsive mobile/tablet tap cadence
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -184,6 +184,9 @@ export class GlideStage {
     this._flockId = 0;
     this._touchedDown = false;
     this._splashCd = 0;
+    this._wasJump = true;
+    this._wasFire = true;
+    this._flapBuf = 0;
 
     this.lanterns.length = 0;
     this.gates.length = 0;
@@ -254,11 +257,12 @@ export class GlideStage {
   _layout() {
     const H = this.height;
     const s = this.s;
+    const wide = this.width / H > 1.15;
     this.seaY = H * 0.905;
-    // Keep flight ceiling below top HUD + utility row (~98px) and compact sky-progress strip so Pogo never flies behind UI
-    this.top = Math.max(H * 0.19, 152 * Math.min(1.18, s));
+    // Portrait reserves top 152px for `#hud` + sky bar; Landscape docks sky bar in Right Gutter so center/left sky opens up!
+    this.top = wide ? Math.max(H * 0.16, 68) : Math.max(H * 0.19, 152 * Math.min(1.18, s));
     this.bottom = this.seaY - 20 * s;
-    this.summitY = Math.max(this.top + 36 * s, H * 0.45);
+    this.summitY = Math.max(this.top + 34 * s, H * 0.45);
     this.landY = this.seaY - 26 * s;
   }
 
@@ -621,10 +625,17 @@ export class GlideStage {
     } else {
       g.spin += (Math.round(g.spin / TAU) * TAU - g.spin) * Math.min(1, dt * 10);
 
-      // 4-Mode Dual-Compatible Input Adapter (`analogX`/`analogY` + `axisX`/`axisY` + directional flags)
+      // 4-Mode Dual-Compatible Input Adapter (`analogX`/`analogY` + `axisX`/`axisY` + directional/action flags)
       const src = input && typeof input === 'object' && input.state ? input.state : (input || {});
+      const jp = input?.justPressed || src?.justPressed || null;
       const ax = Number(src.analogX ?? src.axisX ?? input?.analogX ?? input?.axisX) || 0;
       const ay = Number(src.analogY ?? src.axisY ?? input?.analogY ?? input?.axisY) || 0;
+      const jumpNow = Boolean(src.jump);
+      const fireNow = Boolean(src.fire);
+      const jumpEdge = (jumpNow && !this._wasJump) || Boolean(jp?.jump);
+      const fireEdge = (fireNow && !this._wasFire) || Boolean(jp?.fire);
+      this._wasJump = jumpNow;
+      this._wasFire = fireNow;
 
       let ix = Math.abs(ax) > 0.04 ? clamp(ax, -1, 1) : (src.right ? 1 : 0) - (src.left ? 1 : 0);
       let iy = Math.abs(ay) > 0.04 ? clamp(ay, -1, 1) : (src.down ? 1 : 0) - (src.up ? 1 : 0);
@@ -636,56 +647,66 @@ export class GlideStage {
       }
 
       // Horizontal airspeed tuck (+ix) vs air-brake (-ix)
-      const maxVx = 190 * s;
-      const kx = ix !== 0 ? (ix * g.vx < 0 ? 8 : 5.5) : 2.6;
+      const maxVx = 198 * s;
+      const kx = ix !== 0 ? (ix * g.vx < 0 ? 8.5 : 6.0) : 2.8;
       g.vx += (ix * maxVx - g.vx) * (1 - Math.exp(-kx * dt));
 
-      // Vertical glide sink + pitch steering + zoom-climb energy conversion
-      const sink = 34 * s;
-      const steer = 205 * s;
-      let wantVy = sink + iy * steer;
-      if (iy < -0.2 && g.energy > 0) {
-        const use = Math.min(g.energy, dt * 1.4);
+      // Buoyant vertical glide sink + responsive pitch steering + zoom-climb energy conversion
+      const sink = 28 * s;
+      const steer = 225 * s;
+      const holdLift = jumpNow || fireNow ? -95 * s : 0;
+      let wantVy = sink + iy * steer + holdLift;
+      if ((iy < -0.18 || holdLift < 0) && g.energy > 0) {
+        const use = Math.min(g.energy, dt * 1.45);
         g.energy -= use;
-        wantVy -= 190 * s * (use / Math.max(dt, 1e-4)) * 0.6;
+        wantVy -= 195 * s * (use / Math.max(dt, 1e-4)) * 0.6;
       }
-      const ky = iy !== 0 ? 4.2 : 1.8;
+      const ky = iy !== 0 || holdLift < 0 ? 5.4 : 2.1;
       g.vy += (wantVy - g.vy) * (1 - Math.exp(-ky * dt));
 
       // Rising warm/bioluminescent sea thermals
       let lift = 0;
       for (const th of this.thermals) {
-        const dx = (g.x - th.x) / th.w;
-        if (dx > -1 && dx < 1 && g.y > this.top - 10 * s) {
+        const dx = (g.x - th.x) / (th.w * 1.08);
+        if (dx > -1 && dx < 1 && g.y > this.top - 12 * s) {
           lift = Math.max(lift, th.str * (1 - dx * dx) * th.fade);
         }
       }
-      g.lift += (lift - g.lift) * Math.min(1, dt * 6);
+      g.lift += (lift - g.lift) * Math.min(1, dt * 6.5);
       if (lift > 0.02) {
-        g.vy -= lift * 640 * s * dt;
+        g.vy -= lift * 665 * s * dt;
         this.thermalTime += dt;
       }
-      if (g.vy < -330 * s) g.vy = -330 * s;
+      if (g.vy < -340 * s) g.vy = -340 * s;
 
       // Dive builds speed & zoom-climb kinetic energy
-      const diving = clamp((g.vy - 90 * s) / (190 * s), 0, 1);
-      g.dive += (diving - g.dive) * Math.min(1, dt * 5);
-      if (diving > 0.05) g.energy = Math.min(1.2, g.energy + diving * dt * 0.9);
-      else g.energy = Math.max(0, g.energy - dt * 0.12);
+      const diving = clamp((g.vy - 82 * s) / (185 * s), 0, 1);
+      g.dive += (diving - g.dive) * Math.min(1, dt * 5.2);
+      if (diving > 0.05) g.energy = Math.min(1.25, g.energy + diving * dt * 0.95);
+      else g.energy = Math.max(0, g.energy - dt * 0.11);
 
       const wantSpeed =
-        1 + 0.22 * ix + 0.42 * g.dive + (g.flapT < 0.6 ? 0.25 * (1 - g.flapT / 0.6) : 0);
-      g.speed += (wantSpeed - g.speed) * (1 - Math.exp(-2.4 * dt));
+        1 + 0.22 * ix + 0.42 * g.dive + (g.flapT < 0.6 ? 0.26 * (1 - g.flapT / 0.6) : 0);
+      g.speed += (wantSpeed - g.speed) * (1 - Math.exp(-2.6 * dt));
 
-      // Wing-flap trigger: `firePressed` (quick TAP or upward FLICK in Gesture mode, or FIRE/JUMP button)
-      if (firePressed && g.flapCd <= 0) this._flap(fx, sound);
+      // Wing-flap trigger with 140ms tap buffer: `firePressed` OR `jump`/`fire` edge never drops a tap!
+      if (Boolean(firePressed) || jumpEdge || fireEdge) {
+        this._flapBuf = 0.14;
+      } else if (this._flapBuf > 0) {
+        this._flapBuf = Math.max(0, this._flapBuf - dt);
+      }
+      if (this._flapBuf > 0 && g.flapCd <= 0) {
+        this._flapBuf = 0;
+        this._flap(fx, sound);
+      }
     }
 
     g.x += g.vx * dt;
     g.y += g.vy * dt;
 
+    const wide = W / this.height > 1.15;
     const minX = g.rx * 1.2;
-    const maxX = W - g.rx * 2.2;
+    const maxX = wide ? Math.min(W * 0.68, W - g.rx * 2.6) : W - g.rx * 2.2;
     if (g.x < minX) {
       g.x = minX;
       if (g.vx < 0) g.vx = 0;
@@ -1050,15 +1071,15 @@ export class GlideStage {
       }
       l.y = clamp(l.y, this.top - 6 * s, this.bottom - 6 * s);
 
-      if (canCatch && this._touches(l.x, l.y, l.r, 1.9)) {
-        l.pull = Math.min(1, l.pull + dt * 4);
-        const k = l.pull * Math.min(1, dt * 9);
+      if (canCatch && this._touches(l.x, l.y, l.r, 2.15)) {
+        l.pull = Math.min(1, l.pull + dt * 4.5);
+        const k = l.pull * Math.min(1, dt * 9.5);
         l.ax += (g.x - l.x) * k;
         l.ay += (g.y - l.y) * k;
         l.x += (g.x - l.x) * k;
         l.y += (g.y - l.y) * k;
       }
-      if (canCatch && this._touches(l.x, l.y, l.r)) {
+      if (canCatch && this._touches(l.x, l.y, l.r, 1.12)) {
         this._collect(l, fx, sound);
         removeAt(this.lanterns, i);
         continue;
@@ -1171,7 +1192,7 @@ export class GlideStage {
 
       if (gt.state === 'open' && crossed && this.phase === 'ride' && g.stun <= 0) {
         const dy = Math.abs(g.y - gt.y);
-        if (dy < gt.r * 0.92) {
+        if (dy < gt.r * 1.04) {
           gt.state = 'passed';
           gt.t = 0;
           this.gatesPassed++;

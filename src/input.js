@@ -1,44 +1,67 @@
-// Tower Toppler '26 — 4-Mode Concise Touch, Tilt & Keyboard Controller
+// Tower Toppler '26 — 4-Mode Precision Touch, Context-Aware Doorway, Tilt & Keyboard Controller
 // Leaf module: zero internal src/ imports.
 
 export const CONTROL_MODES = ['gesture', 'joystick', 'dpad', 'tilt'];
 
-// Strict Gesture Tuning Constants (60Hz Chromium Playtest Calibrated — G01..G32)
+const MODE_ALIASES = {
+  hybrid: 'joystick',
+  buttons: 'dpad',
+};
+
+// Strict Precision Gesture Tuning Constants (Real-Device Playtest Calibrated — #270)
 const GESTURE_HORIZ_DEADZONE_PX = 15;
 const GESTURE_SECONDARY_HORIZ_DEADZONE_PX = 22;
-const GESTURE_HORIZ_FULL_SPAN_PX = 42;
-const GESTURE_HORIZ_MAX_LEASH_PX = 56;
-const GESTURE_REVERSAL_PX = 12;
+const GESTURE_HORIZ_FULL_SPAN_PX = 40;
+const GESTURE_HORIZ_MAX_LEASH_PX = 54;
+const GESTURE_RECOIL_STOP_PX = 5; // pulling thumb back >= 5px brakes horizDir -> 0 immediately
+const GESTURE_REVERSAL_PX = 16; // continuing past brake zone reverses direction cleanly
+const GESTURE_STOP_SPEED_PX = 45; // px/s — mid-air post-flick horizontal stop threshold
+const GESTURE_MIDAIR_STOP_IDLE_MS = 32;
 // Natural human thumb horizontal sweep arcs ±25° (~tan 25.2° = 0.47)
 const GESTURE_HORIZ_ARC_SLOPE = 0.47;
 
+// Context-aware doorway / lift interaction thresholds
+const GESTURE_INTERACT_UP_PX = -16;
+const GESTURE_INTERACT_MAX_DX_PX = 22;
+const GESTURE_INTERACT_DOMINANCE = 1.15;
+const GESTURE_INTERACT_LATCH_MS = 180;
+const GESTURE_CENTER_TAP_MOVE_PX = 14;
+
+// Non-doorway controlled vertical slide thresholds
 const GESTURE_SLIDE_UP_PX = -26;
-const GESTURE_SLIDE_UP_MAX_SPEED = 290; // px/s (cleanly separates 220ms doorway slides from 80ms flicks)
-const GESTURE_SLIDE_UP_HOLD_MS = 135;
+const GESTURE_SLIDE_UP_MAX_SPEED = 540; // px/s (raised from 290 so lift climbs never misfire jump)
+const GESTURE_SLIDE_UP_HOLD_MS = 65; // reduced from 135ms -> 65ms
 const GESTURE_SLIDE_DOWN_PX = 26;
 const GESTURE_VERT_RELEASE_PX = 14;
 const GESTURE_VERT_REVERSAL_PX = 18;
 const GESTURE_VERT_MAX_LEASH_PX = 60;
-const GESTURE_VERT_DOMINANCE = 1.12; // |dy| must exceed |dx_vert| * 1.12 (>48°) to engage up/down
+const GESTURE_VERT_DOMINANCE = 1.12;
 
-// Standstill upward flick thresholds
-const GESTURE_FLICK_DY_PX = -20;
-const GESTURE_FLICK_MAX_MS = 115;
-const GESTURE_FLICK_VELOCITY_Y = -340; // px/s (upward is negative)
+// Standstill upward jump flick thresholds (away from doorways)
+const GESTURE_FLICK_DY_PX = -30;
+const GESTURE_FLICK_MAX_MS = 125;
+const GESTURE_FLICK_VELOCITY_Y = -560; // px/s (upward is negative)
 
-// Running / diagonal upward flick thresholds (e.g. dx=+25..35, dy=-35..-45 in 80..85ms mid-run gap leap)
-const GESTURE_RUN_FLICK_DY_PX = -22;
+// Running / diagonal upward jump flick thresholds (e.g. dx=+36, dy=-36 away from door or across gap)
+const GESTURE_RUN_FLICK_DY_PX = -24;
 const GESTURE_RUN_FLICK_MAX_MS = 130;
-const GESTURE_RUN_FLICK_VELOCITY_Y = -310; // px/s
-const GESTURE_RUN_FLICK_MIN_SLOPE = 0.53; // >= 28° upward elevation
+const GESTURE_RUN_FLICK_VELOCITY_Y = -330; // px/s
+const GESTURE_RUN_FLICK_MIN_SLOPE = 0.52; // >= 27.5° upward elevation
 
-// Full-apex jump hold & ballistic horizontal carry across chasms
-const GESTURE_FLICK_HOLD_MS = 290;
-const GESTURE_FULL_FLICK_DY_PX = -28;
-const GESTURE_FULL_FLICK_PULSE_MS = 315;
-const GESTURE_HORIZ_CARRY_MS = 260;
+// Proportional flick jump hold tiers (replaces forced 315ms max-jump pulse!)
+const GESTURE_FLICK_SHORT_MS = 85; // |dy| < 42px -> surgical 1-gap low hop
+const GESTURE_FLICK_MED_DY_PX = 42;
+const GESTURE_FLICK_MED_MS = 150; // 42..59px -> medium jump
+const GESTURE_FLICK_LONG_DY_PX = 60;
+const GESTURE_FLICK_LONG_MS = 230; // >= 60px -> full 2-col jump
+
+// Proportional post-flick ballistic horizontal commit targets (measured from lastFlickTime; expires before touchdown -> vxEnd = 0!)
+const GESTURE_FLICK_COMMIT_SHORT_MS = 355;
+const GESTURE_FLICK_COMMIT_MED_MS = 405;
+const GESTURE_FLICK_COMMIT_LONG_MS = 465;
+const GESTURE_HORIZ_CARRY_MS = 36;
 const GESTURE_FLICK_REARM_PX = 14;
-const GESTURE_FLICK_REARM_MS = 150;
+const GESTURE_FLICK_REARM_MS = 145;
 
 // Capacitive glass quick-tap tolerances (absorbs 6-15px thumb-pad roll jitter cleanly)
 const GESTURE_TAP_MAX_MS = 210;
@@ -70,6 +93,7 @@ export class InputController {
       jump: false,
       fire: false,
     };
+    this._justPressed = this.justPressed;
 
     this.hapticsEnabled = options.hapticsEnabled !== undefined ? Boolean(options.hapticsEnabled) : true;
     this.tiltSensitivity = 1.0;
@@ -84,6 +108,14 @@ export class InputController {
     );
     this.tiltNeutralGamma = 0;
 
+    // Context-aware interaction & active game-mode state (synced via game.js / main.js / #app[data-game-mode])
+    this._canInteract = false;
+    this._interactKind = '';
+    this.canInteract = false;
+    this.interactKind = '';
+    this._gameMode = '';
+    this.gameMode = 'tower';
+
     // Internal Tilt Tracking
     this._tiltListenerAttached = false;
     this._hasTiltSample = false;
@@ -97,12 +129,22 @@ export class InputController {
     // Internal Multi-Source Input Tracking
     this._activePointers = new Map();
     this._heldKeys = new Set();
+    this._leftPulseActive = false;
+    this._leftPulseTimer = null;
+    this._rightPulseActive = false;
+    this._rightPulseTimer = null;
+    this._upPulseActive = false;
+    this._upPulseTimer = null;
+    this._downPulseActive = false;
+    this._downPulseTimer = null;
     this._firePulseActive = false;
     this._firePulseTimer = null;
     this._jumpPulseActive = false;
+    this._jumpPulseRemainingSec = 0;
     this._jumpPulseTimer = null;
     this._horizCarryDir = 0;
     this._horizCarryAnalogX = 0;
+    this._horizCarryRemainingSec = 0;
     this._horizCarryTimer = null;
     this._puckCenteredCache = new WeakMap();
 
@@ -114,9 +156,142 @@ export class InputController {
     this._bindEvents();
   }
 
+  /** Returns current aggregated input state snapshot. */
+  getState() {
+    return this.state;
+  }
+
+  /** Per-frame tick hook called by game.update(dt) — detects stationary post-flick thumb stops & expires ballistic carry deterministically. */
+  update(dt = 0) {
+    const stepDt = Number.isFinite(dt) && dt > 0 ? Math.min(0.05, dt) : 0;
+    let changed = false;
+
+    if (stepDt > 0) {
+      if (this._horizCarryDir !== 0 && this._horizCarryRemainingSec > 0) {
+        this._horizCarryRemainingSec -= stepDt;
+        if (this._horizCarryRemainingSec <= 0) {
+          this._clearHorizCarry();
+          changed = true;
+        }
+      }
+      if (this._jumpPulseActive && this._jumpPulseRemainingSec > 0) {
+        this._jumpPulseRemainingSec -= stepDt;
+        if (this._jumpPulseRemainingSec <= 0) {
+          this._cancelJumpPulse();
+          changed = true;
+        }
+      }
+    }
+
+    if (this._activeGameMode() === 'tower') {
+      for (const entry of this._activePointers.values()) {
+        if (entry.type !== 'gesture') continue;
+        if (stepDt > 0 && entry.jumpHeld && entry.jumpHoldRemainingSec > 0) {
+          entry.jumpHoldRemainingSec -= stepDt;
+          if (entry.jumpHoldRemainingSec <= 0) {
+            entry.jumpHoldRemainingSec = 0;
+            entry.jumpHeld = false;
+            if (entry.jumpTimer !== null) {
+              clearTimeout(entry.jumpTimer);
+              entry.jumpTimer = null;
+            }
+            changed = true;
+          }
+        }
+        if (entry.movedThisFrame) {
+          entry.movedThisFrame = false;
+        } else if (stepDt > 0) {
+          entry.idleHorizSec = (entry.idleHorizSec || 0) + stepDt;
+        }
+        if (
+          (entry.flickLatched || entry.postFlickActive) &&
+          entry.horizDir !== 0 &&
+          entry.idleHorizSec >= GESTURE_MIDAIR_STOP_IDLE_MS / 1000
+        ) {
+          entry.horizDir = 0;
+          entry.postFlickActive = false;
+          entry.lastFlickHoldMs = 0;
+          entry.left = false;
+          entry.right = false;
+          entry.analogX = 0;
+          entry.anchorX = entry.lastX;
+          entry.extremeX = entry.lastX;
+          if (entry.midAirStopTimer !== null) {
+            clearTimeout(entry.midAirStopTimer);
+            entry.midAirStopTimer = null;
+          }
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) {
+      this._recomputeState(true);
+    }
+  }
+
+  /**
+   * Explicitly sets active game mode ('tower' | 'submarine' | 'skimmer' | 'glide' | 'puzzle' | 'vault' | 'title');
+   * also auto-reads document.getElementById('app').dataset.gameMode when unset.
+   */
+  setGameMode(mode = 'tower') {
+    const next = String(mode || '');
+    this._gameMode = next;
+    this.gameMode = next || 'tower';
+    if (next && next !== 'tower') {
+      this.setInteractContext(false, '');
+    }
+    return this.gameMode;
+  }
+
+  _activeGameMode() {
+    if (this._gameMode) return this._gameMode;
+    if (typeof document !== 'undefined') {
+      const dm = document.getElementById('app')?.dataset?.gameMode;
+      if (dm) return dm;
+    }
+    return 'tower';
+  }
+
+  /**
+   * Updates context-aware doorway / lift / interactable proximity from game.js / main.js.
+   * @param {boolean} [canInteract=false]
+   * @param {string} [kind=''] - 'door' | 'lift' | 'fire' | ''
+   */
+  setInteractContext(canInteract = false, kind = '') {
+    const active = Boolean(canInteract);
+    const normKind = active ? String(kind || 'door') : '';
+    this._canInteract = active;
+    this._interactKind = normKind;
+    this.canInteract = active;
+    this.interactKind = normKind;
+  }
+
+  /**
+   * Fires an immediate context interaction (from tapping #action-prompt or tapping Pogo/doorway center zone).
+   * @param {string} [action='up'] - 'up' | 'fire' | 'down'
+   */
+  triggerInteract(action = '') {
+    const resolved = action || (this._interactKind === 'fire' ? 'fire' : 'up');
+    this._cancelJumpPulse();
+    this._clearHorizCarry();
+
+    if (resolved === 'fire') {
+      this._triggerFirePulse(125);
+      return true;
+    }
+    if (resolved === 'down') {
+      this._triggerDownPulse(165);
+      return true;
+    }
+    this._triggerUpPulse(170);
+    return true;
+  }
+
   /** Switches active touch control scheme and sets document.getElementById('app').dataset.controlMode = mode. */
   setControlMode(mode) {
-    const validMode = CONTROL_MODES.includes(mode) ? mode : 'gesture';
+    const mapped = MODE_ALIASES[mode] || mode;
+    const validMode = CONTROL_MODES.includes(mapped) ? mapped : 'gesture';
     const changed = !this._initializedMode || validMode !== this.controlMode;
     this._initializedMode = true;
     if (changed) {
@@ -223,6 +398,22 @@ export class InputController {
 
   /** Clears all held directions/buttons (called on pause / overlay transitions). */
   resetState() {
+    if (this._leftPulseTimer !== null) {
+      clearTimeout(this._leftPulseTimer);
+      this._leftPulseTimer = null;
+    }
+    if (this._rightPulseTimer !== null) {
+      clearTimeout(this._rightPulseTimer);
+      this._rightPulseTimer = null;
+    }
+    if (this._upPulseTimer !== null) {
+      clearTimeout(this._upPulseTimer);
+      this._upPulseTimer = null;
+    }
+    if (this._downPulseTimer !== null) {
+      clearTimeout(this._downPulseTimer);
+      this._downPulseTimer = null;
+    }
     if (this._firePulseTimer !== null) {
       clearTimeout(this._firePulseTimer);
       this._firePulseTimer = null;
@@ -231,8 +422,13 @@ export class InputController {
       clearTimeout(this._jumpPulseTimer);
       this._jumpPulseTimer = null;
     }
+    this._leftPulseActive = false;
+    this._rightPulseActive = false;
+    this._upPulseActive = false;
+    this._downPulseActive = false;
     this._firePulseActive = false;
     this._jumpPulseActive = false;
+    this._jumpPulseRemainingSec = 0;
     this._clearHorizCarry();
 
     for (const entry of this._activePointers.values()) {
@@ -271,7 +467,7 @@ export class InputController {
     this.clearFrame();
   }
 
-  /** Triggers subtle mobile vibration if hapticsEnabled is true. */
+  /** Triggers subtle mobile vibration if hapticsEnabled is true and user has interacted with frame. */
   haptic(pattern = 12) {
     if (!this.hapticsEnabled) return;
     if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
@@ -302,14 +498,56 @@ export class InputController {
     return false;
   }
 
+  _isDoorOrLiftContext() {
+    return (
+      this._canInteract &&
+      (this._interactKind === 'door' || this._interactKind === 'lift' || this._interactKind === '')
+    );
+  }
+
+  _isInCenterInteractZone(clientX, clientY) {
+    let left = 0;
+    let top = 0;
+    let vw = typeof window !== 'undefined' && window.innerWidth ? window.innerWidth : 430;
+    let vh = typeof window !== 'undefined' && window.innerHeight ? window.innerHeight : 932;
+
+    if (typeof document !== 'undefined') {
+      const stageEl = document.getElementById('game-canvas') || document.getElementById('stage-wrap');
+      if (stageEl && typeof stageEl.getBoundingClientRect === 'function') {
+        const r = stageEl.getBoundingClientRect();
+        if (r.width > 40 && r.height > 40) {
+          left = r.left;
+          top = r.top;
+          vw = r.width;
+          vh = r.height;
+        }
+      }
+    }
+
+    const nx = (clientX - left) / Math.max(1, vw);
+    const ny = (clientY - top) / Math.max(1, vh);
+    // Middle 36% horizontally ([0.32..0.68]), middle 54% vertically ([0.24..0.78], matching closer #304 phone/tablet camera!)
+    return nx >= 0.32 && nx <= 0.68 && ny >= 0.24 && ny <= 0.78;
+  }
+
+  _resolveFlickHoldMs(dyUp) {
+    const absDy = Math.abs(dyUp);
+    if (absDy >= GESTURE_FLICK_LONG_DY_PX) return GESTURE_FLICK_LONG_MS;
+    if (absDy >= GESTURE_FLICK_MED_DY_PX) return GESTURE_FLICK_MED_MS;
+    return GESTURE_FLICK_SHORT_MS;
+  }
+
   _latchHorizCarry(dir, analogX, durationMs = GESTURE_HORIZ_CARRY_MS) {
     this._clearHorizCarry();
+    if (!dir || durationMs <= 0) return;
     this._horizCarryDir = dir;
     this._horizCarryAnalogX = analogX;
+    this._horizCarryRemainingSec = durationMs / 1000;
     this._horizCarryTimer = setTimeout(() => {
       this._horizCarryTimer = null;
       this._horizCarryDir = 0;
       this._horizCarryAnalogX = 0;
+      this._horizCarryRemainingSec = 0;
       this._recomputeState(true);
     }, durationMs);
   }
@@ -321,6 +559,7 @@ export class InputController {
     }
     this._horizCarryDir = 0;
     this._horizCarryAnalogX = 0;
+    this._horizCarryRemainingSec = 0;
   }
 
   _cancelJumpPulse() {
@@ -329,13 +568,14 @@ export class InputController {
       this._jumpPulseTimer = null;
     }
     this._jumpPulseActive = false;
+    this._jumpPulseRemainingSec = 0;
   }
 
   _recomputeState(suppressEdgeHaptic = false) {
-    let left = this._heldKeys.has('left');
-    let right = this._heldKeys.has('right');
-    let up = this._heldKeys.has('up');
-    let down = this._heldKeys.has('down');
+    let left = this._heldKeys.has('left') || this._leftPulseActive;
+    let right = this._heldKeys.has('right') || this._rightPulseActive;
+    let up = this._heldKeys.has('up') || this._upPulseActive;
+    let down = this._heldKeys.has('down') || this._downPulseActive;
     let jump = this._heldKeys.has('jump') || this._jumpPulseActive;
     let fire = this._heldKeys.has('fire') || this._firePulseActive;
 
@@ -391,7 +631,7 @@ export class InputController {
       }
     }
 
-    // Apply ballistic horizontal carry after running-flick thumb lift when no active X source overrides
+    // Apply brief (<=36ms) horizontal carry ONLY when no active pointer/key overrides
     if (!left && !right && this._horizCarryDir !== 0) {
       if (this._horizCarryDir < 0) left = true;
       else if (this._horizCarryDir > 0) right = true;
@@ -430,6 +670,64 @@ export class InputController {
     }
   }
 
+  _triggerLeftPulse(durationMs = 95) {
+    if (this._leftPulseTimer !== null) clearTimeout(this._leftPulseTimer);
+    this._leftPulseActive = true;
+    this.haptic(8);
+    this._recomputeState(true);
+    this._leftPulseTimer = setTimeout(() => {
+      this._leftPulseTimer = null;
+      this._leftPulseActive = false;
+      this._recomputeState(true);
+    }, durationMs);
+  }
+
+  _triggerRightPulse(durationMs = 95) {
+    if (this._rightPulseTimer !== null) clearTimeout(this._rightPulseTimer);
+    this._rightPulseActive = true;
+    this.haptic(8);
+    this._recomputeState(true);
+    this._rightPulseTimer = setTimeout(() => {
+      this._rightPulseTimer = null;
+      this._rightPulseActive = false;
+      this._recomputeState(true);
+    }, durationMs);
+  }
+
+  _triggerUpPulse(durationMs = GESTURE_INTERACT_LATCH_MS) {
+    if (this._upPulseTimer !== null) {
+      clearTimeout(this._upPulseTimer);
+    }
+    this._cancelJumpPulse();
+    this._upPulseActive = true;
+    this.justPressed.up = true;
+    this.haptic(10);
+    this._recomputeState(true);
+
+    this._upPulseTimer = setTimeout(() => {
+      this._upPulseTimer = null;
+      this._upPulseActive = false;
+      this._recomputeState(true);
+    }, durationMs);
+  }
+
+  _triggerDownPulse(durationMs = 165) {
+    if (this._downPulseTimer !== null) {
+      clearTimeout(this._downPulseTimer);
+    }
+    this._cancelJumpPulse();
+    this._downPulseActive = true;
+    this.justPressed.down = true;
+    this.haptic(10);
+    this._recomputeState(true);
+
+    this._downPulseTimer = setTimeout(() => {
+      this._downPulseTimer = null;
+      this._downPulseActive = false;
+      this._recomputeState(true);
+    }, durationMs);
+  }
+
   _triggerFirePulse(durationMs = GESTURE_FIRE_PULSE_MS) {
     if (this._firePulseTimer !== null) {
       clearTimeout(this._firePulseTimer);
@@ -446,18 +744,22 @@ export class InputController {
     }, durationMs);
   }
 
-  _triggerJumpPulse(durationMs = GESTURE_FULL_FLICK_PULSE_MS) {
+  _triggerJumpPulse(durationMs = GESTURE_FLICK_MED_MS, extendOnly = false) {
     if (this._jumpPulseTimer !== null) {
       clearTimeout(this._jumpPulseTimer);
     }
     this._jumpPulseActive = true;
-    this.justPressed.jump = true;
-    this.haptic(14);
+    this._jumpPulseRemainingSec = durationMs / 1000;
+    if (!extendOnly) {
+      this.justPressed.jump = true;
+      this.haptic(14);
+    }
     this._recomputeState(true);
 
     this._jumpPulseTimer = setTimeout(() => {
       this._jumpPulseTimer = null;
       this._jumpPulseActive = false;
+      this._jumpPulseRemainingSec = 0;
       this._recomputeState(true);
     }, durationMs);
   }
@@ -471,6 +773,10 @@ export class InputController {
     if (entry.upHoldTimer !== undefined && entry.upHoldTimer !== null) {
       clearTimeout(entry.upHoldTimer);
       entry.upHoldTimer = null;
+    }
+    if (entry.midAirStopTimer !== undefined && entry.midAirStopTimer !== null) {
+      clearTimeout(entry.midAirStopTimer);
+      entry.midAirStopTimer = null;
     }
   }
 
@@ -610,7 +916,7 @@ export class InputController {
   }
 
   // ===========================================================================
-  // Mode 1: Strict Tuned Gesture Logic ('gesture')
+  // Mode 1: Precision Gesture & Context-Aware Doorway Logic ('gesture')
   // ===========================================================================
 
   _createGestureEntry(e) {
@@ -626,6 +932,11 @@ export class InputController {
       startPerfTs: ts.startPerfTs,
       lastX: x,
       lastY: y,
+      lastMoveTime: ts.now,
+      lastHorizMoveTime: ts.now,
+      idleHorizSec: 0,
+      movedThisFrame: true,
+      recentVx: 0,
       maxDist: 0,
 
       // Horizontal dynamic anchor state
@@ -646,25 +957,79 @@ export class InputController {
       vertDir: null, // null | 'up' | 'down'
       analogY: 0,
       flickLatched: false,
+      flickHoldMs: 0,
       flickPeakY: y,
       flickLatchTime: 0,
+      postFlickActive: false,
+      lastFlickTime: 0,
+      lastFlickHoldMs: 0,
       jumpHeld: false,
+      jumpHoldRemainingSec: 0,
       jumpTimer: null,
       upHoldTimer: null,
+      midAirStopTimer: null,
 
       samples: [{ x, y, t: ts.now }],
     };
+  }
+
+  _scheduleMidAirStopWatchdog(entry) {
+    if (entry.midAirStopTimer !== null) {
+      clearTimeout(entry.midAirStopTimer);
+      entry.midAirStopTimer = null;
+    }
+    if ((!entry.flickLatched && !entry.postFlickActive) || entry.horizDir === 0) return;
+    entry.midAirStopTimer = setTimeout(() => {
+      entry.midAirStopTimer = null;
+      if ((entry.flickLatched || entry.postFlickActive) && entry.horizDir !== 0) {
+        entry.horizDir = 0;
+        entry.postFlickActive = false;
+        entry.lastFlickHoldMs = 0;
+        entry.left = false;
+        entry.right = false;
+        entry.analogX = 0;
+        entry.anchorX = entry.lastX;
+        entry.extremeX = entry.lastX;
+        this._recomputeState(true);
+      }
+    }, GESTURE_MIDAIR_STOP_IDLE_MS);
   }
 
   _updateGesturePointer(entry, e) {
     const now = this._resolveTimestampMs(e, entry);
     const x = e.clientX;
     const y = e.clientY;
-    const dxStep = x - entry.lastX;
-    const dyStep = y - entry.lastY;
+    const prevX = entry.lastX;
+    const prevY = entry.lastY;
+    const prevMoveTime = entry.lastMoveTime;
+    const gapMs = now - prevMoveTime;
+    const dtStepSec = Math.max(0.004, gapMs / 1000);
+    const dxStep = x - prevX;
+    const dyStep = y - prevY;
+    const instVx = dxStep / dtStepSec;
+
+    // If finger sat motionless on glass (>45ms with zero pointermove events) before starting an upward flick,
+    // anchor upOnset to the stationary point right before this new stroke (~16ms ago) instead of stale pre-hold time!
+    if (!entry.flickLatched && entry.vertDir === null && gapMs > 45 && Math.abs(entry.upOnsetY - prevY) < 5) {
+      const onsetTs = now - Math.min(18, gapMs);
+      entry.upOnsetX = prevX;
+      entry.upOnsetY = prevY;
+      entry.upOnsetTime = onsetTs;
+      entry.samples.push({ x: prevX, y: prevY, t: onsetTs });
+    }
 
     entry.lastX = x;
     entry.lastY = y;
+    entry.lastMoveTime = now;
+    entry.movedThisFrame = true;
+    entry.recentVx = instVx;
+    if (Math.abs(instVx) >= GESTURE_STOP_SPEED_PX || dyStep <= -2.5) {
+      entry.lastHorizMoveTime = now;
+      entry.idleHorizSec = 0;
+    } else {
+      entry.idleHorizSec = (entry.idleHorizSec || 0) + dtStepSec;
+    }
+
     const distFromStart = Math.hypot(x - entry.startX, y - entry.startY);
     if (distFromStart > entry.maxDist) {
       entry.maxDist = distFromStart;
@@ -676,11 +1041,17 @@ export class InputController {
       entry.samples.shift();
     }
 
+    const gmode = this._activeGameMode();
+    if (gmode === 'submarine' || gmode === 'glide' || gmode === 'puzzle' || gmode === 'skimmer' || gmode === 'vault') {
+      this._updateMiniGameGesturePointer(entry, x, y, now, gmode);
+      return;
+    }
+
     // -------------------------------------------------------------------------
-    // 1. Horizontal Drag with Dynamic Reversal Re-Anchoring
-    //    - 15px deadzone prevents 6-14.5px backward finger-peel taps from flipping p.facing
-    //    - 22px secondary deadzone prevents right-thumb taps from overriding left-thumb walk
-    //    - Suppresses reversal during steep vertical strokes so upward flick hooks keep momentum
+    // 1. Precision Horizontal Drag with Recoil Brake & Instant Reversal
+    //    - >= 5px recoil from extremeX drops horizDir -> 0 immediately (zero sticky coast!)
+    //    - >= 16px recoil reverses direction cleanly in one fluid motion
+    //    - Post-flick stationary thumb (< 45 px/s) drops horizDir -> 0 immediately mid-air
     // -------------------------------------------------------------------------
     const activeHorizDeadzone =
       entry.horizDir === 0 && this._hasOtherGestureHorizPointer(entry)
@@ -692,28 +1063,62 @@ export class InputController {
 
     if (entry.horizDir === 1 || dx > activeHorizDeadzone) {
       if (x > entry.extremeX) entry.extremeX = x;
-      if (!isSteepVertStep && entry.extremeX - x > GESTURE_REVERSAL_PX) {
-        // Instant leftward reversal past deadzone!
+      const recoil = entry.extremeX - x;
+      if (!isSteepVertStep && recoil > GESTURE_REVERSAL_PX) {
+        // Full leftward reversal!
         entry.anchorX = x + (activeHorizDeadzone + 3);
         entry.extremeX = x;
         entry.horizDir = -1;
         dx = x - entry.anchorX;
+      } else if (!isSteepVertStep && recoil >= GESTURE_RECOIL_STOP_PX) {
+        // Deliberate thumb recoil brake -> immediate neutral stop!
+        entry.anchorX = x;
+        entry.extremeX = x;
+        entry.horizDir = 0;
+        entry.postFlickActive = false;
+        entry.lastFlickHoldMs = 0;
+        dx = 0;
       } else if (dx > GESTURE_HORIZ_MAX_LEASH_PX) {
         entry.anchorX = x - GESTURE_HORIZ_MAX_LEASH_PX;
         dx = GESTURE_HORIZ_MAX_LEASH_PX;
       }
     } else if (entry.horizDir === -1 || dx < -activeHorizDeadzone) {
       if (x < entry.extremeX) entry.extremeX = x;
-      if (!isSteepVertStep && x - entry.extremeX > GESTURE_REVERSAL_PX) {
-        // Instant rightward reversal past deadzone!
+      const recoil = x - entry.extremeX;
+      if (!isSteepVertStep && recoil > GESTURE_REVERSAL_PX) {
+        // Full rightward reversal!
         entry.anchorX = x - (activeHorizDeadzone + 3);
         entry.extremeX = x;
         entry.horizDir = 1;
         dx = x - entry.anchorX;
+      } else if (!isSteepVertStep && recoil >= GESTURE_RECOIL_STOP_PX) {
+        // Deliberate thumb recoil brake -> immediate neutral stop!
+        entry.anchorX = x;
+        entry.extremeX = x;
+        entry.horizDir = 0;
+        entry.postFlickActive = false;
+        entry.lastFlickHoldMs = 0;
+        dx = 0;
       } else if (dx < -GESTURE_HORIZ_MAX_LEASH_PX) {
         entry.anchorX = x + GESTURE_HORIZ_MAX_LEASH_PX;
         dx = -GESTURE_HORIZ_MAX_LEASH_PX;
       }
+    }
+
+    // Mid-air post-flick thumb stop: if finger stops moving horizontally after flick, brake immediately
+    if (
+      (entry.flickLatched || entry.postFlickActive) &&
+      entry.horizDir !== 0 &&
+      Math.abs(instVx) < GESTURE_STOP_SPEED_PX &&
+      now - entry.lastHorizMoveTime >= 24 &&
+      dyStep > -2.5
+    ) {
+      entry.anchorX = x;
+      entry.extremeX = x;
+      entry.horizDir = 0;
+      entry.postFlickActive = false;
+      entry.lastFlickHoldMs = 0;
+      dx = 0;
     }
 
     if (Math.abs(dx) > activeHorizDeadzone) {
@@ -724,8 +1129,13 @@ export class InputController {
       entry.analogX = entry.horizDir * mag;
       entry.left = entry.horizDir < 0;
       entry.right = entry.horizDir > 0;
+      if (entry.flickLatched || entry.postFlickActive) {
+        this._scheduleMidAirStopWatchdog(entry);
+      }
     } else {
       entry.horizDir = 0;
+      entry.postFlickActive = false;
+      entry.lastFlickHoldMs = 0;
       entry.extremeX = x;
       entry.analogX = 0;
       entry.left = false;
@@ -738,13 +1148,35 @@ export class InputController {
     if (entry.flickLatched) {
       if (y < entry.flickPeakY) {
         entry.flickPeakY = y;
+        // Upgrade jump hold smoothly if user continues pulling into a longer power-flick
+        const upgradedHold = this._resolveFlickHoldMs(y - entry.upOnsetY);
+        if (upgradedHold > entry.flickHoldMs) {
+          const elapsedFlick = Math.max(0, now - entry.flickLatchTime);
+          const extra = upgradedHold - elapsedFlick;
+          entry.flickHoldMs = upgradedHold;
+          entry.lastFlickHoldMs = upgradedHold;
+          if (extra > 12) {
+            entry.jumpHeld = true;
+            entry.jumpHoldRemainingSec = extra / 1000;
+            if (entry.jumpTimer !== null) {
+              clearTimeout(entry.jumpTimer);
+            }
+            entry.jumpTimer = setTimeout(() => {
+              entry.jumpTimer = null;
+              entry.jumpHeld = false;
+              entry.jumpHoldRemainingSec = 0;
+              this._recomputeState(true);
+            }, extra);
+            this._triggerJumpPulse(extra, true);
+          }
+        }
       }
       if (
         y - entry.flickPeakY >= GESTURE_FLICK_REARM_PX ||
         (now - entry.flickLatchTime >= GESTURE_FLICK_REARM_MS && dyStep >= -0.8)
       ) {
-        // Re-arm upward gesture cleanly for consecutive mid-walk hurdles!
         entry.flickLatched = false;
+        entry.flickHoldMs = 0;
         entry.anchorY = y;
         entry.extremeY = y;
         entry.vertOnsetX = x;
@@ -753,8 +1185,6 @@ export class InputController {
         entry.upOnsetTime = now;
       }
     } else if (entry.vertDir === null) {
-      // Only glide Y baseline along shallow horizontal arc once genuinely walking horizontally,
-      // so ±2.4px X-jitter while standing at a doorway never wipes anchorY!
       const isCommittedWalk =
         entry.horizDir !== 0 || Math.abs(x - entry.startX) > GESTURE_HORIZ_DEADZONE_PX;
       const isShallowHorizDrift =
@@ -773,45 +1203,116 @@ export class InputController {
         entry.upOnsetX = x;
         entry.upOnsetY = y;
         entry.upOnsetTime = now;
-        // Only recover anchorY back up toward startY if previously pulled above startY;
-        // NEVER chase y below startY so slow 60Hz downward slides (+2.5px/frame) accumulate!
         if (entry.anchorY < entry.startY) {
           entry.anchorY = Math.min(y, entry.startY);
           entry.vertOnsetX = x;
         }
-      } else if (entry.upOnsetY - y < 5 && now - entry.upOnsetTime > 95) {
+      } else if (
+        (entry.upOnsetY - y < 4 && dyStep >= -1.0) ||
+        (entry.upOnsetY - y < 5 && now - entry.upOnsetTime > 95)
+      ) {
         entry.upOnsetX = x;
         entry.upOnsetY = y;
         entry.upOnsetTime = now;
       }
     }
 
-    // Compute instantaneous/windowed velocity (px/s)
     const { vx, vy } = this._computeGestureVelocity(entry, x, y, now);
     const dxUp = x - entry.upOnsetX;
     const dyUp = y - entry.upOnsetY;
     const dtUpMs = Math.max(0, now - entry.upOnsetTime);
+    const dyAnchor = y - entry.anchorY;
 
     // -------------------------------------------------------------------------
-    // 3. Fast Upward FLICK -> Jump ONLY (Standstill OR Running Diagonal Flick!)
+    // 3A. CONTEXT-AWARE DOORWAY / LIFT PRIORITY (#270 CRITICAL FIX)
+    //     When Pogo stands at an enterable Doorway, Rune Door, Vault Door, Exit, or Lift,
+    //     ANY vertical upward swipe/pull (dy <= -16px, REGARDLESS of swipe velocity!)
+    //     enters the doorway / rides the lift and MUST NEVER trigger jump!
+    //     (Diagonal jump-away swipes with |dxUp| >= 22px and |dxUp| > |dyUp| * 0.85 still jump!)
     // -------------------------------------------------------------------------
-    const isRunningStroke = entry.horizDir !== 0 || Math.abs(dxUp) >= 14;
+    if (
+      !entry.flickLatched &&
+      this._isDoorOrLiftContext() &&
+      (dyAnchor <= GESTURE_INTERACT_UP_PX || dyUp <= GESTURE_INTERACT_UP_PX)
+    ) {
+      const smallHorizIntent =
+        (entry.horizDir === 0 || Math.abs(vx) < 220) &&
+        Math.abs(dxUp) < GESTURE_INTERACT_MAX_DX_PX &&
+        Math.abs(Math.min(dyAnchor, dyUp)) >= Math.abs(dxUp) * GESTURE_INTERACT_DOMINANCE;
+
+      if (smallHorizIntent) {
+        if (entry.upHoldTimer !== null) {
+          clearTimeout(entry.upHoldTimer);
+          entry.upHoldTimer = null;
+        }
+        this._clearHorizCarry();
+        this._cancelJumpPulse();
+        entry.horizDir = 0;
+        entry.postFlickActive = false;
+        entry.lastFlickHoldMs = 0;
+        entry.left = false;
+        entry.right = false;
+        entry.analogX = 0;
+        entry.anchorX = x;
+        entry.extremeX = x;
+        if (entry.vertDir !== 'up') {
+          entry.vertDir = 'up';
+          entry.extremeY = y;
+          entry.analogY = -1;
+          this._triggerUpPulse(GESTURE_INTERACT_LATCH_MS);
+        } else {
+          if (y < entry.extremeY) entry.extremeY = y;
+          entry.analogY = -1;
+          this._recomputeState(true);
+        }
+        return;
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // 3B. Proportional Upward FLICK -> Precision Jump ONLY
+    //     - Short flick (< 42px) -> 85ms surgical 1-gap hop
+    //     - Medium flick (42..59px) -> 150ms medium jump
+    //     - Power flick (>= 60px) -> 230ms full jump
+    // -------------------------------------------------------------------------
+    const hasOtherWalk = this._hasOtherGestureHorizPointer(entry);
+    const isDiagonalAwayFromDoor =
+      this._isDoorOrLiftContext() &&
+      Math.abs(dxUp) >= GESTURE_INTERACT_MAX_DX_PX &&
+      Math.abs(dxUp) > Math.abs(dyUp) * 0.85;
+
+    const isRunningStroke = entry.horizDir !== 0 || Math.abs(dxUp) >= 16 || isDiagonalAwayFromDoor;
     const standstillFlick =
+      !this._isDoorOrLiftContext() &&
       !isRunningStroke &&
+      !hasOtherWalk &&
       dyUp <= GESTURE_FLICK_DY_PX &&
       dtUpMs <= GESTURE_FLICK_MAX_MS &&
       vy <= GESTURE_FLICK_VELOCITY_Y &&
       Math.abs(vy) > Math.abs(vx) * 0.85;
 
+    const secondaryThumbFlick =
+      hasOtherWalk &&
+      !this._isDoorOrLiftContext() &&
+      dyUp <= -22 &&
+      dtUpMs <= GESTURE_RUN_FLICK_MAX_MS &&
+      vy <= -320 &&
+      Math.abs(vy) >= Math.abs(vx) * 0.65;
+
     const runningDiagFlick =
       isRunningStroke &&
+      (!this._isDoorOrLiftContext() || Math.abs(dxUp) >= GESTURE_INTERACT_MAX_DX_PX || Math.abs(vx) >= 220) &&
       dyUp <= GESTURE_RUN_FLICK_DY_PX &&
       dtUpMs <= GESTURE_RUN_FLICK_MAX_MS &&
       vy <= GESTURE_RUN_FLICK_VELOCITY_Y &&
       Math.abs(vy) >= Math.abs(vx) * GESTURE_RUN_FLICK_MIN_SLOPE &&
       Math.abs(dyUp) >= Math.abs(dxUp) * GESTURE_RUN_FLICK_MIN_SLOPE;
 
-    if (!entry.flickLatched && entry.vertDir !== 'up' && (standstillFlick || runningDiagFlick)) {
+    if (
+      !entry.flickLatched &&
+      entry.vertDir !== 'up' &&
+      (standstillFlick || runningDiagFlick || secondaryThumbFlick)
+    ) {
       if (entry.upHoldTimer !== null) {
         clearTimeout(entry.upHoldTimer);
         entry.upHoldTimer = null;
@@ -820,26 +1321,30 @@ export class InputController {
         clearTimeout(entry.jumpTimer);
       }
 
+      const holdMs = this._resolveFlickHoldMs(dyUp);
       entry.flickLatched = true;
+      entry.flickHoldMs = holdMs;
       entry.flickPeakY = y;
       entry.flickLatchTime = now;
+      entry.postFlickActive = true;
+      entry.lastFlickTime = now;
+      entry.lastFlickHoldMs = holdMs;
+      entry.idleHorizSec = 0;
+      entry.lastHorizMoveTime = now;
       entry.vertDir = null;
       entry.analogY = 0;
       entry.jumpHeld = true;
+      entry.jumpHoldRemainingSec = holdMs / 1000;
 
-      if (runningDiagFlick || dyUp <= GESTURE_FULL_FLICK_DY_PX) {
-        this._triggerJumpPulse(GESTURE_FULL_FLICK_PULSE_MS);
-      } else {
-        this.justPressed.jump = true;
-        this.haptic(14);
-        this._recomputeState(true);
-      }
+      this._triggerJumpPulse(holdMs);
+      this._scheduleMidAirStopWatchdog(entry);
 
       entry.jumpTimer = setTimeout(() => {
         entry.jumpTimer = null;
         entry.jumpHeld = false;
+        entry.jumpHoldRemainingSec = 0;
         this._recomputeState(true);
-      }, GESTURE_FLICK_HOLD_MS);
+      }, holdMs);
       return;
     }
 
@@ -849,7 +1354,6 @@ export class InputController {
     if (!entry.flickLatched) {
       let dy = y - entry.anchorY;
 
-      // Dynamic vertical reversal re-anchoring once UP or DOWN is engaged
       if (entry.vertDir === 'up') {
         if (y < entry.extremeY) entry.extremeY = y;
         if (y - entry.extremeY > GESTURE_VERT_REVERSAL_PX) {
@@ -939,6 +1443,160 @@ export class InputController {
     this._recomputeState();
   }
 
+  /**
+   * Dedicated touch-feel handler for all 5 Mini-Games ('submarine', 'glide', 'puzzle', 'skimmer', 'vault'):
+   * - submarine / glide: <=10px X & <=12px Y smooth 2D analog flight/sub steering (zero jump-flick hijacking)
+   * - puzzle: 16px crisp 4-way cardinal tile-stepping (fast upward swipe steps UP, never misfires jump/stomp)
+   * - skimmer: 10px smooth continuous lane carving + <=-18px upward swipe wave-hop
+   * - vault: instant zero-latency tap-anywhere tumbler lock
+   */
+  _updateMiniGameGesturePointer(entry, x, y, now, gmode) {
+    if (gmode === 'vault') {
+      this._recomputeState();
+      return;
+    }
+
+    if (gmode === 'puzzle') {
+      const dx = x - entry.anchorX;
+      const dy = y - entry.anchorY;
+      const stepThresh = 16;
+      if (Math.hypot(dx, dy) < stepThresh) {
+        entry.horizDir = 0;
+        entry.left = false;
+        entry.right = false;
+        entry.analogX = 0;
+        entry.vertDir = null;
+        entry.analogY = 0;
+      } else if (Math.abs(dx) >= Math.abs(dy)) {
+        entry.vertDir = null;
+        entry.analogY = 0;
+        entry.horizDir = dx < 0 ? -1 : 1;
+        entry.left = dx < 0;
+        entry.right = dx > 0;
+        entry.analogX = entry.horizDir;
+        entry.puzzleSwipeDir = dx < 0 ? 'left' : 'right';
+        if (Math.abs(dx) > 48) entry.anchorX = x - Math.sign(dx) * 48;
+      } else {
+        entry.horizDir = 0;
+        entry.left = false;
+        entry.right = false;
+        entry.analogX = 0;
+        entry.vertDir = dy < 0 ? 'up' : 'down';
+        entry.analogY = dy < 0 ? -1 : 1;
+        entry.puzzleSwipeDir = entry.vertDir;
+        if (Math.abs(dy) > 48) entry.anchorY = y - Math.sign(dy) * 48;
+      }
+      this._recomputeState();
+      return;
+    }
+
+    // Smooth X steering for submarine, glide & skimmer (10px deadzone, dynamic 14px reversal)
+    const xDead = 10;
+    const xSpan = 38;
+    let dx = x - entry.anchorX;
+    if (entry.horizDir === 1 || dx > xDead) {
+      if (x > entry.extremeX) entry.extremeX = x;
+      if (entry.extremeX - x > 14) {
+        entry.anchorX = x + (xDead + 3);
+        entry.extremeX = x;
+        entry.horizDir = -1;
+        dx = x - entry.anchorX;
+      } else if (dx > 52) {
+        entry.anchorX = x - 52;
+        dx = 52;
+      }
+    } else if (entry.horizDir === -1 || dx < -xDead) {
+      if (x < entry.extremeX) entry.extremeX = x;
+      if (x - entry.extremeX > 14) {
+        entry.anchorX = x - (xDead + 3);
+        entry.extremeX = x;
+        entry.horizDir = 1;
+        dx = x - entry.anchorX;
+      } else if (dx < -52) {
+        entry.anchorX = x + 52;
+        dx = -52;
+      }
+    }
+
+    if (Math.abs(dx) > xDead) {
+      entry.horizDir = dx < 0 ? -1 : 1;
+      const mag = 0.24 + 0.76 * Math.min(1, (Math.abs(dx) - xDead) / xSpan);
+      entry.analogX = entry.horizDir * mag;
+      entry.left = entry.horizDir < 0;
+      entry.right = entry.horizDir > 0;
+    } else {
+      entry.horizDir = 0;
+      entry.extremeX = x;
+      entry.analogX = 0;
+      entry.left = false;
+      entry.right = false;
+    }
+
+    if (gmode === 'skimmer') {
+      // Skimmer: upward swipe <= -18px triggers crisp wave-hop jump while maintaining lateral carve!
+      if (entry.flickLatched) {
+        if (y < entry.flickPeakY) entry.flickPeakY = y;
+        if (y - entry.flickPeakY >= 14 || now - entry.flickLatchTime >= 180) {
+          entry.flickLatched = false;
+          entry.upOnsetY = y;
+          entry.upOnsetTime = now;
+        }
+      } else if (y > entry.upOnsetY) {
+        entry.upOnsetY = y;
+        entry.upOnsetTime = now;
+      }
+      if (!entry.flickLatched && y - entry.upOnsetY <= -18) {
+        entry.flickLatched = true;
+        entry.flickPeakY = y;
+        entry.flickLatchTime = now;
+        this._triggerJumpPulse(120);
+        return;
+      }
+      this._recomputeState();
+      return;
+    }
+
+    // Submarine & Sky-Wing Glide: <= 12px vertical deadzone with dynamic 14px Y reversal!
+    const yDead = 12;
+    const ySpan = 38;
+    let dy = y - entry.anchorY;
+    if (entry.vertDir === 'down' || dy > yDead) {
+      if (y > entry.extremeY) entry.extremeY = y;
+      if (entry.extremeY - y > 14) {
+        entry.anchorY = y + (yDead + 3);
+        entry.extremeY = y;
+        entry.vertDir = 'up';
+        dy = y - entry.anchorY;
+      } else if (dy > 52) {
+        entry.anchorY = y - 52;
+        dy = 52;
+      }
+    } else if (entry.vertDir === 'up' || dy < -yDead) {
+      if (y < entry.extremeY) entry.extremeY = y;
+      if (y - entry.extremeY > 14) {
+        entry.anchorY = y - (yDead + 3);
+        entry.extremeY = y;
+        entry.vertDir = 'down';
+        dy = y - entry.anchorY;
+      } else if (dy < -52) {
+        entry.anchorY = y + 52;
+        dy = -52;
+      }
+    }
+
+    if (Math.abs(dy) > yDead) {
+      entry.vertDir = dy < 0 ? 'up' : 'down';
+      const mag = 0.24 + 0.76 * Math.min(1, (Math.abs(dy) - yDead) / ySpan);
+      entry.analogY = (dy < 0 ? -1 : 1) * mag;
+    } else {
+      entry.vertDir = null;
+      entry.extremeY = y;
+      entry.analogY = 0;
+    }
+
+    this._recomputeState();
+  }
+
   _computeGestureVelocity(entry, x, y, now) {
     const dtOnsetSec = Math.max(1, now - entry.upOnsetTime) / 1000;
     const vyChord = (y - entry.upOnsetY) / dtOnsetSec;
@@ -979,22 +1637,68 @@ export class InputController {
     this._cleanupPointerTimers(entry);
     entry.jumpHeld = false;
 
-    // Sustain ballistic horizontal momentum when thumb lifts off at the peak of a running flick!
-    if (!isCancel && entry.flickLatched && entry.horizDir !== 0) {
-      this._latchHorizCarry(entry.horizDir, entry.analogX, GESTURE_HORIZ_CARRY_MS);
+    if (entry.vaultFiredOnDown) {
       return;
     }
 
-    // 5. Quick Stationary TAP (tolerates 6-16px capacitive glass wobble) -> 110ms Fire Pulse
+    const gmode = this._activeGameMode();
+    if (!isCancel && gmode === 'puzzle' && entry.puzzleSwipeDir && duration <= 180) {
+      // Ensure quick <180ms cardinal swipes in Rune Chambers hold long enough for 1 exact tile step
+      if (entry.puzzleSwipeDir === 'left') this._triggerLeftPulse(85);
+      else if (entry.puzzleSwipeDir === 'right') this._triggerRightPulse(85);
+      else if (entry.puzzleSwipeDir === 'up') this._triggerUpPulse(85);
+      else if (entry.puzzleSwipeDir === 'down') this._triggerDownPulse(85);
+      return;
+    }
+
+    // Proportional remaining ballistic horizontal commit from lastFlickTime (355ms / 405ms / 465ms;
+    // expires before touchdown so vxEnd = 0 on 1-col & 2-col ledges with 0% undershoot / 0% overshoot,
+    // and gives 0ms extra carry if held >= targetCommitMs or stopped mid-air!)
+    if (
+      !isCancel &&
+      gmode === 'tower' &&
+      (entry.flickLatched || entry.postFlickActive) &&
+      entry.horizDir !== 0 &&
+      (entry.idleHorizSec || 0) < GESTURE_MIDAIR_STOP_IDLE_MS / 1000
+    ) {
+      const holdMs = entry.lastFlickHoldMs || entry.flickHoldMs || GESTURE_FLICK_SHORT_MS;
+      const targetCommitMs =
+        holdMs >= GESTURE_FLICK_LONG_MS
+          ? GESTURE_FLICK_COMMIT_LONG_MS
+          : holdMs >= GESTURE_FLICK_MED_MS
+            ? GESTURE_FLICK_COMMIT_MED_MS
+            : GESTURE_FLICK_COMMIT_SHORT_MS;
+      const elapsedSinceFlick = Math.max(0, now - (entry.lastFlickTime || entry.flickLatchTime || now));
+      const carryMs = Math.round(Math.max(0, targetCommitMs - elapsedSinceFlick));
+      if (carryMs > 0) this._latchHorizCarry(entry.horizDir, entry.analogX, carryMs);
+      else this._clearHorizCarry();
+      return;
+    }
+
+    this._clearHorizCarry();
+
+    // 5. Quick Stationary TAP:
+    //    - If _canInteract && inside middle 36%x50% Pogo/doorway zone (<=14px move) -> triggerInteract!
+    //    - Otherwise (<=16px capacitive wobble) -> 110ms Fire Pulse!
     if (
       !isCancel &&
       !entry.flickLatched &&
+      !entry.postFlickActive &&
       entry.vertDir === null &&
+      !entry.puzzleSwipeDir &&
       duration <= GESTURE_TAP_MAX_MS &&
       entry.maxDist <= GESTURE_TAP_MAX_MOVE_PX
     ) {
-      this._clearHorizCarry();
-      this._triggerFirePulse(GESTURE_FIRE_PULSE_MS);
+      if (
+        gmode === 'tower' &&
+        this._canInteract &&
+        entry.maxDist <= GESTURE_CENTER_TAP_MOVE_PX &&
+        this._isInCenterInteractZone(entry.startX, entry.startY)
+      ) {
+        this.triggerInteract(this._interactKind === 'fire' ? 'fire' : 'up');
+      } else {
+        this._triggerFirePulse(GESTURE_FIRE_PULSE_MS);
+      }
     }
   }
 
@@ -1053,7 +1757,6 @@ export class InputController {
     }
     this._setPuckOffset(entry.puckEl, px, py);
 
-    // Radially clamped normalized vector prevents extended -18° walk drags from spiking ny!
     const nx = px / maxR;
     const ny = py / maxR;
     const deadzone = 0.16;
@@ -1074,9 +1777,8 @@ export class InputController {
       entry.analogY = 0;
     }
 
-    // Vertical deflection operates doors & lifts ONLY (with hysteresis + vertical dominance, never jumps)
-    const upT = entry.up ? -0.42 : -0.56;
-    const dnT = entry.down ? 0.42 : 0.56;
+    const upT = entry.up ? -0.40 : this._isDoorOrLiftContext() ? -0.44 : -0.56;
+    const dnT = entry.down ? 0.40 : 0.56;
     const vDom = Math.abs(py) >= Math.abs(px) * (entry.up || entry.down ? 0.58 : 0.80);
     entry.up = ny <= upT && vDom;
     entry.down = ny >= dnT && vDom;
@@ -1134,7 +1836,6 @@ export class InputController {
       return null;
     }
 
-    // Diagonal hysteresis prevents 43°-47° thumb-roll chatter from dropping walk or misfiring doors
     const adx = Math.abs(dx);
     const ady = Math.abs(dy);
     if (currentDir === 'left' || currentDir === 'right') {
@@ -1266,6 +1967,7 @@ export class InputController {
       vertDir: null,
       analogY: 0,
       flickLatched: false,
+      flickHoldMs: 0,
       flickPeakY: y,
       flickLatchTime: 0,
       jumpHeld: false,
@@ -1290,7 +1992,6 @@ export class InputController {
       entry.samples.shift();
     }
 
-    // Re-arm after flick & refresh upward onset when thumb rests before flicking
     if (entry.flickLatched) {
       if (y < entry.flickPeakY) entry.flickPeakY = y;
       if (
@@ -1298,6 +1999,7 @@ export class InputController {
         (now - entry.flickLatchTime >= GESTURE_FLICK_REARM_MS && dyStep >= -0.8)
       ) {
         entry.flickLatched = false;
+        entry.flickHoldMs = 0;
         entry.anchorY = y;
         entry.extremeY = y;
         entry.upOnsetX = x;
@@ -1320,16 +2022,46 @@ export class InputController {
     }
 
     const { vx, vy } = this._computeGestureVelocity(entry, x, y, now);
+    const dxUp = x - entry.upOnsetX;
     const dyUp = y - entry.upOnsetY;
     const dtUpMs = Math.max(0, now - entry.upOnsetTime);
+    const dyAnchor = y - entry.anchorY;
 
-    // Fast upward flick -> Jump
+    // Context-aware doorway/lift swipe in Tilt mode -> enters doorway cleanly without jumping!
+    if (
+      entry.type === 'tiltTouch' &&
+      !entry.flickLatched &&
+      this._isDoorOrLiftContext() &&
+      (dyAnchor <= GESTURE_INTERACT_UP_PX || dyUp <= GESTURE_INTERACT_UP_PX) &&
+      Math.abs(dxUp) < GESTURE_INTERACT_MAX_DX_PX &&
+      Math.abs(Math.min(dyAnchor, dyUp)) >= Math.abs(dxUp) * GESTURE_INTERACT_DOMINANCE
+    ) {
+      if (entry.upHoldTimer !== null) {
+        clearTimeout(entry.upHoldTimer);
+        entry.upHoldTimer = null;
+      }
+      this._cancelJumpPulse();
+      if (entry.vertDir !== 'up') {
+        entry.vertDir = 'up';
+        entry.extremeY = y;
+        entry.analogY = -1;
+        this._triggerUpPulse(GESTURE_INTERACT_LATCH_MS);
+      } else {
+        entry.analogY = -1;
+        this._recomputeState(true);
+      }
+      return;
+    }
+
+    // Proportional upward flick -> Jump
+    const flickDyReq = entry.type === 'rightPad' ? -24 : GESTURE_FLICK_DY_PX;
+    const flickVyReq = entry.type === 'rightPad' ? -380 : GESTURE_FLICK_VELOCITY_Y;
     if (
       !entry.flickLatched &&
       entry.vertDir !== 'up' &&
-      dyUp <= GESTURE_FLICK_DY_PX &&
+      dyUp <= flickDyReq &&
       dtUpMs <= GESTURE_FLICK_MAX_MS &&
-      vy <= GESTURE_FLICK_VELOCITY_Y &&
+      vy <= flickVyReq &&
       Math.abs(vy) > Math.abs(vx) * 0.65
     ) {
       if (entry.upHoldTimer !== null) {
@@ -1337,18 +2069,20 @@ export class InputController {
         entry.upHoldTimer = null;
       }
       if (entry.jumpTimer !== null) clearTimeout(entry.jumpTimer);
+      const holdMs = this._resolveFlickHoldMs(dyUp);
       entry.flickLatched = true;
+      entry.flickHoldMs = holdMs;
       entry.flickPeakY = y;
       entry.flickLatchTime = now;
       entry.vertDir = null;
       entry.analogY = 0;
       entry.jumpHeld = true;
-      this._triggerJumpPulse(GESTURE_FULL_FLICK_PULSE_MS);
+      this._triggerJumpPulse(holdMs);
       entry.jumpTimer = setTimeout(() => {
         entry.jumpTimer = null;
         entry.jumpHeld = false;
         this._recomputeState(true);
-      }, GESTURE_FLICK_HOLD_MS);
+      }, holdMs);
       return;
     }
 
@@ -1439,14 +2173,20 @@ export class InputController {
       duration <= GESTURE_TAP_MAX_MS &&
       entry.maxDist <= GESTURE_TAP_MAX_MOVE_PX
     ) {
-      if (entry.type === 'rightPad') {
+      if (
+        this._canInteract &&
+        entry.maxDist <= GESTURE_CENTER_TAP_MOVE_PX &&
+        this._isInCenterInteractZone(entry.startX, entry.startY)
+      ) {
+        this.triggerInteract(this._interactKind === 'fire' ? 'fire' : 'up');
+      } else if (entry.type === 'rightPad') {
         this._triggerFirePulse(GESTURE_FIRE_PULSE_MS);
       } else {
         const vw = typeof window !== 'undefined' && window.innerWidth ? window.innerWidth : 400;
         if (entry.startX < vw * 0.5) {
           this._triggerFirePulse(GESTURE_FIRE_PULSE_MS);
         } else {
-          this._triggerJumpPulse(140);
+          this._triggerJumpPulse(GESTURE_FLICK_SHORT_MS);
         }
       }
     }
@@ -1464,8 +2204,16 @@ export class InputController {
       const target = e.target instanceof Element ? e.target : null;
       if (!target) return;
 
-      // Never intercept modal overlays
-      if (target.closest('.overlay:not(.hidden)')) return;
+      // Never intercept modal overlays or puzzle HUD widgets
+      if (target.closest('.overlay:not(.hidden), #puzzle-hud')) return;
+
+      // Tappable #action-prompt badge: trigger frame-1 interact AND let main.js listener run cleanly
+      if (target.closest('#action-prompt')) {
+        if (this._canInteract) {
+          this.triggerInteract(this._interactKind === 'fire' ? 'fire' : 'up');
+        }
+        return;
+      }
 
       // Calibrate button in tilt bar: allow native click + ensure neutral calibration
       if (target.closest('#btn-calibrate-tilt')) {
@@ -1475,6 +2223,9 @@ export class InputController {
 
       // Never intercept HUD chrome buttons/controls
       if (target.closest('#hud button, #hud a, #hud select, #hud input')) return;
+
+      // Any new touch immediately cancels stale horizontal carry
+      this._clearHorizCarry();
 
       // 1. Direct Action Buttons (#btn-jump & #btn-fire active across ALL 4 modes, multi-touch + slide + 10px halo)
       let jumpBtn = target.closest('#btn-jump');
@@ -1501,7 +2252,6 @@ export class InputController {
       const joystickEl = target.closest('#joystick-zone');
       if (joystickEl && !this._hasPointerOfType('joystick')) {
         if (e.cancelable) e.preventDefault();
-        this._clearHorizCarry();
         const entry = this._createJoystickEntry(e, joystickEl, false);
         this._activePointers.set(e.pointerId, entry);
         this._tryPointerCapture(joystickEl, e.pointerId);
@@ -1513,7 +2263,6 @@ export class InputController {
       const dpadEl = target.closest('#dpad');
       if (dpadEl && !this._hasPointerOfType('dpad')) {
         if (e.cancelable) e.preventDefault();
-        this._clearHorizCarry();
         const entry = this._createDpadEntry(e, dpadEl);
         this._activePointers.set(e.pointerId, entry);
         this._tryPointerCapture(dpadEl, e.pointerId);
@@ -1526,6 +2275,16 @@ export class InputController {
 
       // 4. Full-Bleed Gameplay Stage / Canvas Surface
       if (!target.closest('#game-canvas, #stage-wrap, #touch-controls, #app')) return;
+
+      // Core Astrolabe Vault: tap ANYWHERE on screen across ALL 4 control modes locks ring with 0ms latency!
+      if (this._activeGameMode() === 'vault') {
+        if (e.cancelable) e.preventDefault();
+        const entry = this._createGestureEntry(e);
+        entry.vaultFiredOnDown = true;
+        this._activePointers.set(e.pointerId, entry);
+        this._triggerFirePulse(GESTURE_FIRE_PULSE_MS);
+        return;
+      }
 
       if (this.controlMode === 'gesture') {
         if (e.cancelable) e.preventDefault();
@@ -1543,7 +2302,6 @@ export class InputController {
         const vw = window.innerWidth || 400;
         if (e.clientX < vw * 0.52 && !this._hasPointerOfType('joystick')) {
           if (e.cancelable) e.preventDefault();
-          this._clearHorizCarry();
           const zoneEl = document.getElementById('joystick-zone');
           const entry = this._createJoystickEntry(e, zoneEl, true);
           this._activePointers.set(e.pointerId, entry);
@@ -1567,7 +2325,6 @@ export class InputController {
           !this._hasPointerOfType('dpad')
         ) {
           if (e.cancelable) e.preventDefault();
-          this._clearHorizCarry();
           const entry = this._createDpadEntry(e, dpadFallbackEl);
           this._activePointers.set(e.pointerId, entry);
           this._tryPointerCapture(target, e.pointerId);
@@ -1634,7 +2391,6 @@ export class InputController {
     window.addEventListener('pointerup', this._onPointerUp, { capture: true, passive: false });
     window.addEventListener('pointercancel', this._onPointerCancel, { capture: true, passive: false });
 
-    // Prevent browser scroll/contextmenu on touch controls & canvas
     window.addEventListener(
       'contextmenu',
       (e) => {

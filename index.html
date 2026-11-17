@@ -108,8 +108,20 @@
         </div>
       </div>
 
-      <!-- Contextual Action Prompt Pill -->
-      <div id="action-prompt" class="action-prompt hidden">ENTER DOORWAY</div>
+      <!-- Contextual Tappable Action Prompt Pill -->
+      <button id="action-prompt" class="action-prompt hidden" type="button" aria-label="Context Action">TAP OR SWIPE ↑ • ENTER DOOR</button>
+
+      <!-- Compact Puzzle Chamber Clue HUD + Tap-to-Peek Button -->
+      <div id="puzzle-hud" class="puzzle-hud hidden" role="region" aria-label="Rune Sanctum Clue">
+        <div class="puzzle-hud-copy">
+          <span id="puzzle-hud-title" class="puzzle-hud-title">RUNE SANCTUM</span>
+          <span id="puzzle-hud-sub" class="puzzle-hud-sub">STOMP • MATCH TABLET</span>
+        </div>
+        <button id="btn-peek-clue" class="btn-peek-clue puzzle-peek-btn hidden" type="button" title="Peek Outer Doorway Tablet">
+          <svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-relic"/></svg>
+          <span id="peek-clue-lbl">PEEK CLUE</span>
+        </button>
+      </div>
 
       <!-- Cinematic Sector / Tower Toast Banner -->
       <div id="stage-banner" class="stage-banner hidden">

@@ -1,68 +1,77 @@
-# TOWER TOPPLER '26 — MOBILE TOUCH & CONTROLS FEEL AUDIT (`60Hz` CHROMIUM TELEMETRY)
+# TOWER TOPPLER '26 — MOBILE PHONE & TABLET TOUCH CONTROLS AUDIT (`60Hz` CHROMIUM TELEMETRY)
 
 **Author:** Mobile Touch & Controls Feel Engineer (`controls_playtest`)  
-**Scope:** Live `60Hz` (`dt = 16.6667ms`) Headless Chromium CDP multi-touch + frame-accurate physics playtest across `src/input.js`, `src/game.js`, `index.html`, and `styles.css` (`390×844 @ 2x DPR`, 32 messy real-world mobile player gestures across all 4 control schemes & all 5 mini-games).  
-**Final Verdict:** **`[CONTROLS 10/10]` — `32 / 32` (`100.0%`) PASS** (`0` uncaught page errors, `0` CDP multi-touch errors).
+**Scope:** Live `60Hz` (`dt = 16.6667ms`) Headless Chromium CDP multi-touch + frame-accurate physics playtest across `src/input.js`, `src/game.js`, `src/puzzleRoom.js`, `src/glideStage.js`, `index.html`, and `styles.css`.  
+**Device Matrix (`2x` DPR, `maxTouchPoints: 5`):**
+- **Compact Phone Portrait:** `375×667` (`Phone_SE_375x667` — `37 / 37` PASS)
+- **Standard Phone Portrait:** `390×844` (`Phone_390x844` — `37 / 37` PASS)
+- **Phone Landscape:** `844×390` (`Phone_Land_844x390` — `37 / 37` PASS)
+- **Tablet Portrait:** `768×1024` (`Tablet_Port_768x1024` — `37 / 37` PASS)
+- **Tablet Landscape:** `1024×768` (`Tablet_Land_1024x768` — `37 / 37` PASS)
+
+**Final Verdict:** **`[CONTROLS 10/10 — PHONE & TABLET VERIFIED]` — `185 / 185` (`100.0%`) PASS** (`0` uncaught page errors, `0` native CDP hardware multi-touch errors).
 
 ---
 
-## 1. Executive Summary & Test Methodology
+## 1. Executive Summary & Two-Layer `60Hz` Test Methodology
 
-To evaluate touch feel under authentic human thumb mechanics rather than synthetic 2-point unit jumps, we ran a two-layer **60Hz Headless Chromium CDP + Physics Simulation Harness** against `http://127.0.0.1:8126/` (`Emulation.setDeviceMetricsOverride(390×844 @ 2x DPR, mobile: true)` + `Emulation.setTouchEmulationEnabled(maxTouchPoints: 5)`):
-1. **Layer A — Native Chromium DevTools Multi-Touch (`Input.dispatchTouchEvent`)**: Dispatches simultaneous multi-finger `touchStart` / `touchMove` / `touchEnd` frames (`touchPoints: [{id: 0}, {id: 1}]`) against the live DOM to verify CSS `touch-action: none`, `elementFromPoint` hit-testing, pointer capture, and zero uncaught runtime exceptions (`nativeCdpMultiTouchErrors = []`).
-2. **Layer B — Deterministic `60Hz` (`16.6667ms`) Stepped Gesture + `TowerTopplerGame` Physics Suite (`G01–G32`)**: Feeds 32 noisy human trajectories (cosine ease-in-out doorway slides, `±2.4px` capacitive digitizer quantization jitter, `±18°` anatomical thumb pivot arcs, `6–14px` capacitive finger-peel rolls, ballistic mid-run flick releases, consecutive hurdles without lifting thumb, and 2- & 3-finger multi-touch combinations) into `InputController` + `TowerTopplerGame` across all 4 control modes (`gesture`, `joystick`, `dpad`, `tilt`) and all 5 mini-games (`submarine`, `skimmer`, `glide`, `puzzle`, `vault`).
-
-- **Round 1 Baseline (`21 / 32` Passed, `11` Defects Isolated)**: Uncovered 9 root-cause defects across `src/input.js` (`#156` items 1–8) and `src/game.js` (`#156` item 9).
-- **Round 2 Verification (`32 / 32` Passed — `100.0%`)**: Following `@gameplay` (`#158`) and `@controls` (`#164`), all 32 real-world 60Hz scenarios pass with zero false triggers, zero pointer-stealing, and zero dropped edges.
+To verify real-device mobile and iPad playability under authentic human thumb kinematics rather than synthetic 2-point unit jumps, we executed a two-layer **Headless Chromium CDP + `60Hz` Physics Playtest Suite** (`P01–P37` × `5` viewports = `185` live checks):
+1. **Layer A — Native Chromium DevTools Hardware Multi-Touch (`Input.dispatchTouchEvent`, `P36`)**: Dispatches simultaneous multi-finger `touchStart` / `touchMove` / `touchEnd` frames (`touchPoints: [{id: 0}, {id: 1}]`) across all 5 phone and tablet viewports to verify `touch-action: none`, live `elementFromPoint` hit-testing, pointer capture, and zero uncaught runtime exceptions (`cdpErrors = []`).
+2. **Layer B — Deterministic `60Hz` (`16.6667ms`) Stepped Gesture + `TowerTopplerGame` Physics Suite (`P01–P35`, `P37`)**: Simulates human-speed doorway swipes (`65ms`–`180ms` = `194–538 px/s`, including `65°` slanted thumb pulls), `#action-prompt` Frame-1 taps, surgical `1`-col / `2`-col / `3`-col ledge jumps (both immediate ballistic flick liftoffs and mid-air held releases), mid-air thumb stops (`<= 8` frames), plantar dry-stone stops (`4` frames / `0.068` cols), `130ms` coyote time, `130ms` jump buffering, `0.22F` ledge-lip mantling, `±18°` thumb-arc sweeps, `6–13.8px` backward finger-peel tap wobbles, simultaneous two-thumb multi-touch across all 4 control modes (`gesture`, `joystick`, `dpad`, `tilt`), responsive touch-target scaling (`P37`), and all 5 campaign mini-games (`Submarine`, `Skimmer`, `Glide`, `Rune Chamber`, `Vault`).
 
 ---
 
-## 2. Round-1 vs. Round-2 `60Hz` Chromium Telemetry (`32 / 32` Verified)
+## 2. Priority #0 Real-Device `60Hz` Verification Matrix (`37 × 5 = 185 / 185` PASS)
 
-| ID | Category | Real-World 60Hz Mobile Gesture Scenario | R1 | R2 | Round-2 Verified `60Hz` Telemetry |
-| :- | :--- | :--- | :-: | :-: | :--- |
-| `G01` | 1. Running Flick | `50px` slide right (`200ms`) $\rightarrow$ diagonal flick (`dx=+25, dy=-35` in `80ms`) held across 2-col gap + edge doorway | FAIL | **PASS** | `jumped=true`, `upMisfired=false`, `doorMisfired=false`, `minVx=4.35`, `maxFloor=5.74` (`+1.74F`), `endCol=5.31` |
-| `G02` | 1. Running Flick | Ballistic running diagonal flick (`dx=+25, dy=-35` in `80ms`) + **natural thumb lift at peak** | FAIL | **PASS** | `jumped=true`, `upMisfired=false`, **`horizSpan=2.38` cols** (`>=2.35c` contract; up from `0.23c`!), `maxFloor=5.74` |
-| `G03` | 1. Running Flick | Pre-drifted walk (`-7.5px` upward drift over `220ms`) $\rightarrow$ diagonal flick (`dx=+25, dy=-35` in `80ms`) | PASS | **PASS** | `jumped=true`, `upMisfired=false`, `doorsUsed=0`, `vy=8.68` |
-| `G04` | 1. Running Flick | Leftward sprint shallow `42°` diagonal flick (`dx=-32, dy=-29` in `67ms`) | PASS | **PASS** | `jumped=true`, `upMisfired=false`, `vx=-4.42`, `vy=9.09` |
-| `G05` | 1. Running Flick | Double consecutive mid-run gap flicks without lifting or pulling thumb down `16px` | FAIL | **PASS** | **`jumpCount=2/2`**, `upMisfired=false`, `endCol=5.25` |
-| `G06` | 1. Running Flick | Standstill crisp `80ms` upward flick (`dx=+4, dy=-35` in `80ms`) in front of doorway | FAIL | **PASS** | **`jumped=true`, `upMisfired=false`, `doorsUsed=0`** (was `doorsUsed=1` misfire in R1) |
-| `G07` | 2. Slow Slide | Canonical slow upward slide (`dy=-35px` over `220ms`) at doorway | PASS | **PASS** | `upTriggered=true`, `jumpMisfired=false`, `doorsUsed=1` |
-| `G08` | 2. Slow Slide | Slow upward slide (`220ms`) with `±2.4px` capacitive digitizer quantization jitter | FAIL | **PASS** | **`upTriggered=true`, `jumpMisfired=false`, `doorsUsed=1`** (`anchorY` immune to stationary X-jitter) |
-| `G09` | 2. Slow Slide | Slow upward slide (`dy=-36px` over `220ms`) on Original multi-stop elevator | PASS | **PASS** | `upTriggered=true`, `jumpMisfired=false`, `liftFloor=4.63`, `onElevator=true` |
-| `G10` | 2. Slow Slide | Hesitant two-stage upward slide (`-15px` $\rightarrow$ `115ms` pause $\rightarrow$ `-20px`) at doorway | PASS | **PASS** | `upTriggered=true`, `jumpMisfired=false`, `doorsUsed=1` |
-| `G11` | 2. Slow Slide | Slow `60Hz` downward slide (`dy=+35px` over `220ms`, `+2.5px/frame`) on elevator | FAIL | **PASS** | **`downTriggered=true`, `jumpMisfired=false`, `liftFloor=7.63`** |
-| `G12` | 2. Slow Slide | Continuous upward slide (`-35px`) then downward reversal (`+52px`) | PASS | **PASS** | `sawUp=true`, `sawDown=true`, `jumpMisfired=false` |
-| `G13` | 3. Thumb Arc | Rightward walk at `-18°` upward arc (`dx=+95.1, dy=-30.9`) past doorway | PASS | **PASS** | `droppedWalkFrames=0`, `upOrDown=false`, `jumpMisfired=false`, `doorsUsed=0` |
-| `G14` | 3. Thumb Arc | Rightward walk at `+18°` downward arc (`dx=+95.1, dy=+30.9`) | PASS | **PASS** | `droppedWalkFrames=0`, `upOrDown=false` |
-| `G15` | 3. Thumb Arc | Leftward walk at `-18°` upward arc (`dx=-95.1, dy=-30.9`) | PASS | **PASS** | `droppedWalkFrames=0`, `upOrDown=false`, `jumpMisfired=false` |
-| `G16` | 3. Thumb Arc | Serpentine `R -> L -> R` dynamic re-anchor reversals under `±18°` arc drift | PASS | **PASS** | `sawRight1=true`, `sawLeftRev=true`, `sawRight2=true`, `upOrDown=false` |
-| `G17` | 3. Thumb Arc | Virtual Joystick extended `90px` drag at `-18°` outside `45px` ring | FAIL | **PASS** | **`rightHeld=true`, `upOrDown=false`, `doorsUsed=0`** (radially clamped `nx, ny` + hysteresis) |
-| `G18` | 3. Thumb Arc | Classic D-Pad right hold with `43°–47°` diagonal thumb-roll jitter | FAIL | **PASS** | **`droppedRight=false`, `upChatter=false`, `doorsUsed=0`** (`1.30x` diagonal hysteresis) |
-| `G19` | 4. Tap Wobble | `6.0px` capacitive finger roll during `120ms` tap | PASS | **PASS** | `shots=1`, `dir=+1` |
-| `G20` | 4. Tap Wobble | `10.0px` diagonal roll during `120ms` tap | PASS | **PASS** | `shots=1`, `dir=+1`, `facing=+1` |
-| `G21` | 4. Tap Wobble | `13.8px` backward thumb-peel roll (`dx=-13.5`) during `120ms` tap while facing Right | FAIL | **PASS** | **`shots=1`, `shotDir=+1`, `facing=+1`** (`15px` deadzone blocks backward facing flip) |
-| `G22` | 4. Tap Wobble | `14.0px` upward finger-roll tap (`120ms`, `dx=+4, dy=-13.4`) at doorway | PASS | **PASS** | `shots=1`, `jumpedOrUp=false`, `doorsUsed=0` |
-| `G23` | 4. Tap Wobble | Rapid triple-tap burst (`3× 90ms` taps, `13.5px` wobble, `83ms` gap) | PASS | **PASS** | `fireEdges=3` |
-| `G24` | 4. Tap Wobble | Tilt mode left-half (`fire`) & right-half (`jump`) `14.0px` wobble taps | PASS | **PASS** | `firedLeft=true`, `jumpedRight=true`, `vy=9.09` |
-| `G25` | 5. Multi-Touch | Gesture 2-thumb: Left thumb walking right + Right thumb `-15px` wobble tap | PASS | **PASS** | `shots=1`, `shotDir=+1`, `flippedLeft=false`, `stillWalkingRight=true` |
-| `G26` | 5. Multi-Touch | Gesture 2-thumb: Left walk + Right `#btn-fire` slide-rollover onto `#btn-jump` | PASS | **PASS** | `shotFired=true`, `jumped=true`, `keptRight=true`, `vy=9.09` |
-| `G27` | 5. Multi-Touch | Gesture 2-thumb: Left holding walk left + Right upward flick on canvas | PASS | **PASS** | `jumped=true`, `upMisfired=false`, `keptLeft=true`, `vx=-3.81` |
-| `G28` | 5. Multi-Touch | Joystick 2-thumb: Left `#joystick-zone` + Right canvas tap, `#btn-fire`, & `#btn-jump` | PASS | **PASS** | `canvasTapFired=true`, `btnFired=true`, `btnJumped=true`, `droppedWalk=false` |
-| `G29` | 5. Multi-Touch | Joystick anti-steal: active left stick ignores stray second left-half touch | PASS | **PASS** | `puckActiveAfter=true`, zero puck/axis theft |
-| `G30` | 5. Multi-Touch | D-Pad 2-thumb: outer-halo engage, `L->R` slide, `#btn-jump` `7px` halo, open-canvas fire | FAIL | **PASS** | **`haloLeftWorked=true`, `slidToRight=true`, `haloJumpWorked=true`, `openRightFired=true`, `stillRight=true`** |
-| `G31` | 5. Multi-Touch | Tilt mode: `+12°` roll + `140ms`-rested thumb upward flick + simultaneous left-half tap | FAIL | **PASS** | **`tiltWalkingRight=true`, `jumped=true`, `upMisfired=false`, `fired=true`, `tiltPreserved=true`** |
-| `G32` | 5. Multi-Touch | All 5 mini-games (`Submarine`, `Skimmer`, `Glide`, `Rune Chamber`, `Vault`) at `60Hz` | PASS | **PASS** | `subTorpedo=true`, `subSonar=true`, `skimmerOk=true`, `glideOk=true`, `puzzleStepped=true`, `vaultLocked=true` |
+| ID | Block | Real-World `60Hz` Mobile & Tablet Scenario | Status (`5/5` Viewports) | Verified `60Hz` Telemetry |
+| :- | :--- | :--- | :-: | :--- |
+| `P01` | A. Door vs Jump | Normal Doorway fast upward swipe (`-35px` in `65ms` = `538 px/s`) | **PASS (5/5)** | `entered=true`, **`jumpEver=false`**, `doorsUsed=1`, `doorPhase="enter"` |
+| `P02` | A. Door vs Jump | Normal Doorway crisp upward swipe (`-35px` in `95ms` = `368 px/s`) | **PASS (5/5)** | `entered=true`, **`jumpEver=false`**, `doorsUsed=1` |
+| `P03` | A. Door vs Jump | Normal Doorway medium upward swipe (`-35px` in `130ms` = `269 px/s`) | **PASS (5/5)** | `entered=true`, **`jumpEver=false`**, `doorsUsed=1` |
+| `P04` | A. Door vs Jump | Normal Doorway relaxed upward slide (`-35px` in `180ms` = `194 px/s`) | **PASS (5/5)** | `entered=true`, **`jumpEver=false`**, `doorsUsed=1` |
+| `P05` | A. Door vs Jump | Normal Doorway slanted `65°` human thumb swipe (`dx=+16, dy=-35` in `65ms`) | **PASS (5/5)** | `entered=true`, **`jumpEver=false`**, `doorsUsed=1` |
+| `P06` | A. Door vs Jump | Rune Door fast (`65ms`) & medium (`140ms`) upward swipes enter Rune Chamber | **PASS (5/5)** | `enteredFast=true`, `jumpFast=false`, `enteredMed=true`, `jumpMed=false` |
+| `P07` | A. Door vs Jump | Cage Lift fast (`65ms`) & slow (`165ms`) upward swipes ride lift (`0%` jump) | **PASS (5/5)** | `rodeUpFast=true` (`4.62F`), `rodeUpSlow=true` (`4.66F`), `0%` jump off lift |
+| `P08` | A. Door vs Jump | Intentional diagonal jump-away (`dx=+36, dy=-36` in `80ms`) & `#btn-jump` at door | **PASS (5/5)** | `diagJumpedAway=true`, `btnJumpedAway=true`, `doorsUsed=0` |
+| `P09` | A. Door vs Jump | Tapping `#action-prompt` directly enters doorway on **Frame 1** | **PASS (5/5)** | `frame1Up=true`, `enteredFrame1=true` across all 5 viewports |
+| `P10` | A. Door vs Jump | Center doorway/Pogo tap enters doorway; off-center tap fires cryo-bolt | **PASS (5/5)** | `centerEntered=true`, `offCenterFired=true` |
+| `P11` | B. Jump Precision | Short flick (`32px`) + thumb liftoff across `1`-col gap onto isolated `1`-col ledge (`col 4`) | **PASS (5/5)** | `midEdge`: `2.57 -> 3.98c`; `lateLip`: `2.84 -> 4.25c` (`[3.85..5.15]`, **`0%` undershoot / `0%` overshoot**) |
+| `P12` | B. Jump Precision | Full flick (`65px`) across `1`-col gap onto `2`-col ledge (`cols 6..7`, ballistic & mid-air release) | **PASS (5/5)** | `ballistic`: `4.49 -> 6.23c`; `heldRelease`: `4.29 -> rel 5.60 -> 6.03c` (**`0%` carry overshoot**) |
+| `P13` | B. Jump Precision | Mid-air thumb stop (recoil stop & motionless finger watchdog) drops `p.vx -> 0` in `<= 8` frames | **PASS (5/5)** | **`framesToZeroVx = 7`**, **`framesMotionlessToZeroVx = 7`** (`116ms`) |
+| `P14` | B. Jump Precision | Plantar dry-stone ledge grip stops full-speed walk (`3.29 cols/s`) in `<= 5` frames | **PASS (5/5)** | **`stopFrames = 4` (`67ms`), `skidCols = 0.068` cols** (`< 0.08c` contract) |
+| `P15` | B. Jump Precision | `130ms` coyote time launches jump cleanly `50ms` after stepping off ledge lip | **PASS (5/5)** | `walkedOff=true`, `coyoteBefore=0.097s`, `vyAfter=8.59` |
+| `P16` | B. Jump Precision | `130ms` jump buffer launches Frame 1 upon touchdown when pressed `60ms` early | **PASS (5/5)** | `bufferedLaunch=true`, `vy=8.59` |
+| `P17` | B. Jump Precision | `0.22F` forgiving ledge-lip mantle snaps Pogo onto upper corbel (`4.86F -> 5.00F`) | **PASS (5/5)** | `mantled=true`, `floor=5.00`, `onGround=true` |
+| `P18` | B. Jump Precision | `+1` spiral stair auto-step-up climbs `4` consecutive `1`-col steps cleanly to `floor 8` | **PASS (5/5)** | `endFloor=8.00`, `endCol=4.97`, `onGround=true` |
+| `P19` | C. Ergonomics | Gesture `-18°` upward thumb-arc walk (`100px`) past doorway (`0` drops, `0` misfires) | **PASS (5/5)** | `engaged=true`, `dropped=0`, `misfire=false`, `doorsUsed=0` |
+| `P20` | C. Ergonomics | Virtual Joystick `90px` `-18°` extended drag outside ring never misfires doorway `up` | **PASS (5/5)** | `walked=true`, `misfire=false`, `doorsUsed=0` |
+| `P21` | C. Ergonomics | Classic D-Pad right hold resists `45°` diagonal thumb-roll chatter | **PASS (5/5)** | `dropped=false`, `upChatter=false`, `doorsUsed=0` |
+| `P22` | C. Ergonomics | `6px`, `10px`, and `13.8px` backward finger-peel tap wobbles (`120ms`) fire forward | **PASS (5/5)** | **`okCount = 3 / 3`** (`shotDir=+1`, `facing=+1`) |
+| `P23` | C. Ergonomics | `6px` thumb recoil brakes instantly to neutral (`analogX=0`); `+18px` reverses left | **PASS (5/5)** | `wasRight=true`, `brakedCleanly=true`, `reversedLeft=true` |
+| `P24` | C. Ergonomics | Consecutive double mid-run hurdle flicks without lifting thumb | **PASS (5/5)** | **`jumps = 2 / 2`** |
+| `P25` | D. Multi-Touch | 2-thumb Gesture: continuous left slide + right `#btn-fire` / `#btn-jump` / wobble glass tap | **PASS (5/5)** | **`droppedSlideFrames = 0`**, `jumped=true`, `shotsFired=2` |
+| `P26` | D. Multi-Touch | 2-thumb Gesture: left thumb stationary-hold walk left + right thumb upward flick jump | **PASS (5/5)** | **`droppedLeft = 0`**, `jumped=true` |
+| `P27` | D. Multi-Touch | 2-thumb Joystick: `#btn-fire -> #btn-jump` slide rollover + stray touch anti-steal | **PASS (5/5)** | `fired=true`, `jumped=true`, **`dropped = 0`** |
+| `P28` | D. Multi-Touch | 2-thumb D-Pad: outer-halo engage, `L->R` slide, `#btn-jump` `7px` halo & open-canvas fire | **PASS (5/5)** | `haloLeft=true`, `slidRight=true`, `haloJump=true`, `rightFired=true` |
+| `P29` | D. Multi-Touch | Tilt mode: context doorway swipe (`0%` jump) + `+12°` roll + simultaneous tap fire & jump | **PASS (5/5)** | `tiltDoorOk=true`, `tiltMultiOk=true` |
+| `P30` | E. Mini-Games | **Submarine**: smooth 2D slide steering (`10px/12px` deadzone), tap torpedo & Sonar Ping | **PASS (5/5)** | `steered2D=true` (`dx=+26.7, dy=-21.8`), `torpedoOk=true`, `sonarOk=true` |
+| `P31` | E. Mini-Games | **Storm Skimmer**: snappy lateral carve, `-18px` upward swipe wave-hop & tap plasma bolt | **PASS (5/5)** | `carvedRight=true` (`laneX=1.16`), `hopped=true`, `boltOk=true` |
+| `P32` | E. Mini-Games | **Skywing Glide**: zero-lag tap wing-flap + smooth vertical slide pitch dive/climb | **PASS (5/5)** | `flapped=true`, `dived=true` (`vy=96.0`) |
+| `P33` | E. Mini-Games | **Rune Chamber**: `1` crisp `170ms` cardinal swipe = **EXACTLY `1` tile step** + tap stomp | **PASS (5/5)** | **`tilesMovedSingleSwipe = 1`** (`0` multi-tile overshoot), `stomped=true` |
+| `P34` | E. Mini-Games | **Rune Chamber `[PEEK CLUE]`**: `#btn-peek-clue` touch button illuminates clue cleanly | **PASS (5/5)** | `hasPeekFn=true`, `peekWorked=true` |
+| `P35` | E. Mini-Games | **Core Astrolabe Vault**: tap center, tap left glass, & `#btn-jump` lock all 3 rings (`0ms` lag) | **PASS (5/5)** | `locked0=true`, `locked1=true`, `locked2=true`, `status="won"` |
+| `P36` | D. Multi-Touch | Native Chromium CDP hardware 2-finger `touchStart` / `touchMove` / `touchEnd` | **PASS (5/5)** | **`cdpErrors = []`** across all 5 phone & tablet viewports |
+| `P37` | C. Ergonomics | Responsive touch-target sizing, viewport bounds & zero horizontal overflow (`scrollWidth <= vw`) | **PASS (5/5)** | `SE`: `56/48/102px`; `390`: `59/50/105px`; `Land`: `62/54/106px`; `iPad`: `70/60/128px` |
 
 ---
 
-## 3. Summary of Verified Fixes Applied (`#156` $\rightarrow$ `#158` & `#164`)
+## 3. Key Touch-Feel & Physics Calibrations Verified (`#280`–`#308`)
 
-1. **Stationary `#dpad` & `#joystick-zone` `pointerdown` Aggregation (`src/input.js`)**: `_recomputeState()` now executes *after* `_activePointers.set(e.pointerId, entry)` across all anchored and halo branches, and `#btn-jump` / `#btn-fire` press & slide-rollover explicitly emit `justPressed[action] = true`.
-2. **Full-Apex Flick Hold (`290ms` / `315ms`) + `260ms` Ballistic Horizontal Carry (`src/input.js` + `src/game.js`)**: Running diagonal upward flicks achieve `+1.74F` jump apex (`>= 1.65F` `verifyTowerSolvable` envelope) and `2.38`-col ballistic chasm reach even when the player lifts their thumb at the `80ms` peak (`!p.onGround` neutral coast `rate = 5.5` vs active air-steer `38`).
-3. **Consecutive Mid-Run Hurdle Re-Arm (`src/input.js`)**: `flickLatched` re-arms either on `>= 14px` downward return OR after `150ms` of horizontal continuation (`dyStep >= -0.8`).
-4. **Standstill `80ms` Flick vs. `220ms` Doorway Slide Separation (`src/input.js`)**: `GESTURE_FLICK_VELOCITY_Y = -340 px/s`, `GESTURE_SLIDE_UP_MAX_SPEED = 290 px/s`, and `GESTURE_SLIDE_UP_HOLD_MS = 135ms` cleanly separate `80ms` `-35px` jumps (`-437 px/s`) from `220ms` `-35px` doorway/lift slides (`-159 px/s`).
-5. **Digitizer X-Jitter Guard & `60Hz` Downward Slide Accumulation (`src/input.js`)**: `isShallowHorizDrift` is gated on committed horizontal walk travel (`|dx| > 15px`), and `anchorY` no longer chases downward steps below `startY`.
-6. **Capacitive Tap Finger-Peel Facing Protection (`src/input.js`)**: `GESTURE_HORIZ_DEADZONE_PX = 15` (`22px` for secondary pointers while a primary walk pointer is active) prevents `6–14px` backward finger-peel tap wobble from flipping `p.facing` before `pointerup` fires.
-7. **Radially Clamped Virtual Joystick & D-Pad Diagonal Hysteresis (`src/input.js`)**: Joystick normalizes `(px/maxR, py/maxR)` on the clamped circle with `-0.56 / -0.42` hysteresis + vertical dominance; D-Pad applies `1.30×` horizontal / `1.18×` vertical diagonal hysteresis.
-8. **Tilt / RightPad Rested-Thumb Flick Parity (`src/input.js`)**: `_updateTiltTouchPointer` refreshes `upOnsetY` / `upOnsetTime` after pauses/downward motion and shares the `-340 px/s` flick velocity & `315ms` full-apex pulse.
+1. **Context-Aware Doorway & Lift Priority (`src/input.js` + `src/game.js` + `src/main.js`)**:
+   - `TowerTopplerGame` syncs `input.setInteractContext(canInteract, kind)` and `input.setGameMode(mode)` every frame. When standing at any Doorway, Rune Door, Vault Door, Exit, or Cage Lift (`canInteract === true`), upward swipes (`dy <= -16px`, `|dx| < 22px`) across the entire human speed envelope (`65ms`–`180ms` = `194–538 px/s`, including `65°` slanted thumb swipes) trigger `up` with **`0%` accidental jumps**, while diagonal jump-away swipes (`dx=+36, dy=-36`) and `#btn-jump` jump cleanly.
+   - `#action-prompt` is directly tappable (`pointer-events: auto`), entering doorways on **Frame 1** (`P09`), alongside center Pogo/doorway taps (`P10`).
+2. **Proportional Flick Jump Tiers + Remaining Ballistic Commit (`src/input.js` `#308` + `src/game.js` `#289`)**:
+   - Jump height scales proportionally with upward flick length (`85ms` short `< 42px` / `150ms` med `42..59px` / `230ms` full `>= 60px`), paired with `3.35 cols/s` Reboot run speed, `4`-frame (`0.068` col) plantar dry-stone stopping, `7`-frame (`<= 8f`) mid-air neutral braking, `130ms` coyote time, `130ms` jump buffering, and `0.22F` forgiving ledge-lip mantling.
+   - `postFlickActive` persists across the `145ms` consecutive-hurdle re-arm and computes remaining horizontal commit from `lastFlickTime` (`355ms` short / `405ms` med / `465ms` full). Natural ballistic flick liftoffs clear `1`-col gaps onto isolated `1`-col and `2`-col ledges with **`vxEnd = 0.00`**, **`0%` undershoot**, and **`0%` overshoot**, while stopping the thumb on glass (`32ms` idle watchdog or `>= 5px` recoil) or touching mid-air cancels carry on Frame 1.
+3. **Mode-Aware Touch Ergonomics Across All 5 Mini-Games (`src/input.js` `#290` + `src/puzzleRoom.js` `#294`)**:
+   - `Submarine` & `Skywing Glide` use smooth `10px X / 12px Y` 2D analog steering without jump-flick hijacking; `Storm Skimmer` pairs `10px` lateral carving with `-18px` wave-hop swipes; `Rune Chambers` pair `16px` cardinal swipe detection + `<180ms` `85ms` step pulses with `REPEAT_DELAY = 0.34s` so `1` crisp swipe steps **1 exact tile** (`0` overshoot) alongside tappable `#btn-peek-clue`; and `Core Astrolabe Vault` locks tumbler rings on `pointerdown` anywhere on screen with `0ms` latency.

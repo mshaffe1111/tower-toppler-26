@@ -161,13 +161,16 @@ body {
 #app[data-title-open="true"] #touch-controls,
 #app[data-title-open="true"] #altitude-meter,
 #app[data-title-open="true"] #action-prompt,
+#app[data-title-open="true"] #puzzle-hud,
 #app:has(#overlay-title:not(.hidden)) #hud,
 #app:has(#overlay-title:not(.hidden)) #touch-controls,
 #app:has(#overlay-title:not(.hidden)) #altitude-meter,
 #app:has(#overlay-title:not(.hidden)) #action-prompt,
+#app:has(#overlay-title:not(.hidden)) #puzzle-hud,
 #app:has(#overlay-wardrobe:not(.hidden)) #hud,
 #app:has(#overlay-wardrobe:not(.hidden)) #touch-controls,
 #app:has(#overlay-wardrobe:not(.hidden)) #altitude-meter,
+#app:has(#overlay-wardrobe:not(.hidden)) #puzzle-hud,
 #app:has(#overlay-worlds:not(.hidden)) #touch-controls,
 #app:has(#overlay-minigames:not(.hidden)) #touch-controls,
 #app:has(#overlay-trophies:not(.hidden)) #touch-controls {
@@ -621,10 +624,10 @@ body {
   transition: bottom 0.12s ease-out;
 }
 
-/* Contextual Action Prompt Plaque */
+/* Contextual Tappable Action Prompt Plaque (1-Tap Doorway / Lift / Craft Entry!) */
 .action-prompt {
   position: absolute;
-  bottom: calc(108px + var(--safe-bottom));
+  bottom: calc(90px + var(--safe-bottom));
   left: 50%;
   transform: translateX(-50%);
   isolation: isolate;
@@ -634,22 +637,42 @@ body {
   gap: 7px;
   width: max-content;
   max-width: calc(100vw - 24px);
-  padding: 7px 18px;
+  min-height: 36px;
+  padding: 7px 17px;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
   background: transparent;
   border: none;
   font-family: var(--font-display);
   font-size: 10.5px;
   font-weight: 800;
-  line-height: 1.28;
-  letter-spacing: 0.12em;
+  line-height: 1.25;
+  letter-spacing: 0.11em;
   color: #e8fcff;
   text-align: center;
   text-shadow: 0 0 10px rgba(94, 242, 255, 0.72);
-  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.78)) drop-shadow(0 0 12px rgba(94, 242, 255, 0.24));
-  pointer-events: none;
+  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.78)) drop-shadow(0 0 12px rgba(94, 242, 255, 0.26));
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
   white-space: normal;
-  z-index: 14;
+  z-index: 18;
   animation: promptFloat 0.9s ease-in-out infinite alternate;
+  transition: filter 0.12s ease, color 0.12s ease;
+}
+
+.action-prompt:hover {
+  color: #ffffff;
+  filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.85)) drop-shadow(0 0 16px rgba(94, 242, 255, 0.48));
+}
+
+.action-prompt:active {
+  animation: none;
+  transform: translateX(-50%) scale(0.94);
+  filter: brightness(1.18);
 }
 
 .action-prompt::before {
@@ -680,6 +703,185 @@ body {
 @keyframes promptFloat {
   from { transform: translateX(-50%) translateY(0); }
   to { transform: translateX(-50%) translateY(-3px); }
+}
+
+/* Hide redundant Stage Banner inside Rune Chambers (gl:puzzle-hudPanel + #puzzle-hud already display chamber title) */
+#app[data-game-mode="puzzle"] #stage-banner,
+#app[data-game-mode="puzzle"] .stage-banner {
+  display: none !important;
+}
+
+/* Portrait Rune Chamber HUD: Dock [PEEK CLUE] cleanly in Bottom-Right Gutter (0px overlap on .hud-right, gl:puzzle-hudPanel, or EXIT v!) */
+@media (orientation: portrait) {
+  #puzzle-hud,
+  .puzzle-hud {
+    top: auto !important;
+    left: auto !important;
+    right: calc(12px + var(--safe-right)) !important;
+    bottom: calc(96px + var(--safe-bottom)) !important;
+    transform: none !important;
+    flex-direction: column;
+    align-items: flex-end;
+    max-width: min(168px, 40vw);
+  }
+
+  #puzzle-hud .puzzle-hud-copy,
+  .puzzle-hud .puzzle-hud-copy {
+    display: none;
+  }
+}
+
+@media (orientation: portrait) and (min-width: 700px) {
+  #puzzle-hud,
+  .puzzle-hud {
+    right: calc(26px + var(--safe-right)) !important;
+    bottom: calc(120px + var(--safe-bottom)) !important;
+    max-width: 220px;
+  }
+}
+#puzzle-hud,
+.puzzle-hud,
+#sub-hud,
+#glide-hud,
+#skimmer-hud,
+#vault-hud {
+  position: fixed;
+  top: calc(74px + var(--safe-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 16;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  width: max-content;
+  max-width: calc(100vw - 24px);
+  pointer-events: none;
+}
+
+.puzzle-hud-copy,
+.puzzle-clue-pill {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 5px 13px;
+  background: transparent;
+  filter: drop-shadow(0 5px 12px rgba(0, 0, 0, 0.78));
+}
+
+.puzzle-hud-copy::before,
+.puzzle-clue-pill::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  clip-path: var(--poly-oct-sm);
+  background: linear-gradient(135deg, var(--brass-gleam) 0%, var(--brass-molten) 52%, var(--ice-cyan) 100%);
+}
+
+.puzzle-hud-copy::after,
+.puzzle-clue-pill::after {
+  content: '';
+  position: absolute;
+  inset: 1.3px;
+  z-index: -1;
+  clip-path: var(--poly-oct-sm);
+  background: linear-gradient(180deg, rgba(14, 28, 52, 0.94), rgba(6, 12, 24, 0.97));
+}
+
+.puzzle-hud-title {
+  font-family: var(--font-display);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: var(--brass-gleam);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.puzzle-hud-sub {
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #e8fcff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.92);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#btn-peek-clue,
+.puzzle-peek-btn,
+.btn-peek-clue {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 5px 13px;
+  border: none;
+  background: transparent;
+  color: var(--brass-gleam);
+  font-family: var(--font-display);
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  white-space: nowrap;
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: manipulation;
+  filter: drop-shadow(0 5px 12px rgba(0, 0, 0, 0.80));
+  transition: transform 0.1s ease, color 0.15s ease, filter 0.15s ease;
+}
+
+#btn-peek-clue::before,
+.puzzle-peek-btn::before,
+.btn-peek-clue::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  clip-path: var(--poly-hex-pill);
+  background: linear-gradient(135deg, var(--brass-gleam) 0%, var(--brass-molten) 48%, var(--ice-cyan) 100%);
+}
+
+#btn-peek-clue::after,
+.puzzle-peek-btn::after,
+.btn-peek-clue::after {
+  content: '';
+  position: absolute;
+  inset: 1.4px;
+  z-index: -1;
+  clip-path: var(--poly-hex-pill);
+  background: linear-gradient(180deg, rgba(18, 34, 62, 0.95), rgba(7, 13, 26, 0.98));
+}
+
+#btn-peek-clue.active,
+#btn-peek-clue.peeking,
+#btn-peek-clue[aria-pressed="true"],
+.puzzle-peek-btn.active,
+.puzzle-peek-btn.peeking,
+.btn-peek-clue.active {
+  color: #ffffff;
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.85)) drop-shadow(0 0 12px rgba(94, 242, 255, 0.55));
+}
+
+#btn-peek-clue:active,
+.puzzle-peek-btn:active,
+.btn-peek-clue:active {
+  transform: scale(0.94);
 }
 
 /* Sculpted Heraldic Stage Banner */
@@ -2222,9 +2424,12 @@ div.play-medallion-svg,
 svg.play-medallion-svg,
 #play-medallion-svg svg,
 .hero-medallion-filigree svg {
-  position: static;
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
+  z-index: 0;
+  pointer-events: none;
   display: block;
   overflow: visible;
 }
@@ -2241,13 +2446,16 @@ svg.play-medallion-svg,
   pointer-events: none;
 }
 
+#hero-play-kicker,
 .hero-play-kicker,
 .hero-play-sub,
 .btn-sub-kicker {
+  position: relative;
+  z-index: 2;
   font-family: var(--font-display);
   font-size: 7.5px;
   font-weight: 800;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.14em;
   color: var(--brass-gleam);
   white-space: nowrap;
   max-width: 100%;
@@ -2255,11 +2463,15 @@ svg.play-medallion-svg,
   text-overflow: ellipsis;
 }
 
-.hero-play-label {
+#hero-play-label,
+.hero-play-label,
+#btn-start .btn-text {
+  position: relative;
+  z-index: 2;
   font-family: var(--font-display);
-  font-size: clamp(12.5px, 3.6vw, 15px);
+  font-size: clamp(12px, 3.4vw, 14.5px);
   font-weight: 900;
-  letter-spacing: 0.11em;
+  letter-spacing: 0.10em;
   color: #ffffff;
   white-space: nowrap;
 }
@@ -4382,26 +4594,209 @@ svg.portal-art-bg,
 }
 
 /* ============================================================================
-   9. RESPONSIVE SAFEGUARDS: 360px-430px PORTRAIT + SHORT HEIGHTS + WIDESCREEN DESKTOP
+   9. RESPONSIVE & DEDICATED LANDSCAPE SIDE-GUTTER ARCHITECTURE
+      GOLDEN RULE: In Landscape, x = 34%..66% (Central Tower & Pogo) is 100% SACRED!
+      All HUD Banners, Mission Pills, Toasts & Action Prompts Dock in Side Gutters!
    ============================================================================ */
-@media (max-width: 385px) {
-  .era-tab {
-    padding: 5px 8px;
+/* ---------- PHONE PORTRAIT SCALING (360x640, 375x667 iPhone SE, 390x844, 412x915, 430x932) ---------- */
+@media (max-width: 440px) and (orientation: portrait) {
+  /* 1. Sleek Top #hud (Stays strictly within top ~68-72px; zero crowding or tower hang-down!) */
+  #hud {
+    padding: calc(7px + var(--safe-top)) calc(10px + var(--safe-right)) 10px calc(10px + var(--safe-left));
+    gap: 5px;
+  }
+
+  .hud-label {
+    font-size: clamp(9px, 2.35vw, 10.5px);
+    letter-spacing: 0.09em;
+  }
+
+  /* Hide redundant "HIGH SCORE" text label on narrow phones so ghosted score + utility pills stay compact */
+  .hud-label-ghost {
+    display: none;
+  }
+
+  .hud-score {
+    font-size: clamp(14px, 3.7vw, 17px);
+    letter-spacing: 0.04em;
+  }
+
+  .hud-score-ghost {
+    font-size: clamp(11.5px, 3.1vw, 13.5px);
+    line-height: 1.05;
+  }
+
+  .hud-lives {
+    gap: 4px;
+    margin-top: 2px;
+    min-height: 16px;
+  }
+
+  .life-pip {
+    width: 15px;
+    height: 17px;
+  }
+
+  .hud-time-cluster {
+    gap: 6px;
+  }
+
+  .hud-time-label {
+    font-size: 8.5px;
+    letter-spacing: 0.13em;
+  }
+
+  .hud-timer {
+    font-size: clamp(19px, 5.1vw, 23px);
+  }
+
+  .hud-tower-meta {
+    margin-top: 2px;
+    gap: 4px;
+  }
+
+  .tower-badge {
     font-size: 8px;
+    padding: 1px 5px;
+  }
+
+  .timer-ring-wrap {
+    width: clamp(36px, 9.4vw, 41px);
+    height: clamp(36px, 9.4vw, 41px);
+  }
+
+  .hud-utility-row {
+    gap: 3px;
+    margin-top: 3px;
+  }
+
+  .gears-pill {
+    padding: 2.5px 7px;
+    font-size: 9px;
+    gap: 3px;
+  }
+
+  .gears-pill .ico-gear-gold {
+    width: 11px;
+    height: 11px;
+  }
+
+  .hud-icon-btn {
+    min-width: 24px;
+    height: 22px;
+    padding: 0 4px;
+    font-size: 8.5px;
+  }
+
+  .hud-icon-btn .ico-svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .mission-status-pill,
+  #puzzle-hud,
+  .puzzle-hud {
+    top: calc(64px + var(--safe-top));
+  }
+
+  .stage-banner,
+  .trophy-toast {
+    top: calc(76px + var(--safe-top));
+  }
+
+  /* 2. Smooth clamp() Phone Touch Targets & #action-prompt safely below Pogo's 73-75% feet! */
+  #touch-controls {
+    padding: 8px calc(12px + var(--safe-right)) calc(12px + var(--safe-bottom)) calc(12px + var(--safe-left));
+  }
+
+  .joystick-zone {
+    width: clamp(102px, 27vw, 116px);
+    height: clamp(102px, 27vw, 116px);
+  }
+
+  .joystick-ring {
+    width: clamp(84px, 22.5vw, 96px);
+    height: clamp(84px, 22.5vw, 96px);
+  }
+
+  .dpad {
+    grid-template-columns: repeat(3, clamp(34px, 9vw, 38px));
+    grid-template-rows: repeat(3, clamp(34px, 9vw, 38px));
+    gap: 2.5px;
+  }
+
+  .touch-right {
+    gap: 10px;
+  }
+
+  .action-btn {
+    width: clamp(48px, 12.8vw, 54px);
+    height: clamp(48px, 12.8vw, 54px);
+  }
+
+  .action-fire {
+    margin-bottom: 10px;
+  }
+
+  .action-jump {
+    width: clamp(56px, 15vw, 63px);
+    height: clamp(56px, 15vw, 63px);
+  }
+
+  .action-prompt {
+    bottom: calc(78px + var(--safe-bottom));
+    min-height: 34px;
+    padding: 6px 14px;
+    font-size: clamp(9px, 2.45vw, 10.2px);
+    letter-spacing: 0.09em;
+    max-width: calc(100vw - 20px);
+  }
+
+  /* 3. Start Screen 5-Crest Dock: Zero Clipping & Zero Overflow down to 360px Width! */
+  #overlay-title,
+  .overlay-hero {
+    padding: calc(8px + var(--safe-top)) calc(8px + var(--safe-right)) calc(10px + var(--safe-bottom)) calc(8px + var(--safe-left));
+  }
+
+  .era-tab {
+    padding: 4.5px 9px;
+    font-size: clamp(7.8px, 2.15vw, 9.2px);
     letter-spacing: 0.07em;
   }
 
   .title-settings-btn,
   .title-gear-btn,
   #btn-title-settings {
-    padding: 5px 9px;
-    font-size: 8px;
+    min-height: 30px;
+    padding: 4.5px 10px;
+    font-size: clamp(8px, 2.2vw, 9px);
+  }
+
+  #btn-start,
+  .hero-play-medallion {
+    width: min(92vw, 332px);
+    min-height: 68px;
+    padding: 8px 48px;
+  }
+
+  .diegetic-dock-row,
+  .meta-nav-row {
+    gap: clamp(4px, 1.3vw, 7px);
+    padding: 2px 0 0;
   }
 
   .dock-crest-btn {
     min-height: 58px;
-    padding: 8px 2px 10px;
-    font-size: 6.8px;
+    padding: 7px 2px 9px;
+    gap: 3px;
+  }
+
+  /* Condensed Rajdhani 700 keeps all 5 labels (incl. 11-char EXPEDITIONS) 100% unclipped at 360px! */
+  .dock-crest-lbl,
+  .btn-meta-lbl {
+    font-family: var(--font-ui);
+    font-size: clamp(8.6px, 2.35vw, 10px);
+    font-weight: 700;
     letter-spacing: 0.03em;
   }
 
@@ -4411,51 +4806,91 @@ svg.portal-art-bg,
     height: 17px;
   }
 
+  .dock-crest-badge,
+  .dock-crest-btn .meta-badge {
+    font-size: 6.4px;
+    padding: 1px 4px;
+    top: -4px;
+  }
+}
+
+@media (max-width: 385px) and (orientation: portrait) {
   .trophies-grid {
     grid-template-columns: 1fr;
   }
 }
 
-@media (max-height: 740px) {
+/* Compact Short Portrait Phones (360x640, 375x667 iPhone SE) */
+@media (max-height: 740px) and (orientation: portrait) {
   .title-crest-stage svg,
   .title-emblem-stage svg,
   #title-crest-mount svg {
-    max-height: 112px;
+    max-height: min(14.5dvh, 98px);
+  }
+
+  .title-command-dock,
+  .title-bottom-dock {
+    gap: 6px;
+  }
+
+  .hero-sector-ribbon,
+  .sector-crown-ribbon,
+  #btn-sector-ribbon {
+    padding: 3px 13px;
+    font-size: 7.8px;
+    margin-bottom: -6px;
   }
 
   #btn-start,
   .hero-play-medallion {
-    min-height: 68px;
-    padding: 8px 54px;
+    width: min(88vw, 306px);
+    min-height: 60px;
+    max-height: 68px;
+    padding: 7px 44px;
+  }
+
+  .hero-play-label {
+    font-size: clamp(11.5px, 3.3vw, 13.5px);
   }
 
   .dock-crest-btn {
-    min-height: 56px;
+    min-height: 52px;
+    padding: 6px 2px 8px;
+  }
+
+  .modal-card {
+    max-height: calc(100dvh - 18px);
+    padding: 12px 12px;
+  }
+
+  .sea-chart-frame svg,
+  .sea-chart-svg {
+    max-height: min(40dvh, 268px);
   }
 }
 
-@media (min-width: 768px) {
+@media (min-width: 768px) and (min-height: 581px) {
   .title-top-bar {
-    max-width: 780px;
+    max-width: min(94vw, 920px);
   }
 
   .title-crest-stage,
   .title-emblem-stage,
   #title-crest-mount {
-    width: min(520px, 52vw);
+    width: min(440px, 42vw);
   }
 
   .title-crest-stage svg,
   #title-crest-mount svg {
-    max-height: 165px;
+    max-height: min(17dvh, 136px);
   }
 
   .title-command-dock {
-    max-width: 560px;
+    max-width: min(94vw, 620px);
   }
 
   .modal-wide {
-    max-width: 620px;
+    max-width: 640px;
   }
 
   #overlay-minigames .modal-wide {
@@ -4464,6 +4899,742 @@ svg.portal-art-bg,
 
   #overlay-wardrobe .modal-card {
     max-width: 680px;
+  }
+}
+
+/* ---------- TABLET ERGONOMICS (iPad Portrait 768x1024 & iPad Landscape 1024x768 / 1180x820) ---------- */
+@media (min-width: 700px) and (min-height: 600px) {
+  .hud-icon-btn {
+    min-width: 34px;
+    height: 32px;
+    font-size: 10.5px;
+  }
+
+  .gears-pill {
+    padding: 5px 13px;
+    font-size: 11px;
+  }
+
+  #touch-controls {
+    padding: 14px calc(24px + var(--safe-right)) calc(22px + var(--safe-bottom)) calc(24px + var(--safe-left));
+  }
+
+  .corner-bracket {
+    bottom: calc(16px + var(--safe-bottom));
+    width: 32px;
+    height: 32px;
+  }
+
+  .corner-bl { left: calc(16px + var(--safe-left)); }
+  .corner-br { right: calc(16px + var(--safe-right)); }
+
+  .joystick-zone {
+    width: clamp(128px, 15vmin, 146px);
+    height: clamp(128px, 15vmin, 146px);
+  }
+
+  .joystick-ring {
+    width: clamp(106px, 12.5vmin, 122px);
+    height: clamp(106px, 12.5vmin, 122px);
+  }
+
+  .joystick-puck {
+    width: 38px;
+    height: 38px;
+  }
+
+  .dpad {
+    grid-template-columns: repeat(3, clamp(42px, 5.2vmin, 48px));
+    grid-template-rows: repeat(3, clamp(42px, 5.2vmin, 48px));
+    gap: 4px;
+  }
+
+  .touch-right {
+    gap: 16px;
+  }
+
+  .action-btn {
+    width: clamp(60px, 7.5vmin, 68px);
+    height: clamp(60px, 7.5vmin, 68px);
+  }
+
+  .action-fire {
+    margin-bottom: 14px;
+  }
+
+  .action-jump {
+    width: clamp(70px, 8.8vmin, 78px);
+    height: clamp(70px, 8.8vmin, 78px);
+  }
+
+  .action-lbl {
+    font-size: 8px;
+    bottom: -13px;
+  }
+}
+
+/* Tablet Portrait (768x1024 / 820x1180): Anchor Tappable #action-prompt in Right-Thumb Zone below Pogo! */
+@media (orientation: portrait) and (min-width: 700px) {
+  .action-prompt {
+    left: auto;
+    right: calc(26px + var(--safe-right));
+    bottom: calc(118px + var(--safe-bottom));
+    transform: none;
+    min-height: 42px;
+    padding: 8px 18px;
+    font-size: 11px;
+    animation: promptFloatLandscape 0.9s ease-in-out infinite alternate;
+  }
+
+  .action-prompt:active {
+    animation: none;
+    transform: scale(0.94);
+    filter: brightness(1.18);
+  }
+}
+
+/* ---------- LANDSCAPE SIDE-GUTTER KEYFRAMES (ZERO translateX(-50%) CENTER DRIFT) ---------- */
+@keyframes bannerInLandscape {
+  from { opacity: 0; transform: translateX(-14px) scale(0.96); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+@keyframes toastSlideInLandscape {
+  from { opacity: 0; transform: translateX(14px) scale(0.96); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+@keyframes promptFloatLandscape {
+  from { transform: translateY(0); }
+  to { transform: translateY(-3px); }
+}
+
+/* ---------- ALL LANDSCAPE VIEWPORTS: SIDE-GUTTER DOCKING (0px OVERLAP ON x = 34%..66%) ---------- */
+@media (orientation: landscape) {
+  #hud {
+    padding: calc(6px + var(--safe-top)) calc(12px + var(--safe-right)) 6px calc(12px + var(--safe-left));
+    background: linear-gradient(180deg, rgba(4, 8, 18, 0.46) 0%, rgba(4, 8, 18, 0.12) 58%, rgba(4, 8, 18, 0) 100%);
+  }
+
+  .hud-left {
+    gap: 1px;
+    max-width: 30vw;
+  }
+
+  .hud-right {
+    gap: 1px;
+    max-width: 31vw;
+  }
+
+  .hud-label {
+    font-size: clamp(9.5px, 1.3vw, 12px);
+  }
+
+  .hud-score {
+    font-size: clamp(14px, 2.0vw, 20px);
+  }
+
+  .hud-lives {
+    margin-top: 2px;
+    min-height: 16px;
+    gap: 5px;
+  }
+
+  .life-pip {
+    width: 15px;
+    height: 17px;
+  }
+
+  /* Compact Top-Edge Timer Strip (Stays strictly within y = 0..11% above tower playfield!) */
+  .hud-time-cluster {
+    gap: 7px;
+  }
+
+  .hud-time-stack {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 6px;
+  }
+
+  .hud-time-label {
+    font-size: 9px;
+  }
+
+  .hud-timer {
+    font-size: clamp(19px, 2.6vw, 26px);
+  }
+
+  .hud-tower-meta {
+    margin-top: 0;
+  }
+
+  .timer-ring-wrap {
+    width: 38px;
+    height: 38px;
+  }
+
+  .hud-utility-row {
+    margin-top: 2px;
+    gap: 4px;
+  }
+
+  .hud-icon-btn {
+    min-width: 30px;
+    height: 28px;
+  }
+
+  /* 1. Mission Status Pill -> LEFT OCEAN GUTTER (x <= 28vw; clears even 4:3 iPad 29.8%..70.2% tower!) */
+  .mission-status-pill {
+    position: fixed;
+    top: calc(62px + var(--safe-top));
+    left: calc(14px + var(--safe-left));
+    right: auto;
+    transform: none;
+    max-width: min(252px, 26.5vw);
+    justify-content: flex-start;
+    padding: 4px 12px;
+  }
+
+  /* 2. Stage / Sector Banner -> LEFT OCEAN GUTTER below Mission Pill (x <= 28vw) */
+  .stage-banner {
+    position: fixed;
+    top: calc(94px + var(--safe-top));
+    left: calc(14px + var(--safe-left));
+    right: auto;
+    transform: none;
+    max-width: min(256px, 26.5vw);
+    padding: 8px 16px;
+    text-align: left;
+    animation: bannerInLandscape 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .stage-banner::before,
+  .stage-banner::after {
+    clip-path: var(--poly-oct-sm);
+  }
+
+  .banner-sub {
+    font-size: 8px;
+    letter-spacing: 0.14em;
+  }
+
+  .banner-title {
+    font-size: clamp(11px, 1.55vw, 14px);
+    letter-spacing: 0.06em;
+    line-height: 1.15;
+  }
+
+  /* 3. Puzzle & Mini-Game Clue HUD -> LEFT GUTTER (0px overlap on Puzzle Board / Craft!) */
+  #puzzle-hud,
+  .puzzle-hud,
+  #sub-hud,
+  #glide-hud,
+  #skimmer-hud,
+  #vault-hud {
+    top: calc(62px + var(--safe-top));
+    left: calc(14px + var(--safe-left));
+    right: auto;
+    transform: none;
+    flex-direction: column;
+    align-items: flex-start;
+    max-width: min(252px, 26.5vw);
+  }
+
+  #app:has(#mission-status-pill:not(.hidden)) #puzzle-hud,
+  #app:has(#mission-status-pill:not(.hidden)) .puzzle-hud {
+    top: calc(92px + var(--safe-top));
+  }
+
+  #app:has(#puzzle-hud:not(.hidden)) .stage-banner {
+    top: calc(134px + var(--safe-top));
+  }
+
+  /* 4. Trophy Unlock Toast -> RIGHT OCEAN GUTTER cleanly below Utility Row (x >= 72vw, 0px .hud-right overlap!) */
+  .trophy-toast {
+    position: fixed;
+    top: calc(78px + var(--safe-top));
+    right: calc(14px + var(--safe-right));
+    left: auto;
+    transform: none;
+    max-width: min(252px, 26.5vw);
+    padding: 7px 13px;
+    animation: toastSlideInLandscape 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+@media (orientation: landscape) and (min-height: 600px) {
+  .trophy-toast {
+    top: calc(84px + var(--safe-top));
+  }
+}
+
+@media (orientation: landscape) {
+
+  .trophy-toast-lbl {
+    font-size: 7.5px;
+    letter-spacing: 0.12em;
+  }
+
+  .trophy-toast-title {
+    font-size: 11px;
+  }
+
+  /* 5. Tappable Action Prompt -> RIGHT OCEAN GUTTER above Jump/Cryo Thumb Cluster (x >= 71.5vw) */
+  .action-prompt {
+    position: fixed;
+    left: auto;
+    right: calc(32px + var(--safe-right));
+    bottom: calc(114px + var(--safe-bottom));
+    top: auto;
+    transform: none;
+    max-width: min(246px, 25.5vw);
+    min-height: 40px;
+    padding: 7px 15px;
+    font-size: 10px;
+    letter-spacing: 0.09em;
+    text-align: center;
+    animation: promptFloatLandscape 0.9s ease-in-out infinite alternate;
+  }
+
+  .action-prompt:active {
+    animation: none;
+    transform: scale(0.94);
+    filter: brightness(1.18);
+  }
+
+  /* Widescreen Title Command Bar: Single Horizontal Console Row so Center 3D Pogo stays 100% Uncovered */
+  #overlay-title,
+  .overlay-hero {
+    background:
+      linear-gradient(
+        180deg,
+        rgba(3, 6, 14, 0.72) 0%,
+        rgba(5, 10, 22, 0.24) 11%,
+        rgba(5, 10, 22, 0.00) 19%,
+        rgba(5, 10, 22, 0.00) 80%,
+        rgba(4, 8, 18, 0.58) 89%,
+        rgba(3, 6, 14, 0.90) 100%
+      ) !important;
+  }
+
+  #overlay-title > .title-shell,
+  #overlay-title > .title-hero-shell,
+  #overlay-title > .title-layout,
+  #overlay-title > .modal-hero {
+    max-width: min(96vw, 940px);
+  }
+
+  .title-top-bar {
+    max-width: min(96vw, 940px);
+  }
+
+  .title-command-dock,
+  .title-bottom-dock {
+    max-width: min(96vw, 920px);
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .hero-play-wrap,
+  .hero-cta-stage,
+  .hero-cta-row {
+    width: auto;
+    flex: 0 0 auto;
+  }
+
+  .hero-sector-ribbon,
+  .sector-crown-ribbon,
+  #btn-sector-ribbon,
+  #btn-hero-sector {
+    margin-bottom: 4px;
+  }
+
+  .diegetic-dock-row,
+  .meta-nav-row {
+    flex: 1 1 auto;
+    max-width: 540px;
+    padding: 0;
+  }
+
+  /* Sea Chart 2-Column Side-by-Side Widescreen Presentation */
+  #overlay-worlds .modal-card {
+    max-width: min(94vw, 760px);
+  }
+
+  #worlds-map-list {
+    flex-direction: row;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .sea-chart-frame,
+  .sea-chart-stage {
+    flex: 1 1 52%;
+    min-width: 0;
+  }
+
+  .spyglass-plaque,
+  .sea-spyglass-panel {
+    flex: 1 1 48%;
+    min-width: 0;
+    justify-content: space-between;
+  }
+}
+
+/* ---------- MOBILE LANDSCAPE COMPACT HEIGHTS (e.g. 932x430, 844x390, 667x375) ---------- */
+@media (orientation: landscape) and (max-height: 580px) {
+  .altitude-meter {
+    right: calc(8px + var(--safe-right));
+    height: min(35dvh, 142px);
+    width: 16px;
+  }
+
+  #touch-controls {
+    padding: 6px calc(14px + var(--safe-right)) calc(10px + var(--safe-bottom)) calc(14px + var(--safe-left));
+  }
+
+  .joystick-zone {
+    width: clamp(92px, 14vw, 106px);
+    height: clamp(92px, 14vw, 106px);
+  }
+
+  .joystick-ring {
+    width: clamp(78px, 12vw, 90px);
+    height: clamp(78px, 12vw, 90px);
+  }
+
+  .joystick-puck {
+    width: 28px;
+    height: 28px;
+  }
+
+  .dpad {
+    grid-template-columns: repeat(3, clamp(31px, 4.8vw, 35px));
+    grid-template-rows: repeat(3, clamp(31px, 4.8vw, 35px));
+    gap: 2px;
+  }
+
+  .action-btn {
+    width: clamp(48px, 7.2vw, 54px);
+    height: clamp(48px, 7.2vw, 54px);
+  }
+
+  .action-fire {
+    margin-bottom: 8px;
+  }
+
+  .action-jump {
+    width: clamp(56px, 8.4vw, 62px);
+    height: clamp(56px, 8.4vw, 62px);
+  }
+
+  .action-prompt {
+    bottom: calc(80px + var(--safe-bottom));
+    right: calc(26px + var(--safe-right));
+    max-width: min(236px, 26vw);
+    padding: 5px 12px;
+    min-height: 33px;
+    font-size: clamp(8.4px, 1.25vw, 9.5px);
+  }
+
+  /* Start Screen (#overlay-title): Top Crest <= 18% Height + Bottom Dock <= 18% Height -> 64% Open 3D Center! */
+  #overlay-title,
+  .overlay-hero {
+    padding: calc(6px + var(--safe-top)) calc(14px + var(--safe-right)) calc(7px + var(--safe-bottom)) calc(14px + var(--safe-left));
+  }
+
+  /* Tuck Crest Emblem cleanly between Left Era Switch & Right Tuning Pill in top 18% */
+  .title-crest-stage,
+  .title-emblem-stage,
+  #title-crest-mount {
+    width: min(35vw, 224px);
+    margin: -28px auto 0;
+  }
+
+  .title-crest-stage svg,
+  .title-emblem-stage svg,
+  #title-crest-mount svg {
+    max-height: min(16.5dvh, 66px);
+  }
+
+  .title-diorama-stage,
+  .title-showcase-window,
+  .title-stage-spacer {
+    min-height: 0;
+  }
+
+  .hero-sector-ribbon,
+  .sector-crown-ribbon,
+  #btn-sector-ribbon,
+  #btn-hero-sector {
+    padding: 2px 11px;
+    font-size: 7.4px;
+    margin-bottom: 4px;
+    max-width: 265px;
+  }
+
+  #btn-start,
+  .hero-play-medallion {
+    width: clamp(238px, 28.5vw, 276px);
+    aspect-ratio: 380 / 98;
+    min-height: 56px;
+    max-height: 64px;
+    padding: 8px 40px 7px;
+  }
+
+  #hero-play-kicker,
+  .hero-play-kicker,
+  .hero-play-sub {
+    font-size: 6.5px;
+    letter-spacing: 0.12em;
+  }
+
+  #hero-play-label,
+  .hero-play-label,
+  #btn-start .btn-text {
+    font-size: clamp(10.2px, 1.38vw, 12px);
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+  }
+
+  .dock-crest-btn {
+    min-height: 48px;
+    padding: 5px 2px 7px;
+    gap: 2px;
+  }
+
+  .dock-crest-lbl,
+  .btn-meta-lbl {
+    font-family: var(--font-ui);
+    font-size: clamp(8.5px, 1.3vw, 10px);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+
+  .diegetic-dock-row > .dock-crest-btn:first-child,
+  .diegetic-dock-row > .dock-crest-btn:last-child {
+    transform: translateY(-2px);
+  }
+
+  .diegetic-dock-row > .dock-crest-btn:nth-child(2):nth-last-child(4),
+  .diegetic-dock-row > .dock-crest-btn:nth-child(4):nth-last-child(2) {
+    transform: translateY(-1px);
+  }
+
+  .dock-crest-icon,
+  .dock-crest-icon svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  #expeditions-drawer,
+  .expeditions-drawer {
+    bottom: calc(100% + 6px);
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: min(92vw, 560px);
+    padding: 7px 10px 9px;
+  }
+
+  .expedition-spire-card,
+  .spire-portal-btn,
+  #btn-daily,
+  #btn-endless,
+  #btn-casual-endless {
+    min-height: min(52dvh, 196px);
+    padding: 18px 6px 8px;
+  }
+
+  .expedition-spires-row > :nth-child(2) {
+    min-height: min(55dvh, 206px);
+  }
+
+  /* Compact All Modals, Armory, Arcade, Reliquary, Pause, Game Over & Cutscenes in 390px-430px Landscape */
+  .overlay:not(.overlay-hero):not(.overlay-drawer) {
+    padding: calc(8px + var(--safe-top)) calc(12px + var(--safe-right)) calc(8px + var(--safe-bottom)) calc(12px + var(--safe-left));
+  }
+
+  .modal-card {
+    max-height: calc(100dvh - 16px);
+    padding: 11px 14px;
+  }
+
+  .modal-header-row {
+    margin-bottom: 6px;
+    padding-bottom: 5px;
+  }
+
+  .modal-heading {
+    font-size: clamp(14px, 2.2vw, 17px);
+  }
+
+  #worlds-map-list {
+    max-height: calc(100dvh - 76px);
+  }
+
+  .sea-chart-frame svg,
+  .sea-chart-svg {
+    max-height: calc(100dvh - 82px);
+  }
+
+  /* Armory Spotlight Drawer: <= 38dvh bottom height in landscape so top 62% of Pogo stays clear! */
+  #overlay-wardrobe,
+  .overlay-drawer {
+    padding: 0 calc(10px + var(--safe-right)) calc(6px + var(--safe-bottom)) calc(10px + var(--safe-left));
+    background: linear-gradient(
+      180deg,
+      rgba(4, 8, 18, 0.00) 0%,
+      rgba(4, 8, 18, 0.00) 60%,
+      rgba(4, 8, 18, 0.72) 73%,
+      rgba(3, 6, 14, 0.96) 100%
+    ) !important;
+  }
+
+  #overlay-wardrobe .modal-card,
+  .modal-drawer {
+    max-width: min(94vw, 720px);
+    max-height: 38dvh;
+    padding: 5px 10px 6px;
+  }
+
+  #overlay-wardrobe .modal-header-row {
+    margin-bottom: 4px;
+    padding-bottom: 3px;
+  }
+
+  #overlay-wardrobe .sub-tabs-row {
+    margin-bottom: 4px;
+    padding: 2px;
+  }
+
+  #overlay-wardrobe .sub-tab-btn {
+    padding: 3px 7px;
+    font-size: 7.5px;
+  }
+
+  #overlay-wardrobe .wardrobe-grid {
+    padding: 1px 3px 4px;
+  }
+
+  #overlay-wardrobe .skin-card,
+  #overlay-wardrobe .armory-crest-card {
+    flex: 0 0 clamp(150px, 24vw, 184px);
+    padding: 6px 9px;
+    gap: 3px;
+  }
+
+  #overlay-wardrobe .skin-swatch {
+    width: 21px;
+    height: 21px;
+  }
+
+  #overlay-wardrobe .skin-desc {
+    -webkit-line-clamp: 1;
+    font-size: 9.5px;
+  }
+
+  /* Arcade 2-Column Grid & Reliquary Compact Scroll in Short Landscape */
+  #overlay-minigames .modal-wide {
+    max-width: min(94vw, 760px);
+  }
+
+  .minigames-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    max-height: calc(100dvh - 76px);
+  }
+
+  .arcade-portal-card,
+  .minigame-launch-card {
+    min-height: 82px;
+    padding: 9px 11px;
+  }
+
+  .trophies-grid,
+  .relic-codex-list {
+    max-height: calc(100dvh - 156px);
+  }
+
+  /* Heraldic Pause & Game Over Compact Fit in 390px-430px Landscape */
+  #overlay-pause .modal-card,
+  #overlay-gameover .modal-card {
+    max-width: 480px;
+    padding: 12px 16px 18px;
+  }
+
+  .modal-sub {
+    margin: 2px 0 8px;
+    font-size: 12px;
+  }
+
+  .pause-settings-box {
+    padding: 7px 10px;
+    gap: 5px;
+    margin-bottom: 9px;
+  }
+
+  .pause-ctrl-pills {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .final-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    margin: 8px 0 10px;
+  }
+
+  .stat-box {
+    padding: 7px 5px;
+  }
+
+  .stat-val {
+    font-size: 13.5px;
+  }
+
+  .btn-primary:not(.hero-play-medallion) {
+    padding: 9px 16px;
+    font-size: 11px;
+  }
+
+  .btn-secondary {
+    margin-top: 6px;
+    padding: 7px 12px;
+    font-size: 9.5px;
+  }
+
+  /* Cutscene Letterbox Compact Bars so 3D Crane Shot Keeps > 62% Clear Height */
+  .cinema-bar-top {
+    padding: calc(6px + var(--safe-top)) calc(14px + var(--safe-right)) 6px calc(14px + var(--safe-left));
+  }
+
+  .cinema-bar-bottom {
+    padding: 6px calc(14px + var(--safe-right)) calc(7px + var(--safe-bottom)) calc(14px + var(--safe-left));
+  }
+
+  .cinema-comms-card {
+    max-width: 640px;
+    padding: 8px 12px;
+    gap: 10px;
+  }
+
+  .cinema-portrait {
+    width: 42px;
+    height: 42px;
+  }
+
+  .cinema-portrait svg {
+    width: 32px;
+    height: 32px;
+  }
+
+  .cinema-dialogue-text {
+    min-height: 26px;
+    font-size: 12px;
+    line-height: 1.28;
   }
 }
 

@@ -2626,14 +2626,15 @@ export class SkimmerRenderer {
     this.helmYoke = helmGroup;
     this.craftGroup.add(helmGroup);
 
-    // Real 33-Bone `PogoRig` Explorer Pogo V2 seated heroically in the open cockpit!
+    // Real 33-Bone `PogoRig` Explorer Pogo V3 seated heroically in the open cockpit!
     this.pogoSeat = new THREE.Group();
-    this.pogoSeat.position.set(0, -0.12, 0.08);
+    this.pogoSeat.position.set(0, -0.11, 0.08);
     this.pogoSeat.rotation.y = Math.PI; // Faces -Z (forward down the storm corridor!)
     this.pogoRig = new PogoRig(this.skinId);
-    this.pogoRig.group.scale.setScalar(0.76);
+    this.pogoRig.group.scale.setScalar(0.84);
     this.pogoSeat.add(this.pogoRig.group);
     this.craftGroup.add(this.pogoSeat);
+    this.craftGroup.scale.setScalar(1.08);
 
     // Twin Stern Volumetric Plasma-Cyan Afterburners + Supersonic Mach Shock-Diamond Rings!
     this.jetGroup = new THREE.Group();
@@ -3478,13 +3479,13 @@ export class SkimmerRenderer {
       () => {}
     );
 
-    // 2. Load `assets/models/sea_mine.glb` (#131: barnacle sphere + contact horns + lower chain + 3 red eyes -> O(1) InstancedMesh!)
+    // 2. Load `assets/models/sea_mine.glb` (#131 & #289: 0.66m hurt core parity -> O(1) InstancedMesh!)
     loader.load(
       resolveAssetUrl('assets/models/sea_mine.glb'),
       (gltf) => {
         if (this._disposed || !gltf?.scene) return;
         const tpl = gltf.scene.clone(true);
-        tpl.scale.setScalar(1.12);
+        tpl.scale.setScalar(1.04);
         tpl.traverse((obj) => {
           if (!obj.isMesh || !obj.material) return;
           const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
@@ -3620,8 +3621,14 @@ export class SkimmerRenderer {
     const progPct = clamp((skimmer.timer || 0) / dur, 0, 1);
     const progStep = Math.round(progPct * 120);
     const boostStep = Math.round(clamp((skimmer.boostTimer || 0) / 5.8, 0, 1) * 40);
-    const hudW = Math.min(356, Math.max(236, Math.floor(this.width - 28)));
+    const isLand = this.width > this.height * 1.05;
+    const hudW = isLand
+      ? clamp(Math.round(this.width * 0.28), 204, 272)
+      : clamp(Math.floor(this.width - 28), 224, 352);
     const hudH = Math.round(hudW * (76 / 512));
+    const topOff = isLand
+      ? (this.height <= 450 ? 48 : 56)
+      : (this.width <= 405 ? 78 : HUD_TOP_OFFSET - 6);
     const key = `${hudW}|${progStep}|${boost}|${boostStep}`;
 
     if (key !== this._hudLastKey) {
@@ -3688,7 +3695,8 @@ export class SkimmerRenderer {
     }
 
     this.hudMesh.scale.set(hudW, hudH, 1);
-    this.hudMesh.position.set(this.width * 0.5, -(HUD_TOP_OFFSET + hudH * 0.5), 0);
+    this.hudMesh.position.set(this.width * 0.5, -(topOff + hudH * 0.5), 0);
+    this._hudBottomPx = topOff + hudH;
   }
 
   _parseHexRgb(str, out) {
@@ -3803,10 +3811,13 @@ export class SkimmerRenderer {
       }
       const t = 1 - clamp((pop.life || 0) / Math.max(0.001, pop.maxLife || 1), 0, 1);
       const scalePop = t < 0.16 ? easeOutBack(t / 0.16) * 1.12 : 1.12 - Math.min(0.12, (t - 0.16) * 0.9);
-      const hgt = 22 * Math.max(0.1, scalePop);
+      const baseH = this.height <= 450 ? 18 : 22;
+      const hgt = baseH * Math.max(0.1, scalePop);
       const wid = hgt * e.aspect;
-      const px = clamp(pop.x, wid * 0.5 + 6, this.width - wid * 0.5 - 6);
-      const py = -(pop.y - t * 28);
+      const px = clamp(pop.x, wid * 0.5 + 8, this.width - wid * 0.5 - 8);
+      const minTopY = (this._hudBottomPx || 96) + hgt * 0.5 + 8;
+      const maxBotY = Math.max(minTopY + 12, this.height * 0.50);
+      const py = -clamp(pop.y - t * 26, minTopY, maxBotY);
       m.scale.set(wid, hgt, 1);
       m.position.set(px, py, 1);
       m.material.opacity = clamp(1 - t * t, 0, 1);
@@ -3848,21 +3859,46 @@ export class SkimmerRenderer {
     const distScroll = skimmer.distance ?? time * 18;
     const speed = skimmer.speed || 18;
 
-    // 1. Dynamic Chase Camera: Portrait-Safe Framing + Banking Roll + Boost FOV Kick!
-    const narrowExtraZ = Math.max(0, 0.78 - this.camera.aspect) * 2.55;
-    const targetFov = 51 + boostNorm * 13.0 + (onWater ? 0 : 3.5);
+    // 1. Dynamic Chase Camera: Narrow-Portrait Full ±2.4 Lane Visibility + Chunky Close-Up Landscape Framing!
+    const asp = this.camera.aspect;
+    const isPortrait = asp < 0.92;
+    const isWideLand = asp >= 1.52;
+    const portT = clamp((asp - 0.45) / 0.47, 0, 1);
+    const baseFov = isPortrait
+      ? lerp(60.0, 52.0, portT)
+      : isWideLand
+      ? 43.5
+      : asp >= 1.15
+      ? 46.5
+      : 51.0;
+    const boostFovKick = (isPortrait ? 7.5 : 11.5) * boostNorm;
+    const targetFov = baseFov + boostFovKick + (onWater ? 0 : 3.0);
     if (Math.abs(this.camera.fov - targetFov) > 0.04) {
       this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 8.0);
       this.camera.updateProjectionMatrix();
     }
 
-    const trackFactor = this.camera.aspect < 0.72 ? 0.72 : 0.56;
-    this._camX += (lx * trackFactor - this._camX) * Math.min(1, dt * 11.0);
-    this._camY += (2.58 - boostNorm * 0.22 + sy * 0.42 - this._camY) * Math.min(1, dt * 9.5);
-    const camZ = 6.75 + narrowExtraZ - boostNorm * 0.58;
+    // Keep camera centered enough over the ±2.4 wave corridor on narrow portrait so opposite outer lanes NEVER clip,
+    // while tracking smoothly when Pogo carves out toward ±3.5!
+    const wantCamX = isPortrait
+      ? lx * 0.42 + Math.sign(lx) * Math.max(0, Math.abs(lx) - 2.0) * 0.38
+      : lx * 0.54;
+    const baseCamY = isPortrait ? 2.66 : isWideLand ? 2.18 : asp >= 1.15 ? 2.38 : 2.58;
+    const baseCamZ = isPortrait
+      ? lerp(8.26, 6.82, portT)
+      : isWideLand
+      ? 5.62
+      : asp >= 1.15
+      ? 6.12
+      : 6.75;
+    this._camX += (wantCamX - this._camX) * Math.min(1, dt * 11.0);
+    this._camY += (baseCamY - boostNorm * 0.20 + sy * 0.42 - this._camY) * Math.min(1, dt * 9.5);
+    const camZ = baseCamZ - boostNorm * (isWideLand ? 0.42 : 0.54);
 
+    const lookX = lx * (isPortrait ? 0.16 : 0.36);
+    const lookY = (isPortrait ? 0.50 : 0.58) + sy * 0.25;
     this.camera.position.set(this._camX + shake.x, this._camY + shake.y, camZ);
-    this.camera.lookAt(lx * 0.42, 0.62 + sy * 0.25, -14.5);
+    this.camera.lookAt(lookX, lookY, -14.5);
 
     const targetRoll = clamp(-vx * 0.025, -0.155, 0.155);
     this._camRoll += (targetRoll - this._camRoll) * Math.min(1, dt * 10.5);
@@ -4169,10 +4205,12 @@ export class SkimmerRenderer {
       const gx = g.laneX || 0;
       const gy = Math.sin(time * 3.2 + i) * 0.04;
       const gz = -g.z;
+      const gateScale = 0.90 * clamp((g.width || 1.58) / 1.58, 0.82, 1.25);
       slot.position.set(gx, gy, gz);
+      slot.scale.setScalar(gateScale);
       gd.position.set(gx, gy, gz);
       gd.rotation.set(0, 0, 0);
-      gd.scale.setScalar(1);
+      gd.scale.setScalar(gateScale);
       gd.updateMatrix();
       this.gateBrassInst.setMatrixAt(gateInstCount, gd.matrix);
       this.gateObsInst.setMatrixAt(gateInstCount, gd.matrix);

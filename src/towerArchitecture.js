@@ -19,6 +19,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries as _rawMergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { COLS } from './levels.js';
+import { PUZZLE_TYPES, BELL_COLORS, makePuzzle } from './puzzleRoom.js';
 
 function mergeGeometries(parts) {
   const normalized = parts.map((g) => (g.index ? g.toNonIndexed() : g));
@@ -864,7 +865,7 @@ function getDefaultWallAoTex() {
  *   G = Warm #ff9d2e furnace & cage-lift lantern bounce on adjacent masonry
  *   B = Eerie #4fd1c5 misty doorway / rune-portal rim bounce on adjacent masonry
  */
-function buildWallAoLightTexture(tower, fh, totalH, isOrig) {
+function buildWallAoLightTexture(tower, fh, totalH, isOrig, clueEntries = null) {
   if (isOrig) return getDefaultWallAoTex();
   const W = 64;
   const H = 128;
@@ -922,6 +923,14 @@ function buildWallAoLightTexture(tower, fh, totalH, isOrig) {
       stamp(phi, dy + 1.05, dy - 0.25, COL_ANGLE * 0.98, 0.45, 0.88, 0);
     } else {
       stamp(phi, dy + 1.1, dy - 0.15, COL_ANGLE * 0.82, 0.32, 0, 0.58);
+    }
+  }
+
+  if (Array.isArray(clueEntries)) {
+    for (const ce of clueEntries) {
+      const cPhi = ce.colCenter * COL_ANGLE;
+      const cy = ce.floorY * fh;
+      stamp(cPhi, cy + 0.78, cy - 0.78, COL_ANGLE * 0.95, 0.22, 0, 0.78);
     }
   }
 
@@ -2350,7 +2359,8 @@ function buildTowerMasonryAndAccents(
   stoneMats,
   bandedMeshes,
   bandSpanY,
-  wallAoTex
+  wallAoTex,
+  pipeAvoidHoles = holes
 ) {
   const isOrig = era === 'original';
   const R = TOWER_RADIUS;
@@ -2804,7 +2814,7 @@ function buildTowerMasonryAndAccents(
       const segStep = 1.25;
       for (let sy = 0.35; sy < totalH - 0.6; sy += segStep) {
         const midY = sy + segStep * 0.5;
-        if (isNearOpening(phi, midY, holes, 0.16, 0.25)) continue;
+        if (isNearOpening(phi, midY, pipeAvoidHoles, 0.16, 0.25)) continue;
         const taperOff = -0.048 * Math.min(1, midY / Math.max(10, totalH));
         const pr = R + BRICK_PROUD + 0.052 + taperOff;
 
@@ -2839,7 +2849,7 @@ function buildTowerMasonryAndAccents(
         // Clustered twin & triple companion boiler pipes in 'mist' / 'foundry' (matching reference photo!)
         if (rbTheme === 'mist' || rbTheme === 'foundry') {
           const phi2 = phi + 0.044;
-          if (!isNearOpening(phi2, midY, holes, 0.14, 0.2)) {
+          if (!isNearOpening(phi2, midY, pipeAvoidHoles, 0.14, 0.2)) {
             pushInstance(
               pipeSegs,
               Math.sin(phi2) * (pr - 0.008),
@@ -2858,7 +2868,7 @@ function buildTowerMasonryAndAccents(
           }
           if (Math.round(cVal) % 3 === 2 && sy > 1.5 && sy < totalH - 2.5) {
             const phi3 = phi - 0.042;
-            if (!isNearOpening(phi3, midY, holes, 0.14, 0.2)) {
+            if (!isNearOpening(phi3, midY, pipeAvoidHoles, 0.14, 0.2)) {
               pushInstance(pipeSegs, Math.sin(phi3) * (pr - 0.012), midY, Math.cos(phi3) * (pr - 0.012), 0, phi3, 0, 0.62, segStep, 0.62);
             }
           }
@@ -2884,7 +2894,7 @@ function buildTowerMasonryAndAccents(
         let idxStation = 0;
         for (let vy = 1.9; vy < totalH - 1.4; vy += 3.6, idxStation++) {
           const vPhi = phi + 0.072;
-          if (isNearOpening(vPhi, vy, holes, 0.22, 0.45) || isInElevatorShaft(vPhi, vy, shafts, 0.24)) {
+          if (isNearOpening(vPhi, vy, pipeAvoidHoles, 0.22, 0.45) || isInElevatorShaft(vPhi, vy, shafts, 0.24)) {
             continue;
           }
           const taperOff = -0.048 * Math.min(1, vy / Math.max(10, totalH));
@@ -2912,7 +2922,7 @@ function buildTowerMasonryAndAccents(
           // Tarnished-brass steam pressure gauge with vintage dial face!
           const gPhi = phi - 0.055;
           const gy = vy + 0.26;
-          if (!isNearOpening(gPhi, gy, holes, 0.18, 0.35)) {
+          if (!isNearOpening(gPhi, gy, pipeAvoidHoles, 0.18, 0.35)) {
             const gx = Math.sin(gPhi) * (sr + 0.015);
             const gz = Math.cos(gPhi) * (sr + 0.015);
             pushInstance(gaugeBodyList, gx, gy, gz, 0, gPhi, 0, 1, 1, 1);
@@ -3186,139 +3196,781 @@ function buildTowerMasonryAndAccents(
 }
 
 // ============================================================================
-// 9. EXTERIOR ARCHITECTURAL CLUE PLAQUES (`_buildTowerClue`: 'lights' & 'bells')
+// 9. EXTERIOR RUNE-DOOR CLUE STELES (`tower.runeDoors` + `door.clue` + `tower.clue`)
+//    Sculpted Carved-Obsidian & Forged-Brass Illuminated Clue Tablets mounted
+//    proud (`r = TOWER_RADIUS + 0.45`) directly above every Rune Door (`y = (floor + 1.85) * fh`),
+//    auto-shifting `+1` col with a forged-brass cantilever sign-arm ONLY when a ledge/box
+//    occupies `door.floor + 1.5..2.5`. Each stele renders in strictly 2 draw calls!
 // ============================================================================
 
-function buildTowerClue(clue, fh, stoneMats) {
-  const g = new THREE.Group();
-  const cluePhi = (clue.col + 0.5) * COL_ANGLE;
-  const clueY = clue.floor * fh + fh * 0.96;
-  g.rotation.y = cluePhi;
-  g.position.y = clueY;
-  g.scale.set(1.42, 1.42, 1);
-
-  const anims = [];
-  const slateMat = attachWaterlineShader(
-    new THREE.MeshStandardMaterial({
-      color: '#1e2438',
-      roughness: 0.72,
-      metalness: 0.18,
-    }),
-    0.5
-  );
-  stoneMats.push(slateMat);
-  const brassMat = new THREE.MeshStandardMaterial({
-    color: '#eab308',
-    metalness: 0.86,
-    roughness: 0.22,
+let CLUE_FRAME_MAT = null;
+function getClueFrameMaterial() {
+  if (CLUE_FRAME_MAT) return CLUE_FRAME_MAT;
+  CLUE_FRAME_MAT = new THREE.MeshStandardMaterial({
+    color: '#ffffff',
+    vertexColors: true,
+    roughness: 0.32,
+    metalness: 0.72,
   });
+  CLUE_FRAME_MAT.userData.shared = true;
+  return CLUE_FRAME_MAT;
+}
 
-  if (clue.kind === 'bells' && Array.isArray(clue.order) && clue.order.length > 0) {
-    const n = clue.order.length;
-    const gap = 0.21;
-    const w = n * gap + 0.14;
+function paintGeoVertexColor(geo, hex) {
+  const g = geo.index ? geo.toNonIndexed() : geo;
+  if (g !== geo) geo.dispose();
+  const c = new THREE.Color(hex);
+  const cnt = g.attributes.position.count;
+  const arr = new Float32Array(cnt * 3);
+  for (let i = 0; i < cnt; i++) {
+    arr[i * 3] = c.r;
+    arr[i * 3 + 1] = c.g;
+    arr[i * 3 + 2] = c.b;
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+  return g;
+}
 
-    const bL = new RoundedBoxGeometry(0.05, 0.09, 0.14, 1, 0.01);
-    bL.translate(-w * 0.5 + 0.03, 0.62, TOWER_RADIUS + 0.065);
-    const bR = new RoundedBoxGeometry(0.05, 0.09, 0.14, 1, 0.01);
-    bR.translate(w * 0.5 - 0.03, 0.62, TOWER_RADIUS + 0.065);
-    g.add(new THREE.Mesh(mergeGeometries([bL, bR]), slateMat));
+function remapGeoUvRect(geo, u0, v0, u1, v1) {
+  const g = geo.index ? geo.toNonIndexed() : geo;
+  if (g !== geo) geo.dispose();
+  const uv = g.attributes.uv;
+  if (uv) {
+    for (let i = 0; i < uv.count; i++) {
+      uv.setXY(i, u0 + uv.getX(i) * (u1 - u0), v0 + uv.getY(i) * (v1 - v0));
+    }
+    uv.needsUpdate = true;
+  }
+  return g;
+}
 
-    const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, w, 8), brassMat);
-    rail.rotation.z = Math.PI * 0.5;
-    rail.position.set(0, 0.62, TOWER_RADIUS + 0.115);
-    g.add(rail);
+function wrapTowerCol(c) {
+  return ((Math.round(Number(c) || 0) % COLS) + COLS) % COLS;
+}
 
-    clue.order.forEach((_, k) => {
-      const colHex = clue.colors?.[k] || '#5efce8';
-      const geo = new THREE.PlaneGeometry(0.155, 0.44, 1, 4);
-      const pos = geo.attributes.position;
-      for (let v = 0; v < pos.count; v++) {
-        if (pos.getY(v) < -0.2 && Math.abs(pos.getX(v)) < 0.012) {
-          pos.setY(v, -0.11);
+function isClueBayBlocked(tower, candCol, doorFloor, selfDoor) {
+  const wc = wrapTowerCol(candCol);
+  const yLo = doorFloor + 1.35;
+  const yHi = doorFloor + 2.55;
+  for (const l of tower?.ledges || []) {
+    if (wrapTowerCol(l.col) !== wc) continue;
+    const lf = Number(l.floor) || 0;
+    if (l.type === 'pillar' || (l.type === 'box' && l.h)) {
+      const topF = lf + Math.max(1, Number(l.h) || 1);
+      if (lf < yHi && topF > yLo) return true;
+    } else if (lf >= yLo && lf <= yHi) {
+      return true;
+    }
+  }
+  for (const d of tower?.doors || []) {
+    if (d === selfDoor || (selfDoor?.id && d.id === selfDoor.id)) continue;
+    if (wrapTowerCol(d.col) === wc && Math.abs((Number(d.floor) || 0) - (doorFloor + 1.85)) < 1.15) {
+      return true;
+    }
+  }
+  for (const el of tower?.elevators || []) {
+    if (
+      wrapTowerCol(el.col) === wc &&
+      doorFloor + 1.85 >= (Number(el.minFloor) || 0) - 0.5 &&
+      doorFloor + 1.85 <= (Number(el.maxFloor) || 0) + 1.5
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function resolveClueColOffset(tower, door) {
+  if (typeof door?.clueColOffset === 'number' && Number.isFinite(door.clueColOffset) && door.clueColOffset !== 0) {
+    return door.clueColOffset;
+  }
+  if (typeof door?.clue?.clueColOffset === 'number' && Number.isFinite(door.clue.clueColOffset) && door.clue.clueColOffset !== 0) {
+    return door.clue.clueColOffset;
+  }
+  const df = Number(door?.floor) || 0;
+  if (!isClueBayBlocked(tower, door?.col, df, door)) return 0;
+  for (const candOff of [1, -1, 2, -2]) {
+    if (!isClueBayBlocked(tower, (Number(door?.col) || 0) + candOff, df, door)) {
+      return candOff * 1.24;
+    }
+  }
+  return 0;
+}
+
+function normalizeResolvedClue(rawClue, fallbackType = 'lights') {
+  if (!rawClue || !rawClue.kind) return { kind: fallbackType };
+  if (rawClue.kind === 'lights') {
+    const n = Math.max(2, Math.min(5, Number(rawClue.n) || Math.round(Math.sqrt(rawClue.pattern?.length || 9)) || 3));
+    const pat = Array.isArray(rawClue.pattern)
+      ? rawClue.pattern.slice(0, n * n).map((v) => (v ? 1 : 0))
+      : new Array(n * n).fill(0);
+    while (pat.length < n * n) pat.push(0);
+    return { kind: 'lights', n, pattern: pat };
+  }
+  if (rawClue.kind === 'bells') {
+    const order = Array.isArray(rawClue.order) ? rawClue.order.slice() : [];
+    const colors =
+      Array.isArray(rawClue.colors) && rawClue.colors.length === order.length
+        ? rawClue.colors.slice()
+        : order.map((cIdx) => BELL_COLORS[Number(cIdx) % BELL_COLORS.length] || '#5efce8');
+    if (!order.length && Array.isArray(rawClue.colors) && rawClue.colors.length) {
+      return {
+        kind: 'bells',
+        order: rawClue.colors.map((_, i) => i),
+        colors: rawClue.colors.slice(),
+      };
+    }
+    return { kind: 'bells', order, colors };
+  }
+  return { kind: String(rawClue.kind) };
+}
+
+function collectTowerClueEntries(tower, isRealOrig = false) {
+  if (!tower || isRealOrig) return [];
+  const mergedByKey = new Map();
+  const ingestDoor = (d) => {
+    if (!d) return;
+    const key = d.id ? `id:${d.id}` : `cf:${wrapTowerCol(d.col)}_${Math.round(Number(d.floor) || 0)}`;
+    const prev = mergedByKey.get(key);
+    mergedByKey.set(key, prev ? { ...prev, ...d, clue: d.clue || prev.clue } : { ...d });
+  };
+  if (Array.isArray(tower.runeDoors)) {
+    for (const rd of tower.runeDoors) ingestDoor(rd);
+  }
+  if (Array.isArray(tower.doors)) {
+    for (const d of tower.doors) {
+      if (d && (d.isRune || d.rune)) ingestDoor(d);
+    }
+  }
+
+  const runeDoorList = Array.from(mergedByKey.values());
+  const entries = [];
+
+  if (runeDoorList.length > 0) {
+    for (let idx = 0; idx < runeDoorList.length; idx++) {
+      const door = runeDoorList[idx];
+      const pType =
+        door.puzzleType ||
+        door.clue?.kind ||
+        PUZZLE_TYPES[((Number(tower.id) || 1) - 1 + idx) % PUZZLE_TYPES.length] ||
+        'lights';
+      let rawClue = door.clue || null;
+      if (!rawClue && tower.clue && (tower.clue.doorId === door.id || (runeDoorList.length === 1 && tower.clue.kind === pType))) {
+        rawClue = tower.clue;
+      }
+      if (!rawClue) {
+        try {
+          const pSeed = door.puzzleSeed ?? ((Number(tower.id) || 1) * 7919 + 17 + idx * 131);
+          const pDiff =
+            door.puzzleDifficulty ??
+            (tower.casual ? 0.3 : Math.min(0.85, 0.25 + ((Number(tower.id) || 1) - 1) * 0.08));
+          const puz = makePuzzle({ type: pType, seed: pSeed, difficulty: pDiff, hideTarget: false });
+          rawClue = puz?.clue || { kind: pType };
+        } catch {
+          rawClue = { kind: pType };
         }
       }
-      geo.translate(0, -0.22, 0);
-      geo.computeVertexNormals();
-
-      const mat = new THREE.MeshStandardMaterial({
-        color: colHex,
-        emissive: colHex,
-        emissiveIntensity: 0.26,
-        roughness: 0.68,
-        side: THREE.DoubleSide,
+      const clue = normalizeResolvedClue(rawClue, pType);
+      const colOffset = resolveClueColOffset(tower, door);
+      const doorCol = Number(door.col) || 0;
+      const doorFloor = Number(door.floor) || 0;
+      entries.push({
+        doorId: door.id || null,
+        doorCol,
+        doorFloor,
+        colOffset,
+        colCenter: doorCol + 0.5 + colOffset,
+        floorY: doorFloor + 1.85,
+        clue,
       });
-      const banner = new THREE.Mesh(geo, mat);
-      banner.position.set(-w * 0.5 + 0.07 + gap * (k + 0.5), 0.6, TOWER_RADIUS + 0.122);
-      g.add(banner);
-      anims.push((t) => {
-        banner.rotation.x = Math.sin(t * 1.7 + k * 0.9) * 0.085;
-        banner.rotation.z = Math.cos(t * 1.25 + k * 0.7) * 0.03;
-      });
-    });
-  } else if (clue.kind === 'lights' && clue.n && Array.isArray(clue.pattern)) {
-    const n = clue.n;
-    const cell = 0.115;
-    const size = n * cell + 0.09;
-
-    const plaque = new THREE.Mesh(
-      new RoundedBoxGeometry(size + 0.06, size + 0.06, 0.055, 1, 0.012),
-      slateMat
-    );
-    plaque.position.set(0, size * 0.5, TOWER_RADIUS + 0.06);
-    g.add(plaque);
-
-    const studParts = [];
-    for (const rx of [-size * 0.5, size * 0.5]) {
-      for (const ry of [0.02, size - 0.02]) {
-        const sg = new THREE.ConeGeometry(0.026, 0.018, 5, 1, true);
-        sg.rotateX(Math.PI * 0.5);
-        sg.translate(rx, ry, TOWER_RADIUS + 0.092);
-        studParts.push(sg);
-      }
     }
-    g.add(new THREE.Mesh(mergeGeometries(studParts), brassMat));
+    return entries;
+  }
 
-    const litMat = new THREE.MeshStandardMaterial({
-      color: '#5efce8',
-      emissive: '#14b8a6',
-      emissiveIntensity: 1.25,
-      roughness: 0.22,
-    });
-    const darkMat = new THREE.MeshStandardMaterial({
-      color: '#2d354d',
-      roughness: 0.86,
-    });
-
-    const litParts = [];
-    const darkParts = [];
-    for (let r = 0; r < n; r++) {
-      for (let c = 0; c < n; c++) {
-        const on = Boolean(clue.pattern[r * n + c]);
-        const tg = new RoundedBoxGeometry(cell * 0.8, cell * 0.8, 0.032, 1, 0.006);
-        tg.translate(
-          -size * 0.5 + 0.045 + cell * (c + 0.5),
-          size - 0.045 - cell * (r + 0.5),
-          TOWER_RADIUS + (on ? 0.1 : 0.088)
-        );
-        if (on) litParts.push(tg);
-        else darkParts.push(tg);
-      }
-    }
-    if (litParts.length) g.add(new THREE.Mesh(mergeGeometries(litParts), litMat));
-    if (darkParts.length) g.add(new THREE.Mesh(mergeGeometries(darkParts), darkMat));
-
-    anims.push((t) => {
-      litMat.emissiveIntensity = 0.95 + 0.35 * Math.sin(t * 2.3);
+  if (tower.clue && tower.clue.kind) {
+    const dc = Number(tower.clue.col) || 0;
+    const df = Number(tower.clue.floor) || 2;
+    entries.push({
+      doorId: tower.clue.doorId || null,
+      doorCol: dc,
+      doorFloor: df,
+      colOffset: 0,
+      colCenter: dc + 0.5,
+      floorY: df + 1.45,
+      clue: normalizeResolvedClue(tower.clue, tower.clue.kind),
     });
   }
+  return entries;
+}
+
+function computeClueEntriesSignature(entries) {
+  if (!entries || !entries.length) return 'none';
+  let s = '';
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    const c = e.clue;
+    const pat = c.pattern ? c.pattern.join('') : c.colors ? c.colors.join(',') : '';
+    s += `${e.colCenter.toFixed(2)}@${e.floorY.toFixed(2)}:${c.kind}:${c.n || ''}:${pat}|`;
+  }
+  return s;
+}
+
+function createClueSteleCanvasTex(clue, ownedTextures) {
+  const W = 512;
+  const H = 512;
+  if (typeof document !== 'undefined') {
+    const cv = document.createElement('canvas');
+    cv.width = W;
+    cv.height = H;
+    const ctx = cv.getContext && cv.getContext('2d');
+    if (ctx) {
+      drawClueSteleArtwork(ctx, W, H, clue);
+      const tex = new THREE.CanvasTexture(cv);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.wrapS = THREE.ClampToEdgeWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
+      tex.anisotropy = 4;
+      if (Array.isArray(ownedTextures)) ownedTextures.push(tex);
+      return tex;
+    }
+  }
+  const fallback = new THREE.DataTexture(new Uint8Array([94, 242, 255, 255]), 1, 1, THREE.RGBAFormat);
+  fallback.colorSpace = THREE.SRGBColorSpace;
+  fallback.needsUpdate = true;
+  if (Array.isArray(ownedTextures)) ownedTextures.push(fallback);
+  return fallback;
+}
+
+function drawClueSteleArtwork(ctx, W, H, clue) {
+  ctx.fillStyle = '#050b16';
+  ctx.fillRect(0, 0, W, H);
+
+  if (clue.kind === 'lights') {
+    const n = clue.n || 3;
+    const pad = 34;
+    const inner = W - pad * 2;
+    const step = inner / n;
+    const gap = n >= 4 ? 10 : 13;
+
+    // Outer forged-brass & cyan rune border
+    ctx.strokeStyle = '#d49b2a';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(10, 10, W - 20, H - 20);
+    ctx.strokeStyle = 'rgba(94, 242, 255, 0.45)';
+    ctx.lineWidth = 2.5;
+    ctx.strokeRect(20, 20, W - 40, H - 40);
+
+    // Subtle North / Back-Wall orientation chevron at top center
+    ctx.fillStyle = '#fbbf24';
+    ctx.beginPath();
+    ctx.moveTo(W * 0.5, 6);
+    ctx.lineTo(W * 0.5 + 12, 20);
+    ctx.lineTo(W * 0.5 - 12, 20);
+    ctx.closePath();
+    ctx.fill();
+
+    // Subtle forged-brass grid divider lines
+    ctx.strokeStyle = 'rgba(212, 155, 42, 0.35)';
+    ctx.lineWidth = 2;
+    for (let k = 1; k < n; k++) {
+      const p = pad + k * step;
+      ctx.beginPath();
+      ctx.moveTo(p, pad);
+      ctx.lineTo(p, W - pad);
+      ctx.moveTo(pad, p);
+      ctx.lineTo(W - pad, p);
+      ctx.stroke();
+    }
+
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n; c++) {
+        const on = Boolean(clue.pattern?.[r * n + c]);
+        const x0 = pad + c * step + gap * 0.5;
+        const y0 = pad + r * step + gap * 0.5;
+        const cs = step - gap;
+        const cx = x0 + cs * 0.5;
+        const cy = y0 + cs * 0.5;
+
+        if (on) {
+          const grd = ctx.createRadialGradient(cx, cy, cs * 0.06, cx, cy, cs * 0.68);
+          grd.addColorStop(0.0, '#d8feff');
+          grd.addColorStop(0.38, '#5ef2ff');
+          grd.addColorStop(0.85, '#17bfd9');
+          grd.addColorStop(1.0, '#0c7fa0');
+          ctx.fillStyle = grd;
+          ctx.fillRect(x0, y0, cs, cs);
+
+          ctx.strokeStyle = '#e6ffff';
+          ctx.lineWidth = n >= 4 ? 4.5 : 6;
+          ctx.strokeRect(x0 + 3, y0 + 3, cs - 6, cs - 6);
+
+          // Bold white etched Runic Diamond + Cross relief
+          const dr = cs * 0.29;
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = n >= 4 ? 5.5 : 7.5;
+          ctx.lineJoin = 'round';
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(cx, cy - dr);
+          ctx.lineTo(cx + dr, cy);
+          ctx.lineTo(cx, cy + dr);
+          ctx.lineTo(cx - dr, cy);
+          ctx.closePath();
+          ctx.moveTo(cx - dr * 0.52, cy);
+          ctx.lineTo(cx + dr * 0.52, cy);
+          ctx.moveTo(cx, cy - dr * 0.52);
+          ctx.lineTo(cx, cy + dr * 0.52);
+          ctx.stroke();
+        } else {
+          // Deep recessed dark-obsidian socket (#08111f) + clear #2b4a6b border so 3x3 / 4x4 grid counts cleanly!
+          ctx.fillStyle = '#08111f';
+          ctx.fillRect(x0, y0, cs, cs);
+          ctx.strokeStyle = '#03060d';
+          ctx.lineWidth = 5;
+          ctx.strokeRect(x0 + 2.5, y0 + 2.5, cs - 5, cs - 5);
+          ctx.strokeStyle = '#2d4e70';
+          ctx.lineWidth = 3.5;
+          ctx.strokeRect(x0 + 5, y0 + 5, cs - 10, cs - 10);
+
+          ctx.fillStyle = '#1b334c';
+          ctx.beginPath();
+          ctx.arc(cx, cy, cs * 0.065, 0, TWO_PI);
+          ctx.fill();
+        }
+      }
+    }
+    return;
+  }
+
+  if (clue.kind === 'bells') {
+    const cols = clue.colors?.length ? clue.colors : ['#ff4f64', '#ffb02e', '#3fe07e'];
+    const n = Math.max(1, cols.length);
+    const crestH = Math.round(H * 0.76); // Top 76% (v = 0.24..1.0) = crest face; Bottom 24% (v = 0.0..0.24) = 3D bell swatches!
+
+    ctx.fillStyle = '#070e1c';
+    ctx.fillRect(0, 0, W, crestH);
+    ctx.strokeStyle = '#d49b2a';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(10, 10, W - 20, crestH - 16);
+    ctx.strokeStyle = 'rgba(94, 242, 255, 0.35)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(19, 19, W - 38, crestH - 34);
+
+    // Subtle Left-to-Right strike-order arrow across top frieze
+    ctx.strokeStyle = '#eab308';
+    ctx.fillStyle = '#eab308';
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.moveTo(42, 30);
+    ctx.lineTo(W - 46, 30);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(W - 32, 30);
+    ctx.lineTo(W - 50, 22);
+    ctx.lineTo(W - 50, 38);
+    ctx.closePath();
+    ctx.fill();
+
+    const padX = 28;
+    const slotW = (W - padX * 2) / n;
+
+    for (let k = 0; k < n; k++) {
+      const hex = cols[k] || '#5efce8';
+      const cx = padX + slotW * (k + 0.5);
+
+      // 1..N Strike-Order Pip Dots + Crisp Numeral Badge directly above Bell k!
+      const pipCount = k + 1;
+      const pipSpacing = Math.min(16, (slotW - 18) / Math.max(1, pipCount));
+      const pipStart = cx - ((pipCount - 1) * pipSpacing) * 0.5;
+      for (let p = 0; p < pipCount; p++) {
+        const px = pipStart + p * pipSpacing;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(px, 56, 5.2, 0, TWO_PI);
+        ctx.fill();
+        ctx.strokeStyle = hex;
+        ctx.lineWidth = 2.2;
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = '#101b30';
+      ctx.strokeStyle = hex;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(cx, 88, 17, 0, TWO_PI);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 22px Georgia, serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(k + 1), cx, 89);
+
+      // Brass suspension loop tick down to the hanging 3D bell (`y = 108..134`), then clear dark gap (`216..248`) above swallowtail pennant!
+      ctx.strokeStyle = '#eab308';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(cx, 108);
+      ctx.lineTo(cx, 136);
+      ctx.stroke();
+
+      // Compact Heraldic Swallowtail Pennant cleanly separated below the 3D Bell & Clapper!
+      const bw = Math.min(44, slotW * 0.44);
+      const bx0 = cx - bw * 0.5;
+      const by0 = 252;
+      const by1 = crestH - 28;
+      ctx.fillStyle = hex;
+      ctx.beginPath();
+      ctx.moveTo(bx0, by0);
+      ctx.lineTo(bx0 + bw, by0);
+      ctx.lineTo(bx0 + bw, by1);
+      ctx.lineTo(cx, by1 - 20);
+      ctx.lineTo(bx0, by1);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = 'rgba(255,255,255,0.32)';
+      ctx.fillRect(cx - bw * 0.16, by0 + 6, bw * 0.32, Math.max(8, by1 - by0 - 30));
+      ctx.strokeStyle = '#fde68a';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+
+      // Bottom UV swatch (`y = crestH .. H`, i.e. `v = 0 .. 0.24`) for the 3D protruding bell mesh!
+      const sx0 = (k * W) / n;
+      const sw = W / n;
+      const bGrd = ctx.createLinearGradient(sx0, crestH, sx0 + sw, crestH);
+      bGrd.addColorStop(0.0, hex);
+      bGrd.addColorStop(0.45, '#ffffff');
+      bGrd.addColorStop(0.62, hex);
+      bGrd.addColorStop(1.0, hex);
+      ctx.fillStyle = bGrd;
+      ctx.fillRect(sx0, crestH, sw, H - crestH);
+      ctx.fillStyle = '#fde047';
+      ctx.fillRect(sx0, crestH, sw, 12);
+      ctx.fillRect(sx0, H - 14, sw, 14);
+    }
+    return;
+  }
+
+  // Iconic Medallions for `'beam'` (Prism Beam) and `'blocks'` (Stone Plates) Rune Doors
+  ctx.strokeStyle = '#d49b2a';
+  ctx.lineWidth = 8;
+  ctx.strokeRect(12, 12, W - 24, H - 24);
+  ctx.strokeStyle = '#5ef2ff';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(26, 26, W - 52, H - 52);
+
+  if (clue.kind === 'beam') {
+    // Refracting cyan laser zig-zagging off 2 forged-brass prism mirrors into a star crystal!
+    ctx.strokeStyle = '#5ef2ff';
+    ctx.lineWidth = 14;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(96, 396);
+    ctx.lineTo(196, 176);
+    ctx.lineTo(344, 316);
+    ctx.lineTo(404, 124);
+    ctx.stroke();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 6;
+    ctx.stroke();
+
+    for (const [mx, my, ang] of [
+      [196, 176, 0.55],
+      [344, 316, -0.55],
+    ]) {
+      ctx.save();
+      ctx.translate(mx, my);
+      ctx.rotate(ang);
+      ctx.fillStyle = '#eab308';
+      ctx.strokeStyle = '#fffbeb';
+      ctx.lineWidth = 4;
+      ctx.fillRect(-34, -9, 68, 18);
+      ctx.strokeRect(-34, -9, 68, 18);
+      ctx.restore();
+    }
+
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#5ef2ff';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(404, 78);
+    ctx.lineTo(436, 124);
+    ctx.lineTo(404, 170);
+    ctx.lineTo(372, 124);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    // `'blocks'`: Carved golden monolith blocks + cyan push arrows -> glowing pressure plates!
+    for (const [bx, by, tx, ty] of [
+      [104, 138, 318, 138],
+      [318, 294, 104, 294],
+    ]) {
+      ctx.strokeStyle = '#5ef2ff';
+      ctx.fillStyle = '#0c233b';
+      ctx.lineWidth = 6;
+      ctx.fillRect(tx, ty, 88, 88);
+      ctx.strokeRect(tx, ty, 88, 88);
+
+      ctx.fillStyle = '#d49b2a';
+      ctx.strokeStyle = '#fef3c7';
+      ctx.lineWidth = 5;
+      ctx.fillRect(bx, by, 88, 88);
+      ctx.strokeRect(bx, by, 88, 88);
+
+      const xStart = bx < tx ? bx + 104 : bx - 16;
+      const xEnd = bx < tx ? tx - 18 : tx + 106;
+      const midY = by + 44;
+      ctx.strokeStyle = '#67f5ff';
+      ctx.lineWidth = 8;
+      ctx.beginPath();
+      ctx.moveTo(xStart, midY);
+      ctx.lineTo(xEnd, midY);
+      ctx.stroke();
+    }
+  }
+}
+
+function buildSingleClueStele(entry, fh, ownedTextures) {
+  const { clue, colCenter, floorY, colOffset } = entry;
+  const g = new THREE.Group();
+  const cluePhi = colCenter * COL_ANGLE;
+  const clueY = floorY * fh;
+  g.rotation.y = cluePhi;
+  g.position.y = clueY;
+
+  const steleR = TOWER_RADIUS + 0.45;
+  const isBells = clue.kind === 'bells';
+  const bellCount = isBells ? Math.max(3, clue.colors?.length || clue.order?.length || 3) : 0;
+  const steleW = isBells ? Math.max(1.36, bellCount * 0.31 + 0.22) : clue.kind === 'lights' ? 1.2 : 1.12;
+  const steleH = isBells ? 1.08 : clue.kind === 'lights' ? 1.2 : 1.12;
+
+  // Draw Call 1: Merged Vertex-Colored 3D Carved Obsidian Slab + Forged-Brass Frame & Wall Cantilever Brackets!
+  const frameParts = [];
+  const obsidianHex = '#101829';
+  const brassHex = '#e0a628';
+  const ironHex = '#232b3d';
+
+  const slab = new RoundedBoxGeometry(steleW, steleH, 0.085, 1, 0.016);
+  slab.translate(0, 0, steleR - 0.042);
+  frameParts.push(paintGeoVertexColor(slab, obsidianHex));
+
+  const railT = 0.048;
+  const railD = 0.105;
+  const topRail = new THREE.BoxGeometry(steleW + 0.08, railT, railD);
+  topRail.translate(0, steleH * 0.5 + railT * 0.35, steleR - 0.025);
+  const botRail = new THREE.BoxGeometry(steleW + 0.08, railT, railD);
+  botRail.translate(0, -steleH * 0.5 - railT * 0.35, steleR - 0.025);
+  const leftRail = new THREE.BoxGeometry(railT, steleH + 0.04, railD);
+  leftRail.translate(-steleW * 0.5 - railT * 0.35, 0, steleR - 0.025);
+  const rightRail = new THREE.BoxGeometry(railT, steleH + 0.04, railD);
+  rightRail.translate(steleW * 0.5 + railT * 0.35, 0, steleR - 0.025);
+  const pediment = new THREE.ConeGeometry(0.16, 0.13, 4);
+  pediment.rotateY(Math.PI * 0.25);
+  pediment.scale(1.8, 1, 0.55);
+  pediment.translate(0, steleH * 0.5 + 0.095, steleR - 0.015);
+  frameParts.push(
+    paintGeoVertexColor(topRail, brassHex),
+    paintGeoVertexColor(botRail, brassHex),
+    paintGeoVertexColor(leftRail, brassHex),
+    paintGeoVertexColor(rightRail, brassHex),
+    paintGeoVertexColor(pediment, brassHex)
+  );
+
+  // Twin heavy wall-anchor cantilever arms from masonry wall (`TOWER_RADIUS - 0.04`) out to `steleR - 0.05`
+  const armLen = steleR - TOWER_RADIUS + 0.02;
+  const armMidZ = (TOWER_RADIUS - 0.03 + steleR - 0.05) * 0.5;
+  for (const sx of [-steleW * 0.34, steleW * 0.34]) {
+    const arm = new THREE.BoxGeometry(0.065, 0.075, armLen);
+    arm.translate(sx, steleH * 0.28, armMidZ);
+    const strut = new THREE.BoxGeometry(0.05, 0.055, armLen * 1.08);
+    strut.rotateX(0.46);
+    strut.translate(sx, -steleH * 0.16, armMidZ);
+    frameParts.push(paintGeoVertexColor(arm, ironHex), paintGeoVertexColor(strut, brassHex));
+  }
+
+  // If shifted beside a blocking upper ledge (`colOffset !== 0`), connect back toward the Rune Door arch with a brass sign-arm!
+  if (colOffset !== 0) {
+    const reachX = -Math.sign(colOffset) * Math.min(1.35, Math.abs(colOffset) * (TOWER_RADIUS + 0.32) * COL_ANGLE * 0.82);
+    const hArm = new THREE.BoxGeometry(Math.abs(reachX), 0.055, 0.06);
+    hArm.translate(reachX * 0.5, -steleH * 0.38, steleR - 0.06);
+    const dBrace = new THREE.BoxGeometry(Math.abs(reachX) * 0.82, 0.042, 0.048);
+    dBrace.rotateZ(Math.sign(reachX) * 0.42);
+    dBrace.translate(reachX * 0.45, -steleH * 0.56, steleR - 0.08);
+    frameParts.push(paintGeoVertexColor(hArm, brassHex), paintGeoVertexColor(dBrace, brassHex));
+  }
+
+  if (isBells) {
+    const rod = new THREE.CylinderGeometry(0.022, 0.022, steleW * 0.92, 8);
+    rod.rotateZ(Math.PI * 0.5);
+    rod.translate(0, 0.155, steleR + 0.058);
+    frameParts.push(paintGeoVertexColor(rod, brassHex));
+  }
+
+  const frameMesh = new THREE.Mesh(mergeGeometries(frameParts), getClueFrameMaterial());
+  g.add(frameMesh);
+
+  // Draw Call 2: Sculpted 3D Protruding Rune/Bell Relief + High-DPI 512x512 Unlit Emissive Stele Face!
+  const steleTex = createClueSteleCanvasTex(clue, ownedTextures);
+  const faceParts = [];
+  const faceW = steleW - 0.04;
+  const faceH = steleH - 0.04;
+
+  if (isBells) {
+    // Crest backing plane mapped to top 76% (`v = 0.24..1.0`) of `steleTex`
+    const backing = remapGeoUvRect(new THREE.PlaneGeometry(faceW, faceH), 0, 0.24, 1, 1);
+    backing.translate(0, 0, steleR + 0.004);
+    faceParts.push(backing);
+
+    // 3D Flared Miniature Colored Bells (true flared bell lip + shoulder dome + hanging golden clapper) in strict Left-to-Right strike order!
+    const bellProf = [
+      new THREE.Vector2(0.0, -0.095),
+      new THREE.Vector2(0.108, -0.095),
+      new THREE.Vector2(0.114, -0.072),
+      new THREE.Vector2(0.078, -0.025),
+      new THREE.Vector2(0.062, 0.045),
+      new THREE.Vector2(0.044, 0.082),
+      new THREE.Vector2(0.0, 0.092),
+    ];
+    const padFrac = 28 / 512;
+    const usableW = faceW * (1 - padFrac * 2);
+    const slotW = usableW / bellCount;
+    for (let k = 0; k < bellCount; k++) {
+      const bx = -usableW * 0.5 + slotW * (k + 0.5);
+      const u0 = (k + 0.08) / bellCount;
+      const u1 = (k + 0.92) / bellCount;
+
+      const bellBody = remapGeoUvRect(new THREE.LatheGeometry(bellProf, 12), u0, 0.01, u1, 0.23);
+      bellBody.translate(bx, 0.065, steleR + 0.066);
+      const shackle = remapGeoUvRect(new THREE.TorusGeometry(0.022, 0.007, 5, 10), u0, 0.005, u1, 0.02);
+      shackle.translate(bx, 0.162, steleR + 0.064);
+      const clapper = remapGeoUvRect(new THREE.SphereGeometry(0.026, 7, 5), u0, 0.005, u1, 0.02);
+      clapper.translate(bx, -0.045, steleR + 0.068);
+      faceParts.push(bellBody, shackle, clapper);
+    }
+  } else {
+    const backing = new THREE.PlaneGeometry(faceW, faceH);
+    backing.translate(0, 0, steleR + 0.004);
+    faceParts.push(backing);
+
+    if (clue.kind === 'lights' && clue.n && Array.isArray(clue.pattern)) {
+      // Extrude every LIT rune cell (`pattern[r * n + c] === 1`) +3.2cm forward in real 3D!
+      const n = clue.n;
+      const padFrac = 34 / 512;
+      const stepFrac = (1 - padFrac * 2) / n;
+      const gapFrac = (n >= 4 ? 10 : 13) / 512;
+      const cellW = (stepFrac - gapFrac) * faceW;
+      const cellH = (stepFrac - gapFrac) * faceH;
+
+      for (let r = 0; r < n; r++) {
+        for (let c = 0; c < n; c++) {
+          if (!clue.pattern[r * n + c]) continue;
+          const u0 = padFrac + c * stepFrac + gapFrac * 0.5;
+          const u1 = padFrac + (c + 1) * stepFrac - gapFrac * 0.5;
+          const vTop = 1 - (padFrac + r * stepFrac + gapFrac * 0.5);
+          const vBot = 1 - (padFrac + (r + 1) * stepFrac - gapFrac * 0.5);
+
+          const cx = ((u0 + u1) * 0.5 - 0.5) * faceW;
+          const cy = ((vBot + vTop) * 0.5 - 0.5) * faceH;
+          const raised = remapGeoUvRect(new THREE.BoxGeometry(cellW, cellH, 0.032), u0, vBot, u1, vTop);
+          raised.translate(cx, cy, steleR + 0.02);
+          faceParts.push(raised);
+        }
+      }
+    }
+  }
+
+  const faceMat = new THREE.MeshBasicMaterial({
+    map: steleTex,
+    color: '#ffffff',
+    toneMapped: false,
+    fog: false,
+  });
+  const faceMesh = new THREE.Mesh(mergeGeometries(faceParts), faceMat);
+  g.add(faceMesh);
 
   return {
     group: g,
     phi: cluePhi,
     y: clueY,
-    update: (t) => {
-      for (let i = 0; i < anims.length; i++) anims[i](t);
+    doorId: entry.doorId,
+    doorCol: entry.doorCol,
+    doorFloor: entry.doorFloor,
+    faceMat,
+  };
+}
+
+function buildAllTowerClueSteles(tower, fh, isRealOrig, group, cullableNodes, ownedTextures) {
+  const container = new THREE.Group();
+  group.add(container);
+
+  let builtList = [];
+  let activeSig = '';
+
+  const rebuildFromTower = (liveTower) => {
+    while (container.children.length > 0) {
+      const child = container.children[0];
+      container.remove(child);
+      child.traverse((o) => {
+        if (o.geometry && !o.geometry.userData?.shared) o.geometry.dispose();
+        if (o.material && o.material.map && !o.material.map.userData?.shared) {
+          o.material.map.dispose();
+        }
+      });
+    }
+    for (let i = cullableNodes.length - 1; i >= 0; i--) {
+      if (cullableNodes[i].isClueStele) cullableNodes.splice(i, 1);
+    }
+
+    const entries = collectTowerClueEntries(liveTower, isRealOrig);
+    activeSig = computeClueEntriesSignature(entries);
+    builtList = [];
+    for (let i = 0; i < entries.length; i++) {
+      const built = buildSingleClueStele(entries[i], fh, ownedTextures);
+      container.add(built.group);
+      cullableNodes.push({
+        node: built.group,
+        phi: built.phi,
+        y: built.y,
+        isClueStele: true,
+      });
+      builtList.push(built);
+    }
+  };
+
+  rebuildFromTower(tower);
+
+  return {
+    update: (t, state, liveTower) => {
+      // Hot-sync if `game.js` / `levels.js` attached or mutated `door.clue` / `tower.clue` after build!
+      if (liveTower && (liveTower.clue || liveTower.runeDoors || liveTower.doors)) {
+        const checkEntries = collectTowerClueEntries(liveTower, isRealOrig);
+        const nextSig = computeClueEntriesSignature(checkEntries);
+        if (nextSig !== activeSig) {
+          rebuildFromTower(liveTower);
+        }
+      }
+
+      const liveDoors = state?.doors || liveTower?.doors || [];
+      for (let i = 0; i < builtList.length; i++) {
+        const b = builtList[i];
+        let solved = false;
+        for (let dIdx = 0; dIdx < liveDoors.length; dIdx++) {
+          const ld = liveDoors[dIdx];
+          if ((b.doorId && ld.id === b.doorId) || (ld.col === b.doorCol && ld.floor === b.doorFloor && (ld.isRune || ld.rune))) {
+            solved = Boolean(ld.solved);
+            break;
+          }
+        }
+        if (solved) {
+          b.faceMat.color.setRGB(0.76, 0.96, 0.86);
+        } else {
+          const pulse = 0.94 + 0.06 * Math.sin(t * 2.8 + i);
+          b.faceMat.color.setScalar(pulse);
+        }
+      }
     },
   };
 }
@@ -3629,7 +4281,16 @@ export function buildDetailedTowerGroup(tower, era = 'reboot', glbAssets = {}) {
   const bandSpanY = isRealOrig ? 15 * fh : 7 * fh;
   const cullableNodes = [];
   const totalH = (tower?.floors || 18) * fh;
-  const wallAoTex = buildWallAoLightTexture(tower, fh, totalH, isOrig);
+  const initialClueEntries = collectTowerClueEntries(tower, isRealOrig);
+  const pipeAvoidHoles = holes.concat(
+    initialClueEntries.map((ce) => ({
+      a: ce.colCenter * COL_ANGLE,
+      w: COL_ANGLE * 0.65,
+      y0: (ce.floorY - 0.72) * fh,
+      y1: (ce.floorY + 0.72) * fh,
+    }))
+  );
+  const wallAoTex = buildWallAoLightTexture(tower, fh, totalH, isOrig, initialClueEntries);
   const ownedTextures = wallAoTex && !wallAoTex.userData?.shared ? [wallAoTex] : [];
 
   const bodyInfo = buildTowerMasonryAndAccents(
@@ -3644,17 +4305,13 @@ export function buildDetailedTowerGroup(tower, era = 'reboot', glbAssets = {}) {
     stoneMats,
     bandedMeshes,
     bandSpanY,
-    wallAoTex
+    wallAoTex,
+    pipeAvoidHoles
   );
 
-  // 2. Exterior Architectural Clues (`tower.clue` for Secret Rune Chambers)
-  let clueUpdater = null;
-  if (tower?.clue) {
-    const builtClue = buildTowerClue(tower.clue, fh, stoneMats);
-    group.add(builtClue.group);
-    clueUpdater = builtClue.update;
-    cullableNodes.push({ node: builtClue.group, phi: builtClue.phi, y: builtClue.y });
-  }
+  // 2. Exterior Rune-Door Clue Steles (`tower.runeDoors`, `door.clue` & `tower.clue` above every Rune Door!)
+  const builtClues = buildAllTowerClueSteles(tower, fh, isRealOrig, group, cullableNodes, ownedTextures);
+  const clueUpdater = builtClues.update;
 
   // 3. Doors: Thick Ashlar Lintels/Jambs, Soft Mist-Lit Passages, Protruding Barrel `sparkArch` w/ 90° Manifold Pipes
   const mistSprites = [];
@@ -5093,8 +5750,8 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
   const banded = cachedTower.bandedMeshes;
   if (banded) {
     // Matches renderer's widened Reboot camera (FOV 52, camZ ~19.8 => ~±8.2m visible on the tower face)
-    const minVisY = camY - 8.3;
-    const maxVisY = camY + 8.7;
+    const minVisY = camY - (isOrig ? 8.3 : 6.5);
+    const maxVisY = camY + (isOrig ? 8.7 : 6.5);
     for (let i = 0; i < banded.length; i++) {
       const bm = banded[i];
       const ud = bm.userData;
@@ -5112,7 +5769,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
       const cn = cullNodes[i];
       cn.node.visible =
         fullTowerView ||
-        (Math.cos(cn.phi - effCamAngle) >= -0.28 && Math.abs(cn.y - camY) <= 9.5);
+        (Math.cos(cn.phi - effCamAngle) >= -0.28 && Math.abs(cn.y - camY) <= 6.5);
     }
   }
 
@@ -5162,7 +5819,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
 
   // 3. Summit Crown Brazier Flames & Portal Vortex Uniforms
   if (cachedTower.crownFlames) {
-    const showCrownFlames = fullTowerView || Math.abs(cachedTower.totalH + 0.5 - camY) <= 9.5;
+    const showCrownFlames = fullTowerView || Math.abs(cachedTower.totalH + 0.5 - camY) <= 6.5;
     for (let i = 0; i < cachedTower.crownFlames.length; i++) {
       const fl = cachedTower.crownFlames[i];
       fl.visible = showCrownFlames;
@@ -5179,9 +5836,9 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
     }
   }
 
-  // 4. Exterior Rune Chamber Clue Plaque Animation
+  // 4. Exterior Rune Chamber Clue Plaque Animation & Dynamic Clue Sync
   if (cachedTower.clueUpdater) {
-    cachedTower.clueUpdater(time);
+    cachedTower.clueUpdater(time, state, tower);
   }
 
   // 5. Secret Rune Doors (`solved` dim vs unsolved pulse) & Summit/Vault Rings
@@ -5303,7 +5960,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
 
     const inView =
       fullTowerView ||
-      (Math.cos(ud.phi - effCamAngle) >= -0.28 && Math.abs(ud.baseY - camY) <= 9.5);
+      (Math.cos(ud.phi - effCamAngle) >= -0.28 && Math.abs(ud.baseY - camY) <= 6.5);
     node.visible = inView;
     if (!inView) continue;
 
@@ -5351,11 +6008,11 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
     pod.position.y = podY;
 
     const onFront = fullTowerView || Math.cos(pUd.phi - effCamAngle) >= -0.28;
-    const podInAlt = fullTowerView || Math.abs(podY + 0.45 - camY) <= 10.2;
+    const podInAlt = fullTowerView || Math.abs(podY + 0.45 - camY) <= 7.2;
     pod.visible = onFront && podInAlt;
 
     if (pUd.cablesMesh) {
-      const cablesInAlt = fullTowerView || (podY <= camY + 9.5 && pUd.maxY >= camY - 9.5);
+      const cablesInAlt = fullTowerView || (podY <= camY + 6.5 && pUd.maxY >= camY - 6.5);
       pUd.cablesMesh.visible = onFront && cablesInAlt;
       if (pUd.cablesMesh.visible && pUd.update) pUd.update();
     } else if (pod.visible && pUd.update) {
@@ -5376,7 +6033,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
     const sy = sw.floor * fh;
     const swInView =
       fullTowerView ||
-      (Math.cos(sPhi - effCamAngle) >= -0.28 && Math.abs(sy - camY) <= 9.5);
+      (Math.cos(sPhi - effCamAngle) >= -0.28 && Math.abs(sy - camY) <= 6.5);
     sm.visible = swInView;
     if (!swInView) continue;
 
@@ -5407,7 +6064,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
     const wy = wb.floor * fh;
     const wbVis =
       fullTowerView ||
-      (Math.cos(wPhi - effCamAngle) >= -0.28 && Math.abs(wy - camY) <= 9.5);
+      (Math.cos(wPhi - effCamAngle) >= -0.28 && Math.abs(wy - camY) <= 6.5);
     wbProp.visible = wbVis;
     if (wbVis) {
       const wr = TOWER_RADIUS + 0.36;
@@ -5445,7 +6102,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
     const cy = chest.floor * fh;
     const chestVis =
       fullTowerView ||
-      (Math.cos(cPhi - effCamAngle) >= -0.28 && Math.abs(cy - camY) <= 9.5);
+      (Math.cos(cPhi - effCamAngle) >= -0.28 && Math.abs(cy - camY) <= 6.5);
     chestProp.visible = chestVis;
     if (chestVis) {
       const cr = TOWER_RADIUS + 0.36;

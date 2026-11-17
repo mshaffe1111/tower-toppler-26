@@ -2145,7 +2145,24 @@ export class VaultRenderer {
     });
     this.alignLaser = new THREE.Mesh(new THREE.PlaneGeometry(0.085, 1.82), this.alignLaserMat);
     this.alignLaser.position.set(0, 1.78, 0.30);
-    masterBridge.add(spine, this.masterCrystal, this.alignLaser);
+
+    // Unmistakable 12 o'clock Target Lock Gate Chevrons framing the sweet-spot alignment corridor!
+    const gateChevParts = [];
+    for (const sx of [-1, 1]) {
+      const bracket = new THREE.BoxGeometry(0.055, 1.48, 0.08);
+      bracket.translate(sx * 0.26, 1.66, 0.27);
+      gateChevParts.push(bracket);
+      for (const ry of RING_RADII) {
+        const ptr = new THREE.ConeGeometry(0.068, 0.14, 4);
+        ptr.rotateZ(sx * Math.PI * 0.5);
+        ptr.translate(sx * 0.21, ry, 0.29);
+        gateChevParts.push(ptr);
+      }
+    }
+    const mGateChev = mergeGeometries(gateChevParts, false);
+    for (const g of gateChevParts) g.dispose();
+    const gateChevMesh = new THREE.Mesh(mGateChev, this.masterCrystalMat);
+    masterBridge.add(spine, this.masterCrystal, this.alignLaser, gateChevMesh);
 
     // Instanced 3D Sliding Brass Locking Plunger Bolts (2 draw calls total instead of 6!)
     this.lockBoltShaftInst = new THREE.InstancedMesh(
@@ -2167,10 +2184,11 @@ export class VaultRenderer {
     this.astrolabeRoot.add(masterBridge);
 
     // 5. The 3 Concentric 3D Gleaming Burnished-Gold & Faceted-Amethyst Astrolabe Tumbler Rings!
-    const defaultTols = [0.38, 0.35, 0.32];
+    // Exact 1:1 parity with `src/game.js` `_createVaultRings()` (#289: 0.42 / 0.38 / 0.35 rad tolerances!)
+    const defaultTols = [0.42, 0.38, 0.35];
     const tickGeo = new THREE.BoxGeometry(0.042, 0.12, 0.052);
-    const caliperJawGeo = new THREE.BoxGeometry(0.095, 0.30, 0.26);
-    const caliperGemGeo = new THREE.OctahedronGeometry(0.105, 0);
+    const caliperJawGeo = new THREE.BoxGeometry(0.11, 0.34, 0.28);
+    const caliperGemGeo = new THREE.OctahedronGeometry(0.118, 0);
 
     this.ringObjs = RING_RADII.map((rad, rIdx) => {
       const rg = new THREE.Group();
@@ -2240,7 +2258,7 @@ export class VaultRenderer {
         }
       }
       const notchMesh = new THREE.Mesh(
-        buildBeveledNotchArcGeo(rad, 0.138, 0.11, notchSpan),
+        buildBeveledNotchArcGeo(rad, 0.176, 0.148, notchSpan),
         notchMat
       );
       rg.add(notchMesh);
@@ -2278,7 +2296,16 @@ export class VaultRenderer {
         rg.add(calGemMesh);
       }
 
-      rg.userData = { chassisMat, runeGlowMat, notchMat, rad, obsidianMesh, calGemMesh };
+      rg.userData = {
+        chassisMat,
+        runeGlowMat,
+        notchMat,
+        notchMesh,
+        builtTol: defaultTols[rIdx],
+        rad,
+        obsidianMesh,
+        calGemMesh,
+      };
       this.astrolabeRoot.add(rg);
       return rg;
     });
@@ -2659,6 +2686,7 @@ export class VaultRenderer {
 
     this.camera.aspect = Math.max(0.35, w / h);
     this.camera.updateProjectionMatrix();
+    this._camInitDone = false;
 
     this.oCam.left = 0;
     this.oCam.right = w;
@@ -2711,7 +2739,14 @@ export class VaultRenderer {
     const status = vault.status || 'playing';
     const remSec = Math.max(0, vault.timer || 0);
     const secTenths = Math.ceil(remSec * 10);
-    const hudW = Math.min(352, Math.max(236, Math.floor(this.width - 28)));
+    const asp = this.width / Math.max(1, this.height);
+    const isWideLand = asp > 1.38;
+    const isTabletLand = asp > 1.05 && !isWideLand;
+    const hudW = isWideLand
+      ? clamp(Math.round(this.width * 0.25), 166, 232)
+      : isTabletLand
+      ? 288
+      : clamp(Math.floor(this.width - 28), 224, 348);
     const hudH = Math.round(hudW * (72 / 512));
     const sweetFlag = inSweetSpot && status === 'playing' ? 1 : 0;
     const key = `${hudW}|${lockedCount}|${status}|${secTenths}|${sweetFlag}`;
@@ -2788,7 +2823,17 @@ export class VaultRenderer {
     }
 
     this.hudMesh.scale.set(hudW, hudH, 1);
-    this.hudMesh.position.set(this.width * 0.5, -(HUD_TOP_OFFSET + hudH * 0.5), 0);
+    if (isWideLand) {
+      // Dock in Left Chamber Gutter (`x <= 27%`) so the centered 73% vmin Astrolabe Rings have 0.0px HUD overlap!
+      const gx = 14 + hudW * 0.5;
+      const gy = clamp(Math.round(this.height * 0.42), 146, 205);
+      this.hudMesh.position.set(gx, -gy, 0);
+      this._hudBottomPx = 52;
+    } else {
+      const topOff = isTabletLand ? 52 : this.width <= 405 ? 78 : HUD_TOP_OFFSET - 6;
+      this.hudMesh.position.set(this.width * 0.5, -(topOff + hudH * 0.5), 0);
+      this._hudBottomPx = topOff + hudH;
+    }
   }
 
   _popupTex(text, color) {
@@ -2862,10 +2907,13 @@ export class VaultRenderer {
       }
       const t = 1 - clamp((pop.life || 0) / Math.max(0.001, pop.maxLife || 1), 0, 1);
       const scalePop = t < 0.16 ? easeOutBack(t / 0.16) * 1.12 : 1.12 - Math.min(0.12, (t - 0.16) * 0.9);
-      const hgt = 22 * Math.max(0.1, scalePop);
+      const baseH = this.height <= 450 ? 18 : 22;
+      const hgt = baseH * Math.max(0.1, scalePop);
       const wid = hgt * e.aspect;
-      const px = clamp(pop.x, wid * 0.5 + 6, this.width - wid * 0.5 - 6);
-      const py = -(pop.y - t * 26);
+      const px = clamp(pop.x, wid * 0.5 + 8, this.width - wid * 0.5 - 8);
+      const minTopY = (this._hudBottomPx || 86) + hgt * 0.5 + 8;
+      const maxBotY = Math.max(minTopY + 12, this.height * 0.44);
+      const py = -clamp(pop.y - t * 24, minTopY, maxBotY);
       m.scale.set(wid, hgt, 1);
       m.position.set(px, py, 1);
       m.material.opacity = clamp(1 - t * t, 0, 1);
@@ -2925,29 +2973,24 @@ export class VaultRenderer {
     }
     this._strikeFlash = Math.max(0, this._strikeFlash - dt * 3.8);
 
-    // 1. Aspect-Safe Dramatic Camera Push-In (`0 -> 1 -> 2 -> won`) + Subtle Orbital Parallax!
-    // Ensures 100% horizontal visibility of the outer housing + twin fire braziers on 430x932 portrait
-    // AND rich vertical framing including the rippling subterranean water pool!
+    // 1. Exact `~73%–77%` of `vmin` Centered Framing Across All Phones & Tablets (`0 -> 1 -> 2 -> won`)!
+    // Outer rotating Astrolabe Ring diameter = 4.80m (`r = 2.22 + 0.18`); `wantHalfVmin = 3.28` -> `4.80 / 6.56 = 73.2%` of `vmin`!
     const tanHalf = Math.tan(this.camera.fov * 0.5 * DEG);
     const aspect = Math.max(0.38, this.camera.aspect);
-    const reqHalfW =
+    const isLand = aspect > 1.05;
+    const wantHalfVmin =
       status === 'won'
-        ? 1.98
+        ? 2.36
         : lockedCount === 0
-        ? 3.24
+        ? 3.28
         : lockedCount === 1
-        ? 2.86
-        : 2.34;
-    const reqHalfH =
-      status === 'won'
-        ? 2.28
-        : lockedCount === 0
-        ? 3.65
-        : lockedCount === 1
-        ? 3.18
-        : 2.70;
-    const targetZ = Math.max(reqHalfH / tanHalf, reqHalfW / (tanHalf * aspect));
-    const targetY = status === 'won' ? 0.12 : -0.18 + lockedCount * 0.16;
+        ? 3.10
+        : 2.94;
+    const targetZ = wantHalfVmin / (tanHalf * Math.min(1.0, aspect));
+    const targetY = isLand
+      ? (status === 'won' ? 0.16 : 0.20)
+      : (status === 'won' ? 0.10 : -0.10 + lockedCount * 0.08);
+    const lookY = isLand ? 0.22 : (this._camY * 0.35 - 0.08);
 
     if (!this._camInitDone) {
       this._camZ = targetZ;
@@ -2958,10 +3001,10 @@ export class VaultRenderer {
       this._camY += (targetY - this._camY) * Math.min(1, dt * 6.2);
     }
 
-    const orbitX = Math.sin(time * 0.72) * (0.14 + lockedCount * 0.06);
-    const breatheY = Math.cos(time * 0.58) * 0.05;
+    const orbitX = Math.sin(time * 0.72) * (isLand ? 0.10 : 0.14 + lockedCount * 0.05);
+    const breatheY = Math.cos(time * 0.58) * 0.04;
     this.camera.position.set(orbitX + shake.x, this._camY + breatheY + shake.y, this._camZ);
-    this.camera.lookAt(0, this._camY * 0.35 - 0.12, 0);
+    this.camera.lookAt(0, lookY, 0);
     this.camera.updateMatrixWorld();
 
     // 2. Animate Flickering `#ffaa33` Volumetric Fire Sconces (`sanctum_brazier`) & Water Uniforms
@@ -2990,12 +3033,19 @@ export class VaultRenderer {
       const delta = wrapAngle((rState.angle || 0) - (rState.targetAngle || 0));
       ro.rotation.z = delta;
 
-      const tol = rState.tolerance || 0.35;
+      const tol = rState.tolerance || (i === 0 ? 0.42 : i === 1 ? 0.38 : 0.35);
       const isActive = i === vault.activeRing && status === 'playing';
       const inZone = Math.abs(delta) <= tol;
       if (isActive && inZone) activeInSweetSpot = true;
 
       const ud = ro.userData;
+      // Dynamically sync 3D sweet-spot notch arc geometry if runtime tolerance ever differs from baked tolerance
+      if (ud.notchMesh && Math.abs(tol - ud.builtTol) > 0.005) {
+        ud.notchMesh.geometry.dispose();
+        ud.notchMesh.geometry = buildBeveledNotchArcGeo(ud.rad, 0.176, 0.148, tol * 2);
+        ud.builtTol = tol;
+      }
+
       if (status === 'failed') {
         ud.chassisMat.color.copy(this._colBrassFailed);
         ud.notchMat.color.copy(this._colNotchFailed);
@@ -3008,7 +3058,7 @@ export class VaultRenderer {
         ud.chassisMat.color.copy(this._colBrassLocked);
         ud.notchMat.color.copy(this._colNotchLocked);
         ud.notchMat.emissive.copy(this._colEmLocked);
-        ud.notchMat.emissiveIntensity = 1.08;
+        ud.notchMat.emissiveIntensity = 1.12;
         ud.runeGlowMat.color.copy(this._colGold);
         ud.runeGlowMat.emissive.copy(this._colGoldEm);
         ud.runeGlowMat.emissiveIntensity = 0.82 + 0.15 * Math.sin(time * 6 - i);
@@ -3017,14 +3067,14 @@ export class VaultRenderer {
         if (inZone) {
           ud.notchMat.color.copy(this._colNotchSweet);
           ud.notchMat.emissive.copy(this._colEmSweet);
-          ud.notchMat.emissiveIntensity = 1.45;
+          ud.notchMat.emissiveIntensity = 1.78 + 0.24 * Math.sin(time * 24);
           ud.runeGlowMat.color.copy(this._colCyan);
           ud.runeGlowMat.emissive.copy(this._colCyanEm);
-          ud.runeGlowMat.emissiveIntensity = 0.98;
+          ud.runeGlowMat.emissiveIntensity = 1.05;
         } else {
           ud.notchMat.color.copy(this._colNotchActive);
           ud.notchMat.emissive.copy(this._colEmActive);
-          ud.notchMat.emissiveIntensity = 1.05;
+          ud.notchMat.emissiveIntensity = 1.32 + 0.16 * Math.sin(time * 10);
           ud.runeGlowMat.color.copy(this._colAmethyst);
           ud.runeGlowMat.emissive.copy(this._colAmethystEm);
           ud.runeGlowMat.emissiveIntensity = 0.68;
@@ -3033,10 +3083,10 @@ export class VaultRenderer {
         ud.chassisMat.color.copy(this._colBrassDormant);
         ud.notchMat.color.copy(this._colNotchDormant);
         ud.notchMat.emissive.copy(this._colEmDormant);
-        ud.notchMat.emissiveIntensity = 0.35;
+        ud.notchMat.emissiveIntensity = 0.22;
         ud.runeGlowMat.color.copy(this._colAmethyst);
         ud.runeGlowMat.emissive.copy(this._colAmethystEm);
-        ud.runeGlowMat.emissiveIntensity = 0.38;
+        ud.runeGlowMat.emissiveIntensity = 0.34;
       }
 
       // Animate mechanical brass deadbolt plunger clamping onto locked rings!
@@ -3235,12 +3285,13 @@ export class VaultRenderer {
       spG.attributes.aAlpha.needsUpdate = true;
     }
 
-    // 7. Frustum-Safe 3D Strike Resonator Crystals (anchored cleanly in front of stone steps at z = 1.48!)
+    // 7. Frustum-Safe 3D Strike Resonator Crystals (Right Gutter vertical stack in Landscape; Stone Steps row in Portrait!)
     const distAtGemPlane = Math.max(3.5, this._camZ - 1.48);
     const halfHPlane = tanHalf * distAtGemPlane;
-    const gemScale = clamp(distAtGemPlane / 11.2, 0.58, 1.02);
-    const gemY = clamp(this._camY * 0.45 - halfHPlane * 0.48, -2.38, -1.55);
-    const spacing = maxStrikes > 3 ? 0.44 : 0.56;
+    const halfWPlane = halfHPlane * aspect;
+    const gemScale = isLand ? clamp(distAtGemPlane / 9.2, 0.56, 0.78) : clamp(distAtGemPlane / 11.8, 0.56, 0.96);
+    const gemY = clamp(lookY - halfHPlane * 0.44, -2.44, -2.02);
+    const spacing = maxStrikes > 3 ? 0.42 : 0.54;
 
     let bezelCount = 0;
     for (let s = 0; s < MAX_STRIKE_GEMS; s++) {
@@ -3251,13 +3302,15 @@ export class VaultRenderer {
       }
       gem.visible = true;
       const struck = s < strikes;
-      const offset = (s - (maxStrikes - 1) * 0.5) * spacing * gemScale;
-      gem.position.set(offset, gemY, 1.48);
+      const idxCentered = s - (maxStrikes - 1) * 0.5;
+      const gx = isLand ? clamp(halfWPlane * 0.74, 2.25, 3.85) : idxCentered * spacing * gemScale;
+      const gy = isLand ? 0.24 - idxCentered * spacing * gemScale : gemY;
+      gem.position.set(gx, gy, 1.48);
       gem.scale.setScalar(gemScale);
       gem.userData.crystal.rotation.y = time * 2.1 + s * 0.8;
       gem.userData.mat.color.copy(struck ? this._colCrimson : this._colCyan);
       gem.userData.mat.emissive.copy(struck ? this._colCrimsonEm : this._colCyanEm);
-      this._gearDummy.position.set(offset, gemY, 1.48);
+      this._gearDummy.position.set(gx, gy, 1.48);
       this._gearDummy.rotation.set(0, 0, 0);
       this._gearDummy.scale.setScalar(gemScale);
       this._gearDummy.updateMatrix();

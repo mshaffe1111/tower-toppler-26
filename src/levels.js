@@ -913,6 +913,174 @@ function sanitizeEnemySpawns(enemies, doors, elevators, spawn, ledges, totalFloo
   });
 }
 
+// ============================================================================
+// DETERMINISTIC EXTERIOR RUNE-DOOR CLUE DERIVATION (1:1 WITH src/puzzleRoom.js)
+// ============================================================================
+
+const RUNE_PUZZLE_TYPES = new Set(['lights', 'bells', 'beam', 'blocks']);
+const RUNE_BELL_COLORS = ['#ff4f64', '#ffb02e', '#3fe07e', '#3ab0ff', '#c77dff'];
+const RUNE_BELL_COLOR_NAMES = ['RED', 'GOLD', 'GREEN', 'BLUE', 'VIOLET'];
+
+function hashPuzzleSeed(seed, salt) {
+  let h = 2166136261 >>> 0;
+  const s = `${seed}|${salt}`;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h >>> 0;
+}
+
+function shuffleWithRng(rng, arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const t = arr[i];
+    arr[i] = arr[j];
+    arr[j] = t;
+  }
+  return arr;
+}
+
+function applyRuneLightsPress(lit, n, idx) {
+  const x = idx % n;
+  const y = (idx / n) | 0;
+  lit[idx] ^= 1;
+  if (x > 0) lit[idx - 1] ^= 1;
+  if (x < n - 1) lit[idx + 1] ^= 1;
+  if (y > 0) lit[idx - n] ^= 1;
+  if (y < n - 1) lit[idx + n] ^= 1;
+  return lit;
+}
+
+/**
+ * Deterministically derives the exact exterior architectural clue for a Rune Door
+ * using the bit-for-bit identical PRNG & generator rules as `makePuzzle` in `src/puzzleRoom.js`.
+ */
+export function deriveRuneDoorClue({
+  puzzleType = 'lights',
+  puzzleSeed = 10101,
+  puzzleDifficulty = 0.4,
+  col = 0,
+  floor = 0,
+  clueColOffset = 0,
+  doorId = null
+} = {}) {
+  const type = RUNE_PUZZLE_TYPES.has(puzzleType) ? puzzleType : 'lights';
+  const d = Math.max(0, Math.min(1, Number(puzzleDifficulty) || 0));
+  const rng = mulberry32(hashPuzzleSeed(puzzleSeed, type));
+  const dc = wrapCol(col);
+  const df = Math.round(Number(floor) || 0);
+
+  if (type === 'lights') {
+    const n = d < 0.45 ? 3 : 4;
+    const N = n * n;
+    const k = Math.max(2, Math.min(N - 2, 2 + Math.round(d * 5)));
+    let target = new Array(N).fill(0);
+    let presses = [];
+    for (let attempt = 0; attempt < 200; attempt++) {
+      target = new Array(N).fill(0);
+      for (let y = 0; y < n; y++) {
+        for (let x = 0; x < Math.ceil(n / 2); x++) {
+          const on = rng() < 0.5 ? 1 : 0;
+          target[y * n + x] = on;
+          target[y * n + (n - 1 - x)] = on;
+        }
+      }
+      const litCount = target.reduce((a, b) => a + b, 0);
+      if (litCount < Math.ceil(N * 0.3) || litCount > Math.floor(N * 0.65)) continue;
+      const cells = shuffleWithRng(rng, [...Array(N).keys()]);
+      presses = cells.slice(0, k).sort((a, b) => a - b);
+      const start = target.slice();
+      for (const p of presses) applyRuneLightsPress(start, n, p);
+      let diff = 0;
+      for (let i = 0; i < N; i++) diff += start[i] !== target[i] ? 1 : 0;
+      if (diff < 3) continue;
+      break;
+    }
+    const parMoves = Math.max(6, (presses.length || 3) * 4 + 4);
+    return {
+      kind: 'lights',
+      type: 'lights',
+      n,
+      pattern: target.slice(),
+      col: dc,
+      floor: df,
+      clueColOffset,
+      ...(doorId ? { doorId: String(doorId) } : {}),
+      seed: puzzleSeed,
+      difficulty: d,
+      parMoves
+    };
+  }
+
+  if (type === 'bells') {
+    const count = Math.max(3, Math.min(5, 3 + Math.round(d * 2.2)));
+    const bellColors = shuffleWithRng(rng, [0, 1, 2, 3, 4]).slice(0, count);
+    const order = shuffleWithRng(rng, [...Array(count).keys()]);
+    if (d > 0.65) {
+      let extra;
+      do extra = Math.floor(rng() * count);
+      while (extra === order[order.length - 1]);
+      order.push(extra);
+    }
+    const colorOrder = order.map((b) => bellColors[b]);
+    const hexColors = colorOrder.map((ci) => RUNE_BELL_COLORS[ci]);
+    const colorNames = colorOrder.map((ci) => RUNE_BELL_COLOR_NAMES[ci]);
+    const parMoves = Math.max(8, (order.length || 3) * 4 + 4);
+    return {
+      kind: 'bells',
+      type: 'bells',
+      order: colorOrder,
+      colors: hexColors,
+      bellIndices: order.slice(),
+      colorNames,
+      col: dc,
+      floor: df,
+      clueColOffset,
+      ...(doorId ? { doorId: String(doorId) } : {}),
+      seed: puzzleSeed,
+      difficulty: d,
+      parMoves
+    };
+  }
+
+  return {
+    kind: type,
+    type,
+    col: dc,
+    floor: df,
+    clueColOffset,
+    ...(doorId ? { doorId: String(doorId) } : {}),
+    seed: puzzleSeed,
+    difficulty: d
+  };
+}
+
+function resolveClueColOffset(dc, df, sortedLedges, normElevators) {
+  const isBlockedAt = (testCol) => {
+    const tc = wrapCol(testCol);
+    for (const el of normElevators) {
+      if (el.col === tc && el.minFloor <= df + 2.5 && el.maxFloor >= df + 1.2) {
+        return true;
+      }
+    }
+    for (const l of sortedLedges) {
+      if (l.col !== tc) continue;
+      if (l.type === 'pillar' || l.type === 'box') {
+        const h = Math.max(1, Number(l.h) || 1);
+        if (l.floor < df + 2.5 && l.floor + h > df + 1.2) return true;
+      } else if (l.floor >= df + 1 && l.floor <= df + 2) {
+        return true;
+      }
+    }
+    return false;
+  };
+  if (!isBlockedAt(dc)) return 0;
+  if (!isBlockedAt(dc + 1)) return 1;
+  if (!isBlockedAt(dc - 1)) return -1;
+  return 0;
+}
+
 function finalizeTower({
   id,
   key,
@@ -1007,6 +1175,27 @@ function finalizeTower({
     const isExit = Boolean(d.isExit);
     const isVault = Boolean(d.isVault);
     const isRune = Boolean(d.isRune);
+    const resolvedPuzzleType = isRune
+      ? RUNE_PUZZLE_TYPES.has(d.puzzleType)
+        ? String(d.puzzleType)
+        : 'lights'
+      : d.puzzleType
+      ? String(d.puzzleType)
+      : undefined;
+    const resolvedPuzzleSeed = isRune
+      ? d.puzzleSeed !== undefined && d.puzzleSeed !== null
+        ? Number(d.puzzleSeed) >>> 0 || 10101
+        : (((Number(id) || 1) * 2654435761 + dc * 7919 + df * 104729) >>> 0) || 10101
+      : d.puzzleSeed !== undefined && d.puzzleSeed !== null
+      ? Number(d.puzzleSeed)
+      : undefined;
+    const resolvedPuzzleDifficulty = isRune
+      ? d.puzzleDifficulty !== undefined && d.puzzleDifficulty !== null
+        ? Math.max(0, Math.min(1, Number(d.puzzleDifficulty)))
+        : casual
+        ? 0.3
+        : 0.4
+      : undefined;
     return {
       id: String(d.id),
       col: dc,
@@ -1016,8 +1205,10 @@ function finalizeTower({
       isVault,
       isRune,
       decoy: Boolean(d.decoy),
-      ...(d.puzzleType ? { puzzleType: String(d.puzzleType) } : {}),
-      ...(d.puzzleSeed !== undefined && d.puzzleSeed !== null ? { puzzleSeed: Number(d.puzzleSeed) } : {}),
+      ...(resolvedPuzzleType !== undefined ? { puzzleType: resolvedPuzzleType } : {}),
+      ...(resolvedPuzzleSeed !== undefined ? { puzzleSeed: resolvedPuzzleSeed } : {}),
+      ...(resolvedPuzzleDifficulty !== undefined ? { puzzleDifficulty: resolvedPuzzleDifficulty } : {}),
+      ...(d.clueColOffset !== undefined ? { clueColOffset: Number(d.clueColOffset) } : {}),
       tunnelStyle: d.tunnelStyle === 'sparkArch' ? 'sparkArch' : 'stone'
     };
   });
@@ -1074,6 +1265,33 @@ function finalizeTower({
 
   const sortedLedges = Array.from(byCoord.values()).sort((a, b) => a.floor - b.floor || a.col - b.col);
   const clampedFloors = Math.max(8, Math.round(Number(floors)));
+
+  // Attach deterministic exterior Rune Door clues & plaque clearance offsets
+  for (const nd of normDoors) {
+    if (!nd.isRune) continue;
+    const offset =
+      nd.clueColOffset !== undefined
+        ? Number(nd.clueColOffset)
+        : resolveClueColOffset(nd.col, nd.floor, sortedLedges, normElevators);
+    nd.clueColOffset = offset;
+    nd.clue = deriveRuneDoorClue({
+      puzzleType: nd.puzzleType,
+      puzzleSeed: nd.puzzleSeed,
+      puzzleDifficulty: nd.puzzleDifficulty,
+      col: nd.col,
+      floor: nd.floor,
+      clueColOffset: offset,
+      doorId: nd.id
+    });
+  }
+
+  const runeDoors = normDoors.filter((d) => d.isRune);
+  const vaultDoor = normDoors.find((d) => d.isVault) || null;
+  const primaryClue =
+    runeDoors.find((d) => d.puzzleType === 'lights' || d.puzzleType === 'bells')?.clue ||
+    runeDoors[0]?.clue ||
+    null;
+
   const normEnemies = casual
     ? []
     : real
@@ -1094,6 +1312,9 @@ function finalizeTower({
     real: Boolean(real),
     casual: Boolean(casual),
     casualMission: casualMission ? { ...casualMission } : null,
+    clue: primaryClue,
+    runeDoors,
+    vaultDoor,
     workbench: workbench
       ? {
           col: wrapCol(workbench.col),
@@ -1627,11 +1848,11 @@ export function createRebootTowers() {
   span(r1Ledges, 1, 14, 3, 'solid');
   span(r1Ledges, 2, 3, 2, 'solid');
   span(r1Ledges, 3, 13, 2, 'solid');
-  span(r1Ledges, 4, 15, 3, 'solid');
-  span(r1Ledges, 5, 11, 2, 'solid');
+  span(r1Ledges, 4, 14, 4, 'solid');
+  span(r1Ledges, 5, 11, 3, 'solid');
   span(r1Ledges, 6, 3, 5, 'solid');
   span(r1Ledges, 6, 9, 2, 'crumble');
-  span(r1Ledges, 7, 11, 2, 'solid');  // Secret Rune Door r_t1_rune at col 12, floor 7!
+  span(r1Ledges, 7, 11, 2, 'solid');  // Secret Rune Door r_t1_rune at col 12, floor 7 (f=8..10 col 12 clear!)
   span(r1Ledges, 8, 13, 3, 'solid');
   span(r1Ledges, 9, 1, 3, 'solid');
   span(r1Ledges, 10, 4, 5, 'solid');
@@ -1640,7 +1861,7 @@ export function createRebootTowers() {
   span(r1Ledges, 12, 15, 4, 'solid');
   span(r1Ledges, 13, 4, 3, 'solid');
   span(r1Ledges, 16, 8, 5, 'solid');
-  tile(r1Ledges, 14, 17, 'solid');
+  span(r1Ledges, 17, 13, 2, 'solid');
 
   const r1 = finalizeTower({
     id: 1,
@@ -1695,20 +1916,20 @@ export function createRebootTowers() {
   const r2Ledges = [];
   span(r2Ledges, 0, 15, 4, 'solid');
   span(r2Ledges, 1, 3, 3, 'solid');
-  span(r2Ledges, 2, 7, 2, 'crumble');
+  span(r2Ledges, 2, 6, 3, 'crumble');
   span(r2Ledges, 3, 10, 3, 'solid');
   span(r2Ledges, 4, 13, 3, 'solid');
   span(r2Ledges, 8, 1, 4, 'solid');
-  span(r2Ledges, 9, 14, 2, 'solid');
-  span(r2Ledges, 9, 6, 2, 'crumble');
+  span(r2Ledges, 9, 13, 3, 'solid');
+  span(r2Ledges, 9, 5, 3, 'crumble');
   span(r2Ledges, 10, 8, 4, 'solid');
   span(r2Ledges, 13, 2, 4, 'solid');
-  span(r2Ledges, 14, 7, 2, 'crumble');
+  span(r2Ledges, 14, 6, 3, 'crumble');
   span(r2Ledges, 15, 10, 3, 'solid');
-  span(r2Ledges, 16, 13, 3, 'solid');
-  span(r2Ledges, 17, 1, 2, 'crumble');
+  span(r2Ledges, 16, 13, 4, 'solid');
+  span(r2Ledges, 17, 1, 3, 'crumble');
   span(r2Ledges, 18, 4, 5, 'solid');
-  tile(r2Ledges, 10, 19, 'solid');
+  span(r2Ledges, 19, 9, 2, 'solid');
 
   const r2 = finalizeTower({
     id: 2,
@@ -1763,21 +1984,22 @@ export function createRebootTowers() {
   span(r3Ledges, 1, 3, 4, 'conveyorL');
   tile(r3Ledges, 2, 0, 'solid');
   tile(r3Ledges, 7, 2, 'steamVent', { phasePeriod: 3.4, phaseOffset: 0.0 });
-  span(r3Ledges, 2, 8, 2, 'solid');
+  span(r3Ledges, 2, 8, 3, 'solid');
   span(r3Ledges, 3, 11, 3, 'solid');
-  span(r3Ledges, 5, 6, 2, 'solid');
+  span(r3Ledges, 5, 6, 3, 'solid');
   span(r3Ledges, 6, 3, 4, 'solid');
-  span(r3Ledges, 7, 8, 3, 'conveyorR');
+  span(r3Ledges, 7, 7, 4, 'conveyorR');
   span(r3Ledges, 8, 11, 3, 'solid');
   tile(r3Ledges, 14, 9, 'steamVent', { phasePeriod: 3.2, phaseOffset: 1.1 });
+  tile(r3Ledges, 15, 9, 'solid');
   span(r3Ledges, 10, 15, 3, 'solid');
-  span(r3Ledges, 11, 13, 2, 'solid');
+  span(r3Ledges, 11, 12, 3, 'solid'); // Secret Rune Door r_t3_rune at col 13, floor 11 (f=12..14 col 13 clear!)
   span(r3Ledges, 14, 3, 4, 'solid');
-  span(r3Ledges, 15, 8, 3, 'conveyorL');
+  span(r3Ledges, 15, 7, 4, 'conveyorL');
   tile(r3Ledges, 11, 16, 'steamVent', { phasePeriod: 3.4, phaseOffset: 0.5 });
   span(r3Ledges, 17, 12, 3, 'solid');
-  span(r3Ledges, 18, 0, 5, 'solid');
-  tile(r3Ledges, 6, 19, 'solid');
+  span(r3Ledges, 18, 15, 6, 'solid');
+  span(r3Ledges, 19, 5, 2, 'solid');
 
   const r3 = finalizeTower({
     id: 3,
@@ -1828,20 +2050,20 @@ export function createRebootTowers() {
   const r4Ledges = [];
   span(r4Ledges, 0, 14, 5, 'solid');
   span(r4Ledges, 1, 3, 4, 'ice');
-  span(r4Ledges, 2, 8, 4, 'ice');
+  span(r4Ledges, 2, 7, 4, 'ice');
   span(r4Ledges, 3, 12, 3, 'solid');
   span(r4Ledges, 6, 4, 4, 'ice');
   tile(r4Ledges, 5, 6, 'solid');
-  span(r4Ledges, 7, 9, 3, 'solid');
+  span(r4Ledges, 7, 8, 4, 'solid');
   span(r4Ledges, 11, 13, 3, 'ice');
   span(r4Ledges, 12, 9, 3, 'solid');
-  span(r4Ledges, 12, 1, 3, 'solid');
-  span(r4Ledges, 13, 5, 4, 'ice');
-  span(r4Ledges, 14, 10, 3, 'crumble');
-  span(r4Ledges, 15, 14, 3, 'solid');
+  span(r4Ledges, 12, 0, 4, 'solid');
+  span(r4Ledges, 13, 4, 4, 'ice');
+  span(r4Ledges, 14, 9, 3, 'crumble');
+  span(r4Ledges, 15, 13, 4, 'solid');
   span(r4Ledges, 19, 2, 5, 'ice');
   tile(r4Ledges, 4, 19, 'solid');
-  tile(r4Ledges, 8, 20, 'solid');
+  span(r4Ledges, 20, 7, 2, 'solid');
 
   const r4 = finalizeTower({
     id: 4,
@@ -1855,7 +2077,7 @@ export function createRebootTowers() {
     parTime: 38,
     spawn: { col: 0, floor: 0 },
     palette: REBOOT_PALETTES.blizzard,
-    mechanics: { windForce: 1.35, windPeriod: 6.0 },
+    mechanics: { windForce: 0.82, windPeriod: 6.0 },
     ledges: r4Ledges,
     elevators: [
       { col: 12, minFloor: 7, maxFloor: 11, startFloor: 7, speed: 1.8 },
@@ -1896,29 +2118,29 @@ export function createRebootTowers() {
   span(r5Ledges, 2, 7, 3, 'solid');
   span(r5Ledges, 3, 11, 3, 'solid');
   span(r5Ledges, 4, 15, 4, 'solid');
-  tile(r5Ledges, 4, 5, 'phaseBlock', { switchGroup: 'red', inverted: false });
-  tile(r5Ledges, 6, 5, 'solid');
+  span(r5Ledges, 5, 3, 2, 'phaseBlock', { switchGroup: 'red', inverted: false });
+  span(r5Ledges, 5, 5, 3, 'solid');
   tile(r5Ledges, 7, 5, 'laserGate', { switchGroup: 'red', inverted: false });
   tile(r5Ledges, 7, 7, 'solid');
   span(r5Ledges, 5, 8, 3, 'solid');
 
-  span(r5Ledges, 9, 0, 4, 'solid');
+  span(r5Ledges, 9, 15, 5, 'solid');
   tile(r5Ledges, 15, 9, 'laserGate', { switchGroup: 'cyan', inverted: false });
   tile(r5Ledges, 15, 11, 'solid');
-  span(r5Ledges, 9, 12, 3, 'solid'); // Rune Chamber r_t5_rune at col 13, floor 9!
-  span(r5Ledges, 10, 5, 2, 'phaseBlock', { switchGroup: 'cyan', inverted: false });
+  span(r5Ledges, 9, 12, 3, 'solid'); // Rune Chamber r_t5_rune at col 13, floor 9 (f=10..12 col 13 clear!)
+  span(r5Ledges, 10, 4, 3, 'phaseBlock', { switchGroup: 'cyan', inverted: false });
   span(r5Ledges, 10, 7, 2, 'solid');
 
   span(r5Ledges, 14, 10, 4, 'solid');
-  span(r5Ledges, 15, 15, 2, 'solid');
+  span(r5Ledges, 15, 15, 3, 'solid');
   tile(r5Ledges, 1, 15, 'laserGate', { switchGroup: 'red', inverted: true });
   tile(r5Ledges, 1, 17, 'solid');
   span(r5Ledges, 15, 2, 3, 'solid');
-  span(r5Ledges, 16, 6, 2, 'solid');
-  span(r5Ledges, 17, 9, 2, 'crumble');
-  span(r5Ledges, 18, 12, 2, 'solid');
+  span(r5Ledges, 16, 5, 3, 'solid');
+  span(r5Ledges, 17, 9, 3, 'crumble');
+  span(r5Ledges, 18, 12, 3, 'solid');
   span(r5Ledges, 19, 15, 5, 'solid');
-  tile(r5Ledges, 5, 20, 'solid');
+  span(r5Ledges, 20, 4, 2, 'solid');
 
   const r5 = finalizeTower({
     id: 5,
@@ -1969,20 +2191,20 @@ export function createRebootTowers() {
   // --------------------------------------------------------------------------
   const r6Ledges = [];
   span(r6Ledges, 0, 14, 5, 'solid');
-  tile(r6Ledges, 4, 1, 'piston', { phasePeriod: 3.2, phaseOffset: 0.0 });
+  span(r6Ledges, 1, 3, 2, 'piston', { phasePeriod: 3.2, phaseOffset: 0.0 });
   span(r6Ledges, 2, 6, 3, 'solid');
-  tile(r6Ledges, 10, 3, 'piston', { phasePeriod: 3.2, phaseOffset: 0.9 });
+  span(r6Ledges, 3, 9, 2, 'piston', { phasePeriod: 3.2, phaseOffset: 0.9 });
   span(r6Ledges, 4, 12, 3, 'solid');
   span(r6Ledges, 9, 0, 4, 'solid');
-  tile(r6Ledges, 5, 10, 'piston', { phasePeriod: 3.0, phaseOffset: 0.4 });
-  tile(r6Ledges, 7, 11, 'piston', { phasePeriod: 3.0, phaseOffset: 1.2 });
+  span(r6Ledges, 10, 4, 2, 'piston', { phasePeriod: 3.0, phaseOffset: 0.4 });
+  span(r6Ledges, 11, 6, 2, 'piston', { phasePeriod: 3.0, phaseOffset: 1.2 });
   span(r6Ledges, 12, 9, 4, 'solid');
   span(r6Ledges, 13, 13, 3, 'solid');
   span(r6Ledges, 15, 2, 4, 'solid');
-  tile(r6Ledges, 7, 16, 'piston', { phasePeriod: 3.0, phaseOffset: 0.0 });
-  span(r6Ledges, 16, 9, 2, 'solid');
+  span(r6Ledges, 16, 6, 2, 'piston', { phasePeriod: 3.0, phaseOffset: 0.0 });
+  span(r6Ledges, 16, 8, 3, 'solid');
   span(r6Ledges, 20, 12, 5, 'solid');
-  tile(r6Ledges, 2, 21, 'solid');
+  span(r6Ledges, 21, 1, 2, 'solid');
 
   const r6 = finalizeTower({
     id: 6,
@@ -1996,7 +2218,7 @@ export function createRebootTowers() {
     parTime: 40,
     spawn: { col: 0, floor: 0 },
     palette: REBOOT_PALETTES.piston,
-    mechanics: { windForce: 0.45, windPeriod: 7.0 },
+    mechanics: { windForce: 0.36, windPeriod: 7.0 },
     ledges: r6Ledges,
     elevators: [
       { col: 15, minFloor: 4, maxFloor: 9, startFloor: 4, speed: 2.0 },
@@ -2033,22 +2255,22 @@ export function createRebootTowers() {
   // --------------------------------------------------------------------------
   const r7Ledges = [];
   span(r7Ledges, 0, 14, 5, 'solid');
-  span(r7Ledges, 1, 4, 3, 'ice');
+  span(r7Ledges, 1, 3, 4, 'ice');
   span(r7Ledges, 2, 8, 2, 'crumble');
   span(r7Ledges, 3, 11, 3, 'solid');
   span(r7Ledges, 6, 3, 4, 'solid');
-  span(r7Ledges, 7, 8, 3, 'conveyorR');
+  span(r7Ledges, 7, 7, 4, 'conveyorR');
   span(r7Ledges, 8, 12, 3, 'solid');
   span(r7Ledges, 13, 0, 4, 'solid');
-  span(r7Ledges, 14, 12, 2, 'solid'); // Rune Chamber r_t7_rune at col 12, floor 14!
-  tile(r7Ledges, 5, 14, 'phaseBlock', { switchGroup: 'cyan', inverted: false });
+  span(r7Ledges, 14, 11, 3, 'solid'); // Rune Chamber r_t7_rune at col 12, floor 14 (f=15..16 col 12 clear!)
+  span(r7Ledges, 14, 4, 2, 'phaseBlock', { switchGroup: 'cyan', inverted: false });
   span(r7Ledges, 14, 7, 3, 'solid');
   span(r7Ledges, 17, 15, 4, 'solid');
-  span(r7Ledges, 18, 4, 2, 'crumble');
+  span(r7Ledges, 18, 3, 3, 'crumble');
   span(r7Ledges, 19, 7, 3, 'ice');
-  span(r7Ledges, 20, 11, 2, 'crumble');
+  span(r7Ledges, 20, 10, 3, 'crumble');
   span(r7Ledges, 21, 14, 5, 'solid');
-  tile(r7Ledges, 4, 22, 'solid');
+  span(r7Ledges, 22, 3, 2, 'solid');
 
   const r7 = finalizeTower({
     id: 7,
@@ -2062,7 +2284,7 @@ export function createRebootTowers() {
     parTime: 42,
     spawn: { col: 0, floor: 0 },
     palette: REBOOT_PALETTES.blackout,
-    mechanics: { windForce: 0.6, windPeriod: 6.5, blackoutCycle: 9.0, lightningInterval: 7.5 },
+    mechanics: { windForce: 0.48, windPeriod: 6.5, blackoutCycle: 9.0, lightningInterval: 7.5 },
     ledges: r7Ledges,
     elevators: [{ col: 15, minFloor: 8, maxFloor: 13, startFloor: 8, speed: 2.0 }],
     doors: [
@@ -2099,25 +2321,25 @@ export function createRebootTowers() {
   // --------------------------------------------------------------------------
   const r8Ledges = [];
   span(r8Ledges, 0, 14, 5, 'solid');
-  span(r8Ledges, 1, 4, 3, 'ice');
-  tile(r8Ledges, 8, 2, 'piston', { phasePeriod: 3.0, phaseOffset: 0.0 });
+  span(r8Ledges, 1, 3, 4, 'ice');
+  span(r8Ledges, 2, 7, 2, 'piston', { phasePeriod: 3.0, phaseOffset: 0.0 });
   span(r8Ledges, 3, 10, 3, 'solid');
-  tile(r8Ledges, 14, 4, 'phaseBlock', { switchGroup: 'red', inverted: false });
+  span(r8Ledges, 4, 13, 2, 'phaseBlock', { switchGroup: 'red', inverted: false });
   span(r8Ledges, 4, 0, 2, 'solid');
   span(r8Ledges, 9, 3, 4, 'solid');
-  span(r8Ledges, 10, 8, 3, 'conveyorR');
+  span(r8Ledges, 10, 7, 4, 'conveyorR');
   span(r8Ledges, 11, 12, 3, 'solid');
-  span(r8Ledges, 14, 4, 4, 'solid');
+  span(r8Ledges, 14, 1, 7, 'solid');
   tile(r8Ledges, 3, 14, 'laserGate', { switchGroup: 'cyan', inverted: false });
   tile(r8Ledges, 3, 16, 'solid');
-  span(r8Ledges, 14, 1, 2, 'solid');
-  tile(r8Ledges, 9, 15, 'phaseBlock', { switchGroup: 'cyan', inverted: false });
+  span(r8Ledges, 15, 8, 2, 'phaseBlock', { switchGroup: 'cyan', inverted: false });
   span(r8Ledges, 16, 11, 3, 'solid');
+  tile(r8Ledges, 14, 17, 'solid');
   tile(r8Ledges, 15, 17, 'steamVent', { phasePeriod: 3.2, phaseOffset: 0.6 });
-  span(r8Ledges, 18, 1, 2, 'solid');
+  span(r8Ledges, 18, 0, 3, 'solid');
   span(r8Ledges, 22, 4, 3, 'ice');
-  span(r8Ledges, 23, 8, 5, 'solid');
-  tile(r8Ledges, 14, 24, 'solid');
+  span(r8Ledges, 23, 7, 6, 'solid');
+  span(r8Ledges, 24, 13, 2, 'solid');
 
   const r8 = finalizeTower({
     id: 8,
@@ -2133,7 +2355,7 @@ export function createRebootTowers() {
     palette: REBOOT_PALETTES.apex,
     mechanics: {
       waterRiseRate: 0.14,
-      windForce: 1.1,
+      windForce: 0.68,
       windPeriod: 6.0,
       blackoutCycle: 11.0,
       lightningInterval: 8.0
@@ -2732,18 +2954,22 @@ function buildThemeMechanics(theme, difficulty, rng, casual = false) {
         return { ...DEFAULT_MECHANICS };
     }
   }
-  const diffScale = Math.min(1.6, 0.75 + difficulty * 0.14);
+  const diffScale = Math.min(1.45, 0.75 + difficulty * 0.12);
   switch (theme) {
     case 'sinking':
       return { ...DEFAULT_MECHANICS, waterRiseRate: Number((0.12 * diffScale).toFixed(3)) };
     case 'blizzard':
-      return { ...DEFAULT_MECHANICS, windForce: Number((1.05 * diffScale).toFixed(2)), windPeriod: 6.0 };
+      return {
+        ...DEFAULT_MECHANICS,
+        windForce: Number(Math.min(0.88, 0.65 * diffScale).toFixed(2)),
+        windPeriod: 6.0
+      };
     case 'piston':
-      return { ...DEFAULT_MECHANICS, windForce: 0.4, windPeriod: 7.0 };
+      return { ...DEFAULT_MECHANICS, windForce: 0.34, windPeriod: 7.0 };
     case 'blackout':
       return {
         ...DEFAULT_MECHANICS,
-        windForce: 0.5,
+        windForce: 0.42,
         windPeriod: 6.5,
         blackoutCycle: Number((9.5 - Math.min(2.5, difficulty * 0.25)).toFixed(1)),
         lightningInterval: Number((7.5 + rng() * 1.5).toFixed(1))
@@ -2752,7 +2978,7 @@ function buildThemeMechanics(theme, difficulty, rng, casual = false) {
       return {
         ...DEFAULT_MECHANICS,
         waterRiseRate: Number((0.10 * diffScale).toFixed(3)),
-        windForce: Number((0.9 * diffScale).toFixed(2)),
+        windForce: Number(Math.min(0.76, 0.56 * diffScale).toFixed(2)),
         windPeriod: 6.0,
         blackoutCycle: 11.0,
         lightningInterval: 8.0
@@ -3082,30 +3308,38 @@ export function generateProceduralTower({
       continue;
     }
 
-    // Template 5: multiSwitchCascade (red -> cyan 2-stage phase bridge relay)
+    // Template 5: multiSwitchCascade (red -> cyan 2-stage 2-tile phase bridge relay)
     if (chunk === 'multiSwitchCascade' && !isOrig && remaining >= 4) {
       const g1 = 'red';
       const g2 = 'cyan';
       const sw1Col = wrapCol(curCol);
-      tile(ledges, sw1Col, curFloor, 'solid');
+      span(ledges, curFloor, dir === 1 ? wrapCol(sw1Col - 1) : sw1Col, 2, 'solid');
       switches.push({ id: `${key}_sw_${switchSeq++}`, col: sw1Col, floor: curFloor, group: g1, mode: 'toggle' });
       switchStateTracker[g1] = !switchStateTracker[g1];
 
-      const br1 = wrapCol(sw1Col + dir * 2);
-      tile(ledges, br1, curFloor + 1, 'phaseBlock', { switchGroup: g1, inverted: !switchStateTracker[g1] });
+      const br1Start = dir === 1 ? wrapCol(sw1Col + 1) : wrapCol(sw1Col - 2);
+      span(ledges, curFloor + 1, br1Start, 2, 'phaseBlock', {
+        switchGroup: g1,
+        inverted: !switchStateTracker[g1]
+      });
+      const br1End = dir === 1 ? wrapCol(br1Start + 1) : br1Start;
 
-      const midStart = dir === 1 ? wrapCol(br1 + 2) : wrapCol(br1 - 3);
+      const midStart = dir === 1 ? wrapCol(br1End + 1) : wrapCol(br1End - 2);
       span(ledges, curFloor + 2, midStart, 2, 'solid');
       const sw2Col = dir === 1 ? wrapCol(midStart + 1) : midStart;
       switches.push({ id: `${key}_sw_${switchSeq++}`, col: sw2Col, floor: curFloor + 2, group: g2, mode: 'toggle' });
       switchStateTracker[g2] = !switchStateTracker[g2];
 
-      const br2 = wrapCol(sw2Col + dir * 2);
-      tile(ledges, br2, curFloor + 3, 'phaseBlock', { switchGroup: g2, inverted: !switchStateTracker[g2] });
+      const br2Start = dir === 1 ? wrapCol(sw2Col + 1) : wrapCol(sw2Col - 2);
+      span(ledges, curFloor + 3, br2Start, 2, 'phaseBlock', {
+        switchGroup: g2,
+        inverted: !switchStateTracker[g2]
+      });
+      const br2End = dir === 1 ? wrapCol(br2Start + 1) : br2Start;
 
-      const destStart = dir === 1 ? wrapCol(br2 + 2) : wrapCol(br2 - 4);
+      const destStart = dir === 1 ? wrapCol(br2End + 1) : wrapCol(br2End - 3);
       span(ledges, curFloor + 4, destStart, 3, 'solid');
-      addGear(br2, curFloor + 3);
+      addGear(br2End, curFloor + 3);
       curFloor += 4;
       curCol = dir === 1 ? wrapCol(destStart + 2) : destStart;
       continue;
@@ -3115,23 +3349,22 @@ export function generateProceduralTower({
     if (chunk === 'laserGateCorridor' && !isOrig && remaining >= 3) {
       const group = switchSeq % 2 === 1 ? 'red' : 'cyan';
       const swCol = wrapCol(curCol);
-      tile(ledges, swCol, curFloor, 'solid');
+      span(ledges, curFloor, dir === 1 ? wrapCol(swCol - 1) : swCol, 2, 'solid');
       switches.push({ id: `${key}_sw_${switchSeq++}`, col: swCol, floor: curFloor, group, mode: 'toggle' });
       const nextState = !switchStateTracker[group];
       switchStateTracker[group] = nextState;
 
       const preCol = wrapCol(swCol + dir * 1);
       const gateCol = wrapCol(swCol + dir * 2);
-      const postStart = dir === 1 ? wrapCol(swCol + dir * 3) : wrapCol(swCol + dir * 3 - 2);
-      tile(ledges, preCol, curFloor + 1, 'solid');
+      const corridorStart = dir === 1 ? preCol : wrapCol(swCol - 4);
+      span(ledges, curFloor + 1, corridorStart, 4, 'solid');
       // In game.js: l.active = l.inverted ? swOn : !swOn -> we want active=false (open) when swOn === nextState!
       tile(ledges, gateCol, curFloor + 1, 'laserGate', {
         switchGroup: group,
         inverted: !nextState
       });
       tile(ledges, gateCol, curFloor + 3, 'solid'); // cap above laserGate
-      span(ledges, curFloor + 1, postStart, 3, 'solid');
-      const postEnd = dir === 1 ? wrapCol(postStart + 2) : postStart;
+      const postEnd = dir === 1 ? wrapCol(corridorStart + 3) : corridorStart;
       const upStart = dir === 1 ? wrapCol(postEnd + 1) : wrapCol(postEnd - 3);
       span(ledges, curFloor + 2, upStart, 3, 'solid');
       curFloor += 2;
@@ -3139,11 +3372,11 @@ export function generateProceduralTower({
       continue;
     }
 
-    // Template 7: switchPhaseBridge (single resonator switch + phaseBlock bridge)
+    // Template 7: switchPhaseBridge (single resonator switch + 2-tile phaseBlock bridge)
     if (chunk === 'switchPhaseBridge' && !isOrig && remaining >= 3) {
       const group = switchSeq % 2 === 1 ? 'red' : 'cyan';
       const swCol = wrapCol(curCol);
-      tile(ledges, swCol, curFloor, 'solid');
+      span(ledges, curFloor, dir === 1 ? wrapCol(swCol - 1) : swCol, 2, 'solid');
       switches.push({
         id: `${key}_sw_${switchSeq++}`,
         col: swCol,
@@ -3154,17 +3387,18 @@ export function generateProceduralTower({
       const nextGroupState = !switchStateTracker[group];
       switchStateTracker[group] = nextGroupState;
 
-      const bridgeCol = wrapCol(swCol + dir * 2);
-      tile(ledges, bridgeCol, curFloor + 1, 'phaseBlock', {
+      const brStart = dir === 1 ? wrapCol(swCol + 2) : wrapCol(swCol - 3);
+      span(ledges, curFloor + 1, brStart, 2, 'phaseBlock', {
         switchGroup: group,
         inverted: !nextGroupState
       });
-      const destStart = dir === 1 ? wrapCol(bridgeCol + 2) : wrapCol(bridgeCol - 4);
+      const brEnd = dir === 1 ? wrapCol(brStart + 1) : brStart;
+      const destStart = dir === 1 ? wrapCol(brEnd + 1) : wrapCol(brEnd - 3);
       span(ledges, curFloor + 2, destStart, 3, 'solid');
 
       curFloor += 2;
       curCol = dir === 1 ? wrapCol(destStart + 2) : destStart;
-      addGear(bridgeCol, curFloor - 1);
+      addGear(brEnd, curFloor - 1);
       continue;
     }
 
@@ -3181,32 +3415,39 @@ export function generateProceduralTower({
       const cStart = dir === 1 ? wrapCol(curCol + 1) : wrapCol(curCol - 3);
       span(ledges, curFloor + 1, cStart, 3, oppType);
       const endCol = dir === 1 ? wrapCol(cStart + 2) : cStart;
-      const nextStart = dir === 1 ? wrapCol(endCol + 2) : wrapCol(endCol - 4);
+      const nextStart = dir === 1 ? wrapCol(endCol + 1) : wrapCol(endCol - 3);
       span(ledges, curFloor + 2, nextStart, 3, 'solid');
       curFloor += 2;
       curCol = dir === 1 ? wrapCol(nextStart + 2) : nextStart;
       continue;
     }
 
-    // Template 9: pistonRhythmCascade (staggered extending hydraulic pistons)
+    // Template 9: pistonRhythmCascade (staggered 2-tile hydraulic piston pads)
     if (chunk === 'pistonRhythmCascade' && !isOrig && remaining >= 3) {
-      const p1 = wrapCol(curCol + dir * 2);
-      const p2 = wrapCol(p1 + dir * 2);
-      tile(ledges, p1, curFloor + 1, 'piston', { phasePeriod: 3.1, phaseOffset: 0.0 });
-      tile(ledges, p2, curFloor + 2, 'piston', { phasePeriod: 3.1, phaseOffset: 0.9 });
-      const aStart = dir === 1 ? wrapCol(p2 + 2) : wrapCol(p2 - 4);
+      const p1Start = dir === 1 ? wrapCol(curCol + 2) : wrapCol(curCol - 3);
+      span(ledges, curFloor + 1, p1Start, 2, 'piston', { phasePeriod: 3.1, phaseOffset: 0.0 });
+      const p1End = dir === 1 ? wrapCol(p1Start + 1) : p1Start;
+
+      const p2Start = dir === 1 ? wrapCol(p1End + 2) : wrapCol(p1End - 3);
+      span(ledges, curFloor + 2, p2Start, 2, 'piston', { phasePeriod: 3.1, phaseOffset: 0.9 });
+      const p2End = dir === 1 ? wrapCol(p2Start + 1) : p2Start;
+
+      const aStart = dir === 1 ? wrapCol(p2End + 1) : wrapCol(p2End - 3);
       span(ledges, curFloor + 3, aStart, 3, 'solid');
-      addGear(p2, curFloor + 2);
+      addGear(p2End, curFloor + 2);
       curFloor += 3;
       curCol = dir === 1 ? wrapCol(aStart + 2) : aStart;
       continue;
     }
 
-    // Template 10: steamVentBoostTier (walkable steam grate + bonus upper perch)
+    // Template 10: steamVentBoostTier (2-tile steam grate pad + 2-tile upper bonus perch)
     if (chunk === 'steamVentBoostTier' && !isOrig && remaining >= 3) {
-      const vCol = wrapCol(curCol + dir * 2);
+      const padStart = dir === 1 ? wrapCol(curCol + 1) : wrapCol(curCol - 2);
+      const solidCol = dir === 1 ? padStart : wrapCol(padStart + 1);
+      const vCol = dir === 1 ? wrapCol(padStart + 1) : padStart;
+      tile(ledges, solidCol, curFloor + 1, 'solid');
       tile(ledges, vCol, curFloor + 1, 'steamVent', { phasePeriod: 3.3, phaseOffset: Number((rng() * 1.4).toFixed(2)) });
-      tile(ledges, vCol, curFloor + 3, 'solid'); // high steam-launch bonus perch!
+      span(ledges, curFloor + 3, dir === 1 ? wrapCol(vCol - 1) : vCol, 2, 'solid'); // 2-tile steam-launch bonus perch!
       addGear(vCol, curFloor + 3);
       const aStart = dir === 1 ? wrapCol(vCol + 2) : wrapCol(vCol - 4);
       span(ledges, curFloor + 2, aStart, 3, 'solid');
@@ -3215,17 +3456,17 @@ export function generateProceduralTower({
       continue;
     }
 
-    // Template 11: crumbleGapCrossing (2-tile crumble bridge + solid anchor)
+    // Template 11: crumbleGapCrossing (2-tile crumble bridge + 3-tile solid anchor)
     if (chunk === 'crumbleGapCrossing' && remaining >= 2) {
-      const c1 = wrapCol(curCol + dir * 2);
-      const cStart = dir === 1 ? c1 : wrapCol(c1 - 1);
+      const cStart = dir === 1 ? wrapCol(curCol + 2) : wrapCol(curCol - 3);
       span(ledges, curFloor + 1, cStart, 2, 'crumble');
-      const nextAnchor = dir === 1 ? wrapCol(c1 + 3) : wrapCol(c1 - 5);
+      const cEnd = dir === 1 ? wrapCol(cStart + 1) : cStart;
+      const nextAnchor = dir === 1 ? wrapCol(cEnd + 1) : wrapCol(cEnd - 3);
       span(ledges, curFloor + 2, nextAnchor, 3, 'solid');
 
       addEnemy({
         type: 'molecule',
-        col: wrapCol(c1 + dir * 6) + 0.5,
+        col: wrapCol(cEnd + dir * 6) + 0.5,
         floor: curFloor + 1.55,
         dir: -dir,
         speed: Number((1.8 + Math.min(0.9, diff * 0.1)).toFixed(2)),
@@ -3234,7 +3475,7 @@ export function generateProceduralTower({
 
       curFloor += 2;
       curCol = dir === 1 ? wrapCol(nextAnchor + 2) : nextAnchor;
-      addGear(c1, curFloor - 1);
+      addGear(cEnd, curFloor - 1);
       continue;
     }
 
@@ -3254,10 +3495,11 @@ export function generateProceduralTower({
 
     // Template 13: glacierSwitchbackAlcove (ice shelf + solid windbreak spur)
     if (chunk === 'glacierSwitchbackAlcove' && remaining >= 2) {
-      const iStart = dir === 1 ? wrapCol(curCol + 2) : wrapCol(curCol - 4);
+      const gapStep = mechanics.windForce > 0.5 ? 1 : 2;
+      const iStart = dir === 1 ? wrapCol(curCol + gapStep) : wrapCol(curCol - gapStep - 2);
       span(ledges, curFloor + 1, iStart, 3, 'ice');
       const iEnd = dir === 1 ? wrapCol(iStart + 2) : iStart;
-      const aStart = dir === 1 ? wrapCol(iEnd + 2) : wrapCol(iEnd - 4);
+      const aStart = dir === 1 ? wrapCol(iEnd + gapStep) : wrapCol(iEnd - gapStep - 2);
       span(ledges, curFloor + 2, aStart, 3, 'solid');
       curFloor += 2;
       curCol = dir === 1 ? wrapCol(aStart + 2) : aStart;
@@ -3266,11 +3508,13 @@ export function generateProceduralTower({
 
     // Template 14: spiralCorbelRun (+2..3 stepped stone floors + optional Secret Alcove)
     const steps = Math.min(3, remaining);
+    let lastRunStart = curCol;
     for (let s = 0; s < steps; s++) {
       curFloor += 1;
-      const stepDelta = s % 2 === 0 ? 1 : 2;
+      const stepDelta = s % 2 === 0 || mechanics.windForce > 0.5 ? 1 : 2;
       curCol = wrapCol(curCol + dir * stepDelta);
       const runStart = dir === 1 ? curCol : wrapCol(curCol - 2);
+      lastRunStart = runStart;
       span(ledges, curFloor, runStart, 3, 'solid');
       if (s === 1 && curFloor > 2) {
         const isRob = rng() < 0.35;
@@ -3286,27 +3530,33 @@ export function generateProceduralTower({
       curCol = dir === 1 ? wrapCol(runStart + 2) : runStart;
     }
 
+    let placedSecretHere = false;
     if (!secretPlaced && curFloor >= Math.floor(exitFloor * 0.45) && curFloor <= exitFloor - 3) {
-      const sideCol = wrapCol(curCol - dir * 4);
-      const bStart = dir === 1 ? sideCol : wrapCol(sideCol - 1);
+      const backCol = dir === 1 ? lastRunStart : wrapCol(lastRunStart + 2);
+      const bridgeCol = wrapCol(backCol - dir);
+      const sideCol = wrapCol(backCol - dir * 2);
+      const starCol = wrapCol(backCol - dir * 3);
+      const bStart = dir === 1 ? starCol : sideCol;
+      tile(ledges, bridgeCol, curFloor, isCasual ? 'solid' : 'crumble');
       span(ledges, curFloor, bStart, 2, 'solid');
-      tile(ledges, wrapCol(curCol - dir * 2), curFloor, isCasual ? 'solid' : 'crumble');
       pushSecretDoor(sideCol, curFloor);
       collectibles.push({
         id: `${key}_star`,
-        col: wrapCol(sideCol + (dir === 1 ? 1 : -1)),
+        col: starCol,
         floor: curFloor,
         type: 'starCore'
       });
       secretPlaced = true;
+      placedSecretHere = true;
     }
 
-    if (rng() < 0.3) dir = -dir;
+    if (!placedSecretHere && rng() < 0.3) dir = -dir;
   }
 
   while (curFloor < exitFloor) {
     curFloor += 1;
-    curCol = wrapCol(curCol + dir * 2);
+    const stepDelta = curFloor % 2 === 0 || mechanics.windForce > 0.5 ? 1 : 2;
+    curCol = wrapCol(curCol + dir * stepDelta);
     const sStart = dir === 1 ? curCol : wrapCol(curCol - 2);
     span(ledges, curFloor, sStart, 3, 'solid');
     curCol = dir === 1 ? wrapCol(sStart + 2) : sStart;
@@ -3328,10 +3578,35 @@ export function generateProceduralTower({
   addGear(wrapCol(summitStart + 4), exitFloor);
 
   if (!secretPlaced) {
-    const bonusCol = wrapCol(summitStart - 2);
-    tile(ledges, bonusCol, exitFloor, 'solid');
-    pushSecretDoor(bonusCol, exitFloor);
-    collectibles.push({ id: `${key}_star`, col: bonusCol, floor: exitFloor, type: 'starCore' });
+    const bonusStart = wrapCol(summitStart - 3);
+    const bonusDoorCol = wrapCol(summitStart - 2);
+    span(ledges, exitFloor, bonusStart, 2, 'solid');
+    pushSecretDoor(bonusDoorCol, exitFloor);
+    collectibles.push({ id: `${key}_star`, col: bonusStart, floor: exitFloor, type: 'starCore' });
+  } else {
+    // Ensure mid-tower Rune Door has an unobstructed exterior wall plaque bay (df + 1..2 within +-1 col)
+    const runeEntry = doors.find((d) => d.isRune);
+    if (runeEntry && runeEntry.floor < exitFloor) {
+      const bayBlocked = (testCol) => {
+        const tc = wrapCol(testCol);
+        return (
+          elevators.some((el) => wrapCol(el.col) === tc && el.minFloor <= runeEntry.floor + 2.5 && el.maxFloor >= runeEntry.floor + 1) ||
+          ledges.some((l) => wrapCol(l.col) === tc && l.floor >= runeEntry.floor + 1 && l.floor <= runeEntry.floor + 2)
+        );
+      };
+      if (bayBlocked(runeEntry.col) && bayBlocked(runeEntry.col + 1) && bayBlocked(runeEntry.col - 1)) {
+        const bonusStart = wrapCol(summitStart - 3);
+        const bonusDoorCol = wrapCol(summitStart - 2);
+        span(ledges, exitFloor, bonusStart, 2, 'solid');
+        runeEntry.col = bonusDoorCol;
+        runeEntry.floor = exitFloor;
+        const starItem = collectibles.find((c) => c.id === `${key}_star`);
+        if (starItem) {
+          starItem.col = bonusStart;
+          starItem.floor = exitFloor;
+        }
+      }
+    }
   }
 
   const timeLimit = Math.min(180, 85 + Math.round((floors - 16) * 4.5));
@@ -3361,7 +3636,12 @@ export function generateProceduralTower({
 
   // Guaranteed Solvability Verification + Deterministic Bridge Repair Pass
   const check = verifyTowerSolvable(tower);
-  if (!check.solvable) {
+  const secretDoor = tower.doors.find((d) => d.isRune || d.isVault);
+  const secretReachable = !secretDoor || verifyTowerSolvable({
+    ...tower,
+    doors: tower.doors.map((d) => ({ ...d, isExit: d.id === secretDoor.id }))
+  }).solvable;
+  if (!check.solvable || !secretReachable) {
     tower = repairProceduralTower(tower, exitCol, exitFloor);
   }
 
@@ -3477,61 +3757,96 @@ export function generateProceduralTower({
 }
 
 function repairProceduralTower(tower, exitCol, exitFloor) {
-  const shaftCols = new Set(tower.elevators.map((e) => e.col));
-  let c = wrapCol(tower.spawn.col);
   const repairMap = new Map();
   for (const l of tower.ledges) {
     const isBarrier = l.type === 'box' || l.type === 'pillar' || l.type === 'laserGate';
     repairMap.set(isBarrier ? `${l.col}:${l.floor}:${l.type}` : `${l.col}:${l.floor}:step`, { ...l });
   }
 
-  for (let f = tower.spawn.floor; f <= exitFloor; f++) {
-    if (f > tower.spawn.floor) {
-      let step = 1;
-      if (shaftCols.has(wrapCol(c + 1))) step = 2;
-      if (shaftCols.has(wrapCol(c + step))) {
-        tower.elevators = tower.elevators.filter((e) => e.col !== wrapCol(c + step));
-        shaftCols.delete(wrapCol(c + step));
-      }
-      repairMap.delete(`${c}:${f}:step`);
-      repairMap.delete(`${c}:${f}:laserGate`);
-      c = wrapCol(c + step);
-    }
-    repairMap.delete(`${c}:${f}:laserGate`);
-    repairMap.set(`${c}:${f}:step`, {
-      col: c,
-      floor: f,
+  let elevators = [...tower.elevators];
+  let switches = [...tower.switches];
+  let doors = tower.doors.map((d) => ({ ...d }));
+
+  const dropShaftAt = (wc) => {
+    elevators = elevators.filter((e) => wrapCol(e.col) !== wc);
+  };
+
+  const placeSolidAt = (col, fl) => {
+    const wc = wrapCol(col);
+    dropShaftAt(wc);
+    repairMap.delete(`${wc}:${fl}:laserGate`);
+    repairMap.set(`${wc}:${fl}:step`, {
+      col: wc,
+      floor: fl,
       type: 'solid',
       switchGroup: null,
       inverted: false,
       phasePeriod: 3.2,
       phaseOffset: 0
     });
-    repairMap.delete(`${c}:${f + 1}:step`);
-    repairMap.delete(`${c}:${f + 1}:laserGate`);
+  };
+
+  const forceClearStepAndLaser = (col, fl) => {
+    const wc = wrapCol(col);
+    repairMap.delete(`${wc}:${fl}:step`);
+    repairMap.delete(`${wc}:${fl}:laserGate`);
+    switches = switches.filter((sw) => !(wrapCol(sw.col) === wc && Math.round(sw.floor) === fl));
+    // Unlink any interior portal sitting directly in the emergency stair's headroom cell
+    const victimIds = new Set(
+      doors
+        .filter((d) => !d.isExit && !d.isRune && !d.isVault && wrapCol(d.col) === wc && Math.round(d.floor) === fl)
+        .map((d) => d.id)
+    );
+    if (victimIds.size > 0) {
+      doors = doors.filter((d) => !victimIds.has(d.id) && !victimIds.has(d.targetId));
+    }
+  };
+
+  // Build a guaranteed +1 spiral staircase ending directly at (exitCol, exitFloor)
+  const sf = Math.round(tower.spawn.floor);
+  const stairColAt = new Map();
+  for (let f = exitFloor; f >= sf; f--) {
+    stairColAt.set(f, wrapCol(exitCol - (exitFloor - f)));
   }
 
-  while (c !== exitCol) {
-    const d = colDist(c, exitCol);
-    c = wrapCol(c + Math.sign(d));
-    if (shaftCols.has(c)) {
-      tower.elevators = tower.elevators.filter((e) => e.col !== c);
-      shaftCols.delete(c);
+  // Horizontal walk on spawnFloor from spawn.col -> stairColAt.get(sf) (df=0 requires no overhead clearance)
+  const startStairCol = stairColAt.get(sf);
+  let hc = wrapCol(tower.spawn.col);
+  placeSolidAt(hc, sf);
+  while (hc !== startStairCol) {
+    const d = colDist(hc, startStairCol);
+    hc = wrapCol(hc + Math.sign(d));
+    placeSolidAt(hc, sf);
+  }
+
+  // Place each spiral step and clear the headroom cell directly above its launch step
+  for (let f = sf; f <= exitFloor; f++) {
+    const sc = stairColAt.get(f);
+    placeSolidAt(sc, f);
+    if (f < exitFloor) {
+      forceClearStepAndLaser(sc, f + 1);
     }
-    repairMap.delete(`${c}:${exitFloor}:laserGate`);
-    repairMap.set(`${c}:${exitFloor}:step`, {
-      col: c,
-      floor: exitFloor,
-      type: 'solid',
-      switchGroup: null,
-      inverted: false,
-      phasePeriod: 3.2,
-      phaseOffset: 0
-    });
+  }
+
+  // Place any secret Rune/Vault door on the +1 side of exitCol on exitFloor (never capping stairColAt(exitFloor-1)!)
+  let secretOffset = 2;
+  for (const sd of doors) {
+    if (!sd.isRune && !sd.isVault) continue;
+    const targetSecretCol = wrapCol(exitCol + secretOffset);
+    for (let s = 1; s <= secretOffset + 1; s++) {
+      placeSolidAt(wrapCol(exitCol + s), exitFloor);
+    }
+    sd.col = targetSecretCol;
+    sd.floor = exitFloor;
+    delete sd.clueColOffset;
+    secretOffset += 2;
   }
 
   return finalizeTower({
     ...tower,
+    elevators,
+    switches,
+    doors,
     ledges: Array.from(repairMap.values())
   });
 }

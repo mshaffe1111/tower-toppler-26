@@ -2049,9 +2049,10 @@ export class SubRenderer {
     this.scene.background = this.fogColor;
     this.scene.fog = new THREE.Fog(this.fogColor, CAM_Z, 64);
 
-    this.camera = new THREE.PerspectiveCamera(FOV, 390 / 620, 0.5, 220);
+    this._fov = FOV;
+    this.camera = new THREE.PerspectiveCamera(this._fov, 390 / 620, 0.5, 220);
     this.camera.position.set(0, 0, CAM_Z);
-    this.mapCam = new THREE.PerspectiveCamera(FOV, 390 / 620, 0.5, 220);
+    this.mapCam = new THREE.PerspectiveCamera(this._fov, 390 / 620, 0.5, 220);
     this.mapCam.position.set(0, 0, CAM_Z);
 
     // Preallocated scratch vectors & state (0 per-frame GC allocations)
@@ -2426,11 +2427,11 @@ export class SubRenderer {
   }
 
   _pxw(z) {
-    return (2 * Math.tan(FOV * 0.5 * DEG) * (CAM_Z - z)) / this.height;
+    return (2 * Math.tan(this._fov * 0.5 * DEG) * (CAM_Z - z)) / this.height;
   }
 
   _halfW(z) {
-    return (CAM_Z - z) * Math.tan(FOV * 0.5 * DEG) * this.camera.aspect;
+    return (CAM_Z - z) * Math.tan(this._fov * 0.5 * DEG) * this.camera.aspect;
   }
 
   resize(width, height) {
@@ -2438,7 +2439,11 @@ export class SubRenderer {
     this.width = width;
     this.height = height;
     const aspect = Math.max(0.3, width / height);
+    // Telephoto framing on portrait phones (<0.85) makes Pogo's Manta Sub, mines & reef read boldly
+    // while keeping 0..W mapped 1:1 edge-to-edge so 100% of horizontal look-ahead is preserved!
+    this._fov = aspect < 0.85 ? 43.5 : aspect > 1.45 ? 46 : 48;
     for (const cam of [this.camera, this.mapCam]) {
+      cam.fov = this._fov;
       cam.aspect = aspect;
       cam.updateProjectionMatrix();
       cam.updateMatrixWorld(true);
@@ -2473,19 +2478,19 @@ export class SubRenderer {
       x: 0,
       y: 0,
       vy: 0,
-      r: 10,
+      r: 14,
       color: 0,
       customHex: '',
       state: 'swim',
       bubbleT: 0,
-      bubbleR: 18,
+      bubbleR: 22.5,
       dir: -1,
       seed: 0,
     }));
     this._adaptMinePool = Array.from({ length: MAX_MINE }, () => ({
       x: 0,
       y: 0,
-      r: 16,
+      r: 23,
       kind: 'anchored',
       phase: 0,
       blink: 0,
@@ -2495,8 +2500,8 @@ export class SubRenderer {
     this._adaptBubblePool = Array.from({ length: MAX_TORP }, () => ({
       x: 0,
       y: 0,
-      vx: 300,
-      r: 8,
+      vx: 320,
+      r: 9.2,
       age: 0.2,
       seed: 0,
       isTorpedo: true,
@@ -2504,12 +2509,30 @@ export class SubRenderer {
     this._adaptRingPool = Array.from({ length: MAX_RING }, () => ({
       x: 0,
       y: 0,
-      r0: 10,
+      r0: 12,
       r1: 120,
       color: '#5efce8',
       life: 0.5,
       maxLife: 0.8,
       flat: false,
+    }));
+    this._adaptJellyPool = Array.from({ length: 4 }, (_, idx) => ({
+      x: 0,
+      y: 0,
+      z: -0.85,
+      r: 24.5,
+      hue: idx % 3,
+      phase: idx * 2.1,
+      pulse: idx * 1.4,
+      state: 'float',
+      deadT: 0,
+    }));
+    this._adaptClamPool = Array.from({ length: 3 }, (_, idx) => ({
+      x: 0,
+      y: 0,
+      r: 25,
+      open: 0.65,
+      hasPearl: idx !== 1,
     }));
 
     this._fishTrack = new WeakMap();
@@ -2519,8 +2542,8 @@ export class SubRenderer {
       y: 240,
       vx: 0,
       vy: 0,
-      rx: 34,
-      ry: 19,
+      rx: 39,
+      ry: 22,
       stun: 0,
       stunMax: 1,
       invuln: 0,
@@ -2548,9 +2571,9 @@ export class SubRenderer {
       seabedY: 560,
       sub: this._adaptedSub,
       fish: [],
-      jellies: EMPTY,
+      jellies: [],
       mines: [],
-      clams: EMPTY,
+      clams: [],
       bubbles: [],
       rings: [],
       vfx: EMPTY,
@@ -2627,7 +2650,11 @@ export class SubRenderer {
 
     const W = this.width || 390;
     const H = this.height || 620;
-    const s = clamp(Math.sqrt((W * H) / (390 * 620)), 0.8, 1.6);
+    const minDim = Math.min(W, H);
+    // Keep entity CSS-pixel radii calibrated 1:1 with `game.js` (#289) hitboxes across all phones & tablets
+    // (never inflating 1.6x on tablets, while giving compact 375px/390px phones crisp readability!)
+    const phoneBoost = minDim <= 400 ? 1.08 : minDim <= 450 ? 1.04 : 1.0;
+    const s = phoneBoost;
     const st = this._adaptedStage;
     const asub = this._adaptedSub;
 
@@ -2642,7 +2669,7 @@ export class SubRenderer {
     this._adaptLastTimer = timer;
 
     const boostMult = (rawSub.ventBoostTimer || 0) > 0 ? 1.3 : 1.0;
-    const scrollSpd = 96 * s * boostMult;
+    const scrollSpd = 96 * boostMult;
     this._adaptScroll += scrollSpd * dt;
 
     st.width = W;
@@ -2653,8 +2680,8 @@ export class SubRenderer {
     st.healing = this.era === 'original' ? 0.85 : 0.45 + st.progress * 0.35;
     st.scroll = this._adaptScroll;
     st.scrollSpeed = scrollSpd;
-    st.surfaceY = H * 0.095;
-    st.seabedY = H * 0.905;
+    st.surfaceY = H < 460 ? Math.max(36, H * 0.11) : H * 0.095;
+    st.seabedY = H < 460 ? H - Math.max(36, H * 0.105) : H * 0.905;
     let spVal = 0;
     if (typeof rawSub.sonarPulse === 'number') {
       spVal = rawSub.sonarPulse;
@@ -2678,7 +2705,7 @@ export class SubRenderer {
     // Next watchtower glides into view during the closing stretch of the transit
     const tw = this._adaptedTower;
     const remSec = duration - timer;
-    tw.r = clamp(W * 0.28, 70 * s, 185 * s);
+    tw.r = clamp(W * 0.26, 78, 175);
     tw.targetX = W - tw.r * 0.62;
     if (remSec < 3.4) {
       tw.active = true;
@@ -2695,8 +2722,8 @@ export class SubRenderer {
     asub.y = rawSub.y;
     asub.vx = rawSub.vx || 0;
     asub.vy = rawSub.vy || 0;
-    asub.rx = 34 * s;
-    asub.ry = 19 * s;
+    asub.rx = 39 * phoneBoost;
+    asub.ry = 22 * phoneBoost;
     if (dt > 0) {
       const k = 1 - Math.exp(-10 * dt);
       asub.ax += (clamp((asub.vx - pvx) / dt, -4000, 4000) - asub.ax) * k;
@@ -2704,7 +2731,7 @@ export class SubRenderer {
     }
     asub.prop = 0.85 + clamp(asub.vx / 240, -0.35, 0.65) + ((rawSub.ventBoostTimer || 0) > 0 ? 0.35 : 0);
 
-    // Map fish (zero allocations)
+    // Map fish & 3D Golden Gears (calibrated to 32px torpedo stun & 42px hull collect hitboxes)
     const srcFish = rawSub.fish || EMPTY;
     st.fish.length = 0;
     for (let i = 0; i < srcFish.length && st.fish.length < MAX_FISH; i++) {
@@ -2726,18 +2753,18 @@ export class SubRenderer {
       df.x = sf.x;
       df.y = sf.y;
       df.vy = 0;
-      df.r = (sf.isGear ? 12 : 10.5) * s;
+      df.r = (sf.isGear ? 15.5 : 14.0) * phoneBoost;
       df.color = i % 5;
       df.customHex = sf.color || '';
       df.state = sf.bubbled ? 'bubbled' : 'swim';
       df.bubbleT = sf.bubbled ? Math.max(0.02, tr.bubbleT) : 0;
-      df.bubbleR = (sf.isGear ? 21 : 19) * s;
+      df.bubbleR = (sf.isGear ? 24.5 : 22.5) * phoneBoost;
       df.dir = (sf.vx || -1) > 0 ? 1 : -1;
       df.seed = tr.seed;
       st.fish.push(df);
     }
 
-    // Map mines (zero allocations)
+    // Map mines (r = 23.0px -> ~17.5px iron sphere core matching 27px hurt core, ~25.8px horn tips matching 35px torpedo hit!)
     const srcMines = rawSub.mines || EMPTY;
     st.mines.length = 0;
     for (let i = 0; i < srcMines.length && st.mines.length < MAX_MINE; i++) {
@@ -2746,13 +2773,72 @@ export class SubRenderer {
       const dm = this._adaptMinePool[st.mines.length];
       dm.x = sm.x;
       dm.y = sm.y;
-      dm.r = 16.5 * s;
+      dm.r = 23.0;
       dm.kind = sm.y < H * 0.36 ? 'float' : 'anchored';
       dm.phase = sm.phase || 0;
       dm.blink = (time * 1.6 + (sm.phase || 0)) % 1;
       dm.spin = time * 0.6 + (sm.phase || 0);
       dm.frozenTimer = sm.frozenTimer || 0;
       st.mines.push(dm);
+    }
+
+    // Map or synthesize living bioluminescent jellyfish & seabed clams (zero allocations)
+    st.jellies.length = 0;
+    if (Array.isArray(rawSub.jellies)) {
+      for (let i = 0; i < rawSub.jellies.length && st.jellies.length < 4; i++) {
+        const sj = rawSub.jellies[i];
+        if (!sj) continue;
+        const dj = this._adaptJellyPool[st.jellies.length];
+        dj.x = sj.x;
+        dj.y = sj.y;
+        dj.z = -0.1;
+        dj.r = (sj.r || 24.5) * phoneBoost;
+        dj.hue = (sj.hue ?? i) % 3;
+        dj.phase = sj.phase || i * 2.1;
+        dj.pulse = sj.pulse ?? time * 3.1 + i * 1.4;
+        dj.state = sj.state || 'float';
+        dj.deadT = sj.deadT || 0;
+        st.jellies.push(dj);
+      }
+    } else if (this.era !== 'original') {
+      const jSpan = W + 180;
+      const yTop = st.surfaceY + 56;
+      const yRange = Math.max(60, st.seabedY - st.surfaceY - 126);
+      for (let i = 0; i < 3; i++) {
+        const dj = this._adaptJellyPool[i];
+        let jx = ((i + 0.32) * (jSpan / 3) - this._adaptScroll * 0.68) % jSpan;
+        if (jx < 0) jx += jSpan;
+        dj.x = jx - 90;
+        dj.y = yTop + ((i * 0.37 + 0.18) % 1) * yRange + Math.sin(time * 1.35 + i * 2.1) * 16;
+        dj.z = -0.85;
+        dj.r = 24.5 * phoneBoost;
+        dj.hue = i % 3;
+        dj.phase = i * 2.1;
+        dj.pulse = time * 3.0 + i * 1.7;
+        dj.state = 'float';
+        dj.deadT = 0;
+        st.jellies.push(dj);
+      }
+    }
+
+    st.clams.length = 0;
+    if (Array.isArray(rawSub.clams)) {
+      for (let i = 0; i < rawSub.clams.length && st.clams.length < 3; i++) {
+        st.clams.push(rawSub.clams[i]);
+      }
+    } else if (this.era !== 'original') {
+      const cSpan = W + 220;
+      for (let i = 0; i < 3; i++) {
+        const dc = this._adaptClamPool[i];
+        let cx = ((i + 0.5) * (cSpan / 3) - this._adaptScroll) % cSpan;
+        if (cx < 0) cx += cSpan;
+        dc.x = cx - 110;
+        dc.y = st.seabedY;
+        dc.r = 24 * phoneBoost;
+        dc.open = 0.5 + 0.45 * Math.max(0, Math.sin(time * 0.9 + i * 2.2));
+        dc.hasPearl = i !== 1;
+        st.clams.push(dc);
+      }
     }
 
     // Map bubbles / Cryo-Torpedoes (zero allocations)
@@ -2769,7 +2855,7 @@ export class SubRenderer {
       db.x = sb.x;
       db.y = sb.y;
       db.vx = sb.vx || 320;
-      db.r = 8.2 * s;
+      db.r = 9.2 * phoneBoost;
       db.age = 0.25 + ((time * 2 + i * 0.3) % 1);
       db.seed = i * 1.3;
       db.isTorpedo = sb.isTorpedo !== undefined ? Boolean(sb.isTorpedo) : this.era !== 'original';
@@ -2785,8 +2871,8 @@ export class SubRenderer {
       const dr = this._adaptRingPool[st.rings.length];
       dr.x = sw.x;
       dr.y = sw.y;
-      dr.r0 = 12 * s;
-      dr.r1 = (sw.maxR || 120) * 0.45;
+      dr.r0 = 14 * phoneBoost;
+      dr.r1 = (sw.maxR || 120) * 0.5;
       dr.color = sw.color || '#5efce8';
       dr.life = sw.life;
       dr.maxLife = sw.maxLife || 0.85;
@@ -5785,7 +5871,7 @@ export class SubRenderer {
     this.snowMat.uniforms.uYmin.value = seabedW - 1;
     this.snowMat.uniforms.uYmax.value = surfW + 1;
     const pr = gl.getPixelRatio ? gl.getPixelRatio() : 1;
-    const focal = (this.height * pr) / (2 * Math.tan(FOV * 0.5 * DEG));
+    const focal = (this.height * pr) / (2 * Math.tan(this._fov * 0.5 * DEG));
     this.snowMat.uniforms.uPx.value = focal;
     this.wakeMat.uniforms.uPx.value = focal;
 
@@ -5864,8 +5950,9 @@ export class SubRenderer {
     const dX = Math.sin(time * 0.31) * 0.06 + Math.sin(time * 0.73) * 0.025;
     const dY = Math.cos(time * 0.23) * 0.05 + Math.sin(time * 0.61) * 0.02;
     const camZ = lerp(CAM_Z, 14.4, cine);
-    const halfW0 = camZ * Math.tan(FOV * 0.5 * DEG) * this.camera.aspect;
-    const x = lerp(this._camFX + dX, sw.x - halfW0 * 0.04, cine);
+    const halfW0 = camZ * Math.tan(this._fov * 0.5 * DEG) * this.camera.aspect;
+    const leadX = this.camera.aspect < 0.85 ? halfW0 * 0.03 * (1 - cine) : 0;
+    const x = lerp(this._camFX + dX + leadX, sw.x - halfW0 * 0.04, cine);
     const y = lerp(this._camFY + dY, this._surfW, smooth01(cine * 1.08));
     this.camera.position.set(x + Math.sin(time * 73.7) * mag, y + Math.cos(time * 61.3) * mag * 0.85, camZ);
     this.camera.rotation.set(0.085 * cine, 0, Math.sin(time * 0.17) * 0.008 * (1 - cine));
@@ -6073,16 +6160,18 @@ export class SubRenderer {
     this.ventChimneyMesh.instanceMatrix.needsUpdate = true;
     this.ventPlumeMesh.instanceMatrix.needsUpdate = true;
 
-    // Upper Bioluminescent Warp Cavern (`warp_cavern.glb`)
+    // Upper Bioluminescent Warp Cavern (`warp_cavern.glb`, calibrated to 56px entry hitbox & landscape water column!)
     const wc = !isOrig ? stage.warpCave : null;
     const stW = stage.width || this.width;
-    const showWc = Boolean(wc && wc.active !== false && !wc.entered && wc.x < stW + 24 && wc.x > -90);
+    const showWc = Boolean(wc && wc.active !== false && !wc.entered && wc.x < stW + 32 && wc.x > -100);
     this.warpCavernGroup.visible = showWc;
     if (showWc) {
       const ww = this._toWorld(wc.x, wc.y, 0, this._v);
-      const cavSc = Math.max(0.95, (wc.r || 46) * pxw * 1.38);
-      const clampedY = Math.min(ww.y, surfW - cavSc * 1.05);
-      const edgeFade = smoothstep(stW + 22, stW - 58, wc.x) * smoothstep(-85, -15, wc.x);
+      const entryPx = wc.r ? Math.max(wc.r * 1.18, 52) : 56;
+      const maxColSc = Math.max(0.95, (surfW - seabedW) * 0.27);
+      const cavSc = clamp(entryPx * pxw * 1.32, 0.92, maxColSc);
+      const clampedY = Math.min(ww.y, surfW - cavSc * 0.92);
+      const edgeFade = smoothstep(stW + 28, stW - 54, wc.x) * smoothstep(-92, -15, wc.x);
       this.warpCavernGroup.position.set(ww.x, clampedY, -0.35);
       this.warpCavernGroup.rotation.set(0.05, -0.28 + Math.sin(time * 0.9) * 0.04, 0);
       this.warpCavernGroup.scale.setScalar(cavSc);
@@ -6131,7 +6220,9 @@ export class SubRenderer {
     this._cheer *= Math.exp(-3 * dt);
 
     const v = this._toWorld(sub.x, sub.y, 0, this._v);
-    const sc = ((sub.rx * pxw) / (isOrig ? 1.15 : 0.98)) * (isOrig ? 1.06 : 1.14);
+    const phoneSubBoost = stage !== this._adaptedStage && Math.min(this.width, this.height) <= 435 ? 1.14 : 1.0;
+    const effRx = (stage === this._adaptedStage ? sub.rx : Math.max(sub.rx, 37)) * phoneSubBoost;
+    const sc = ((effRx * pxw) / (isOrig ? 1.15 : 0.98)) * (isOrig ? 1.06 : 1.15);
     const surf = sub.surfaced || 0;
     const bob = Math.sin(time * 2.1) * 0.045 * sc * (1 - surf) + Math.sin(time * 1.8) * 0.035 * sc * surf;
     outer.position.set(v.x - this._recoil * 0.07 * sc, v.y + bob, 0);
@@ -6700,17 +6791,20 @@ export class SubRenderer {
     const ta = tent.geometry.attributes.aAlpha.array;
     const c = this._c;
     const bio = this.U.uBio.value;
+    const isPhone = Math.min(this.width, this.height) <= 435;
     let n = 0;
     for (let i = 0; i < jellies.length && n < MAX_JELLY; i++) {
       const j = jellies[i];
-      const v = this._toWorld(j.x, j.y, 0, this._v);
-      const r = j.r * pxw * 1.05;
+      const jz = j.z ?? -0.1;
+      const v = this._toWorld(j.x, j.y, jz, this._v);
+      const effJr = stage === this._adaptedStage ? j.r : Math.max(j.r, isPhone ? 23.5 : 21);
+      const r = effJr * pxw * 1.08;
       const popped = j.state === 'popped';
       const pt = popped ? clamp(j.deadT / 0.45, 0, 1) : 0;
       const ps = Math.sin(j.pulse || 0);
       const sxz = (1 - 0.13 * ps) * (1 + pt * 0.7);
       const sy = (1 + 0.1 * ps) * (1 - pt * 0.4);
-      d.position.set(v.x, v.y, -0.1);
+      d.position.set(v.x, v.y, jz);
       d.rotation.set(0.25, 0, Math.sin(time * 0.8 + j.phase) * 0.12);
       d.scale.set(r * sxz, r * sy, r * sxz);
       d.updateMatrix();
@@ -6750,13 +6844,15 @@ export class SubRenderer {
     inactiveMineMesh.count = 0;
 
     const d = this._dummy;
+    const isPhone = Math.min(this.width, this.height) <= 435;
     let n = 0;
     let ln = 0;
     let an = 0;
     for (let i = 0; i < mines.length && n < MAX_MINE; i++) {
       const m = mines[i];
       const v = this._toWorld(m.x, m.y, 0, this._v);
-      const r = m.r * pxw;
+      const effMr = stage === this._adaptedStage ? m.r : Math.max(m.r, isPhone ? 22.5 : 19.5);
+      const r = effMr * pxw;
       const frozen = (m.frozenTimer || 0) > 0;
       d.position.set(v.x, v.y, 0);
       d.rotation.set(0.24, m.spin || 0, 0.16);
@@ -6883,7 +6979,7 @@ export class SubRenderer {
     const ox = stage.sonarOriginX ?? stage.sub?.x ?? 0;
     const oy = stage.sonarOriginY ?? stage.sub?.y ?? 0;
     const wPos = this._toWorld(ox, oy, 0, this._v);
-    const maxWorldR = 275 * (stage.s || 1) * pxw;
+    const maxWorldR = (stage === this._adaptedStage ? 320 : 285 * (stage.s || 1)) * pxw;
     const curR = lerp(0.55, maxWorldR, 1 - Math.pow(1 - prog, 2.2));
     this.sonarWaveMesh.position.set(wPos.x, wPos.y, 0.15);
     this.sonarWaveMesh.scale.set(curR, curR, curR * 0.45);

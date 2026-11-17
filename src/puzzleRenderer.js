@@ -26,7 +26,7 @@ const FLIP_T = 0.38;
 const BEAM_Y = 0.76;
 const POGO_SCALE = 1.32;
 const WATER_Y = -0.32;
-const HUD_TOP_OFFSET = 98;
+const HUD_TOP_OFFSET = 114;
 
 const MAX_TILES = 64;
 const MAX_GLOW = 260;
@@ -3138,7 +3138,9 @@ export class PuzzleRenderer {
     this.stele.visible = p.type !== 'beam';
     this.stele.position.set(steleX, -0.04, steleZ);
     this.stele.rotation.set(0, 0.34, 0);
-    this._drawMural(room);
+    const initShow = p.showTarget !== false || room.solved ? 1.0 : clamp(room.peekAlpha ?? 0, 0, 1);
+    this._lastMuralShow = -1;
+    this._drawMural(room, initShow);
 
     const t = p.type;
     const vis = (o, on) => {
@@ -3248,8 +3250,15 @@ export class PuzzleRenderer {
     this._syncGlbRoomProps(room);
   }
 
-  _drawMural(room) {
+  _drawMural(room, effectiveShowInput = undefined) {
     const p = room.puzzle;
+    const effectiveShow =
+      effectiveShowInput !== undefined
+        ? clamp(effectiveShowInput, 0, 1)
+        : p.showTarget !== false || room.solved
+          ? 1.0
+          : clamp(room.peekAlpha ?? 0, 0, 1);
+    this._lastMuralShow = effectiveShow;
     const c = this.muralCanvas;
     const ctx = c.getContext('2d');
     const gc = this.muralGlowCanvas.getContext('2d');
@@ -3280,53 +3289,70 @@ export class PuzzleRenderer {
       const cell = Math.min(W - 60, H - 90) / n;
       const ox = (W - cell * n) / 2;
       const oy = 34;
-      if (p.showTarget) {
-        for (let y = 0; y < n; y++) {
-          for (let x = 0; x < n; x++) {
-            const on = p.target[y * n + x];
-            const cx = ox + (x + 0.5) * cell;
-            const cy = oy + (y + 0.5) * cell;
+      for (let y = 0; y < n; y++) {
+        for (let x = 0; x < n; x++) {
+          const on = p.target[y * n + x];
+          const cx = ox + (x + 0.5) * cell;
+          const cy = oy + (y + 0.5) * cell;
+          // Weathered carved recessed rune socket ALWAYS visible (>= 0.18 alpha even when peekAlpha === 0)
+          carve((k) => {
+            k.lineWidth = 4.2;
+            k.beginPath();
+            k.arc(cx, cy, cell * 0.36, 0, TAU);
+            k.stroke();
+            k.beginPath();
+            k.arc(cx, cy, cell * 0.28, 0, TAU);
+            k.fill();
+          });
+          ctx.save();
+          ctx.strokeStyle = 'rgba(195, 224, 255, 0.20)';
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.arc(cx, cy, cell * 0.32, 0, TAU);
+          ctx.stroke();
+          drawRune(ctx, mulberry32(4100 + (y * n + x) * 97), cx, cy, cell * 0.34);
+          ctx.restore();
+
+          gc.save();
+          gc.globalAlpha = 0.18;
+          gc.strokeStyle = glow;
+          gc.lineWidth = 1.8;
+          gc.beginPath();
+          gc.arc(cx, cy, cell * 0.33, 0, TAU);
+          gc.stroke();
+          gc.restore();
+
+          if (on && effectiveShow > 0.01) {
+            gc.save();
+            gc.globalAlpha = effectiveShow;
+            const g = gc.createRadialGradient(cx, cy, 0, cx, cy, cell * 0.43);
+            g.addColorStop(0, '#ffffff');
+            g.addColorStop(0.38, glow);
+            g.addColorStop(1, 'rgba(0,0,0,0)');
+            gc.fillStyle = g;
+            gc.beginPath();
+            gc.arc(cx, cy, cell * 0.43, 0, TAU);
+            gc.fill();
+            gc.restore();
+
+            ctx.save();
+            ctx.globalAlpha = effectiveShow;
+            ctx.fillStyle = glow;
+            ctx.beginPath();
+            ctx.arc(cx, cy, cell * 0.26, 0, TAU);
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2.0;
+            drawRune(ctx, mulberry32(4100 + (y * n + x) * 97), cx, cy, cell * 0.34);
+            ctx.restore();
+          } else if (!on) {
             carve((k) => {
-              k.lineWidth = 4;
               k.beginPath();
-              k.arc(cx, cy, cell * 0.36, 0, TAU);
-              k.stroke();
+              k.arc(cx, cy, cell * 0.11, 0, TAU);
+              k.fill();
             });
-            if (on) {
-              const g = gc.createRadialGradient(cx, cy, 0, cx, cy, cell * 0.42);
-              g.addColorStop(0, '#ffffff');
-              g.addColorStop(0.35, glow);
-              g.addColorStop(1, 'rgba(0,0,0,0)');
-              gc.fillStyle = g;
-              gc.beginPath();
-              gc.arc(cx, cy, cell * 0.42, 0, TAU);
-              gc.fill();
-              ctx.fillStyle = glow;
-              ctx.beginPath();
-              ctx.arc(cx, cy, cell * 0.26, 0, TAU);
-              ctx.fill();
-            } else {
-              carve((k) => {
-                k.beginPath();
-                k.arc(cx, cy, cell * 0.12, 0, TAU);
-                k.fill();
-              });
-            }
           }
         }
-      } else {
-        ctx.font = '900 112px Orbitron, Georgia, serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = 'rgba(10,12,26,0.65)';
-        ctx.fillText('?', W / 2, H * 0.43);
-        gc.font = '900 112px Orbitron, Georgia, serif';
-        gc.textAlign = 'center';
-        gc.textBaseline = 'middle';
-        gc.fillStyle = glow;
-        gc.globalAlpha = 0.38;
-        gc.fillText('?', W / 2, H * 0.43);
-        gc.globalAlpha = 1;
       }
       carve((k) => {
         k.lineWidth = 3;
@@ -3349,34 +3375,72 @@ export class PuzzleRenderer {
         k.arc(W / 2, 192, 9, 0, TAU);
         k.fill();
       });
+      ctx.strokeStyle = 'rgba(217, 185, 118, 0.22)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(W / 2 - 44, 168);
+      ctx.quadraticCurveTo(W / 2 - 38, 82, W / 2, 72);
+      ctx.quadraticCurveTo(W / 2 + 38, 82, W / 2 + 44, 168);
+      ctx.stroke();
+
       const n = p.order.length;
       const sp = Math.min(40, (W - 60) / n);
       const sockets = [];
       for (let i = 0; i < n; i++) {
         const cx = W / 2 + (i - (n - 1) / 2) * sp;
         const cy = 250;
+        // Carved recessed socket + faint 0.20 rim ALWAYS visible even when peekAlpha === 0
         carve((k) => {
           k.lineWidth = 4;
           k.beginPath();
-          k.arc(cx, cy, 12, 0, TAU);
+          k.arc(cx, cy, 13, 0, TAU);
           k.stroke();
           k.beginPath();
-          k.arc(cx, cy, 6, 0, TAU);
+          k.arc(cx, cy, 7, 0, TAU);
           k.fill();
         });
-        if (p.showTarget && p.bells && p.bells[p.order[i]]) {
+        ctx.strokeStyle = 'rgba(195, 224, 255, 0.22)';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 12, 0, TAU);
+        ctx.stroke();
+
+        gc.save();
+        gc.globalAlpha = 0.18;
+        gc.strokeStyle = glow;
+        gc.lineWidth = 1.6;
+        gc.beginPath();
+        gc.arc(cx, cy, 12, 0, TAU);
+        gc.stroke();
+        gc.restore();
+
+        if (effectiveShow > 0.01 && p.bells && p.bells[p.order[i]]) {
           const tCol = BELL_COLORS[p.bells[p.order[i]].color] || glow;
+          ctx.save();
+          ctx.globalAlpha = effectiveShow;
+          ctx.fillStyle = tCol;
+          ctx.beginPath();
+          ctx.arc(cx, cy, 7.5, 0, TAU);
+          ctx.fill();
           ctx.strokeStyle = tCol;
           ctx.lineWidth = 3.5;
           ctx.beginPath();
-          ctx.arc(cx, cy, 12, 0, TAU);
+          ctx.arc(cx, cy, 12.5, 0, TAU);
           ctx.stroke();
+          ctx.restore();
+
+          gc.save();
+          gc.globalAlpha = effectiveShow;
+          gc.fillStyle = tCol;
+          gc.beginPath();
+          gc.arc(cx, cy, 6.5, 0, TAU);
+          gc.fill();
           gc.strokeStyle = tCol;
           gc.lineWidth = 4;
           gc.beginPath();
-          ctx.globalAlpha = 1;
-          gc.arc(cx, cy, 12, 0, TAU);
+          gc.arc(cx, cy, 12.5, 0, TAU);
           gc.stroke();
+          gc.restore();
         }
         sockets.push([cx / W, cy / H]);
       }
@@ -4365,11 +4429,17 @@ export class PuzzleRenderer {
 
   _updateStele(room, time) {
     if (!this.stele.visible) return;
+    const p = room.puzzle;
+    const effectiveShow = p.showTarget !== false || room.solved ? 1.0 : clamp(room.peekAlpha ?? 0, 0, 1);
+    if (Math.abs(effectiveShow - (this._lastMuralShow ?? -1)) > 0.018) {
+      this._drawMural(room, effectiveShow);
+    }
     const sp = this.stele.position;
     this.shades.flat(sp.x, 0.0, sp.z + 0.1, 2.6, 1.1, 0, 0.55, 0, 0);
     if (room.type === 'lights') {
       const k = 0.85 + 0.15 * Math.sin(time * 1.6);
-      this.muralMat.emissiveIntensity = 1.35 * k + (room.solved ? 0.7 : 0);
+      this.muralMat.emissiveIntensity = (0.32 + 1.15 * effectiveShow) * k + (room.solved ? 0.7 : 0);
+      const halo = 0.025 + 0.085 * effectiveShow;
       this.glows.bill(
         sp.x,
         1.4,
@@ -4377,11 +4447,13 @@ export class PuzzleRenderer {
         2.2,
         2.4,
         0,
-        this.glowCol.r * 0.09,
-        this.glowCol.g * 0.09,
-        this.glowCol.b * 0.09
+        this.glowCol.r * halo,
+        this.glowCol.g * halo,
+        this.glowCol.b * halo
       );
     } else if (room.type === 'bells' && this._sockets) {
+      const k = 0.88 + 0.12 * Math.sin(time * 1.6);
+      this.muralMat.emissiveIntensity = (0.32 + 1.05 * effectiveShow) * k + (room.solved ? 0.65 : 0);
       const n = this._sockets.length;
       const wrong = room.t - room.wrongAt;
       for (let i = 0; i < n; i++) {
@@ -4396,8 +4468,13 @@ export class PuzzleRenderer {
           this.glows.bill(x, y, z, 0.32 * pop, 0.32 * pop, 0, col.r * 1.15, col.g * 1.15, col.b * 1.15);
           this.glows.bill(x, y, z, 0.12, 0.12, 0, 1, 1, 1);
         } else if (wrong >= 0 && wrong < 0.7) {
-          const k = (1 - wrong / 0.7) * (0.5 + 0.5 * Math.sin(wrong * 40));
-          this.glows.bill(x, y, z, 0.3, 0.3, 0, 0.6 * k, 0.25 * k, 0.35 * k);
+          const wk = (1 - wrong / 0.7) * (0.5 + 0.5 * Math.sin(wrong * 40));
+          this.glows.bill(x, y, z, 0.3, 0.3, 0, 0.6 * wk, 0.25 * wk, 0.35 * wk);
+        } else if (effectiveShow > 0.03 && p.bells && p.bells[p.order[i]]) {
+          const col = this._bellCols[p.bells[p.order[i]].color];
+          const pk = effectiveShow * 0.88;
+          const sz = 0.24 * (0.65 + 0.35 * effectiveShow);
+          this.glows.bill(x, y, z, sz, sz, 0, col.r * pk, col.g * pk, col.b * pk);
         }
       }
     }
@@ -4578,10 +4655,14 @@ export class PuzzleRenderer {
     this.exitChip.visible = a > 0.01;
     if (!this.exitChip.visible) return;
     const v = this._v.set(this._doorX, 0.05, this._doorZ + 0.9).project(this.camera);
+    const wide = this.width / this.height > 1.15;
     const x = (v.x + 1) * 0.5 * this.width;
-    const y = Math.min(this.height - 168, (1 - v.y) * 0.5 * this.height + 6);
-    const s = clamp(this.width / 390, 0.85, 1.35);
-    this.exitChip.scale.set(96 * s, 32 * s, 1);
+    const rawY = (1 - v.y) * 0.5 * this.height + (wide ? 10 : 14);
+    const y = wide
+      ? clamp(rawY, this.height * 0.84, this.height - 20)
+      : clamp(rawY, this.height * 0.78, this.height - 102);
+    const s = clamp((wide ? this.height * 1.15 : this.width) / 390, 0.78, 1.25);
+    this.exitChip.scale.set((wide ? 82 : 94) * s, (wide ? 27 : 31) * s, 1);
     this.exitChip.position.set(x, -y + Math.sin(time * 4) * 2, 0);
     this.exitChip.material.opacity = a * (this._onEntrance ? 1 : 0.72);
   }
@@ -4618,11 +4699,13 @@ export class PuzzleRenderer {
     const pr = Math.min(2, this.gl.getPixelRatio ? this.gl.getPixelRatio() : this._dpr || 1);
     const W = this.width;
     const wide = W / this.height > 1.15;
-    const s = clamp(Math.min(W, this.height * 1.1) / 390, 0.85, 1.22);
-    const pw = wide ? Math.min(W * 0.44, 420 * s) : Math.min(W - 18, 520 * s);
-    const ph = 60 * s;
+    const s = wide ? clamp(this.height / 420, 0.78, 1.06) : clamp(W / 390, 0.85, 1.2);
+    const pw = wide ? Math.min(W * 0.255, 236 * s) : Math.min(W - 18, 500 * s);
+    const ph = (wide ? 50 : 56) * s;
     const cw = Math.max(1, Math.round(pw * pr));
     const ch = Math.max(1, Math.round(ph * pr));
+    const effectiveShow = p.showTarget !== false || room.solved ? 1 : clamp(room.peekAlpha ?? 0, 0, 1);
+    const peekBucket = Math.round(effectiveShow * 4);
     const prog =
       room.type === 'bells'
         ? `${room.progress}:${room.rung.join('')}`
@@ -4633,11 +4716,15 @@ export class PuzzleRenderer {
           : room.type === 'blocks'
             ? room.platesOn
             : 0;
-    const key = `${room.hud.rev}|${room.hud.title}|${room.hud.line}|${room.hud.status}|${prog}|${Boolean(p.showTarget)}|${room.moves}|${room.parMoves}|${room.solved}|${cw}x${ch}|${W}x${this.height}`;
+    const key = `${room.hud.rev}|${room.hud.title}|${room.hud.line}|${room.hud.status}|${prog}|${peekBucket}|${room.moves}|${room.parMoves}|${room.solved}|${cw}x${ch}|${W}x${this.height}`;
     const hudA =
       room.phase === 'intro' ? smooth01((room.phaseT - 0.3) / 0.5) : 1 - clamp(room.fade || 0, 0, 1);
     this.hudPanel.material.opacity = hudA;
     this.hudPanel.visible = hudA > 0.01;
+    const hudX = wide ? W - 12 - pw / 2 : W / 2;
+    const hudY = wide ? -(112 + ph / 2) : -(HUD_TOP_OFFSET + ph / 2);
+    this.hudPanel.scale.set(pw, ph, 1);
+    this.hudPanel.position.set(hudX, hudY, 0);
     const c = this._hudCanvas;
     if (key === this._hudKey && c.width === cw && c.height === ch) return;
     this._hudKey = key;
@@ -4666,78 +4753,85 @@ export class PuzzleRenderer {
     bg.addColorStop(0, 'rgba(10, 16, 34, 0.84)');
     bg.addColorStop(1, 'rgba(5, 9, 22, 0.84)');
     ctx.fillStyle = bg;
-    this._roundRect(ctx, 1, 1, pw - 2, ph - 2, 14 * s);
+    this._roundRect(ctx, 1, 1, pw - 2, ph - 2, 12 * s);
     ctx.fill();
     ctx.strokeStyle = 'rgba(217, 169, 78, 0.45)';
     ctx.lineWidth = 1.3;
     ctx.stroke();
 
     const glow = '#' + this.glowCol.getHexString();
-    const mx = 28 * s;
+    const mx = (wide ? 22 : 26) * s;
     const my = ph / 2;
-    const mg = ctx.createRadialGradient(mx, my, 2, mx, my, 20 * s);
+    const mg = ctx.createRadialGradient(mx, my, 2, mx, my, (wide ? 16 : 19) * s);
     mg.addColorStop(0, glow);
     mg.addColorStop(0.55, 'rgba(0,0,0,0.25)');
     mg.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = mg;
     ctx.beginPath();
-    ctx.arc(mx, my, 20 * s, 0, TAU);
+    ctx.arc(mx, my, (wide ? 16 : 19) * s, 0, TAU);
     ctx.fill();
     ctx.strokeStyle = 'rgba(217, 169, 78, 0.72)';
-    ctx.lineWidth = 1.8;
+    ctx.lineWidth = 1.7;
     ctx.beginPath();
-    ctx.arc(mx, my, 15 * s, 0, TAU);
+    ctx.arc(mx, my, (wide ? 12.5 : 14.5) * s, 0, TAU);
     ctx.stroke();
 
     ctx.save();
     ctx.lineCap = 'round';
     ctx.strokeStyle = '#f8fafc';
-    ctx.lineWidth = 2.2 * s;
+    ctx.lineWidth = 2.0 * s;
     const typeIdx = ['lights', 'bells', 'beam', 'blocks'].indexOf(room.type);
-    drawRune(ctx, mulberry32(1000 + (typeIdx * 4 + 1) * 77), mx, my, 24 * s);
+    drawRune(ctx, mulberry32(1000 + (typeIdx * 4 + 1) * 77), mx, my, (wide ? 19 : 22) * s);
     ctx.restore();
 
-    const rw = this._drawHudWidget(ctx, room, pw, ph, s, glow);
-    const tx = 54 * s;
+    const rw = this._drawHudWidget(ctx, room, pw, ph, s, glow, effectiveShow);
+    const tx = (wide ? 42 : 50) * s;
     ctx.textBaseline = 'alphabetic';
     ctx.textAlign = 'left';
-    ctx.font = this._font(800, 12.5 * s);
+    ctx.font = this._font(800, (wide ? 10.5 : 12) * s);
     ctx.fillStyle = '#7be8ff';
     const titleStr = room.hud.title || p.title;
-    ctx.fillText(titleStr, tx, 21 * s);
+    ctx.fillText(titleStr, tx, (wide ? 18 : 20) * s);
     if (room.parMoves > 0) {
       const tw = ctx.measureText(titleStr).width;
       const inPar = (room.moves || 0) <= room.parMoves;
-      ctx.font = this._font(800, 9.5 * s);
+      ctx.font = this._font(800, (wide ? 8.8 : 9.5) * s);
       ctx.fillStyle = room.parCleared ? '#fde047' : inPar ? '#fbbf24' : 'rgba(148, 169, 201, 0.82)';
       const parTxt = room.parCleared ? 'PAR +5G' : `PAR ${room.moves || 0}/${room.parMoves}`;
-      if (tx + tw + 8 * s + ctx.measureText(parTxt).width < pw - rw - 6 * s) {
-        ctx.fillText(parTxt, tx + tw + 8 * s, 20.5 * s);
+      if (tx + tw + 6 * s + ctx.measureText(parTxt).width < pw - rw - 4 * s) {
+        ctx.fillText(parTxt, tx + tw + 6 * s, (wide ? 17.5 : 19.5) * s);
       }
     }
 
-    ctx.font = this._font(600, 12.5 * s, 'Rajdhani, "Segoe UI", sans-serif');
+    const lineStr = wide
+      ? room.solved
+        ? 'Vault open • step south to exit'
+        : !room.showTarget && effectiveShow > 0.25
+          ? 'Doorway clue lit on stele'
+          : !room.showTarget && (room.type === 'lights' || room.type === 'bells')
+            ? 'Step to doorway to peek clue'
+            : room.hud.line
+      : room.hud.line;
+    ctx.font = this._font(600, (wide ? 10.5 : 11.8) * s, 'Rajdhani, "Segoe UI", sans-serif');
     ctx.fillStyle = 'rgba(241, 245, 249, 0.88)';
-    const maxW = pw - tx - rw - 10 * s;
-    let lines = this._wrap(ctx, room.hud.line, maxW, 2);
+    const maxW = Math.max(40 * s, pw - tx - rw - 8 * s);
+    let lines = this._wrap(ctx, lineStr, maxW, 2);
     if (lines.length > 1) {
-      ctx.font = this._font(600, 11.5 * s, 'Rajdhani, "Segoe UI", sans-serif');
-      lines = this._wrap(ctx, room.hud.line, maxW, 2);
+      ctx.font = this._font(600, (wide ? 9.8 : 11) * s, 'Rajdhani, "Segoe UI", sans-serif');
+      lines = this._wrap(ctx, lineStr, maxW, 2);
     }
     for (let i = 0; i < lines.length; i++) {
-      ctx.fillText(lines[i], tx, (lines.length > 1 ? 37 : 40) * s + i * 13 * s);
+      ctx.fillText(lines[i], tx, (lines.length > 1 ? (wide ? 31 : 34) : (wide ? 35 : 38)) * s + i * (wide ? 11.5 : 12.5) * s);
     }
 
     this._hudTex.needsUpdate = true;
-    this.hudPanel.scale.set(pw, ph, 1);
-    this.hudPanel.position.set(wide ? 14 + pw / 2 : W / 2, -(HUD_TOP_OFFSET + ph / 2), 0);
   }
 
-  _drawHudWidget(ctx, room, pw, ph, s, glow) {
+  _drawHudWidget(ctx, room, pw, ph, s, glow, effectiveShow = 1) {
     const p = room.puzzle;
-    const right = pw - 12 * s;
+    const right = pw - 10 * s;
     const cy = ph / 2;
-    const sx = right - 12 * s;
+    const sx = right - 11 * s;
 
     // Vector Star Core emblem: dim slate until chamber is solved, radiant gold when solved
     ctx.save();
@@ -4746,7 +4840,7 @@ export class PuzzleRenderer {
     ctx.beginPath();
     for (let i = 0; i < 10; i++) {
       const a = -Math.PI / 2 + (i / 10) * TAU;
-      const rad = (i % 2 === 0 ? 10 : 4.4) * s;
+      const rad = (i % 2 === 0 ? 9.5 : 4.2) * s;
       if (i === 0) ctx.moveTo(sx + Math.cos(a) * rad, cy + Math.sin(a) * rad);
       else ctx.lineTo(sx + Math.cos(a) * rad, cy + Math.sin(a) * rad);
     }
@@ -4754,64 +4848,73 @@ export class PuzzleRenderer {
     ctx.fill();
     ctx.restore();
 
-    let used = 34 * s;
-    const x1 = sx - 20 * s;
-    if (room.type === 'lights' && p.showTarget) {
+    let used = 32 * s;
+    const x1 = sx - 18 * s;
+    if (room.type === 'lights' && effectiveShow > 0.15) {
       const n = p.n;
-      const cell = 9.5 * s;
+      const cell = 8.8 * s;
       const w = n * cell;
       const x0 = x1 - w;
       const y0 = cy - w / 2;
+      ctx.save();
+      ctx.globalAlpha = effectiveShow;
       for (let y = 0; y < n; y++) {
         for (let x = 0; x < n; x++) {
           const on = p.target[y * n + x];
-          ctx.fillStyle = on ? glow : 'rgba(148,169,201,0.2)';
+          ctx.fillStyle = on ? glow : 'rgba(148,169,201,0.22)';
           ctx.beginPath();
           ctx.arc(x0 + (x + 0.5) * cell, y0 + (y + 0.5) * cell, cell * (on ? 0.36 : 0.22), 0, TAU);
           ctx.fill();
         }
       }
-      used += w + 12 * s;
+      ctx.restore();
+      used += w + 10 * s;
     } else if (room.type === 'bells') {
       const n = p.order.length;
-      const sp = 13 * s;
+      const sp = 12 * s;
       const x0 = x1 - n * sp;
       for (let i = 0; i < n; i++) {
         const cx = x0 + (i + 0.5) * sp;
         if (i < room.progress) {
           ctx.fillStyle = BELL_COLORS[room.rung[i]];
           ctx.beginPath();
-          ctx.arc(cx, cy, 5 * s, 0, TAU);
+          ctx.arc(cx, cy, 4.8 * s, 0, TAU);
           ctx.fill();
         } else {
-          const targetCol = p.showTarget && p.bells && p.bells[p.order[i]] ? BELL_COLORS[p.bells[p.order[i]].color] : null;
+          const targetCol =
+            effectiveShow > 0.15 && p.bells && p.bells[p.order[i]]
+              ? BELL_COLORS[p.bells[p.order[i]].color]
+              : null;
+          ctx.save();
+          if (targetCol) ctx.globalAlpha = effectiveShow;
           ctx.strokeStyle = targetCol || 'rgba(148,169,201,0.45)';
           ctx.lineWidth = (targetCol ? 2.1 : 1.5) * s;
           ctx.beginPath();
-          ctx.arc(cx, cy, 4.6 * s, 0, TAU);
+          ctx.arc(cx, cy, 4.4 * s, 0, TAU);
           ctx.stroke();
+          ctx.restore();
         }
       }
-      used += n * sp + 12 * s;
+      used += n * sp + 10 * s;
     } else if (room.type === 'blocks') {
-      ctx.font = this._font(800, 14 * s);
+      ctx.font = this._font(800, 13 * s);
       ctx.textAlign = 'right';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = room.platesOn === room.plates.length ? glow : '#f8fafc';
       const txt = `${room.platesOn}/${room.plates.length}`;
       ctx.fillText(txt, x1, cy);
-      used += ctx.measureText(txt).width + 14 * s;
+      used += ctx.measureText(txt).width + 12 * s;
     } else if (room.type === 'beam') {
       const on = room.beam.hit;
       ctx.fillStyle = on ? glow : 'rgba(148,169,201,0.32)';
       ctx.beginPath();
-      ctx.moveTo(x1 - 8 * s, cy - 12 * s);
+      ctx.moveTo(x1 - 7.5 * s, cy - 11 * s);
       ctx.lineTo(x1, cy);
-      ctx.lineTo(x1 - 8 * s, cy + 12 * s);
-      ctx.lineTo(x1 - 16 * s, cy);
+      ctx.lineTo(x1 - 7.5 * s, cy + 11 * s);
+      ctx.lineTo(x1 - 15 * s, cy);
       ctx.closePath();
       ctx.fill();
-      used += 28 * s;
+      used += 24 * s;
     }
     return used;
   }

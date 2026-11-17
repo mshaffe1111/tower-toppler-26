@@ -40,6 +40,11 @@ const altFillEl = document.getElementById('alt-fill');
 const altPipEl = document.getElementById('alt-pip');
 const altWaterEl = document.getElementById('alt-water');
 const actionPromptEl = document.getElementById('action-prompt');
+const puzzleHudEl = document.getElementById('puzzle-hud');
+const puzzleHudTitleEl = document.getElementById('puzzle-hud-title');
+const puzzleHudSubEl = document.getElementById('puzzle-hud-sub');
+const btnPeekClue = document.getElementById('btn-peek-clue');
+const peekClueLblEl = document.getElementById('peek-clue-lbl');
 
 const bannerEl = document.getElementById('stage-banner');
 const bannerSubEl = document.getElementById('banner-sub');
@@ -634,31 +639,167 @@ function starsToSvgHtml(starsObj) {
   return `${s1}${s2}${s3}`;
 }
 
-function renderActionPromptMarkup(rawText) {
-  const upper = String(rawText || '').toUpperCase();
-  let icon = PROMPT_ICONS.up;
-  if (rawText.includes('▲▼') || (upper.includes('LIFT') && upper.includes('RIDE')) || upper.includes('CAGE')) {
-    icon = PROMPT_ICONS.updown;
-  } else if (upper.includes('CRAFT') || upper.includes('WORKBENCH') || upper.includes('DYNAMO') || upper.includes('REPAIR') || upper.includes('FIX')) {
-    icon = PROMPT_ICONS.craft;
-  } else if (upper.includes('CHEST') || upper.includes('KEY') || upper.includes('TREASURE')) {
-    icon = PROMPT_ICONS.key;
-  } else if (upper.includes('CURIO') || upper.includes('ARTIFACT')) {
-    icon = PROMPT_ICONS.curio;
-  } else if (upper.includes('RUNE') || upper.includes('CHAMBER') || upper.includes('PUZZLE') || upper.includes('BELL') || upper.includes('MIRROR')) {
-    icon = PROMPT_ICONS.rune;
-  } else if (upper.includes('GLIDE') || upper.includes('FLAP') || upper.includes('WING')) {
-    icon = PROMPT_ICONS.wing;
-  } else if (upper.includes('CALL') || upper.includes('CRYO') || upper.includes('SNOW')) {
-    icon = PROMPT_ICONS.cryo;
-  } else if (upper.includes('BOOST')) {
-    icon = PROMPT_ICONS.bolt;
+function resolveActionPromptSpec(rawText, hudMode) {
+  const raw = String(rawText || '').trim();
+  if (!raw || hudMode === 'puzzle') {
+    return { html: '', interactKind: '', triggerAction: null, subtype: '' };
   }
+  const upper = raw.toUpperCase();
+
+  // Informational / non-interactive status badges
+  if (
+    upper.includes('SOLVED') ||
+    upper.includes('UNLOCKED') ||
+    upper.includes('NEED PARTS') ||
+    upper.includes('NEED KEYS') ||
+    upper.includes('AT WORKBENCH') ||
+    upper.includes('SONAR ACTIVE') ||
+    upper.startsWith('BOOST ')
+  ) {
+    let icon = PROMPT_ICONS.up;
+    let label = upper
+      .replace(/->/g, '•')
+      .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}▲▼◀▶✓◎]/gu, '')
+      .trim();
+    if (upper.includes('BOOST')) icon = PROMPT_ICONS.bolt;
+    else if (upper.includes('RUNE')) icon = PROMPT_ICONS.rune;
+    else if (upper.includes('PART') || upper.includes('WORKBENCH')) {
+      icon = PROMPT_ICONS.craft;
+      if (upper.includes('AT WORKBENCH')) label = 'CRAFT DYNAMO FIRST';
+    } else if (upper.includes('KEY')) {
+      icon = PROMPT_ICONS.key;
+    } else if (upper.includes('SONAR')) {
+      icon = PROMPT_ICONS.cryo;
+      label = 'SONAR PING ACTIVE';
+    }
+    return {
+      html: `${icon}<span>${label}</span>`,
+      interactKind: '',
+      triggerAction: null,
+      subtype: 'info',
+    };
+  }
+
+  // 1. Casual Workbench & Treasure Chest ('fire' per #277 + 'up' bridge for game.js)
+  if (upper.includes('CRAFT') && (upper.includes('DYNAMO') || upper.includes('BEACON'))) {
+    return {
+      html: `${PROMPT_ICONS.craft}<span>TAP • CRAFT DYNAMO</span>`,
+      interactKind: 'fire',
+      triggerAction: 'fire',
+      subtype: 'station',
+    };
+  }
+  if (upper.includes('OPEN') && upper.includes('CHEST')) {
+    return {
+      html: `${PROMPT_ICONS.key}<span>TAP • OPEN CHEST</span>`,
+      interactKind: 'fire',
+      triggerAction: 'fire',
+      subtype: 'station',
+    };
+  }
+
+  // 2. Call Lift ('fire')
+  if (upper.includes('CALL') && upper.includes('LIFT')) {
+    return {
+      html: `${PROMPT_ICONS.cryo}<span>TAP • CALL LIFT</span>`,
+      interactKind: 'fire',
+      triggerAction: 'fire',
+      subtype: 'call_lift',
+    };
+  }
+
+  // 3. Boarded / Resting Lift ('lift' -> 'up')
+  if (raw.includes('▲▼') || (upper.includes('LIFT') && (upper.includes('CAGE') || upper.includes('RIDE')))) {
+    return {
+      html: `${PROMPT_ICONS.updown}<span>TAP / SWIPE ↑ • RIDE LIFT</span>`,
+      interactKind: 'lift',
+      triggerAction: 'up',
+      subtype: 'lift',
+    };
+  }
+
+  // 4. Tower Doorways, Rune Sanctums, Core Vaults & Summit Exits ('door' -> 'up', <= 26 chars)
+  if (hudMode === 'tower') {
+    if (upper.includes('RUNE')) {
+      return {
+        html: `${PROMPT_ICONS.rune}<span>TAP / SWIPE ↑ • RUNE DOOR</span>`,
+        interactKind: 'door',
+        triggerAction: 'up',
+        subtype: 'door',
+      };
+    }
+    if (upper.includes('VAULT')) {
+      return {
+        html: `${PROMPT_ICONS.up}<span>TAP / SWIPE ↑ • CORE VAULT</span>`,
+        interactKind: 'door',
+        triggerAction: 'up',
+        subtype: 'door',
+      };
+    }
+    if (upper.includes('INSTALL') && upper.includes('DYNAMO')) {
+      return {
+        html: `${PROMPT_ICONS.craft}<span>TAP / SWIPE ↑ • FIX BEACON</span>`,
+        interactKind: 'door',
+        triggerAction: 'up',
+        subtype: 'door',
+      };
+    }
+    if (upper.includes('DEPART')) {
+      return {
+        html: `${PROMPT_ICONS.up}<span>TAP / SWIPE ↑ • DEPART</span>`,
+        interactKind: 'door',
+        triggerAction: 'up',
+        subtype: 'door',
+      };
+    }
+    if (upper.includes('TOPPLE')) {
+      return {
+        html: `${PROMPT_ICONS.up}<span>TAP / SWIPE ↑ • TOPPLE!</span>`,
+        interactKind: 'door',
+        triggerAction: 'up',
+        subtype: 'door',
+      };
+    }
+    if (upper.includes('DOOR') || upper.includes('PORTAL') || upper.includes('PASSAGE')) {
+      return {
+        html: `${PROMPT_ICONS.up}<span>TAP OR SWIPE ↑ • ENTER DOOR</span>`,
+        interactKind: 'door',
+        triggerAction: 'up',
+        subtype: 'door',
+      };
+    }
+  }
+
+  // 5. Core Lock Vault Ring Lock ('fire')
+  if (hudMode === 'vault') {
+    return {
+      html: `${PROMPT_ICONS.bolt}<span>TAP • LOCK RING</span>`,
+      interactKind: '',
+      triggerAction: 'fire',
+      subtype: 'vault',
+    };
+  }
+
+  // 6. Submarine controls hint
+  if (hudMode === 'submarine') {
+    return {
+      html: `${PROMPT_ICONS.cryo}<span>TAP FIRE • JUMP SONAR</span>`,
+      interactKind: '',
+      triggerAction: 'fire',
+      subtype: 'sub',
+    };
+  }
+
   const cleanLabel = upper
     .replace(/->/g, '•')
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}▲▼◀▶]/gu, '')
     .trim();
-  return `${icon}<span>${cleanLabel}</span>`;
+  return {
+    html: `${PROMPT_ICONS.up}<span>${cleanLabel}</span>`,
+    interactKind: '',
+    triggerAction: null,
+    subtype: '',
+  };
 }
 
 function renderMissionStatusMarkup(rawStatus) {
@@ -802,8 +943,12 @@ function renderLivesPips(lives) {
 }
 
 let prevDirKey = '';
-let prevPromptRaw = '';
+let prevPromptKey = '';
 let prevMissionStatusRaw = '';
+let currentPromptAction = null;
+let currentPromptSubtype = '';
+let prevPuzzleTitle = '';
+let prevPuzzleSub = '';
 
 let lastLaunch = {
   type: 'campaign',
@@ -888,8 +1033,65 @@ const game = new TowerTopplerGame(
         altMeterEl.classList.toggle('sinking', waterPct > 1);
       }
 
+      if (appEl && appEl.dataset.gameMode !== (hud.mode || 'tower')) {
+        appEl.dataset.gameMode = hud.mode || 'tower';
+      }
+
+      // Sync Puzzle Chamber HUD (#puzzle-hud + [PEEK CLUE] button) cleanly outside board
+      const showPuzzleHud = hud.mode === 'puzzle' && !isTitleScreenOpen() && Boolean(game.puzzleRoom);
+      if (puzzleHudEl) {
+        if (showPuzzleHud) {
+          const pr = game.puzzleRoom;
+          let pTitle = 'RUNE SANCTUM';
+          let pSub = 'SOLVE ANCIENT MECHANISM';
+          if (pr.solved) {
+            pTitle = 'SANCTUM UNLOCKED';
+            pSub = pr.parCleared ? 'PAR MASTERY • +5 GEARS' : 'STAR CORE UNLOCKED';
+          } else if (pr.type === 'lights') {
+            pTitle = `RUNE FLOOR • ${pr.moves || 0}/${pr.parMoves || 3}`;
+            pSub = 'STOMP • MATCH TABLET';
+          } else if (pr.type === 'bells') {
+            const progCount = pr.bellStep ?? pr.seqIdx ?? pr.progress ?? 0;
+            const totalBells = Array.isArray(pr.order) ? pr.order.length : 4;
+            pTitle = `BELL SANCTUM • ${progCount}/${totalBells}`;
+            pSub = 'RING • CREST ORDER';
+          } else if (pr.type === 'beam') {
+            pTitle = `PRISM BEAM • ${pr.moves || 0}/${pr.parMoves || 4}`;
+            pSub = 'TAP MIRROR • LIGHT CORE';
+          } else if (pr.type === 'blocks') {
+            pTitle = `STONE PLATES • ${pr.moves || 0}/${pr.parMoves || 6}`;
+            pSub = 'PUSH BLOCKS • TAP UNDO';
+          }
+
+          if (puzzleHudTitleEl && pTitle !== prevPuzzleTitle) {
+            prevPuzzleTitle = pTitle;
+            puzzleHudTitleEl.textContent = pTitle;
+          }
+          if (puzzleHudSubEl && pSub !== prevPuzzleSub) {
+            prevPuzzleSub = pSub;
+            puzzleHudSubEl.textContent = pSub;
+          }
+
+          const canPeekClue =
+            !pr.solved &&
+            (pr.showTarget === false || ((pr.type === 'lights' || pr.type === 'bells') && pr.showTarget !== true));
+          if (btnPeekClue) {
+            btnPeekClue.classList.toggle('hidden', !canPeekClue);
+            const isPeeking = Boolean((pr.peekAlpha || 0) > 0.25 || pr.isPeekingClue);
+            btnPeekClue.classList.toggle('peeking', isPeeking);
+            btnPeekClue.classList.toggle('active', isPeeking);
+            if (peekClueLblEl) {
+              peekClueLblEl.textContent = isPeeking ? 'CLUE LIT' : 'PEEK CLUE';
+            }
+          }
+          puzzleHudEl.classList.remove('hidden');
+        } else {
+          puzzleHudEl.classList.add('hidden');
+        }
+      }
+
       if (actionPromptEl) {
-        let promptRaw = hud.actionPrompt || '';
+        let promptRaw = hud.mode === 'puzzle' ? '' : (hud.actionPrompt || '');
         if (!promptRaw && hud.mode === 'skimmer' && (hud.boostMult || 1) > 1) {
           promptRaw = `BOOST ${hud.boostMult}X`;
         }
@@ -898,19 +1100,44 @@ const game = new TowerTopplerGame(
             hud.mode === 'submarine' ||
             hud.mode === 'skimmer' ||
             hud.mode === 'glide' ||
-            hud.mode === 'puzzle' ||
             hud.mode === 'vault') &&
           !isTitleScreenOpen();
+
         if (promptRaw && activeMode) {
-          if (promptRaw !== prevPromptRaw) {
-            prevPromptRaw = promptRaw;
-            actionPromptEl.innerHTML = renderActionPromptMarkup(promptRaw);
+          const spec = resolveActionPromptSpec(promptRaw, hud.mode);
+          const nextKey = `${hud.mode}|${promptRaw}`;
+          if (nextKey !== prevPromptKey) {
+            prevPromptKey = nextKey;
+            actionPromptEl.innerHTML = spec.html;
           }
-          actionPromptEl.classList.remove('hidden');
+          currentPromptAction = spec.triggerAction;
+          currentPromptSubtype = spec.subtype;
+          actionPromptEl.classList.toggle('is-actionable', Boolean(spec.triggerAction));
+          actionPromptEl.classList.toggle('hidden', !spec.html);
+
+          if (hud.mode === 'tower') {
+            if (spec.interactKind) {
+              input.setInteractContext?.(true, spec.interactKind);
+            } else {
+              input.setInteractContext?.(false, '');
+            }
+          } else {
+            input.setInteractContext?.(false, '');
+          }
         } else {
-          prevPromptRaw = '';
+          prevPromptKey = '';
+          currentPromptAction = null;
+          currentPromptSubtype = '';
+          actionPromptEl.classList.remove('is-actionable');
           actionPromptEl.classList.add('hidden');
+          if (hud.mode !== 'tower') {
+            input.setInteractContext?.(false, '');
+          } else if (!promptRaw && !isPlayerInTowerInteractZone()) {
+            input.setInteractContext?.(false, '');
+          }
         }
+      } else if (hud.mode !== 'tower') {
+        input.setInteractContext?.(false, '');
       }
     },
 
@@ -921,7 +1148,10 @@ const game = new TowerTopplerGame(
     onGameOver(victory, score, hiScore, summary = {}) {
       sound.setMusicActive?.(false);
       input.resetState?.();
+      input.setInteractContext?.(false, '');
+      currentPromptAction = null;
       if (actionPromptEl) actionPromptEl.classList.add('hidden');
+      if (puzzleHudEl) puzzleHudEl.classList.add('hidden');
       if (missionStatusPillEl) missionStatusPillEl.classList.add('hidden');
       if (altMeterEl) altMeterEl.classList.add('hidden');
 
@@ -1216,7 +1446,9 @@ function playStoryCutscene(kind, { previewMode = false, onComplete = null } = {}
 
   clearBanner();
   input.resetState?.();
+  input.setInteractContext?.(false, '');
   if (actionPromptEl) actionPromptEl.classList.add('hidden');
+  if (puzzleHudEl) puzzleHudEl.classList.add('hidden');
   if (missionStatusPillEl) missionStatusPillEl.classList.add('hidden');
   if (altMeterEl) altMeterEl.classList.add('hidden');
 
@@ -2104,7 +2336,9 @@ function beginRunCommon() {
     renderer.setCutsceneCam?.(null);
   }
   hideAllOverlays();
+  if (puzzleHudEl) puzzleHudEl.classList.add('hidden');
   input.resetState?.();
+  input.setInteractContext?.(false, '');
   game.applySettings?.({ ...progression.getSettings(), blasterFxId: getEquippedBlasterFxSafe() });
   gearsBeforeRun = progression.getGears();
 }
@@ -2202,9 +2436,12 @@ function returnToTitle() {
   hideAllOverlays();
   clearBanner();
   input.resetState?.();
+  input.setInteractContext?.(false, '');
+  currentPromptAction = null;
   sound.setMusicActive?.(false);
   sound.setMiniGameMode?.(null);
   if (actionPromptEl) actionPromptEl.classList.add('hidden');
+  if (puzzleHudEl) puzzleHudEl.classList.add('hidden');
   if (missionStatusPillEl) missionStatusPillEl.classList.add('hidden');
   if (altMeterEl) altMeterEl.classList.add('hidden');
 
@@ -2212,6 +2449,71 @@ function returnToTitle() {
   loadTitlePreviewTower();
   overlayTitle?.classList.remove('hidden');
   syncTitleShowcaseState();
+}
+
+function isPlayerInTowerInteractZone() {
+  if (game.mode !== 'tower' || !game.tower || !game.player) return false;
+  const p = game.player;
+  if (p.hidden || p.tumbling) return false;
+  if (p.onElevator) return true;
+  const distCol = (a, b) => {
+    let d = (((b - a) % 16) + 16) % 16;
+    if (d > 8) d -= 16;
+    return Math.abs(d);
+  };
+  if (p.onGround || (p.coyoteTimer || 0) > 0) {
+    if (game.tower.doors?.some((d) => Math.abs(d.floor - p.floor) < 0.58 && distCol(p.col, d.col + 0.5) < 0.80)) {
+      return true;
+    }
+    if (game.elevators?.some((el) => Math.abs(el.floor - p.floor) < 0.55 && distCol(p.col, el.col + 0.5) < 0.80)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+let lastActionPromptPointerTs = -1000;
+function triggerCurrentPromptInteract() {
+  const act = currentPromptAction;
+  if (!act) return;
+  sound.unlock();
+  input.haptic?.(14);
+  if (typeof input.triggerInteract === 'function') {
+    input.triggerInteract(act);
+  } else {
+    input.state[act] = true;
+    if (input.justPressed && act in input.justPressed) {
+      input.justPressed[act] = true;
+    }
+    setTimeout(() => {
+      if (input.state) input.state[act] = false;
+    }, act === 'up' ? 165 : 115);
+  }
+  // Ensure Workbench & Chest stations respond whether game.js checks 'fire' or 'up'
+  if (currentPromptSubtype === 'station' && input.justPressed) {
+    input.justPressed.up = true;
+  }
+}
+
+let lastPeekPointerTs = -1000;
+function triggerPuzzlePeekClue() {
+  const pr = game.puzzleRoom;
+  if (!pr || pr.solved) return;
+  sound.unlock();
+  sound.switchToggle?.();
+  input.haptic?.(12);
+  if (typeof pr.peekClue === 'function') {
+    pr.peekClue();
+  } else if (typeof pr.triggerPeek === 'function') {
+    pr.triggerPeek();
+  } else {
+    pr.peekAlpha = 1.0;
+    pr.peekTimer = 2.8;
+    pr.isPeekingClue = true;
+  }
+  if (btnPeekClue) {
+    btnPeekClue.classList.add('peeking', 'active');
+  }
 }
 
 function openWorldsOverlay() {
@@ -2468,6 +2770,47 @@ minigameCards.forEach((card) => {
   });
 });
 
+// Tappable Contextual Action Prompt & Puzzle Chamber [PEEK CLUE] Handlers (#277)
+actionPromptEl?.addEventListener('pointerdown', (e) => {
+  if (!currentPromptAction) return;
+  e.preventDefault();
+  e.stopPropagation();
+  lastActionPromptPointerTs = performance.now();
+  triggerCurrentPromptInteract();
+});
+
+actionPromptEl?.addEventListener('click', (e) => {
+  if (!currentPromptAction) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (performance.now() - lastActionPromptPointerTs > 320) {
+    triggerCurrentPromptInteract();
+  }
+});
+
+actionPromptEl?.addEventListener('keydown', (e) => {
+  if ((e.code === 'Enter' || e.code === 'Space') && currentPromptAction) {
+    e.preventDefault();
+    e.stopPropagation();
+    triggerCurrentPromptInteract();
+  }
+});
+
+btnPeekClue?.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  lastPeekPointerTs = performance.now();
+  triggerPuzzlePeekClue();
+});
+
+btnPeekClue?.addEventListener('click', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  if (performance.now() - lastPeekPointerTs > 320) {
+    triggerPuzzlePeekClue();
+  }
+});
+
 // Audio & Pause HUD Buttons
 const handleToggleMute = () => {
   sound.unlock();
@@ -2492,8 +2835,10 @@ function triggerPauseToggle() {
   sound.unlock();
   const paused = game.togglePause();
   input.resetState?.();
+  input.setInteractContext?.(false, '');
   if (paused) {
     if (actionPromptEl) actionPromptEl.classList.add('hidden');
+    if (puzzleHudEl) puzzleHudEl.classList.add('hidden');
     if (pauseTowerName) {
       if (game.pausedFrom === 'submarine') pauseTowerName.textContent = 'MK.7 Sub-Hunter';
       else if (game.pausedFrom === 'skimmer') pauseTowerName.textContent = 'Hydro-Skimmer Run';
@@ -2617,6 +2962,7 @@ function loop(ts) {
   }
 
   if (cutsceneState.active) {
+    input.setInteractContext?.(false, '');
     game.time = (game.time || 0) + dt;
     cutsceneState.elapsed += dt;
 
@@ -2637,6 +2983,7 @@ function loop(ts) {
       }
     }
   } else if (game.mode === 'title') {
+    input.setInteractContext?.(false, '');
     game.time = (game.time || 0) + dt;
     game._syncDynamicLedges?.(dt, true);
     if (game.player && game.player.muzzleFlash > 0) {
@@ -2671,6 +3018,7 @@ function loop(ts) {
   } else {
     game.titleShowcase = false;
     game.wardrobeSpotlight = false;
+    input.update?.(dt);
     game.update(dt);
   }
 

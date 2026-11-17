@@ -1521,13 +1521,18 @@ export class GameRenderer {
 
       if (isTower && pop.col != null && pop.floor != null) {
         const theta = wrapAngle((pop.col - camCol) * COL_ANGLE);
+        const nudgedTheta = theta + (theta >= 0 ? 0.14 : -0.14);
         const r = TOWER_RADIUS + 0.85;
-        slot.sprite.position.set(r * Math.sin(theta), pop.floor * fh + 0.65 * fh + t * 0.85, r * Math.cos(theta));
-        slot.sprite.scale.set(1.6, 0.4, 1);
+        slot.sprite.position.set(
+          r * Math.sin(nudgedTheta),
+          pop.floor * fh + 1.15 * fh + t * 0.95,
+          r * Math.cos(nudgedTheta)
+        );
+        slot.sprite.scale.set(1.28, 0.32, 1);
       } else if (pop.x != null && pop.y != null) {
         const wp = this._screenToWorld(pop.x, pop.y, cam, 1.5);
-        slot.sprite.position.set(wp.x, wp.y + t * 0.7, 1.5);
-        slot.sprite.scale.set(1.8, 0.45, 1);
+        slot.sprite.position.set(wp.x, wp.y + 0.18 + t * 0.72, 1.5);
+        slot.sprite.scale.set(1.48, 0.37, 1);
       } else {
         slot.sprite.visible = false;
       }
@@ -1585,6 +1590,9 @@ export class GameRenderer {
     }
 
     const pBaseCol = player ? player.col : 0.5;
+    const landBlend = Math.max(0, Math.min(1, (aspect - 0.95) / 1.15));
+    // Smooth phone-portrait blend: 1.0 on 19.5:9 tall phones (0.46), 0.5 on 16:9 SE (0.56), 0.0 on 3:4 iPad (0.75+)
+    const tallPhoneBlend = Math.max(0, Math.min(1, (0.72 - aspect) / 0.26));
     const csOrbitCols = isCutscene
       ? csKind === 'epilogue'
         ? Math.sin(time * 0.65) * 0.55 * (1 - csEase * 0.5)
@@ -1595,20 +1603,26 @@ export class GameRenderer {
       : isCutscene
       ? pBaseCol + csOrbitCols
       : isTitleShowcase
-      ? pBaseCol + Math.sin(time * 0.32) * 0.36 - 0.1
+      ? pBaseCol + Math.sin(time * 0.32) * (0.34 - landBlend * 0.1) - (0.09 - landBlend * 0.04)
       : camCol;
 
-    // 18-deg long-lens on 1987 `tower.real` vs 50-deg Start-Screen Diorama vs 52-deg wide Lighthouse Reboot perspective
+    // Aspect-calibrated FOV across Phone Portrait (52.5->48), Tablet (44), and Phone Landscape (40->37)
+    const portraitGameFov = 44 + tallPhoneBlend * 8.5;
+    const landscapeGameFov = 44 - Math.max(0, Math.min(1, (aspect - 1.33) / 0.84)) * 7;
+    const gameplayFov =
+      Math.round((portraitGameFov * (1 - landBlend) + landscapeGameFov * landBlend) * 2) * 0.5;
+    const portraitShowcaseFov = 45 + tallPhoneBlend * 6.5;
+    const landscapeShowcaseFov = 43 - Math.max(0, Math.min(1, (aspect - 1.33) / 0.84)) * 4;
+    const showcaseFov =
+      Math.round((portraitShowcaseFov * (1 - landBlend) + landscapeShowcaseFov * landBlend) * 2) * 0.5;
     const wantFov =
       isRealOrig && !isWardrobe && !isCutscene && !isTitleShowcase
         ? 18
         : isWardrobe || isCutscene
         ? 48
         : isTitleShowcase
-        ? 50
-        : isOrig
-        ? 48
-        : 52;
+        ? showcaseFov
+        : gameplayFov;
     if (this.towerCam.fov !== wantFov) {
       this.towerCam.fov = wantFov;
       this.towerCam.updateProjectionMatrix();
@@ -1618,29 +1632,61 @@ export class GameRenderer {
     if (isRealOrig && !isWardrobe && !isCutscene && !isTitleShowcase) {
       const halfTan = Math.tan(THREE.MathUtils.degToRad(9));
       const lens = Math.tan(THREE.MathUtils.degToRad(24)) / halfTan;
-      camZ = Math.max(9.6 * lens, Math.min(18.0 * lens, 3.75 / (halfTan * Math.max(0.43, aspect))));
+      const minOrigZ = (aspect >= 1.05 ? 10.6 + Math.min(1.2, (aspect - 1.0) * 0.8) : 9.4) * lens;
+      camZ = Math.max(minOrigZ, Math.min(16.2 * lens, 3.45 / (halfTan * Math.max(0.45, aspect))));
     } else if (!isOrig && !isWardrobe && !isCutscene && !isTitleShowcase) {
-      // Wide Reboot framing (~58% tower width so veiled moon, storm clouds, fireflies & crashing surf flank BOTH sides)
-      camZ = aspect < 0.88 ? Math.min(20.2, 10.6 * (0.86 / Math.max(0.45, aspect))) : 10.6;
+      // Closer Phone Portrait (13.9m SE .. 14.85m 19.5:9 -> ~76-84% tower width + storm flanks, bold 8.5-10% Pogo)
+      // & Landscape (12.95m 4:3 iPad -> 11.4m 19.5:9 phone -> ledges strictly inside 27.8..72.2% iPad / 31.1..68.9% phone!)
+      if (aspect < 0.95) {
+        camZ = 12.95 + tallPhoneBlend * 1.9;
+      } else {
+        const wideLand = Math.max(0, Math.min(1, (aspect - 1.33) / 0.84));
+        camZ = 12.95 - wideLand * 1.55;
+      }
+    } else if (isOrig && !isWardrobe && !isCutscene && !isTitleShowcase) {
+      if (aspect < 0.95) {
+        camZ = 12.7 + tallPhoneBlend * 1.85;
+      } else {
+        const wideLand = Math.max(0, Math.min(1, (aspect - 1.33) / 0.84));
+        camZ = 12.65 - wideLand * 1.35;
+      }
     } else {
-      camZ = aspect < 0.82 ? Math.min(18.0, 9.6 * (0.80 / Math.max(0.43, aspect))) : 9.6;
+      camZ = aspect < 0.82 ? Math.min(15.2, 9.2 * (0.76 / Math.max(0.45, aspect))) : 9.6;
     }
-    let camY = camFloor * fh + (isRealOrig ? 0.85 : isOrig ? 1.15 : 0.82);
+
+    // Frame Pogo's feet at screenY ~ 72.5-74.5% on Phone Portrait & ~71% on Phone Landscape
+    const portraitPosOffY = 0.62 + tallPhoneBlend * 0.34;
+    const portraitTiltUpY = 0.44 + tallPhoneBlend * 0.2;
+    const rebootPosOffY = portraitPosOffY * (1 - landBlend) + -0.02 * landBlend;
+    const rebootTiltUpY = portraitTiltUpY * (1 - landBlend) + 0.22 * landBlend;
+    const origPosOffY = isRealOrig
+      ? aspect >= 1.05
+        ? 0.28
+        : 0.58
+      : (0.72 + tallPhoneBlend * 0.22) * (1 - landBlend) + 0.06 * landBlend;
+    let camY = camFloor * fh + (isOrig ? origPosOffY : rebootPosOffY);
     const shake = writeShakeOffset(state.shake, time, this._shakeVec);
 
     if (isWardrobe) {
       const pFloorY = (player.floor || 0) * fh;
-      this.towerCam.position.set(0, pFloorY + 0.04, TOWER_RADIUS + 2.55);
-      this.towerCam.lookAt(0, pFloorY + 0.04, TOWER_RADIUS + 0.38);
+      const wardLand = Math.max(0, Math.min(1, (aspect - 1.05) / 1.0));
+      const wardY = pFloorY + 0.04 + wardLand * 0.11;
+      const wardZ = TOWER_RADIUS + 2.55 + wardLand * 0.42;
+      this.towerCam.position.set(0, wardY, wardZ);
+      this.towerCam.lookAt(0, wardY, TOWER_RADIUS + 0.38);
     } else if (isTitleShowcase) {
-      // Heroic low-angle Start-Screen Diorama framing Pogo + Watchtower + Surf inside crystal-clear 24%..68% window
+      // Bold, heroic Start-Screen Diorama across Phone Portrait (12.9m SE .. 14.3m), Tablet (11.2m), & Phone Landscape (10.6m)
       const pFloorY = (player?.floor || 0) * fh;
-      const showcaseZ = aspect < 0.88 ? Math.min(16.4, 8.9 * (0.86 / Math.max(0.45, aspect))) : 9.2;
-      const showcaseX = Math.sin(time * 0.32) * 0.42;
-      camY = pFloorY + 0.65 + Math.sin(time * 0.55) * 0.06;
+      const wideLand = Math.max(0, Math.min(1, (aspect - 1.33) / 0.84));
+      const showcaseZ =
+        aspect < 0.95 ? 12.1 + tallPhoneBlend * 2.2 : 11.2 - wideLand * 0.6;
+      const showcaseX = Math.sin(time * 0.32) * (0.38 - landBlend * 0.1);
+      camY = pFloorY + (0.58 * (1 - landBlend) + 0.5 * landBlend) + Math.sin(time * 0.55) * 0.045;
+      const showcaseLookY =
+        pFloorY + ((1.38 + tallPhoneBlend * 0.24) * (1 - landBlend) + (0.94 - wideLand * 0.06) * landBlend);
       camZ = showcaseZ;
       this.towerCam.position.set(showcaseX, camY, showcaseZ);
-      this.towerCam.lookAt(0, pFloorY + 1.82, TOWER_RADIUS * 0.35);
+      this.towerCam.lookAt(0, showcaseLookY, TOWER_RADIUS * 0.35);
     } else if (isCutscene) {
       const pFloorY = (player?.floor || 0) * fh;
       const towerTopY = Math.max(12, tower.floors * fh);
@@ -1686,12 +1732,12 @@ export class GameRenderer {
         this.towerCam.lookAt(0, lookY, (TOWER_RADIUS + 0.36) * csEase);
       }
     } else if (!isOrig) {
-      // Subtle upward lighthouse perspective tilt matching reference composition
+      // Subtle upward lighthouse perspective tilt framing Pogo at y ~ 63-66% with 5.5-6+ floors look-ahead
       this.towerCam.position.set(shake.x, camY + shake.y, camZ);
-      this.towerCam.lookAt(shake.x, camY + 0.38 + shake.y, 0);
+      this.towerCam.lookAt(shake.x, camY + rebootTiltUpY + shake.y, 0);
     } else {
       this.towerCam.position.set(shake.x, camY + shake.y, camZ);
-      this.towerCam.lookAt(shake.x, camY - 0.1 + shake.y, 0);
+      this.towerCam.lookAt(shake.x, camY + (isRealOrig ? -0.05 : 0.12) + shake.y, 0);
     }
 
     // Era Sky, Chiaroscuro Shadows, Blackout & Lightning Modulation (`StormAtmosphere` GLSL dome + weather)
@@ -1915,6 +1961,8 @@ export class GameRenderer {
       this.shieldBubble.visible = Boolean(pogoVisible && player.shield);
 
       if (pogoVisible) {
+        const pogoHeroScale = !isOrig && !isWardrobe ? 1.14 : 1.0;
+        this.pogoRig.group.scale.setScalar(pogoHeroScale);
         this.pogoRig.group.position.set(px, py, pz);
         this.pogoRig.group.rotation.y =
           pTheta + (isWardrobe ? Math.sin(time * 0.85) * 0.55 : isTitleShowcase ? Math.sin(time * 0.65) * 0.22 : 0);
@@ -1945,7 +1993,7 @@ export class GameRenderer {
           const mr = TOWER_RADIUS + 0.46;
           const flashScale = Math.min(1.35, 0.55 + mf * 4.5);
           this.muzzleFlashGroup.visible = true;
-          this.muzzleFlashGroup.position.set(mr * Math.sin(mTheta), py + 0.42, mr * Math.cos(mTheta));
+          this.muzzleFlashGroup.position.set(mr * Math.sin(mTheta), py + 0.42 * pogoHeroScale, mr * Math.cos(mTheta));
           this.muzzleFlashGroup.scale.setScalar(flashScale);
           this.muzzleFlashGroup.rotation.set(time * 14, mTheta, time * 18);
           this.heroLight.color.set(activeFx.prismatic ? this._prismColor : activeFx.muzzle);
@@ -1954,12 +2002,17 @@ export class GameRenderer {
           this.heroLight.color.set('#7be8ff');
           this.heroLight.intensity = blackout > 0.2 ? 0.78 : isTitleShowcase ? 0.54 : 0.36;
         }
-        this.heroLight.position.set(px, py + 1.05, pz + 1.15);
+        this.heroLight.position.set(px, py + 1.05 * pogoHeroScale, pz + 1.15);
 
         if (isWardrobe) {
           const wUd = this.wardrobeFxOrb.userData;
+          const wardLand = Math.max(0, Math.min(1, (aspect - 1.05) / 1.0));
           this.wardrobeFxOrb.visible = true;
-          this.wardrobeFxOrb.position.set(0.27, py + 0.46 + Math.sin(time * 3.2) * 0.03, TOWER_RADIUS + 0.46);
+          this.wardrobeFxOrb.position.set(
+            0.27 + wardLand * 0.18,
+            py + 0.46 + Math.sin(time * 3.2) * 0.03,
+            TOWER_RADIUS + 0.46
+          );
           this.wardrobeFxOrb.scale.setScalar(0.36);
           wUd.icosa.visible = activeFx.shape === 'icosa';
           wUd.voxel.visible = activeFx.shape === 'voxel';
@@ -1973,7 +2026,8 @@ export class GameRenderer {
         }
 
         if (this.shieldBubble.visible) {
-          this.shieldBubble.position.set(px, py + 0.44, pz);
+          this.shieldBubble.scale.setScalar(pogoHeroScale);
+          this.shieldBubble.position.set(px, py + 0.44 * pogoHeroScale, pz);
           this.shieldBubble.rotation.y = time * 1.8;
         }
 
@@ -1988,7 +2042,7 @@ export class GameRenderer {
       }
     }
 
-    // Update Enemies via Next-Gen `EnemyVisualPool` (`src/enemyRig.js`) + Hull-Only Shadow Trim
+    // Update Enemies via Next-Gen `EnemyVisualPool` (`src/enemyRig.js`) + Hitbox-Honest Scale & Shadow Trim
     if (this.enemyVisuals) {
       this.enemyVisuals.syncEnemies(
         state.enemies,
@@ -1999,6 +2053,36 @@ export class GameRenderer {
         topple.active ? tg.position.y : 0
       );
       if (!isOrig) {
+        const eKids = this.enemyVisuals.root?.children;
+        if (eKids) {
+          for (let i = 0; i < eKids.length; i++) {
+            const rig = eKids[i];
+            if (!rig || !rig.isGroup || !rig.visible) continue;
+            const fam = rig.userData?.family;
+            // Calibrate 3D visual silhouette 1:1 with `src/game.js` 0.52-col / 0.56-floor collision radii
+            if (fam === 0) {
+              // `eye` (trims 1.38x * 1.42x double-inflation by ~29% & keeps creeping tendrils grounded on flagstones)
+              rig.scale.multiplyScalar(0.71);
+              rig.position.y -= 0.1;
+            } else if (fam === 1) {
+              // `molecule`
+              rig.scale.multiplyScalar(0.86);
+              rig.position.y -= 0.025;
+            } else if (fam === 2) {
+              // `roller`
+              rig.scale.multiplyScalar(0.88);
+              rig.position.y -= 0.032;
+            } else if (fam === 3) {
+              // `bouncer`
+              rig.scale.multiplyScalar(0.86);
+              rig.position.y -= 0.036;
+            } else if (fam === 4) {
+              // `robot` (`robotH` / `robotV`)
+              rig.scale.multiplyScalar(0.85);
+              rig.position.y -= 0.03;
+            }
+          }
+        }
         this._trimEnemyShadows();
       }
     }

@@ -8,7 +8,7 @@ import {
 import { sound } from './audio.js';
 import { progression } from './progression.js';
 import { GlideStage } from './glideStage.js';
-import { PUZZLE_TYPES, makePuzzle, PuzzleRoom } from './puzzleRoom.js';
+import { PUZZLE_TYPES, makePuzzle, peekPuzzleClue, PuzzleRoom } from './puzzleRoom.js';
 
 function wrapCol(c) {
   return ((c % COLS) + COLS) % COLS;
@@ -175,6 +175,7 @@ export class TowerTopplerGame {
     this.curiosTotalHere = 0;
     this._stationHintCooldown = 0;
     this._casualSkipConfirmTimer = 0;
+    this._upDoorLatch = false;
 
     // 1987 Real-Tower spawner & extras state
     this.spawnPoints = null;
@@ -314,6 +315,7 @@ export class TowerTopplerGame {
       jumpBufferTimer: 0,
       jumpCutEligible: false,
       stepHopActive: false,
+      steamBoostActive: false,
       jumpStartCol: col,
       jumpStartFloor: floor,
       knockbackTimer: 0,
@@ -327,9 +329,9 @@ export class TowerTopplerGame {
 
   _createVaultRings() {
     return [
-      { angle: Math.random() * Math.PI * 2, speed: 1.65, targetAngle: 0, tolerance: 0.38, locked: false },
-      { angle: Math.random() * Math.PI * 2, speed: -2.35, targetAngle: 0, tolerance: 0.35, locked: false },
-      { angle: Math.random() * Math.PI * 2, speed: 3.10, targetAngle: 0, tolerance: 0.32, locked: false },
+      { angle: Math.random() * Math.PI * 2, speed: 1.60, targetAngle: 0, tolerance: 0.42, locked: false },
+      { angle: Math.random() * Math.PI * 2, speed: -2.25, targetAngle: 0, tolerance: 0.38, locked: false },
+      { angle: Math.random() * Math.PI * 2, speed: 2.95, targetAngle: 0, tolerance: 0.35, locked: false },
     ];
   }
 
@@ -634,49 +636,53 @@ export class TowerTopplerGame {
     this.workbench = t.workbench;
     this.treasureChest = t.treasureChest;
 
-    // Build Rune Chamber puzzle & attach exterior architectural clue 4–6 floors away (§3.2.5)
+    // Build deterministic Rune Chamber puzzle(s) & attach exterior clue directly onto every Rune Door
     this.puzzleData = null;
     this.puzzleDoor = null;
     this.puzzleRoom = null;
     this.glideStage = null;
 
-    const runeDoor = t.doors.find((d) => d.isRune);
-    if (runeDoor && this.era !== 'original') {
-      const pType =
-        runeDoor.puzzleType ||
-        PUZZLE_TYPES[((t.id || 1) - 1) % PUZZLE_TYPES.length] ||
-        'lights';
-      const pSeed = runeDoor.puzzleSeed || ((t.id || 1) * 7919 + 17);
-      this.puzzleData = makePuzzle({
-        type: pType,
-        seed: pSeed,
-        difficulty: Math.min(0.85, 0.25 + ((t.id || 1) - 1) * 0.08),
-        hideTarget: pType === 'lights',
-      });
-      if (this.puzzleData && this.puzzleData.clue) {
-        const exitDoor = t.doors.find((d) => d.isExit);
-        const exitF = exitDoor ? exitDoor.floor : Math.max(6, (t.floors || 18) - 2);
-        const offsetFloors = 5;
-        const goUp = runeDoor.floor + offsetFloors < exitF - 1;
-        const clueFloor = goUp ? runeDoor.floor + offsetFloors : Math.max(2, runeDoor.floor - offsetFloors);
-        let clueCol = wrapCol(runeDoor.col + 6);
-        for (let dc = 0; dc < COLS; dc++) {
-          const candCol = wrapCol(clueCol + dc);
-          const doorClash = t.doors.some((d) => wrapCol(d.col) === candCol && Math.abs(d.floor - clueFloor) <= 2);
-          const elClash = (t.elevators || []).some(
-            (e) => wrapCol(e.col) === candCol && clueFloor >= e.minFloor - 1 && clueFloor <= e.maxFloor + 1
-          );
-          if (!doorClash && !elClash) {
-            clueCol = candCol;
-            break;
-          }
+    const runeDoors = t.doors.filter((d) => d.isRune);
+    if (this.era !== 'original') {
+      for (let ri = 0; ri < runeDoors.length; ri++) {
+        const rd = runeDoors[ri];
+        const pType =
+          rd.puzzleType ||
+          PUZZLE_TYPES[((t.id || 1) - 1 + ri) % PUZZLE_TYPES.length] ||
+          'lights';
+        const pSeed = rd.puzzleSeed ?? ((t.id || 1) * 7919 + 17 + ri * 1013);
+        const pDiff =
+          rd.puzzleDifficulty !== undefined && rd.puzzleDifficulty !== null
+            ? Number(rd.puzzleDifficulty)
+            : Math.min(0.85, 0.25 + ((t.id || 1) - 1) * 0.08);
+        rd.puzzleType = pType;
+        rd.puzzleSeed = pSeed;
+        rd.puzzleDifficulty = pDiff;
+        const builtPuz = makePuzzle({
+          type: pType,
+          seed: pSeed,
+          difficulty: pDiff,
+          hideTarget: pType === 'lights' || pType === 'bells',
+        });
+        rd._puzzle = builtPuz;
+        if (!this.puzzleData) {
+          this.puzzleData = builtPuz;
         }
-        t.clue = {
-          ...this.puzzleData.clue,
-          col: clueCol,
-          floor: clueFloor,
+        const peeked = peekPuzzleClue({ seed: pSeed, difficulty: pDiff, forcedType: pType });
+        const baseClue = peeked?.clue || builtPuz?.clue || { kind: pType };
+        rd.clue = {
+          ...(rd.clue || {}),
+          ...baseClue,
+          col: rd.col,
+          floor: rd.floor,
+          ...(rd.clueColOffset !== undefined ? { clueColOffset: rd.clueColOffset } : {}),
         };
       }
+    }
+    t.runeDoors = runeDoors;
+    t.vaultDoor = t.doors.find((d) => d.isVault) || null;
+    if (runeDoors.length > 0 && runeDoors[0].clue) {
+      t.clue = { ...runeDoors[0].clue };
     }
 
     this.tower = t;
@@ -717,6 +723,7 @@ export class TowerTopplerGame {
     this.moleculeDir = 1;
     this._stationHintCooldown = 0;
     this._casualSkipConfirmTimer = 0;
+    this._upDoorLatch = false;
 
     // Environmental state
     const mech = t.mechanics || {};
@@ -849,7 +856,7 @@ export class TowerTopplerGame {
     this.stallTimer = 0;
 
     this.camCol = this.player.col;
-    this.camFloor = Math.max(2, this.player.floor + (this._isRealOriginal() ? 2.2 : 1.5));
+    this.camFloor = Math.max(1.45, this.player.floor + (this._isRealOriginal() ? 2.2 : 1.45));
 
     sound?.setWind?.(0);
     sound?.setMiniGameMode?.(null);
@@ -878,7 +885,7 @@ export class TowerTopplerGame {
       if (bonusSec > 0) {
         this.addPopup({
           col: this.player.col,
-          floor: this.player.floor + 1.2,
+          floor: this.player.floor + 1.35,
           text: `+${bonusSec}s SKIMMER BONUS!`,
           color: '#5efce8',
           maxLife: 1.35,
@@ -992,7 +999,7 @@ export class TowerTopplerGame {
         } else if (this.mode === 'tower') {
           this.addPopup({
             col: this.player.col,
-            floor: this.player.floor + 1.15,
+            floor: this.player.floor + 1.35,
             text: 'EXTRA LIFE!',
             color: '#6bf2ff',
             maxLife: 1.35,
@@ -1236,8 +1243,75 @@ export class TowerTopplerGame {
 
   // --- HUD Synchronization (§2.4) ---
 
+  _evaluateInteractContext() {
+    const p = this.player;
+    if (
+      this.mode !== 'tower' ||
+      !this.tower ||
+      !p ||
+      p.hidden ||
+      p.doorPhase ||
+      p.tumbling ||
+      (!p.onGround && (p.coyoteTimer || 0) <= 0 && !p.onElevator)
+    ) {
+      return { canInteract: false, kind: '' };
+    }
+
+    const enterableDoor = this.tower.doors?.find(
+      (d) =>
+        Math.abs(d.floor - p.floor) < 0.55 &&
+        Math.abs(colDist(p.col, d.col + 0.5)) < 0.78 &&
+        (d.isExit ||
+          (d.isRune && !d.solved) ||
+          (d.isVault && !this.towerVaultCleared) ||
+          d.decoy ||
+          Boolean(d.targetId))
+    );
+    if (enterableDoor) {
+      return { canInteract: true, kind: 'door', door: enterableDoor };
+    }
+
+    const wb = this.tower.workbench;
+    if (
+      wb &&
+      !wb.crafted &&
+      Math.abs(wb.floor - p.floor) < 0.85 &&
+      Math.abs(colDist(p.col, wb.col + 0.5)) < 0.92 &&
+      this.salvagePartsCollected >= Math.max(1, this.salvagePartsTotal || 3)
+    ) {
+      return { canInteract: true, kind: 'fire' };
+    }
+
+    const ch = this.tower.treasureChest;
+    if (
+      ch &&
+      !ch.opened &&
+      Math.abs(ch.floor - p.floor) < 0.85 &&
+      Math.abs(colDist(p.col, ch.col + 0.5)) < 0.92 &&
+      this.compassKeysCollected >= Math.max(1, this.compassKeysTotal || 3)
+    ) {
+      return { canInteract: true, kind: 'fire' };
+    }
+
+    if (p.onElevator) {
+      return { canInteract: true, kind: 'lift' };
+    }
+    const restingLift = this.elevators?.find(
+      (el) => Math.abs(el.floor - p.floor) < 0.45 && Math.abs(colDist(p.col, el.col + 0.5)) < 0.68
+    );
+    if (restingLift) {
+      return { canInteract: true, kind: 'lift' };
+    }
+
+    return { canInteract: false, kind: '' };
+  }
+
   _syncHud() {
     const activeMode = this.mode === 'paused' ? this.pausedFrom || 'tower' : this.mode;
+    const interactCtx = this._evaluateInteractContext();
+    this.input?.setGameMode?.(activeMode);
+    this.input?.setInteractContext?.(interactCtx.canInteract, interactCtx.kind);
+
     const exitDoor = this.tower?.doors?.find((d) => d.isExit);
     const exitFloor = exitDoor ? exitDoor.floor : Math.max(1, (this.tower?.floors || 18) - 2);
     const p = this.player;
@@ -1275,7 +1349,7 @@ export class TowerTopplerGame {
         const nearDoor =
           (p.onGround || p.coyoteTimer > 0) &&
           this.tower.doors?.find(
-            (d) => Math.abs(d.floor - p.floor) < 0.55 && Math.abs(colDist(p.col, d.col + 0.5)) < 0.74
+            (d) => Math.abs(d.floor - p.floor) < 0.55 && Math.abs(colDist(p.col, d.col + 0.5)) < 0.78
           );
         if (nearDoor) {
           if (nearDoor.isExit && !isRealOrig) {
@@ -1292,7 +1366,7 @@ export class TowerTopplerGame {
           } else if (nearDoor.isVault) {
             actionPrompt = this.towerVaultCleared ? '✓ VAULT UNLOCKED' : '▲ CRACK VAULT';
           } else if (nearDoor.isRune) {
-            actionPrompt = nearDoor.solved ? '✓ RUNE SOLVED' : 'UP • ENTER RUNE CHAMBER';
+            actionPrompt = nearDoor.solved ? '✓ RUNE SOLVED' : '▲ ENTER RUNE SANCTUM';
           } else {
             // Note: on Original Tower 8 summit, real exit 'T' & decoy '#' share identical prompt so decoys aren't spoiled!
             actionPrompt = this.era === 'reboot' ? '▲ ENTER DOORWAY' : '▲ ENTER PORTAL';
@@ -1355,6 +1429,10 @@ export class TowerTopplerGame {
         : Math.max(1, this.comboCount || 1);
 
     const missionStatus = this._buildMissionStatus();
+    const puzType = this.puzzleRoom?.puzzle?.type || this.puzzleDoor?.puzzleType || null;
+    const canPeekClue = Boolean(
+      activeMode === 'puzzle' && this.puzzleDoor && (puzType === 'lights' || puzType === 'bells')
+    );
 
     this.cb.onHud?.({
       era: this.era,
@@ -1373,6 +1451,8 @@ export class TowerTopplerGame {
       altitudePct,
       waterPct,
       actionPrompt,
+      interactKind: interactCtx.kind,
+      canPeekClue,
       missionStatus,
       boostMult,
     });
@@ -1383,6 +1463,7 @@ export class TowerTopplerGame {
   update(dt) {
     const clampedDt = Math.min(0.05, Math.max(0, dt || 0));
     this.time += clampedDt;
+    this.input?.update?.(clampedDt);
 
     if (this._stationHintCooldown > 0) {
       this._stationHintCooldown = Math.max(0, this._stationHintCooldown - clampedDt);
@@ -1431,6 +1512,9 @@ export class TowerTopplerGame {
       if (pt.life <= 0) this.particles.splice(i, 1);
     }
 
+    if (this.mode !== 'tower') {
+      this.input?.setInteractContext?.(false, '');
+    }
     if (this.mode === 'title') {
       this.camCol = wrapCol(this.camCol + clampedDt * 0.55);
       this._syncDynamicLedges(clampedDt, true);
@@ -1609,6 +1693,8 @@ export class TowerTopplerGame {
     const inp = this.input.state;
     const isReboot = this.era === 'reboot';
     const isRealOrig = this._isRealOriginal();
+    const preInteract = this._evaluateInteractContext();
+    this.input?.setInteractContext?.(preInteract.canInteract, preInteract.kind);
 
     if (this.runType === 'daily' && this.dailyMeta) {
       this.dailyMeta.elapsedSec += dt;
@@ -1646,9 +1732,9 @@ export class TowerTopplerGame {
       p.enteringDoor = 1;
       if (p.tunnelTarget) {
         const dc = colDist(this.camCol, p.tunnelTarget.col + 0.5);
-        this.camCol = wrapCol(this.camCol + dc * Math.min(1, dt * 10));
-        const tf = Math.max(2, p.tunnelTarget.floor + (isRealOrig ? 2.2 : 1.2));
-        this.camFloor += (tf - this.camFloor) * Math.min(1, dt * 8.5);
+        this.camCol = wrapCol(this.camCol + dc * Math.min(1, dt * 12));
+        const tf = Math.max(1.45, p.tunnelTarget.floor + (isRealOrig ? 2.2 : 1.45));
+        this.camFloor += (tf - this.camFloor) * Math.min(1, dt * 9.5);
       }
       if (p.tunnelTimer <= 0 && p.tunnelTarget) {
         p.col = wrapCol(p.tunnelTarget.col + 0.5);
@@ -1664,6 +1750,7 @@ export class TowerTopplerGame {
         p.tunnelTimer = 0.16;
         p.tunnelTarget = null;
         p.invuln = Math.max(p.invuln || 0, 1.5);
+        this._upDoorLatch = true;
         if (exitSupport && p.floor > this.waterFloor + 0.25) {
           p.safeCol = p.col;
           p.safeFloor = p.floor;
@@ -1682,6 +1769,7 @@ export class TowerTopplerGame {
         p.doorPhase = null;
         p.enteringDoor = 0;
         p.invuln = Math.max(p.invuln || 0, 1.35);
+        this._upDoorLatch = true;
       }
     }
 
@@ -1862,8 +1950,8 @@ export class TowerTopplerGame {
       else if (moveIntent > 0.08) p.facing = 1;
     }
 
-    const moveSpeed = isRealOrig ? ORIG_WALK_SPEED : isReboot ? 4.5 : 4.1;
-    const stepWalkSpeed = !isRealOrig && p.stepHopActive && !p.onGround ? 2.35 : moveSpeed;
+    const moveSpeed = isRealOrig ? ORIG_WALK_SPEED : isReboot ? 3.35 : 3.15;
+    const stepWalkSpeed = !isRealOrig && p.stepHopActive && !p.onGround ? 2.25 : moveSpeed;
     const targetVx = p.tumbling
       ? 0
       : isRealOrig
@@ -1893,22 +1981,22 @@ export class TowerTopplerGame {
         const isCounterSteer = moveIntent * p.vx < -0.1;
         const rate = !p.onGround
           ? Math.abs(moveIntent) > 0.05
-            ? 38
-            : 5.5
+            ? 36.0
+            : 30.0
           : isIce
           ? Math.abs(moveIntent) > 0.05
-            ? 15.5
-            : 10.2
+            ? 13.5
+            : 7.5
           : Math.abs(moveIntent) > 0.05
           ? isCounterSteer
-            ? 92
-            : 54
-          : 68;
+            ? 72.0
+            : 42.0
+          : 58.0;
         p.vx = approach(p.vx, desiredVx, rate * dt);
       } else {
         const desiredOrigVx = targetVx + convPush + slidePush;
         if (isIce && p.onGround) {
-          const iceRate = Math.abs(moveIntent) > 0.05 ? 15.0 : 10.2;
+          const iceRate = Math.abs(moveIntent) > 0.05 ? 13.0 : 7.5;
           p.vx = approach(p.vx, desiredOrigVx, iceRate * dt);
         } else {
           p.vx = desiredOrigVx;
@@ -1961,7 +2049,7 @@ export class TowerTopplerGame {
             }
             this.addPopup({
               col: c.col + 0.5,
-              floor: c.floor + 0.82,
+              floor: c.floor + 1.35,
               text: '◈ RELIC DECODED! +750',
               color: '#e879f9',
               maxLife: 1.45,
@@ -1989,7 +2077,7 @@ export class TowerTopplerGame {
             }
             this.addPopup({
               col: c.col + 0.5,
-              floor: c.floor + 0.8,
+              floor: c.floor + 1.35,
               text: `❖ ${partName} (${this.salvagePartsCollected}/${req})`,
               color: '#fbbf24',
               maxLife: 1.35,
@@ -2012,7 +2100,7 @@ export class TowerTopplerGame {
             }
             this.addPopup({
               col: c.col + 0.5,
-              floor: c.floor + 0.8,
+              floor: c.floor + 1.35,
               text: `◈ COMPASS KEY (${this.compassKeysCollected}/${req})`,
               color: '#fde047',
               maxLife: 1.35,
@@ -2038,7 +2126,7 @@ export class TowerTopplerGame {
               : '✦ CURIO RECOVERED! +600';
             this.addPopup({
               col: c.col + 0.5,
-              floor: c.floor + 0.82,
+              floor: c.floor + 1.35,
               text: curioLabel,
               color: '#5efce8',
               maxLife: 1.4,
@@ -2050,7 +2138,7 @@ export class TowerTopplerGame {
             this._tryUnlockTrophy('first_star_core');
             this.addPopup({
               col: c.col + 0.5,
-              floor: c.floor + 0.75,
+              floor: c.floor + 1.35,
               text: '★ STAR CORE!',
               color: '#5efce8',
               maxLife: 1.3,
@@ -2063,7 +2151,7 @@ export class TowerTopplerGame {
             sound?.collectGear?.();
             this.addPopup({
               col: c.col + 0.5,
-              floor: c.floor + 0.65,
+              floor: c.floor + 1.35,
               text: '+1 GEAR',
               color: '#fbbf24',
             });
@@ -2085,7 +2173,7 @@ export class TowerTopplerGame {
             this._stationHintCooldown = 2.6;
             this.addPopup({
               col: wb.col + 0.5,
-              floor: wb.floor + 0.9,
+              floor: wb.floor + 1.35,
               text: `NEED PARTS (${this.salvagePartsCollected}/${reqParts})`,
               color: '#bae6fd',
               maxLife: 1.15,
@@ -2106,7 +2194,7 @@ export class TowerTopplerGame {
             this._stationHintCooldown = 2.6;
             this.addPopup({
               col: ch.col + 0.5,
-              floor: ch.floor + 0.9,
+              floor: ch.floor + 1.35,
               text: `NEED KEYS (${this.compassKeysCollected}/${reqKeys})`,
               color: '#fde68a',
               maxLife: 1.15,
@@ -2117,7 +2205,19 @@ export class TowerTopplerGame {
     }
 
     // Door / Workbench / Chest / Rune Chamber / Vault / Decoy / Exit interaction with UP
-    if (!p.tumbling && this.input.consumeJustPressed('up') && (p.onGround || p.coyoteTimer > 0)) {
+    const upEdge = Boolean(this.input.consumeJustPressed?.('up'));
+    if (!inp.up) {
+      this._upDoorLatch = false;
+    }
+    if (upEdge) {
+      this._upDoorLatch = false;
+    }
+    const wantsUpInteract =
+      !p.tumbling &&
+      (p.onGround || p.coyoteTimer > 0) &&
+      (upEdge || (Boolean(inp.up) && !this._upDoorLatch && Math.abs(p.vx) <= 3.65));
+
+    if (wantsUpInteract) {
       const wbNear =
         this.tower?.workbench &&
         !this.tower.workbench.crafted &&
@@ -2126,14 +2226,17 @@ export class TowerTopplerGame {
           ? this.tower.workbench
           : null;
       if (wbNear) {
+        this._upDoorLatch = true;
+        p.jumpBufferTimer = 0;
         const reqParts = Math.max(1, this.salvagePartsTotal || 3);
         if (this.salvagePartsCollected >= reqParts) {
+          p.vx = 0;
           this._craftWorkbenchDynamo(wbNear);
         } else {
           sound?.vaultTick?.(false);
           this.addPopup({
             col: wbNear.col + 0.5,
-            floor: wbNear.floor + 0.95,
+            floor: wbNear.floor + 1.35,
             text: `COLLECT ${reqParts} SALVAGE PARTS (${this.salvagePartsCollected}/${reqParts})`,
             color: '#fbbf24',
             maxLife: 1.25,
@@ -2150,14 +2253,17 @@ export class TowerTopplerGame {
           ? this.tower.treasureChest
           : null;
       if (chNear) {
+        this._upDoorLatch = true;
+        p.jumpBufferTimer = 0;
         const reqKeys = Math.max(1, this.compassKeysTotal || 3);
         if (this.compassKeysCollected >= reqKeys) {
+          p.vx = 0;
           this._openTreasureChest(chNear);
         } else {
           sound?.vaultTick?.(false);
           this.addPopup({
             col: chNear.col + 0.5,
-            floor: chNear.floor + 0.95,
+            floor: chNear.floor + 1.35,
             text: `FIND ${reqKeys} COMPASS KEYS (${this.compassKeysCollected}/${reqKeys})`,
             color: '#fde047',
             maxLife: 1.25,
@@ -2167,10 +2273,14 @@ export class TowerTopplerGame {
       }
 
       const door = this.tower?.doors?.find(
-        (d) => Math.abs(d.floor - p.floor) < 0.55 && Math.abs(colDist(p.col, d.col + 0.5)) < 0.74
+        (d) => Math.abs(d.floor - p.floor) < 0.55 && Math.abs(colDist(p.col, d.col + 0.5)) < 0.78
       );
       if (door) {
         if (door.isExit) {
+          this._upDoorLatch = true;
+          p.jumpBufferTimer = 0;
+          p.vx = 0;
+          p.col = wrapCol(door.col + 0.5);
           const missionType = this._getCasualMissionType(this.tower);
           if (missionType === 'tower_repair' && !this.dynamoCrafted && !this.tower?.workbench?.crafted) {
             sound?.vaultTick?.(false);
@@ -2178,7 +2288,7 @@ export class TowerTopplerGame {
             this.cb.onBanner?.('SUMMIT BEACON OFFLINE', 'CRAFT DYNAMO AT WORKBENCH');
             this.addPopup({
               col: door.col + 0.5,
-              floor: door.floor + 1.0,
+              floor: door.floor + 1.35,
               text: 'CRAFT DYNAMO AT WORKBENCH!',
               color: '#fbbf24',
               maxLife: 1.4,
@@ -2204,7 +2314,7 @@ export class TowerTopplerGame {
             this.cb.onBanner?.('OBJECTIVE INCOMPLETE', 'PRESS UP AGAIN TO DEPART');
             this.addPopup({
               col: door.col + 0.5,
-              floor: door.floor + 1.0,
+              floor: door.floor + 1.35,
               text: 'PRESS UP AGAIN TO DEPART',
               color: '#fde047',
               maxLife: 1.5,
@@ -2216,10 +2326,22 @@ export class TowerTopplerGame {
           return;
         }
         if (door.isRune && !door.solved) {
+          this._upDoorLatch = true;
+          p.jumpBufferTimer = 0;
+          p.vx = 0;
+          p.vy = 0;
+          p.col = wrapCol(door.col + 0.5);
+          p.floor = door.floor;
           this._enterPuzzleRoom(door);
           return;
         }
         if (door.isVault && !this.towerVaultCleared) {
+          this._upDoorLatch = true;
+          p.jumpBufferTimer = 0;
+          p.vx = 0;
+          p.vy = 0;
+          p.col = wrapCol(door.col + 0.5);
+          p.floor = door.floor;
           this.vaultReturnState = {
             col: door.col + 0.5,
             floor: door.floor,
@@ -2231,8 +2353,11 @@ export class TowerTopplerGame {
         }
         if (door.decoy) {
           // 1987 unpartnered '#' decoy (e.g. T8 summit): walks straight through hollow core to (c+8)%16 over empty air!
+          this._upDoorLatch = true;
+          p.jumpBufferTimer = 0;
           this.towerDoorsUsed += 1;
-          p.col = door.col + 0.5;
+          p.col = wrapCol(door.col + 0.5);
+          p.floor = door.floor;
           p.doorPhase = 'enter';
           p.enteringDoor = 0.1;
           p.tunnelTimer = 0.14;
@@ -2247,9 +2372,12 @@ export class TowerTopplerGame {
         if (door.targetId) {
           const target = this.tower.doors.find((d) => d.id === door.targetId);
           if (target) {
+            this._upDoorLatch = true;
+            p.jumpBufferTimer = 0;
             this.towerDoorsUsed += 1;
             const tStyle = door.tunnelStyle || target.tunnelStyle || 'stone';
-            p.col = door.col + 0.5;
+            p.col = wrapCol(door.col + 0.5);
+            p.floor = door.floor;
             p.doorPhase = 'enter';
             p.enteringDoor = 0.1;
             p.tunnelTimer = 0.14;
@@ -2268,9 +2396,9 @@ export class TowerTopplerGame {
       }
     }
 
-    // Coyote time & Jump buffering
-    const coyoteWindow = isRealOrig ? 0.12 : isReboot ? 0.10 : 0.11;
-    const bufferWindow = isRealOrig ? 0.13 : isReboot ? 0.11 : 0.12;
+    // Coyote time & Jump buffering (generous 130ms mobile grace window)
+    const coyoteWindow = isRealOrig ? 0.12 : 0.13;
+    const bufferWindow = 0.13;
     if (p.onGround && !p.tumbling) {
       p.coyoteTimer = coyoteWindow;
     } else {
@@ -2315,10 +2443,11 @@ export class TowerTopplerGame {
           p.vy = 7.5;
           p.arc = makeArc('jump', p.floor, p.vx, ARC_JUMP.length, ARC_JUMP);
         } else {
-          p.vy = isReboot ? 9.5 : 8.1;
+          p.vy = isReboot ? 9.05 : 8.3;
         }
         p.jumpCutEligible = true;
         p.stepHopActive = false;
+        p.steamBoostActive = false;
         p.jumpStartCol = p.col;
         p.jumpStartFloor = p.floor;
         p.onGround = false;
@@ -2360,13 +2489,14 @@ export class TowerTopplerGame {
             p.vy = 5.6;
             p.arc = makeArc('climb', p.floor, p.vx, ARC_CLIMB.length, ARC_CLIMB);
           } else {
-            p.vy = isReboot ? 7.5 : 6.2;
-            if (Math.abs(p.vx) > 2.35) {
-              p.vx = Math.sign(p.vx) * 2.35;
+            p.vy = isReboot ? 7.8 : 6.6;
+            if (Math.abs(p.vx) > 2.25) {
+              p.vx = Math.sign(p.vx) * 2.25;
             }
           }
           p.jumpCutEligible = false;
           p.stepHopActive = true;
+          p.steamBoostActive = false;
           p.onGround = false;
           p.onElevator = null;
           p.coyoteTimer = 0;
@@ -2474,10 +2604,11 @@ export class TowerTopplerGame {
         p.floor = levelEl.floor;
         p.jumpCutEligible = false;
         p.stepHopActive = false;
+        p.steamBoostActive = false;
         if (!isReboot && !levelEl.boarded) {
           levelEl.boarded = true;
           this.addScore(50);
-          this.addPopup({ col: p.col, floor: p.floor + 0.9, text: '+50', color: '#38bdf8' });
+          this.addPopup({ col: p.col, floor: p.floor + 1.35, text: '+50', color: '#38bdf8' });
         }
       }
     }
@@ -2489,6 +2620,7 @@ export class TowerTopplerGame {
     if (p.onElevator && !p.tumbling) {
       p.jumpCutEligible = false;
       p.stepHopActive = false;
+      p.steamBoostActive = false;
       const el = p.onElevator;
       if (isRealOrig || Array.isArray(el.stops)) {
         if (Math.abs(colDist(p.col, el.col + 0.5)) > 0.52 && !el.autoDir) {
@@ -2614,20 +2746,20 @@ export class TowerTopplerGame {
         if (isRealOrig) {
           p.vy = Math.max(-ORIG_MAX_FALL, p.vy - ORIG_FALL_G * dt);
         } else if (isReboot) {
-          let grav = 24.5;
-          if (p.vy > 1.4 && !inp.jump && p.jumpCutEligible) {
-            grav = p.vy > 6.2 ? 62.0 : 48.0;
-          } else if (Math.abs(p.vy) <= 1.1) {
-            grav = 18.5;
-          } else if (p.vy < -1.1) {
-            grav = 37.0;
+          let grav = 27.5;
+          if (p.vy > 1.2 && !inp.jump && p.jumpCutEligible) {
+            grav = p.vy > 5.5 ? 78.0 : 62.0;
+          } else if (Math.abs(p.vy) <= 1.0) {
+            grav = 19.5;
+          } else if (p.vy < -1.0) {
+            grav = 42.5;
           }
-          p.vy = Math.max(-15.0, p.vy - grav * dt);
+          p.vy = Math.max(-15.5, p.vy - grav * dt);
         } else {
-          const origGrav = p.vy < -1.0 ? 29.0 : 21.5;
+          const origGrav = p.vy < -1.0 ? 32.0 : 23.5;
           p.vy = Math.max(-14.5, p.vy - origGrav * dt);
-          if (!inp.jump && p.vy > 2.0 && p.jumpCutEligible) {
-            p.vy = Math.max(1.8, p.vy - 26.0 * dt);
+          if (!inp.jump && p.vy > 1.6 && p.jumpCutEligible) {
+            p.vy = Math.max(1.5, p.vy - 34.0 * dt);
           }
         }
         p.floor += p.vy * dt;
@@ -2654,13 +2786,14 @@ export class TowerTopplerGame {
         const prevHead = prevFloor + 0.72;
         const startCol = p.jumpStartCol ?? p.col;
         const startFloor = p.jumpStartFloor ?? prevFloor;
+        const diagFloorReach = p.steamBoostActive ? 3.35 : 1.15;
         for (const l of this.ledges) {
           if (l.gone || !l.active || l.type === 'laserGate') continue;
           if (Math.abs(colDist(p.col, l.col + 0.5)) >= 0.34) continue;
           const isWallBlock = l.type === 'box' || l.type === 'pillar';
           if (
             !isWallBlock &&
-            l.floor <= startFloor + 1.15 &&
+            l.floor <= startFloor + diagFloorReach &&
             Math.abs(colDist(startCol, l.col + 0.5)) >= 0.45
           ) {
             continue;
@@ -2670,6 +2803,7 @@ export class TowerTopplerGame {
             p.floor = bottom - 0.721;
             p.vy = 0;
             p.jumpCutEligible = false;
+            p.steamBoostActive = false;
             break;
           }
         }
@@ -2699,6 +2833,7 @@ export class TowerTopplerGame {
               p.dropThrough = null;
               p.jumpCutEligible = false;
               p.stepHopActive = false;
+              p.steamBoostActive = false;
               p.onGround = true;
               p.onElevator = el;
               this._onTouchdown(wasOnGround, prevVy, null);
@@ -2706,7 +2841,7 @@ export class TowerTopplerGame {
                 el.boarded = true;
                 this.visitedElevators.add(ei);
                 this.addScore(50);
-                this.addPopup({ col: p.col, floor: p.floor + 0.9, text: '+50', color: '#38bdf8' });
+                this.addPopup({ col: p.col, floor: p.floor + 1.35, text: '+50', color: '#38bdf8' });
               }
               break;
             }
@@ -2714,19 +2849,22 @@ export class TowerTopplerGame {
         }
       }
 
-      // Forgiving ledge-edge mantle (Reboot & non-real classic)
-      if (!isRealOrig && !p.onGround && p.vy <= 1.6 && Math.abs(p.vx) > 0.3) {
+      // Forgiving ledge-edge mantle (0.22F lip snap for Reboot & non-real classic)
+      if (!isRealOrig && !p.onGround && p.vy <= 1.8 && (Math.abs(p.vx) > 0.18 || Math.abs(moveIntent) > 0.05)) {
+        const approachDir = Math.abs(p.vx) > 0.18 ? Math.sign(p.vx) : Math.sign(moveIntent);
         const mantleLedge = this.ledges.find((l) => {
           if (!this._isWalkableLedge(l)) return false;
           const floorGap = l.floor - p.floor;
-          if (floorGap <= 0 || floorGap > 0.18) return false;
+          if (floorGap <= 0 || floorGap > 0.22) return false;
           const dc = colDist(p.col, l.col + 0.5);
-          return Math.abs(dc) < 0.72 && Math.sign(p.vx) === Math.sign(dc);
+          return Math.abs(dc) < 0.76 && approachDir === Math.sign(dc);
         });
         if (mantleLedge) {
           p.floor = mantleLedge.floor;
           p.vy = 0;
+          p.jumpCutEligible = false;
           p.stepHopActive = false;
+          p.steamBoostActive = false;
           p.onGround = true;
           p.landImpact = Math.max(p.landImpact, 0.35);
           sound?.stepUp?.();
@@ -2745,11 +2883,12 @@ export class TowerTopplerGame {
           Math.abs(colDist(p.col, l.col + 0.5)) < 0.58 &&
           p.vy < 8.5
         ) {
-          p.vy = 12.8;
+          p.vy = 13.3;
           p.jumpCutEligible = false;
           p.stepHopActive = false;
-          p.jumpStartCol = p.col;
-          p.jumpStartFloor = p.floor;
+          p.steamBoostActive = true;
+          p.jumpStartCol = l.col + 0.5;
+          p.jumpStartFloor = l.floor;
           p.onGround = false;
           p.onElevator = null;
           p.coyoteTimer = 0;
@@ -2770,7 +2909,7 @@ export class TowerTopplerGame {
       const gained = curWholeFloor - this.maxFloorReached;
       this.maxFloorReached = curWholeFloor;
       this.addScore(gained * 40);
-      this.addPopup({ col: p.col, floor: curWholeFloor + 1.0, text: `+${gained * 40}`, color: '#a7f3d0', maxLife: 0.7 });
+      this.addPopup({ col: p.col, floor: curWholeFloor + 1.35, text: `+${gained * 40}`, color: '#a7f3d0', maxLife: 0.7 });
     } else if (curWholeFloor > this.maxFloorReached) {
       this.maxFloorReached = curWholeFloor;
     }
@@ -2815,9 +2954,26 @@ export class TowerTopplerGame {
 
   _onTouchdown(wasOnGround, prevVy, landed) {
     const p = this.player;
+    const inp = this.input?.state;
     const isReboot = this.era === 'reboot';
     p.jumpCutEligible = false;
     p.stepHopActive = false;
+    p.steamBoostActive = false;
+
+    // Plantar Ledge Grip: when landing on dry stone with neutral thumb, plant boots cleanly!
+    const neutralHoriz = !inp || (!inp.left && !inp.right && Math.abs(inp.analogX || 0) <= 0.08);
+    const isDryStone =
+      !this._isRealOriginal() &&
+      (!landed ||
+        (landed.type !== 'ice' &&
+          landed.type !== 'conveyorR' &&
+          landed.type !== 'conveyorL' &&
+          landed.type !== 'slideR' &&
+          landed.type !== 'slideL'));
+    if (neutralHoriz && isDryStone && !wasOnGround) {
+      p.vx *= 0.2;
+      if (Math.abs(p.vx) < 0.5) p.vx = 0;
+    }
     if (!wasOnGround && prevVy < -1.4) {
       const impact = Math.min(1, Math.abs(prevVy) / (isReboot ? 13 : 10));
       p.landImpact = Math.max(p.landImpact, impact);
@@ -3408,7 +3564,7 @@ export class TowerTopplerGame {
       this._emitProgEvent('shield_absorb', { towerId: this.tower?.id || 1, era: this.era });
       this.addPopup({
         col: p.col,
-        floor: p.floor + 1.0,
+        floor: p.floor + 1.35,
         text: 'SHIELD ABSORBED!',
         color: '#5efce8',
         maxLife: 1.15,
@@ -3420,6 +3576,7 @@ export class TowerTopplerGame {
     this.runHurtTotal += 1;
     p.jumpCutEligible = false;
     p.stepHopActive = false;
+    p.steamBoostActive = false;
     this.comboCount = 0;
     this.comboTimer = 0;
     sound?.hurt?.();
@@ -3498,12 +3655,30 @@ export class TowerTopplerGame {
 
   _updateCamera(dt) {
     const isRealOrig = this._isRealOriginal();
-    const d = colDist(this.camCol, this.player.col);
-    this.camCol = wrapCol(this.camCol + d * Math.min(1, dt * 13));
-    const offset = isRealOrig ? 2.2 : 1.25;
-    const targetFloor = Math.max(this.waterFloor + 2.4, this.player.floor + offset);
-    const rate = isRealOrig ? 16 : 7.5;
-    this.camFloor += (targetFloor - this.camFloor) * Math.min(1, dt * rate);
+    const p = this.player;
+    const d = colDist(this.camCol, p.col);
+    const colRate = isRealOrig ? 16 : 14;
+    this.camCol = wrapCol(this.camCol + d * Math.min(1, dt * colRate));
+
+    if (isRealOrig) {
+      const targetFloor = Math.max(this.waterFloor + 2.4, p.floor + 2.2);
+      this.camFloor += (targetFloor - this.camFloor) * Math.min(1, dt * 16);
+      return;
+    }
+
+    const climbingBoost =
+      (p.onElevator && (p.onElevator.dir > 0 || p.onElevator.autoDir > 0)) || p.vy > 1.2
+        ? 0.35
+        : p.vy < -2.2
+        ? -0.15
+        : 0;
+    const minCamFloor = Math.max(1.45, this.waterFloor + 2.1);
+    const maxCamFloor = Math.max(minCamFloor, (this.tower?.floors || 18) + 0.6);
+    const rawTarget = p.floor + 1.45 + climbingBoost;
+    const targetFloor = Math.max(minCamFloor, Math.min(maxCamFloor, rawTarget));
+    const vertDelta = targetFloor - this.camFloor;
+    const vertRate = vertDelta < 0 ? 12.0 : 9.5;
+    this.camFloor += vertDelta * Math.min(1, dt * vertRate);
   }
 
   _zenBuoyantRescue() {
@@ -3537,6 +3712,7 @@ export class TowerTopplerGame {
     p.dropThrough = null;
     p.jumpCutEligible = false;
     p.stepHopActive = false;
+    p.steamBoostActive = false;
     p.onGround = true;
     p.onElevator = null;
     p.invuln = 2.0;
@@ -3630,6 +3806,7 @@ export class TowerTopplerGame {
     this.player.dropThrough = null;
     this.player.jumpCutEligible = false;
     this.player.stepHopActive = false;
+    this.player.steamBoostActive = false;
     this.player.doorPhase = null;
     this.player.enteringDoor = 0;
     this.player.hidden = false;
@@ -4072,10 +4249,10 @@ export class TowerTopplerGame {
 
   _triggerSubSonarPing(s, w, h) {
     s.sonarPulse = 1.0;
-    s.sonarCooldown = 3.5;
+    s.sonarCooldown = 3.0;
     s.sonarOriginX = s.x;
     s.sonarOriginY = s.y;
-    s.shockwaves.push({ x: s.x, y: s.y, life: 0.85, maxLife: 0.85, maxR: 260, color: '#5efce8' });
+    s.shockwaves.push({ x: s.x, y: s.y, life: 0.85, maxLife: 0.85, maxR: 290, color: '#5efce8' });
 
     if (typeof sound?.boostGate === 'function') sound.boostGate(2);
     else sound?.bubble?.();
@@ -4087,12 +4264,12 @@ export class TowerTopplerGame {
       const dx = m.x - s.x;
       const dy = m.y - s.y;
       const dist = Math.hypot(dx, dy) || 1;
-      if (dist < 280) {
-        const push = ((280 - dist) / 280) * 115;
+      if (dist < 320) {
+        const push = ((320 - dist) / 320) * 125;
         m.x += (dx / dist) * push;
         m.y = Math.max(66, Math.min(h - 62, m.y + (dy / dist) * push * 0.8));
-        m.pushVx = (dx / dist) * 145;
-        m.frozenTimer = 1.4;
+        m.pushVx = (dx / dist) * 155;
+        m.frozenTimer = 1.6;
         this._spawnParticles(m.x, m.y, '#67e8f9', 8, 85, 40);
       }
     }
@@ -4198,11 +4375,11 @@ export class TowerTopplerGame {
       if (sw.life <= 0) s.shockwaves.splice(si, 1);
     }
 
-    const baseSpeed = !isOrig && s.ventBoostTimer > 0 ? 285 : 205;
+    const baseSpeed = !isOrig && s.ventBoostTimer > 0 ? 305 : 225;
     const ax = Math.abs(inp.analogX || 0) > 0.05 ? inp.analogX : (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
     const ay = Math.abs(inp.analogY || 0) > 0.05 ? inp.analogY : (inp.down ? 1 : 0) - (inp.up ? 1 : 0);
-    s.vx = approach(s.vx, ax * baseSpeed + (!isOrig && s.ventBoostTimer > 0 ? 75 : 0), 900 * dt);
-    s.vy = approach(s.vy, ay * baseSpeed, 900 * dt);
+    s.vx = approach(s.vx, ax * baseSpeed + (!isOrig && s.ventBoostTimer > 0 ? 75 : 0), 1250 * dt);
+    s.vy = approach(s.vy, ay * baseSpeed, 1250 * dt);
 
     // Reboot Hydrothermal Bubble Vents (`sub.vents = [{ x, width }]`)
     if (!isOrig) {
@@ -4344,7 +4521,7 @@ export class TowerTopplerGame {
 
       if (s.warpCave.active && !s.warpCave.entered && s.timer >= 9.8) {
         s.warpCave.x -= 95 * dt;
-        if (Math.hypot(s.x - s.warpCave.x, s.y - s.warpCave.y) < 46) {
+        if (Math.hypot(s.x - s.warpCave.x, s.y - s.warpCave.y) < 56) {
           s.warpCave.entered = true;
           s.warpCave.active = false;
           this.prog?.addGears?.(5);
@@ -4377,7 +4554,7 @@ export class TowerTopplerGame {
 
       let consumed = false;
       for (const f of s.fish) {
-        if (!f.caught && !f.bubbled && Math.hypot(b.x - f.x, b.y - f.y) < 26) {
+        if (!f.caught && !f.bubbled && Math.hypot(b.x - f.x, b.y - f.y) < 32) {
           f.bubbled = true;
           f.vx *= 0.35;
           consumed = true;
@@ -4390,7 +4567,7 @@ export class TowerTopplerGame {
       if (!consumed && !isOrig) {
         for (let mi = s.mines.length - 1; mi >= 0; mi--) {
           const m = s.mines[mi];
-          if (Math.hypot(b.x - m.x, b.y - m.y) < 28) {
+          if (Math.hypot(b.x - m.x, b.y - m.y) < 35) {
             consumed = true;
             m.hp = (m.hp ?? 1) - 1;
             if (m.hp <= 0) {
@@ -4428,7 +4605,7 @@ export class TowerTopplerGame {
       }
       m.x += m.vx * (m.frozenTimer > 0 ? 0.25 : 1) * dt;
       m.y += Math.sin(this.time * 2.5 + m.phase) * 14 * dt;
-      if (m.frozenTimer <= 0 && Math.hypot(s.x - m.x, s.y - m.y) < 32) {
+      if (m.frozenTimer <= 0 && Math.hypot(s.x - m.x, s.y - m.y) < 27) {
         this.comboCount = 0;
         this.comboTimer = 0;
         this.addShake(8);
@@ -4450,7 +4627,7 @@ export class TowerTopplerGame {
       }
       if (f.bubbled) {
         f.y -= (f.isSonarCache ? 16 : 22) * dt;
-        if (Math.hypot(s.x - f.x, s.y - f.y) < 36) {
+        if (Math.hypot(s.x - f.x, s.y - f.y) < 42) {
           f.caught = true;
           if (f.isGear) {
             const gearAmt = f.isSonarCache ? 2 : 1;
@@ -4533,21 +4710,21 @@ export class TowerTopplerGame {
   _spawnSkimmerRow(zAhead) {
     const sk = this.skimmer;
     const isCasual = this.runType === 'endless_casual';
-    const rawLane = (Math.random() * 2 - 1) * 2.5;
+    const rawLane = (Math.random() * 2 - 1) * 2.4;
     const prevLane = sk.lastLane ?? 0;
-    const lane = Math.max(-2.5, Math.min(2.5, Math.max(prevLane - 2.6, Math.min(prevLane + 2.6, rawLane))));
+    const lane = Math.max(-2.4, Math.min(2.4, Math.max(prevLane - 2.4, Math.min(prevLane + 2.4, rawLane))));
     sk.lastLane = lane;
     const roll = Math.random();
     if (roll < 0.44) {
-      sk.gates.push({ z: zAhead, laneX: lane, width: 1.45, hit: false });
+      sk.gates.push({ z: zAhead, laneX: lane, width: 1.58, hit: false });
       sk.hazards.push({
-        z: zAhead + 4.5,
+        z: zAhead + 4.8,
         laneX: Math.max(-3.1, Math.min(3.1, -lane * 0.85)),
         type: isCasual ? 'crate' : Math.random() < 0.5 ? 'mine' : 'crate',
         hp: 1,
       });
     } else if (roll < 0.72) {
-      sk.ramps.push({ z: zAhead, laneX: lane, width: 1.35, used: false });
+      sk.ramps.push({ z: zAhead, laneX: lane, width: 1.48, used: false });
       for (let g = 0; g < 3; g++) {
         sk.gears.push({
           z: zAhead + 3.0 + g * 2.2,
@@ -4609,11 +4786,18 @@ export class TowerTopplerGame {
       Math.abs(inp.analogX || 0) > 0.05
         ? inp.analogX
         : (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
-    sk.vx = approach(sk.vx, steer * 8.2, 34 * dt);
+    sk.vx = approach(sk.vx, steer * 9.0, 42 * dt);
     sk.laneX = Math.max(-3.5, Math.min(3.5, sk.laneX + sk.vx * dt));
 
-    if (this.input.consumeJustPressed('jump') && sk.onWater) {
-      sk.vy = 8.2;
+    const hopPressed = this.input.consumeJustPressed('jump') || this.input.consumeJustPressed('up');
+    if (hopPressed) {
+      sk.jumpBuffer = 0.13;
+    } else if ((sk.jumpBuffer || 0) > 0) {
+      sk.jumpBuffer = Math.max(0, sk.jumpBuffer - dt);
+    }
+    if ((sk.jumpBuffer || 0) > 0 && sk.onWater) {
+      sk.jumpBuffer = 0;
+      sk.vy = 8.4;
       sk.onWater = false;
       sound?.jump?.();
     }
@@ -4631,14 +4815,14 @@ export class TowerTopplerGame {
 
     if (sk.fireCooldown > 0) sk.fireCooldown -= dt;
     if (this.input.consumeJustPressed('fire') && sk.fireCooldown <= 0) {
-      sk.fireCooldown = 0.24;
+      sk.fireCooldown = 0.22;
       sk.bolts.push({ z: 1.0, laneX: sk.laneX, y: sk.y + 0.35 });
       sound?.snowball?.();
     }
 
     sk.spawnCursor -= dz;
     while (sk.spawnCursor < 46) {
-      sk.spawnCursor += 10.5;
+      sk.spawnCursor += 11.4;
       this._spawnSkimmerRow(sk.spawnCursor);
     }
 
@@ -4651,7 +4835,7 @@ export class TowerTopplerGame {
       }
       for (let hi = sk.hazards.length - 1; hi >= 0; hi--) {
         const h = sk.hazards[hi];
-        if (Math.abs(b.z - h.z) < 1.3 && Math.abs(b.laneX - h.laneX) < 0.85) {
+        if (Math.abs(b.z - h.z) < 1.4 && Math.abs(b.laneX - h.laneX) < 1.05) {
           if (h.type === 'crate') {
             sk.cratesDestroyed = (sk.cratesDestroyed || 0) + 1;
             this.prog?.addGears?.(1);
@@ -4673,7 +4857,7 @@ export class TowerTopplerGame {
     for (let i = sk.gates.length - 1; i >= 0; i--) {
       const g = sk.gates[i];
       g.z -= dz;
-      if (!g.hit && Math.abs(g.z) < 1.0 && Math.abs(sk.laneX - g.laneX) < g.width * 0.65) {
+      if (!g.hit && Math.abs(g.z) < 1.05 && Math.abs(sk.laneX - g.laneX) < g.width * 0.68) {
         g.hit = true;
         sk.boostMult = Math.min(4, sk.boostMult + 1);
         sk.maxBoost = Math.max(sk.maxBoost || 1, sk.boostMult);
@@ -4691,7 +4875,7 @@ export class TowerTopplerGame {
     for (let i = sk.ramps.length - 1; i >= 0; i--) {
       const r = sk.ramps[i];
       r.z -= dz;
-      if (!r.used && Math.abs(r.z) < 1.0 && Math.abs(sk.laneX - r.laneX) < r.width * 0.65 && sk.y < 0.7) {
+      if (!r.used && Math.abs(r.z) < 1.05 && Math.abs(sk.laneX - r.laneX) < r.width * 0.68 && sk.y < 0.75) {
         r.used = true;
         sk.rampsUsed = (sk.rampsUsed || 0) + 1;
         sk.vy = 10.6;
@@ -4708,9 +4892,9 @@ export class TowerTopplerGame {
       g.z -= dz;
       if (
         !g.collected &&
-        Math.abs(g.z) < 1.05 &&
-        Math.abs(sk.laneX - g.laneX) < 0.85 &&
-        Math.abs(sk.y - g.y) < 1.1
+        Math.abs(g.z) < 1.1 &&
+        Math.abs(sk.laneX - g.laneX) < 0.98 &&
+        Math.abs(sk.y - g.y) < 1.15
       ) {
         g.collected = true;
         this.prog?.addGears?.(1);
@@ -4724,8 +4908,8 @@ export class TowerTopplerGame {
     for (let i = sk.hazards.length - 1; i >= 0; i--) {
       const h = sk.hazards[i];
       h.z -= dz;
-      const hitHeight = h.type === 'rock' ? 1.35 : 0.85;
-      if (Math.abs(h.z) < 0.9 && Math.abs(sk.laneX - h.laneX) < 0.75 && sk.y < hitHeight) {
+      const hitHeight = h.type === 'rock' ? 1.3 : 0.82;
+      if (Math.abs(h.z) < 0.85 && Math.abs(sk.laneX - h.laneX) < 0.66 && sk.y < hitHeight) {
         if (isCasual) {
           this.addScore(50);
           if (typeof sound?.hitBlock === 'function') sound.hitBlock();
@@ -4874,17 +5058,28 @@ export class TowerTopplerGame {
     this.popups = [];
     this.shake = 0;
 
-    let puz = door ? this.puzzleData : null;
-    if (!door || !puz) {
-      this._standalonePuzzleIdx = ((this._standalonePuzzleIdx ?? -1) + 1) % PUZZLE_TYPES.length;
+    let puz = door ? door._puzzle || null : null;
+    if (!puz) {
+      if (!door) {
+        this._standalonePuzzleIdx = ((this._standalonePuzzleIdx ?? -1) + 1) % PUZZLE_TYPES.length;
+      }
       const pType = door?.puzzleType || PUZZLE_TYPES[this._standalonePuzzleIdx] || 'lights';
-      const pSeed = door?.puzzleSeed || (((Date.now() >>> 0) % 90000) + 1000);
+      const pSeed = door?.puzzleSeed ?? (((Date.now() >>> 0) % 90000) + 1000);
+      const pDiff =
+        door && door.puzzleDifficulty !== undefined && door.puzzleDifficulty !== null
+          ? Number(door.puzzleDifficulty)
+          : this.runType === 'endless_casual'
+          ? 0.3
+          : 0.4;
       puz = makePuzzle({
         type: pType,
         seed: pSeed,
-        difficulty: this.runType === 'endless_casual' ? 0.3 : 0.4,
-        hideTarget: Boolean(door && (pType === 'lights' || pType === 'bells') && this.tower?.clue),
+        difficulty: pDiff,
+        hideTarget: Boolean(door && (pType === 'lights' || pType === 'bells')),
       });
+      if (door) {
+        door._puzzle = puz;
+      }
     }
 
     this.puzzleRoom = new PuzzleRoom();
@@ -4892,6 +5087,7 @@ export class TowerTopplerGame {
       width: this.renderer?.width || 390,
       height: this.renderer?.height || 640,
       puzzle: puz,
+      door: this.puzzleDoor,
       worldIndex: Math.floor(((this.tower?.id || 1) - 1) / 2),
       palette: this.tower?.palette,
     });
@@ -5006,6 +5202,7 @@ export class TowerTopplerGame {
     this.puzzleRoom = null;
     this.puzzleDoor = null;
     this.mode = 'tower';
+    this._upDoorLatch = true;
     this.input?.consumeJustPressed?.('jump');
     this.input?.consumeJustPressed?.('up');
 
@@ -5031,8 +5228,8 @@ export class TowerTopplerGame {
       activeRing: 0,
       strikes: 0,
       maxStrikes: isCasual ? 5 : 3,
-      timer: isCasual ? 15.0 : 12.0,
-      duration: isCasual ? 15.0 : 12.0,
+      timer: isCasual ? 16.0 : 13.5,
+      duration: isCasual ? 16.0 : 13.5,
       status: 'playing',
       statusTimer: 0,
       rings: this._createVaultRings(),
@@ -5055,7 +5252,11 @@ export class TowerTopplerGame {
         }
       }
 
-      if (this.input.consumeJustPressed('fire') || this.input.consumeJustPressed('jump')) {
+      if (
+        this.input.consumeJustPressed('fire') ||
+        this.input.consumeJustPressed('jump') ||
+        this.input.consumeJustPressed('up')
+      ) {
         const ring = v.rings[v.activeRing];
         if (ring) {
           const diff = Math.abs(wrapAngleRad(ring.angle - ring.targetAngle));
@@ -5145,6 +5346,7 @@ export class TowerTopplerGame {
           this._finishTransitionMiniGame();
         } else {
           this.mode = 'tower';
+          this._upDoorLatch = true;
           this.player.col = this.vaultReturnState.col;
           this.player.floor = this.vaultReturnState.floor;
           this.player.vx = 0;

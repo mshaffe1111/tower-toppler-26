@@ -14,9 +14,10 @@
 //  - 'blocks': push carved rune blocks onto pressure plates (tap/fire = undo last push)
 
 const TAU = Math.PI * 2;
-const MOVE_T = 0.15; // seconds per tile step
-const PUSH_T = 0.21; // step that slides a rune block
-const REPEAT_DELAY = 0.28; // held direction auto-steps after this delay
+const MOVE_T = 0.145; // crisp single-tile step duration
+const PUSH_T = 0.205; // step that slides a rune block
+const REPEAT_DELAY = 0.34; // touch-tuned repeat threshold: 1 swipe = 1 exact tile step, hold = steady march
+const REPEAT_STEP_GAP = 0.035; // brief settle gap between held repeat steps so thumb stops never overshoot
 const HOP_T = 0.3; // stomp / hop duration
 const HOP_LAND = 0.2; // stomp impact moment inside hop
 const INTRO_T = 1.05;
@@ -33,8 +34,8 @@ export const BELL_COLOR_NAMES = ['RED', 'GOLD', 'GREEN', 'BLUE', 'VIOLET'];
 export const BELL_NOTES = [0, 2, 4, 7, 9];
 
 const TITLES = {
-  lights: ['RUNE FLOOR', 'Tap or press Action to stomp a rune • match the mural'],
-  bells: ['BELL CHAMBER', 'Tap by a bell to ring it • exterior banners show the order'],
+  lights: ['RUNE FLOOR', 'Match the glowing Rune Tablet above the outer doorway • Step to doorway to peek'],
+  bells: ['BELL CHAMBER', 'Ring bells in left-to-right order from the doorway crest • Step to doorway to peek'],
   beam: ['PRISM BEAM', 'Tap by a mirror to rotate it • ignite the prism crystal'],
   blocks: ['STONE PLATES', 'Push the rune blocks onto the plates • tap to undo'],
 };
@@ -200,6 +201,7 @@ function genBells(rng, d, hideTarget = false) {
       kind: 'bells',
       order: order.map((b) => bells[b].color),
       colors: order.map((b) => BELL_COLORS[bells[b].color]),
+      bellIndices: order.slice(),
     },
   };
 }
@@ -366,7 +368,7 @@ function genBeam(rng, d) {
     p.doorX = doorX;
     p.solid = [];
     p.solution = sol;
-    p.clue = null;
+    p.clue = { kind: 'beam', mirrors: p.mirrors.length };
     return p;
   }
   throw new Error('beam generation failed');
@@ -527,37 +529,78 @@ function genBlocks(rng, d) {
     blocks: best.blockObjs,
     solution: best.sol.moves,
     pushes: best.sol.pushes,
-    clue: null,
+    clue: { kind: 'blocks', plates: best.p.plates.length, blocks: best.blockObjs.length },
   };
+}
+
+function resolvePuzzleType(seed = 1, forcedType = null, fallbackType = null) {
+  if (forcedType && PUZZLE_TYPES.includes(forcedType)) return forcedType;
+  if (fallbackType && PUZZLE_TYPES.includes(fallbackType)) return fallbackType;
+  return PUZZLE_TYPES[Math.abs(hashSeed(seed, 'pick')) % PUZZLE_TYPES.length] || 'lights';
 }
 
 // ------------------------------------------------------------------------------------ public API
 /**
  * Builds a deterministic, verified-solvable puzzle description.
- * @param {{ type?: 'lights'|'bells'|'beam'|'blocks', seed?: number|string, difficulty?: number, hideTarget?: boolean }} [o]
+ * @param {{ type?: 'lights'|'bells'|'beam'|'blocks'|null, forcedType?: 'lights'|'bells'|'beam'|'blocks'|null, seed?: number|string, difficulty?: number, hideTarget?: boolean }} [o]
  */
-export function makePuzzle({ type = 'lights', seed = 1, difficulty = 0.3, hideTarget = false } = {}) {
-  if (!PUZZLE_TYPES.includes(type)) type = 'lights';
+export function makePuzzle({
+  type = null,
+  forcedType = null,
+  seed = 1,
+  difficulty = 0.3,
+  hideTarget = false,
+} = {}) {
+  const resolvedType =
+    forcedType && PUZZLE_TYPES.includes(forcedType)
+      ? forcedType
+      : type && PUZZLE_TYPES.includes(type)
+        ? type
+        : type === null && forcedType === null
+          ? 'lights'
+          : resolvePuzzleType(seed, forcedType, type);
   const d = clamp(Number(difficulty) || 0, 0, 1);
-  const rng = mulberry32(hashSeed(seed, type));
+  const rng = mulberry32(hashSeed(seed, resolvedType));
   let p;
-  if (type === 'lights') p = genLights(rng, d, hideTarget);
-  else if (type === 'bells') p = genBells(rng, d, hideTarget);
-  else if (type === 'beam') p = genBeam(rng, d);
+  if (resolvedType === 'lights') p = genLights(rng, d, hideTarget);
+  else if (resolvedType === 'bells') p = genBells(rng, d, hideTarget);
+  else if (resolvedType === 'beam') p = genBeam(rng, d);
   else p = genBlocks(rng, d);
   let parMoves = 12;
-  if (type === 'lights') {
+  if (resolvedType === 'lights') {
     parMoves = Math.max(6, (p.solution?.length || 3) * 4 + 4);
-  } else if (type === 'bells') {
+  } else if (resolvedType === 'bells') {
     parMoves = Math.max(8, (p.order?.length || 3) * 4 + 4);
-  } else if (type === 'beam') {
+  } else if (resolvedType === 'beam') {
     const flips = (p.mirrors || []).reduce((a, m, i) => a + ((m.rot & 1) !== p.solution[i] ? 1 : 0), 0);
     parMoves = Math.max(8, flips * 5 + 5);
   } else {
     parMoves = Math.max(8, Math.ceil((p.solution?.length || 8) * 1.45) + 3);
   }
-  const [title, hint] = TITLES[type];
-  return { v: 1, type, seed, difficulty: d, title, hint, parMoves, ...p };
+  const parTime = Math.max(14, Math.round(12 + parMoves * 1.6));
+  const [title, hint] = TITLES[resolvedType];
+  return { v: 1, type: resolvedType, seed, difficulty: d, title, hint, parMoves, parTime, ...p };
+}
+
+/**
+ * Pure deterministic exterior clue helper running the exact same RNG & puzzle generation path
+ * as `makePuzzle` and `new PuzzleRoom({ seed, difficulty, forcedType, door: { isRune: true } })`.
+ * @param {{ seed?: number|string, difficulty?: number, forcedType?: 'lights'|'bells'|'beam'|'blocks'|null, type?: 'lights'|'bells'|'beam'|'blocks'|null }} [o]
+ */
+export function peekPuzzleClue({ seed = 1, difficulty = 0, forcedType = null, type = null } = {}) {
+  const resolvedType = resolvePuzzleType(seed, forcedType, type);
+  const p = makePuzzle({
+    type: resolvedType,
+    seed,
+    difficulty,
+    hideTarget: resolvedType === 'lights' || resolvedType === 'bells',
+  });
+  return {
+    type: p.type,
+    clue: p.clue,
+    parMoves: p.parMoves,
+    parTime: p.parTime,
+  };
 }
 
 /** Returns true when `st` represents a solved state for puzzle `p`. */
@@ -607,7 +650,10 @@ function setViewBasis(v) {
 
 // ------------------------------------------------------------------------------------ PuzzleRoom
 export class PuzzleRoom {
-  constructor() {
+  /**
+   * @param {{ seed?: number|string, difficulty?: number, forcedType?: string|null, type?: string|null, door?: object|null, puzzle?: object|null, width?: number, height?: number, worldIndex?: number, palette?: object|null, alreadySolved?: boolean, solveBonus?: number, hideTarget?: boolean }} [opts]
+   */
+  constructor(opts = null) {
     this.width = 390;
     this.height = 620;
     this.s = 1;
@@ -626,6 +672,10 @@ export class PuzzleRoom {
     this.cols = 5;
     this.rows = 5;
     this.doorX = 2;
+    this.showTarget = true;
+    this.peekAlpha = 1;
+    this.isPeekingClue = false;
+    this._peekHoldT = 0;
     this.pogo = this._makePogo();
     this.hud = { title: '', line: '', status: '', rev: 0 };
     this.beam = {
@@ -641,6 +691,14 @@ export class PuzzleRoom {
     this._dirs = [false, false, false, false];
     this._wasJump = false;
     this._wasFire = false;
+
+    if (
+      opts &&
+      typeof opts === 'object' &&
+      (opts.puzzle || opts.seed !== undefined || opts.forcedType || opts.type || opts.door)
+    ) {
+      this.start(opts);
+    }
   }
 
   _makePogo() {
@@ -673,12 +731,18 @@ export class PuzzleRoom {
   }
 
   /**
-   * @param {{ width?: number, height?: number, puzzle?: object, worldIndex?: number, palette?: object, alreadySolved?: boolean, solveBonus?: number }} [o]
+   * @param {{ width?: number, height?: number, puzzle?: object|null, seed?: number|string, difficulty?: number, forcedType?: string|null, type?: string|null, door?: object|null, hideTarget?: boolean, worldIndex?: number, palette?: object|null, alreadySolved?: boolean, solveBonus?: number }} [o]
    */
   start({
     width = 390,
     height = 620,
     puzzle = null,
+    seed = undefined,
+    difficulty = undefined,
+    forcedType = null,
+    type = null,
+    door = null,
+    hideTarget = undefined,
     worldIndex = 0,
     palette = null,
     alreadySolved = false,
@@ -687,13 +751,31 @@ export class PuzzleRoom {
     this.width = Math.max(200, width);
     this.height = Math.max(240, height);
     this.s = clamp(Math.sqrt((this.width * this.height) / (390 * 700)), 0.8, 1.6);
-    const p = puzzle || makePuzzle({ type: 'lights', seed: 1, difficulty: 0.3 });
+    let p = puzzle || door?._puzzle || null;
+    if (!p) {
+      const effSeed = seed ?? door?.puzzleSeed ?? 1;
+      const effDiff = difficulty ?? door?.puzzleDifficulty ?? 0.3;
+      const hasExplicitSeedOrType =
+        seed !== undefined || forcedType !== null || type !== null || Boolean(door);
+      const effType = hasExplicitSeedOrType
+        ? resolvePuzzleType(effSeed, forcedType ?? door?.puzzleType ?? null, type)
+        : 'lights';
+      const effHide =
+        hideTarget !== undefined
+          ? Boolean(hideTarget)
+          : Boolean(door?.isRune && (effType === 'lights' || effType === 'bells'));
+      p = makePuzzle({ type: effType, seed: effSeed, difficulty: effDiff, hideTarget: effHide });
+    }
     this.puzzle = p;
     this.type = p.type;
     this.puzzleType = p.type;
     this.cols = p.cols;
     this.rows = p.rows;
     this.doorX = p.doorX;
+    this.showTarget = p.showTarget !== false;
+    this.target = p.target || null;
+    this.order = p.order || null;
+    this.clue = p.clue || null;
     this.worldIndex = worldIndex | 0;
     this.palette = palette || { glow: '#5efce8' };
     this.glow = this.palette.glow || '#5efce8';
@@ -710,7 +792,12 @@ export class PuzzleRoom {
     this.fade = 1;
     this.moves = 0;
     this.parMoves = p.parMoves || 12;
+    this.parTime = p.parTime || Math.max(14, Math.round(12 + this.parMoves * 1.6));
     this.parCleared = false;
+    const hiddenClue = !this.showTarget && (p.type === 'lights' || p.type === 'bells');
+    this._peekHoldT = hiddenClue && !this.wasSolved ? 2.8 : 0;
+    this.peekAlpha = !hiddenClue || this.wasSolved ? 1 : 0.94;
+    this.isPeekingClue = hiddenClue && !this.wasSolved;
     this.progressRatio = alreadySolved ? 1 : 0;
     this.gateOpen = alreadySolved ? 1 : 0;
     this.undos = 0;
@@ -803,8 +890,8 @@ export class PuzzleRoom {
       this.wasSolved ? 'Sanctum Vault open • step down through the archway' : line,
       this.wasSolved ? 'OPEN' : `PAR ${this.parMoves}`
     );
-    if (p.type === 'lights' && !p.showTarget && !this.wasSolved) {
-      this._setHud(title, 'Stomp the runes into the pattern carved outside on the tower', `PAR ${this.parMoves}`);
+    if (p.type === 'lights' && p.showTarget && !this.wasSolved) {
+      this._setHud(title, 'Tap or Jump on a rune to stomp it • match the glowing stele', `PAR ${this.parMoves}`);
     } else if (p.type === 'bells' && p.showTarget && !this.wasSolved) {
       this._setHud(title, 'Tap by a bell to ring it • match the stele sequence', `PAR ${this.parMoves}`);
     }
@@ -812,6 +899,49 @@ export class PuzzleRoom {
     this._traceBeam();
     this._refreshProgressRatio();
     this._updateViewFollow(1);
+  }
+
+  /**
+   * Illuminates the hidden outer doorway clue on the interior mural stele for `duration` seconds.
+   * Called automatically on doorway entry/threshold step, or via the HUD `[PEEK CLUE]` button.
+   */
+  peekClue(duration = 3.2) {
+    if (!this.puzzle) return 0;
+    const hold = Math.max(0.8, Number(duration) || 3.2);
+    this._peekHoldT = Math.max(this._peekHoldT || 0, hold);
+    this.isPeekingClue = true;
+    this.peekAlpha = Math.max(this.peekAlpha || 0, 0.45);
+    return this.peekAlpha;
+  }
+
+  isAtDoorwayThreshold() {
+    const po = this.pogo;
+    if (!po) return false;
+    if (this.phase === 'intro' || this.t <= 1.4) return true;
+    return po.y >= this.rows - 1 && Math.abs(po.x - this.doorX) <= 1;
+  }
+
+  _updatePeekClue(dt) {
+    const hiddenClue = !this.showTarget && (this.type === 'lights' || this.type === 'bells');
+    if (!hiddenClue || this.solved || this.wasSolved) {
+      this.peekAlpha = clamp((this.peekAlpha ?? 1) + dt * 6, 0, 1);
+      this.isPeekingClue = false;
+      this._peekHoldT = 0;
+      return;
+    }
+    const atDoor = this.isAtDoorwayThreshold();
+    if (atDoor) {
+      this._peekHoldT = Math.max(this._peekHoldT || 0, 2.8);
+    } else {
+      this._peekHoldT = Math.max(0, (this._peekHoldT || 0) - dt);
+    }
+    const wantPeek = atDoor || this._peekHoldT > 0;
+    this.isPeekingClue = wantPeek;
+    if (wantPeek) {
+      this.peekAlpha = clamp((this.peekAlpha || 0) + dt * 5.8, 0, 1);
+    } else {
+      this.peekAlpha = clamp((this.peekAlpha || 0) - dt * 2.1, 0, 1);
+    }
   }
 
   _applySolution() {
@@ -896,32 +1026,38 @@ export class PuzzleRoom {
     const W = this.width;
     const H = this.height;
     const aspect = W / H;
+    const wide = aspect > 1.15;
     v.aspect = aspect;
-    // Tight heroic telephoto FOV minimizes perspective distortion and showcases Explorer Pogo V2
-    v.fov = aspect < 0.75 ? 30 : aspect < 1.2 ? 31 : 28;
+    // Tight heroic telephoto FOV minimizes perspective distortion while framing stele + archway cleanly
+    v.fov = aspect < 0.75 ? 30 : aspect < 1.2 ? 31 : 29;
     const cols = this.cols;
     const rows = this.rows;
-    const hx = cols * 0.46 + (this.type === 'beam' ? 0.55 : 0.12);
-    const zBack = -rows * 0.48 - 0.18;
-    const zFront = rows * 0.48 + 0.35;
-    const backH = this.type === 'lights' ? 1.85 : this.type === 'bells' ? 1.7 : 1.35;
+    const hx = cols * 0.48 + (this.type === 'beam' ? 0.58 : 0.22);
+    const zBack = -rows * 0.5 - 0.25;
+    const zFront = rows * 0.5 + 0.58;
+    const steleX = -Math.max(2.15, cols * 0.46) - 0.62;
+    const steleZ = this.worldZ(0) - 0.95;
+    const steleTop = this.type === 'beam' ? 1.65 : 2.52;
     const pts = (this._fitPts = this._fitPts || []);
     pts.length = 0;
     pts.push(
       [-hx, 0, zFront],
       [hx, 0, zFront],
+      [0, -0.1, zFront + 0.28],
       [-hx, 0, zBack],
       [hx, 0, zBack],
-      [-hx * 0.72, backH, zBack - 0.2],
-      [hx * 0.72, backH, zBack - 0.2],
-      [0, backH + 0.25, zBack - 0.32]
+      [steleX, 0, steleZ],
+      [steleX, steleTop, steleZ],
+      [0, 2.38, steleZ - 0.22],
+      [hx * 0.85, 1.85, zBack - 0.22]
     );
-    // Reserve safe top space for `#hud` + utility row (top 98px) and the chamber banner card beneath it
-    const topSafe = aspect > 1.15 ? 104 * Math.min(1.2, this.s) : 158 * Math.min(1.2, this.s);
-    const botSafe = aspect > 1.15 ? 46 * this.s : 106 * this.s;
-    const sideSafe = 6 * this.s;
+    // Portrait reserves top space for `#hud` + `#puzzle-hud` / `hudPanel` and bottom touch controls;
+    // Landscape docks HUD into left/right side gutters (`0..24%` and `76..100%`) so center top/bottom stay open!
+    const topSafe = wide ? Math.max(18, H * 0.055) : 162 * Math.min(1.18, this.s);
+    const botSafe = wide ? Math.max(38, H * 0.105) : 112 * Math.min(1.18, this.s);
+    const sideSafe = wide ? Math.max(20, W * 0.185) : 10 * this.s;
     let best = null;
-    // Heroic 3/4 isometric angle (36..44 deg pitch with subtle -10 deg azimuth) -> ~2.2x larger PogoRig!
+    // Heroic 3/4 isometric angle (36..44 deg pitch with subtle -10 deg azimuth)
     for (let deg = 36; deg <= 44; deg += 2) {
       const pitch = (deg * Math.PI) / 180;
       const dist = this._fitDist(pitch, pts, topSafe, botSafe, sideSafe);
@@ -932,8 +1068,9 @@ export class PuzzleRoom {
       const score = Math.sqrt(Math.abs(bx - ax) * Math.abs(by - ay)) * (1 - Math.abs(deg - 38) * 0.012);
       if (!best || score > best.score) best = { score, pitch, dist };
     }
-    // Pull 14% closer for dramatic heroic 3/4 framing; hero-follow keeps Pogo & active tiles centered
-    const heroDist = best.dist * 0.86;
+    // In landscape, keep 1.00x exact fit so stele + full grid + south exit archway never clip;
+    // in portrait, pull slightly closer (0.95x) while keeping stele & archway inside safe bounds.
+    const heroDist = wide ? best.dist : best.dist * 0.95;
     this._fitDist(best.pitch, pts, topSafe, botSafe, sideSafe, heroDist);
     v.pitch = best.pitch;
     v.dist = heroDist;
@@ -1013,13 +1150,15 @@ export class PuzzleRoom {
     const v = this.view;
     if (!v.baseEye || !v.baseTarget) return;
     const po = this.pogo;
+    const wide = this.width / this.height > 1.15;
     const wx = clamp(this.worldX(po.px ?? po.x), -2.2, 2.2);
     const wz = clamp(this.worldZ(po.py ?? po.y), -2.2, 2.4);
-    const follow = this.phase === 'solved' ? 0.16 : 0.26;
+    const follow = wide ? 0.09 : this.phase === 'solved' ? 0.15 : 0.22;
+    const solvedShift = wide ? 0.18 : 0.38;
     const wantTx = v.baseTarget[0] + wx * follow;
-    const wantTz = v.baseTarget[2] + wz * follow * 0.82 - (this.phase === 'solved' ? 0.42 : 0);
+    const wantTz = v.baseTarget[2] + wz * follow * 0.82 - (this.phase === 'solved' ? solvedShift : 0);
     const wantEx = v.baseEye[0] + wx * follow * 0.72;
-    const wantEz = v.baseEye[2] + wz * follow * 0.65 - (this.phase === 'solved' ? 0.55 : 0);
+    const wantEz = v.baseEye[2] + wz * follow * 0.65 - (this.phase === 'solved' ? solvedShift * 1.25 : 0);
     const k = dt >= 0.9 ? 1 : 1 - Math.exp(-5.5 * dt);
     v.target[0] += (wantTx - v.target[0]) * k;
     v.target[2] += (wantTz - v.target[2]) * k;
@@ -1122,10 +1261,11 @@ export class PuzzleRoom {
     const src = input && typeof input === 'object' && input.state ? input.state : (input || {});
     this._readInput(input, src, dt);
 
+    const jp = input?.justPressed || src?.justPressed || null;
     const jump = !!src.jump;
-    const jumpEdge = jump && !this._wasJump;
+    const jumpEdge = (jump && !this._wasJump) || Boolean(jp?.jump);
     const fireNow = !!src.fire;
-    const fireEdge = fireNow && !this._wasFire;
+    const fireEdge = (fireNow && !this._wasFire) || Boolean(jp?.fire);
     this._wasJump = jump;
     this._wasFire = fireNow;
 
@@ -1154,12 +1294,16 @@ export class PuzzleRoom {
         this.timeSec = this.playT;
       }
       this._stepPogo(dt, sound);
+      if (this._repeatGapT > 0) this._repeatGapT = Math.max(0, this._repeatGapT - dt);
       if (fire) this._fireBuf = true;
-      if (!po.moving && po.hopT < 0 && this.phase !== 'leaving') {
+      // Zero-lag action response: allow buffered tap to trigger immediately once hop impact (`HOP_LAND`) has landed
+      if (!po.moving && (po.hopT < 0 || (this._fireBuf && po.hopT >= HOP_LAND)) && this.phase !== 'leaving') {
         if (this._fireBuf) {
           this._fireBuf = false;
+          po.hopT = -1;
+          po.hop = 0;
           this._interact(fx, sound);
-        } else {
+        } else if (po.hopT < 0) {
           this._tryInputMove(fx, sound);
         }
       }
@@ -1190,6 +1334,7 @@ export class PuzzleRoom {
     }
 
     this._updatePuzzle(dt, fx, sound);
+    this._updatePeekClue(dt);
     this._refreshProgressRatio();
     if (this.solved) {
       this.gateOpen = clamp(this.gateOpen + dt * 0.72, 0, 1);
@@ -1213,14 +1358,15 @@ export class PuzzleRoom {
   }
 
   _readInput(rawInput, src, dt) {
-    // 4-Mode Dual-Compatible Touch & Gesture Adapter (`analogX`/`analogY` + `left`/`right`/`up`/`down`)
+    // 4-Mode Dual-Compatible Touch & Gesture Adapter (`analogX`/`analogY` + `left`/`right`/`up`/`down` + `justPressed`)
     const ax = Number(src.analogX ?? src.axisX ?? rawInput?.analogX ?? rawInput?.axisX) || 0;
     const ay = Number(src.analogY ?? src.axisY ?? rawInput?.analogY ?? rawInput?.axisY) || 0;
+    const jp = rawInput?.justPressed || src?.justPressed || null;
     const d = this._dirs;
-    d[0] = ax > 0.25 || !!src.right;
-    d[2] = ax < -0.25 || !!src.left;
-    d[1] = ay > 0.35 || !!src.down;
-    d[3] = ay < -0.35 || !!src.up || (this.jumpIsUp === true && !!src.jump);
+    d[0] = ax > 0.25 || !!src.right || !!jp?.right;
+    d[2] = ax < -0.25 || !!src.left || !!jp?.left;
+    d[1] = ay > 0.34 || !!src.down || !!jp?.down;
+    d[3] = ay < -0.34 || !!src.up || !!jp?.up || (this.jumpIsUp === true && !!src.jump);
 
     for (let k = 0; k < 4; k++) {
       if (d[k]) {
@@ -1249,7 +1395,8 @@ export class PuzzleRoom {
       fresh = true;
       this._buffer = -1;
       this._bufferFresh = false;
-    } else {
+      this._repeatGapT = 0;
+    } else if (!(this._repeatGapT > 0)) {
       let best = Infinity;
       for (let k = 0; k < 4; k++) {
         if (this._dirs[k] && this._held[k] >= REPEAT_DELAY && this._held[k] < best) {
@@ -1257,6 +1404,7 @@ export class PuzzleRoom {
           dir = k;
         }
       }
+      if (dir >= 0) this._repeatGapT = REPEAT_STEP_GAP;
     }
     if (dir >= 0) this._tryMove(dir, fresh, fx, sound);
   }
@@ -1622,7 +1770,7 @@ export class PuzzleRoom {
       }
       if (this.wrongs >= 3 && this.hintLevel === 0) {
         this.hintLevel = 1;
-        this._setHud(null, 'Hint: the glowing bell rings first • check the banners outside', null);
+        this._setHud(null, 'Hint: the glowing bell rings first • step to doorway to peek crest', null);
         this._vfx('hint', 0, 0, { life: 1 });
       }
       if (this.wrongs >= 6 && this.hintLevel === 1) {
