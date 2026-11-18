@@ -44,6 +44,8 @@ const TWO_PI = Math.PI * 2;
 const COL_ANGLE = TWO_PI / COLS;
 const LEDGE_STAND_OFFSET = 0.46; // Exact centerline match with `towerArchitecture.js` `LEDGE_OFFSET`
 const LIFT_STAND_OFFSET = 0.48;  // Exact centerline match with `towerArchitecture.js` `LIFT_OFFSET`
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
 const HYDRO_FX_STYLES = {
   standard_cryo: {
@@ -1044,31 +1046,60 @@ export class GameRenderer {
   _buildPurificationEruption() {
     const g = new THREE.Group();
     g.visible = false;
-    const geyser = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.85, 0.95, 28, 20, 1, true),
+    // Feathered cascading turquoise water-geyser plumes + prismatic mist rings (zero boxy geometry!)
+    const plumeMat = new THREE.MeshBasicMaterial({
+      map: this.glowDotTex,
+      color: '#5efce8',
+      transparent: true,
+      opacity: 0.62,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const geyser = new THREE.Mesh(new THREE.CylinderGeometry(2.35, 0.85, 26, 24, 1, true), plumeMat);
+    geyser.position.y = 13;
+
+    const innerCore = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.15, 0.45, 30, 20, 1, true),
       new THREE.MeshBasicMaterial({
-        color: '#5efce8',
+        map: this.glowDotTex,
+        color: '#e0f7ff',
         transparent: true,
-        opacity: 0.55,
+        opacity: 0.72,
         blending: THREE.AdditiveBlending,
         side: THREE.DoubleSide,
         depthWrite: false,
       })
     );
-    geyser.position.y = 14;
+    innerCore.position.y = 15;
+
     const rainbowHalo = new THREE.Mesh(
-      new THREE.TorusGeometry(6.2, 0.32, 10, 36),
+      new THREE.TorusGeometry(5.6, 0.22, 12, 42),
       new THREE.MeshBasicMaterial({
-        color: '#fde047',
+        color: '#67e8f9',
         transparent: true,
-        opacity: 0.42,
+        opacity: 0.48,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       })
     );
     rainbowHalo.rotation.x = Math.PI * 0.5;
-    g.add(geyser, rainbowHalo);
-    g.userData = { geyser, rainbowHalo };
+
+    const goldHalo = new THREE.Mesh(
+      new THREE.TorusGeometry(6.8, 0.14, 10, 42),
+      new THREE.MeshBasicMaterial({
+        color: '#fde047',
+        transparent: true,
+        opacity: 0.38,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    goldHalo.rotation.x = Math.PI * 0.5;
+    goldHalo.position.y = 2.4;
+
+    g.add(geyser, innerCore, rainbowHalo, goldHalo);
+    g.userData = { geyser, innerCore, rainbowHalo, goldHalo };
     return g;
   }
 
@@ -1209,17 +1240,29 @@ export class GameRenderer {
   }
 
   _buildDebrisPool() {
-    const geo = new THREE.BoxGeometry(0.42, 0.32, 0.34);
-    const mat = new THREE.MeshStandardMaterial({ color: '#64748b', roughness: 0.62, metalness: 0.15 });
-    const inst = new THREE.InstancedMesh(geo, mat, 32);
+    // Cascading Luminous Purification Water-Droplet Streamers (replaces old boxy debris cubes!)
+    const geo = this.sharedWaterDropGeo.clone();
+    geo.scale(1.15, 1.85, 1.15);
+    const mat = new THREE.MeshStandardMaterial({
+      color: '#bae6fd',
+      emissive: '#38bdf8',
+      emissiveIntensity: 1.15,
+      roughness: 0.08,
+      metalness: 0.15,
+      transparent: true,
+      opacity: 0.86,
+    });
+    const inst = new THREE.InstancedMesh(geo, mat, 48);
     inst.visible = false;
     const meta = [];
-    for (let i = 0; i < 32; i++) {
+    for (let i = 0; i < 48; i++) {
+      const ang = (i / 48) * TWO_PI;
       meta.push({
-        rx: ((i % 9) - 4) * 1.05,
-        rz: ((i % 5) - 2) * 0.85,
-        speed: 0.68 + (i % 5) * 0.24,
-        rot: (i % 2 === 0 ? 1 : -1) * (2.4 + (i % 4)),
+        ang,
+        rad: TOWER_RADIUS + 0.55 + (i % 4) * 0.65,
+        speed: 0.85 + (i % 6) * 0.22,
+        phase: (i * 0.21) % 1,
+        scale: 0.65 + (i % 4) * 0.25,
       });
     }
     return { inst, geo, mat, meta };
@@ -1348,6 +1391,63 @@ export class GameRenderer {
       );
       g.add(slab, face, holoRing);
       g.userData = { holoRing };
+    } else if (
+      type === 'critterPod' ||
+      type === 'critter_pod' ||
+      type === 'critter' ||
+      type === 'wildlife' ||
+      type === 'rescuePod'
+    ) {
+      // Wave 3 Rescuable Earth Water-Critter Pod (Translucent Sea-Glass Bubble + Bronze Collar + 3D Otter/Turtle!)
+      const bubble = new THREE.Mesh(
+        new THREE.SphereGeometry(0.36, 16, 12),
+        this._getCollectibleMat(
+          'critterPod:bubble',
+          () =>
+            new THREE.MeshStandardMaterial({
+              color: '#a5f3fc',
+              emissive: '#22d3ee',
+              emissiveIntensity: 0.55,
+              roughness: 0.06,
+              transparent: true,
+              opacity: 0.48,
+            })
+        )
+      );
+      const collar = new THREE.Mesh(
+        new THREE.TorusGeometry(0.38, 0.032, 8, 24),
+        this._getCollectibleMat(
+          'critterPod:collar',
+          () => new THREE.MeshStandardMaterial({ color: '#e5a945', metalness: 0.86, roughness: 0.22 })
+        )
+      );
+      const critterCore = new THREE.Group();
+      const fbCritter = new THREE.Mesh(
+        new THREE.CapsuleGeometry(0.11, 0.22, 6, 10),
+        this._getCollectibleMat(
+          'critterPod:body',
+          () => new THREE.MeshStandardMaterial({ color: '#2dd4bf', roughness: 0.35 })
+        )
+      );
+      fbCritter.rotation.z = Math.PI * 0.5;
+      critterCore.add(fbCritter);
+      if (typeof window !== 'undefined' && typeof fetch === 'function') {
+        const loader = new GLTFLoader();
+        loader.load(
+          'assets/models/sea_turtle.glb',
+          (gltf) => {
+            if (!gltf?.scene) return;
+            critterCore.clear();
+            const cl = gltf.scene.clone(true);
+            cl.scale.setScalar(0.46);
+            critterCore.add(cl);
+          },
+          undefined,
+          () => {}
+        );
+      }
+      g.add(bubble, collar, critterCore);
+      g.userData = { holoRing: collar };
     } else if (type === 'curio' || type === 'salvage_part' || type === 'compass_key') {
       const orb = new THREE.Mesh(
         new THREE.IcosahedronGeometry(0.21, 1),
@@ -1544,6 +1644,8 @@ export class GameRenderer {
     const cutscene =
       !isWardrobe && state.cutsceneCam?.active
         ? state.cutsceneCam
+        : !isWardrobe && state.cutscene?.active
+        ? state.cutscene
         : !isWardrobe && this.cutsceneCam?.active
         ? this.cutsceneCam
         : null;
@@ -1594,24 +1696,24 @@ export class GameRenderer {
       ? pBaseCol + Math.sin(time * 0.30) * (0.42 - landBlend * 0.12)
       : camCol;
 
-    // Portrait (`52°`) vs Tablet/Desktop/Phone-Landscape (`42° -> 39°`)
-    const portraitGameFov = 46 + tallPhoneBlend * 6.0;
+    // Portrait (`48° -> 55.5°`) vs Tablet/Desktop/Phone-Landscape (`42° -> 39°`)
+    const portraitGameFov = 48 + tallPhoneBlend * 7.5;
     const landscapeGameFov = 42 - Math.max(0, Math.min(1, (aspect - 1.33) / 0.90)) * 3.0;
     const gameplayFov = Math.round((portraitGameFov * (1 - landBlend) + landscapeGameFov * landBlend) * 2) * 0.5;
-    const wantFov = isWardrobe ? 44 : isCutscene ? 48 : gameplayFov;
+    const wantFov = isWardrobe ? 44 : isCutscene ? 50 : gameplayFov;
     if (this.towerCam.fov !== wantFov) {
       this.towerCam.fov = wantFov;
       this.towerCam.updateProjectionMatrix();
     }
 
-    // `camZ` frames Gateway (~15.7% screen height on 1080p) while leaving sunlit river/mountain/coral
-    // vistas visible on BOTH flanks — and never clipping staircases on `412x915` (`aspect = 0.45`) portrait!
+    // `camZ` frames 1.28x Gateway heroically while keeping spire at `~65–71%` width on `412x915`
+    // Android Portrait so BOTH flanks of the living Earth Water Biome vista shine clearly!
     let camZ;
     if (aspect < 0.92) {
-      camZ = 17.6 + tallPhoneBlend * 4.4; // 17.6m (3:4) -> 22.0m (9:19.5 portrait: stairs unclipped + flanking vista!)
+      camZ = 19.8 + tallPhoneBlend * 6.8; // 19.8m (3:4) -> 26.6m (9:19.5 portrait: ~65% spire + 35% sunlit flanks!)
     } else {
       const wideLand = Math.max(0, Math.min(1, (aspect - 1.33) / 0.90));
-      camZ = 16.0 - wideLand * 1.4; // 16.0m tablet -> 14.6m 1080p / 20:9 landscape
+      camZ = 16.2 - wideLand * 1.4; // 16.2m tablet -> 14.8m 1080p / 20:9 landscape
     }
 
     const posOffY = (1.05 + tallPhoneBlend * 0.48) * (1 - landBlend) + 0.32 * landBlend;
@@ -1627,16 +1729,16 @@ export class GameRenderer {
       this.towerCam.position.set(0, wardY, wardZ);
       this.towerCam.lookAt(0, pFloorY + 0.58, TOWER_RADIUS + LEDGE_STAND_OFFSET);
     } else if (isTitleShowcase) {
-      // Heroic Title Screen Vista framing Gateway + sunlit canyon waterfalls / coral lagoon!
+      // Heroic Title Screen Vista framing 1.28x Gateway squarely in the center between Title Crest & CTA!
       const pFloorY = (hero?.floor || 0) * fh;
       const wideLand = Math.max(0, Math.min(1, (aspect - 1.33) / 0.90));
-      const showcaseZ = aspect < 0.92 ? 17.2 + tallPhoneBlend * 4.4 : 15.6 - wideLand * 1.1;
-      const showcaseX = Math.sin(time * 0.30) * 0.65;
-      camY = pFloorY + (1.15 * (1 - landBlend) + 0.92 * landBlend) + Math.sin(time * 0.55) * 0.06;
-      const lookY = pFloorY + ((2.15 + tallPhoneBlend * 0.35) * (1 - landBlend) + 1.45 * landBlend);
+      const showcaseZ = aspect < 0.92 ? 16.4 + tallPhoneBlend * 5.2 : 13.6 - wideLand * 1.1;
+      const showcaseX = Math.sin(time * 0.30) * 0.48;
+      camY = pFloorY + (1.08 * (1 - landBlend) + 0.94 * landBlend) + Math.sin(time * 0.55) * 0.05;
+      const lookY = pFloorY + (0.98 * (1 - landBlend) + 0.92 * landBlend);
       camZ = showcaseZ;
       this.towerCam.position.set(showcaseX, camY, showcaseZ);
-      this.towerCam.lookAt(0, lookY, TOWER_RADIUS * 0.42);
+      this.towerCam.lookAt(0, lookY, TOWER_RADIUS + LEDGE_STAND_OFFSET * 0.55);
     } else if (isCutscene) {
       const pFloorY = (hero?.floor || 0) * fh;
       const towerTopY = Math.max(18, tower.floors * fh);
@@ -1769,12 +1871,13 @@ export class GameRenderer {
       const dm = this._debrisDummy;
       for (let i = 0; i < dp.meta.length; i++) {
         const d = dp.meta[i];
-        dm.position.set(
-          d.rx + Math.sin(time * 3 + d.rx) * 0.75 * topple.progress,
-          camY - 3.5 + Math.max(-0.5, (1 - ((topple.progress * d.speed) % 1)) * 9.5),
-          TOWER_RADIUS + 0.6 + d.rz * 0.45
-        );
-        dm.rotation.set(time * d.rot, time * d.rot * 0.7, 0);
+        const u = (d.phase + time * d.speed * 0.55) % 1;
+        const arcR = d.rad + u * 2.8;
+        const dropY = camY - 2.0 + Math.sin(u * Math.PI) * 9.5 - u * 2.5;
+        const swirlA = d.ang + time * 0.65;
+        dm.position.set(Math.sin(swirlA) * arcR, dropY, Math.cos(swirlA) * arcR);
+        dm.rotation.set(Math.cos(u * Math.PI) * 0.65, swirlA, 0);
+        dm.scale.setScalar(d.scale * (1.0 - u * 0.45));
         dm.updateMatrix();
         dp.inst.setMatrixAt(i, dm.matrix);
       }
@@ -1798,8 +1901,20 @@ export class GameRenderer {
 
     updateTowerArchitecture(cached, state, time, dt);
 
-    // Update Collectibles (`waterDrop`, `waterSeed`, `relic`, `curio`)
-    const collectibles = state.collectibles || [];
+    // Update Collectibles (`waterDrop`, `waterSeed`, `relic`, `curio`, plus Wave 3 `critterPods`!)
+    const rawCols = state.collectibles || [];
+    const extraPods = state.critterPods || state.wildlifePods || null;
+    const collectibles =
+      extraPods && extraPods.length > 0
+        ? rawCols.concat(
+            extraPods.map((cp) => ({
+              col: cp.col,
+              floor: cp.floor,
+              type: cp.type || 'critterPod',
+              collected: Boolean(cp.rescued || cp.collected || cp.freed),
+            }))
+          )
+        : rawCols;
     while (this.collectiblePool.length < collectibles.length) {
       const cDef = collectibles[this.collectiblePool.length];
       const cm = this._buildCollectibleMesh(cDef.type);
@@ -1868,7 +1983,9 @@ export class GameRenderer {
       this.shieldBubble.visible = Boolean(heroVisible && hero.shield);
 
       if (heroVisible) {
-        this.gatewayRig.group.scale.setScalar(1.0);
+        // 1.28x Hero Visual Stature (`1.185 * 1.28 = 1.517u`, cleanly clearing `1.66u` elevator hoist yokes!)
+        const heroScale = isWardrobe ? 1.12 : 1.28;
+        this.gatewayRig.group.scale.setScalar(heroScale);
         this.gatewayRig.group.position.set(px, py, pz);
         this.gatewayRig.group.rotation.y =
           pTheta + (isWardrobe ? Math.sin(time * 0.85) * 0.55 : isTitleShowcase ? Math.sin(time * 0.65) * 0.22 : 0);
@@ -2096,7 +2213,7 @@ export class GameRenderer {
 
     if (this.oceanVfx) {
       this.oceanVfx.setPurification?.(purify);
-      if (isWardrobe) {
+      if (isWardrobe || (isTitleShowcase && (hero?.floor || 0) < 0.85)) {
         this.oceanVfx.setVisible?.(false);
       } else {
         this.oceanVfx.setVisible?.(true);

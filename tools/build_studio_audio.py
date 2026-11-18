@@ -12,6 +12,7 @@ energy), and encoded to compact Vorbis .ogg stems in assets/audio/.
 
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import os
@@ -1481,6 +1482,318 @@ def compose_storm_ocean() -> np.ndarray:
     return canvas.render_seamless(ir, wet_mix=0.42, cutoff_hz=5000.0)
 
 
+def compose_warden_boss() -> np.ndarray:
+    """
+    7. music_warden_boss.ogg (64.0s exact, 32 bars @ 120 BPM in D Minor / F Heroic)
+    Driving taiko/orchestral toms, bowed cello ostinato, heroic Pelagian brass & choir
+    for Siphon Warden boss encounters & Warden Gauntlet (thrilling yet warm, zero >6kHz harshness).
+    """
+    rng = np.random.default_rng(1007)
+    bpm = 120.0
+    beat = 60.0 / bpm  # 0.5s
+    bar_len = 4.0 * beat  # 2.0s
+    n_bars = 32
+    loop_sec = n_bars * bar_len  # 64.0s exact!
+    canvas = StudioCanvas(loop_sec, tail_seconds=8.0)
+
+    # 4 evolving 8-bar sections (A: Confrontation, B: Warden Assault, C: Pelagian Counterattack, D: Relentless Resolve)
+    sec_a = [
+        (38, [50, 57, 62, 65, 69]),  # Dm9
+        (34, [46, 53, 58, 62, 65]),  # Bbmaj7
+        (43, [43, 50, 55, 58, 62]),  # Gm7
+        (45, [45, 52, 57, 60, 64]),  # Asus4 / Am7
+    ] * 2
+    sec_b = [
+        (38, [50, 57, 62, 65, 69]),  # Dm
+        (36, [48, 55, 60, 64, 67]),  # C
+        (34, [46, 53, 58, 62, 69]),  # Bbmaj7
+        (33, [45, 52, 57, 61, 64]),  # A7sus/A
+    ] * 2
+    sec_c = [
+        (41, [53, 57, 60, 65, 69]),  # F Heroic!
+        (40, [52, 55, 60, 64, 67]),  # C/E
+        (38, [50, 57, 62, 65, 69]),  # Dm9
+        (34, [46, 53, 58, 62, 65]),  # Bbmaj9
+        (43, [43, 50, 55, 58, 65]),  # Gm11
+        (36, [48, 55, 60, 64, 69]),  # C6
+        (34, [46, 53, 58, 62, 69]),  # Bbmaj7
+        (33, [45, 52, 57, 62, 64]),  # Asus4
+    ]
+    sec_d = [
+        (38, [50, 57, 62, 65, 69]),
+        (34, [46, 53, 58, 62, 65]),
+        (36, [48, 55, 60, 64, 67]),
+        (33, [45, 52, 57, 61, 64]),
+    ] * 2
+    prog = sec_a + sec_b + sec_c + sec_d
+
+    # Relentless 8th-note bowed cello spiccato motor (accented 3+3+2 drive)
+    ost_steps = [
+        (0.0, 0, 0.86),
+        (0.5, 1, 0.56),
+        (1.0, 2, 0.64),
+        (1.5, 0, 0.82),
+        (2.0, 1, 0.56),
+        (2.5, 2, 0.64),
+        (3.0, 3, 0.78),
+        (3.5, 2, 0.58),
+    ]
+
+    for b, (bass_m, chord) in enumerate(prog):
+        t0 = b * bar_len
+        sec = b // 8
+        dyn = 0.78 + 0.18 * math.sin(math.pi * ((b % 8) + 0.5) / 8.0)
+
+        # Deep orchestral sub-pulse (downbeat + syncopated beat 2.5)
+        canvas.add_Mono(synth_sub_bass(midi_to_hz(bass_m), beat * 2.1, vel=0.72 * dyn), t0, pan=0.0, reverb_send=0.14)
+        canvas.add_Mono(synth_sub_bass(midi_to_hz(bass_m), beat * 1.35, vel=0.60 * dyn), t0 + 2.5 * beat, pan=0.0, reverb_send=0.14)
+
+        # Driving bowed cello spiccato ostinato
+        for b_off, idx, v_base in ost_steps:
+            m_n = chord[idx % len(chord)]
+            spic = synth_spiccato_cello(midi_to_hz(m_n), beat * 0.48, vel=v_base * 0.88 * dyn)
+            canvas.add_Mono(spic, t0 + b_off * beat + float(rng.uniform(-0.004, 0.004)), gain=0.74, pan=-0.30 + 0.20 * (idx % 4), reverb_send=0.34)
+
+        # Dramatic Pelagian String & Choir Swells
+        choir_amt = [0.28, 0.45, 0.68, 0.36][sec]
+        pad_vel = [0.54, 0.70, 0.86, 0.60][sec] * dyn
+        pad = synth_warm_string_pad(chord, bar_len * 1.04, vel=pad_vel, choir_blend=choir_amt, seed=700 + b)
+        canvas.add_Stereo(pad, t0, gain=0.94, reverb_send=0.50)
+
+        # Driving Taiko & Orchestral Tom Ensemble (warm deep skin impacts, zero harsh cymbals)
+        taiko_hits = [(0.0, 46.0, 0.84, 0.0), (1.5, 68.0, 0.66, -0.24), (2.5, 52.0, 0.74, 0.16), (3.0, 88.0, 0.60, 0.28)]
+        if sec in (1, 2):
+            taiko_hits.extend([(0.75, 92.0, 0.46, -0.32), (3.5, 76.0, 0.56, -0.18)])
+        if b % 4 == 3:
+            # Energetic 4-bar taiko turnaround fill
+            taiko_hits.extend([(3.25, 98.0, 0.54, 0.24), (3.75, 64.0, 0.68, -0.20)])
+        for h_beat, h_hz, h_vel, h_pan in taiko_hits:
+            canvas.add_Mono(synth_orchestral_tom(h_hz, vel=h_vel * dyn), t0 + h_beat * beat, gain=0.66, pan=h_pan, reverb_send=0.30)
+
+        # Tactile hollow temple woodblock rhythmic accents
+        for wb_b in (1.0, 2.0, 3.5):
+            if sec == 0 and wb_b == 2.0:
+                continue
+            canvas.add_Mono(synth_soft_woodblock(510.0 if wb_b < 3.0 else 640.0, vel=0.44 * dyn), t0 + wb_b * beat, gain=0.48, pan=0.22 if wb_b > 2.0 else -0.22, reverb_send=0.28)
+
+        # Felt piano dramatic bass octaves on strong bars
+        if sec in (1, 2) and b % 2 == 0:
+            fp = synth_felt_piano(midi_to_hz(chord[0]), beat * 3.0, vel=0.72 * dyn, rng=rng)
+            canvas.add_Mono(fp, t0, gain=0.68, pan=-0.18, reverb_send=0.44)
+
+    # Heroic Pelagian French Horn + Solo Cello Boss Theme (Sections B, C & fierce motif in A2/D)
+    boss_melody = [
+        # Sec A2 warning call (bars 4..7)
+        (4, 0.0, 62, 2.0, 0.74),
+        (4, 2.0, 65, 2.0, 0.78),
+        (5, 0.0, 69, 3.2, 0.82),
+        (6, 0.0, 67, 2.0, 0.78),
+        (6, 2.0, 65, 2.0, 0.74),
+        (7, 0.0, 64, 3.4, 0.76),
+        # Sec B Warden Assault (bars 8..15)
+        (8, 0.0, 62, 1.5, 0.82),
+        (8, 1.5, 65, 1.0, 0.80),
+        (8, 2.5, 69, 1.5, 0.86),
+        (9, 0.0, 72, 2.5, 0.88),
+        (9, 2.5, 70, 1.5, 0.84),
+        (10, 0.0, 69, 2.0, 0.84),
+        (10, 2.0, 65, 2.0, 0.80),
+        (11, 0.0, 64, 3.5, 0.82),
+        (12, 0.0, 65, 1.5, 0.84),
+        (12, 1.5, 67, 1.0, 0.82),
+        (12, 2.5, 69, 1.5, 0.88),
+        (13, 0.0, 74, 2.5, 0.90),
+        (13, 2.5, 72, 1.5, 0.86),
+        (14, 0.0, 70, 2.0, 0.84),
+        (14, 2.0, 69, 2.0, 0.82),
+        (15, 0.0, 67, 3.5, 0.84),
+        # Sec C Pelagian Heroic Counterattack (bars 16..23)
+        (16, 0.0, 69, 2.0, 0.88),
+        (16, 2.0, 72, 2.0, 0.90),
+        (17, 0.0, 76, 3.0, 0.92),
+        (17, 3.0, 74, 1.0, 0.84),
+        (18, 0.0, 74, 2.0, 0.88),
+        (18, 2.0, 69, 2.0, 0.84),
+        (19, 0.0, 70, 3.5, 0.88),
+        (20, 0.0, 67, 2.0, 0.84),
+        (20, 2.0, 70, 2.0, 0.86),
+        (21, 0.0, 72, 2.5, 0.90),
+        (21, 2.5, 69, 1.5, 0.84),
+        (22, 0.0, 65, 2.0, 0.84),
+        (22, 2.0, 69, 2.0, 0.86),
+        (23, 0.0, 67, 3.6, 0.86),
+        # Sec D fierce return (bars 24..28)
+        (24, 0.0, 62, 3.0, 0.78),
+        (25, 0.0, 65, 3.0, 0.76),
+        (26, 0.0, 64, 2.0, 0.74),
+        (26, 2.0, 62, 2.0, 0.72),
+        (27, 0.0, 61, 3.4, 0.74),
+    ]
+    for bar_i, b_off, m_n, b_dur, vel in boss_melody:
+        t_pos = bar_i * bar_len + b_off * beat
+        hn = synth_french_horn(midi_to_hz(m_n), b_dur * beat, vel=vel)
+        canvas.add_Mono(hn, t_pos, gain=0.86, pan=-0.18, reverb_send=0.52)
+        vc = synth_solo_cello(midi_to_hz(m_n), b_dur * beat, vel=vel * 0.82)
+        canvas.add_Mono(vc, t_pos, gain=0.74, pan=0.20, reverb_send=0.50)
+
+    ir = build_space_ir(rt60=3.4, pre_delay_ms=22.0, hf_damping_hz=2200.0, canyon_echo=False, seed=207)
+    return canvas.render_seamless(ir, wet_mix=0.40, cutoff_hz=5000.0)
+
+
+def compose_core_descent() -> np.ndarray:
+    """
+    8. music_core_descent.ogg (64.0s exact, 32 bars @ 120 BPM in A Dorian / C Lydian)
+    Propulsive shimmering marimba arpeggios, sub-aquatic pulse & rushing hydro-harmonics
+    for Reactor Core Descent & Flash-Flood Survival!
+    """
+    rng = np.random.default_rng(1008)
+    bpm = 120.0
+    beat = 60.0 / bpm  # 0.5s
+    bar_len = 4.0 * beat  # 2.0s
+    n_bars = 32
+    loop_sec = n_bars * bar_len  # 64.0s exact!
+    canvas = StudioCanvas(loop_sec, tail_seconds=8.0)
+
+    sec_a = [
+        (45, [57, 60, 64, 67, 71]),  # Am9
+        (41, [53, 57, 60, 64, 66]),  # Fmaj7#11
+        (43, [55, 59, 62, 64, 67]),  # G6/9
+        (40, [52, 55, 59, 62, 67]),  # Em11
+    ] * 2
+    sec_b = [
+        (45, [57, 60, 64, 67, 71]),  # Am9
+        (38, [50, 57, 60, 64, 69]),  # Dm9/D7sus
+        (41, [53, 57, 60, 64, 69]),  # Fmaj13
+        (43, [55, 59, 62, 67, 69]),  # G6/9
+    ] * 2
+    sec_c = [
+        (36, [48, 55, 59, 62, 67]),  # Cmaj9
+        (38, [50, 57, 62, 66, 69]),  # Dadd9
+        (40, [52, 55, 59, 62, 66]),  # Em9
+        (35, [47, 54, 57, 62, 66]),  # Bm7
+        (41, [53, 57, 60, 64, 66]),  # Fmaj7#11
+        (43, [55, 59, 62, 64, 69]),  # G6/9
+        (45, [57, 60, 64, 67, 71]),  # Am9
+        (40, [52, 57, 59, 64, 67]),  # Em11
+    ]
+    sec_d = [
+        (45, [57, 60, 64, 67, 71]),
+        (41, [53, 57, 60, 64, 66]),
+        (38, [50, 57, 60, 64, 69]),
+        (40, [52, 55, 59, 62, 67]),
+    ] * 2
+    prog = sec_a + sec_b + sec_c + sec_d
+
+    # Propulsive interlocking 8th/16th shimmering marimba plunge arpeggios
+    marimba_arp = [
+        (0.0, 0, 0.80, -0.35),
+        (0.25, 2, 0.56, 0.25),
+        (0.5, 4, 0.68, -0.22),
+        (0.75, 3, 0.54, 0.32),
+        (1.0, 1, 0.74, -0.28),
+        (1.5, 4, 0.72, 0.28),
+        (1.75, 2, 0.54, -0.18),
+        (2.0, 0, 0.78, 0.34),
+        (2.5, 3, 0.66, -0.30),
+        (2.75, 4, 0.58, 0.22),
+        (3.0, 2, 0.72, -0.24),
+        (3.5, 1, 0.64, 0.30),
+    ]
+
+    for b, (bass_m, chord) in enumerate(prog):
+        t0 = b * bar_len
+        sec = b // 8
+        dyn = 0.76 + 0.18 * math.sin(math.pi * ((b % 8) + 0.5) / 8.0)
+
+        # Sub-aquatic buoyant bass pulse (four-on-the-flow energy)
+        for sub_b, sub_v in [(0.0, 0.72), (1.5, 0.54), (2.5, 0.62)]:
+            canvas.add_Mono(synth_sub_bass(midi_to_hz(bass_m), beat * 1.15, vel=sub_v * dyn), t0 + sub_b * beat, pan=0.0, reverb_send=0.18)
+
+        # Propulsive shimmering Rosewood Marimba arpeggios
+        for b_off, idx, v_base, pan in marimba_arp:
+            if sec == 0 and b < 4 and (b_off * 4) % 2 == 1:
+                continue  # Build smoothly from 8th-note plunge into full 16th-note torrent
+            m_n = chord[(idx + (b % 2)) % len(chord)] + (12 if idx >= 3 else 0)
+            mar = synth_wooden_marimba(midi_to_hz(m_n), beat * 0.95, vel=v_base * 0.78 * dyn)
+            canvas.add_Mono(mar, t0 + b_off * beat + float(rng.uniform(-0.004, 0.004)), gain=0.72, pan=pan, reverb_send=0.40)
+
+        # Harmonic Steel-Tongue Drum & Kalimba rushing hydro-harmonics
+        for td_b, td_idx in [(0.0, 4), (1.25, 2), (2.5, 3), (3.25, 4)]:
+            td_m = chord[td_idx % len(chord)] + 12
+            if sec in (1, 2):
+                td = synth_tongue_drum(midi_to_hz(td_m), beat * 1.6, vel=0.58 * dyn)
+                canvas.add_Mono(td, t0 + td_b * beat, gain=0.62, pan=0.35 if td_b > 1.5 else -0.35, reverb_send=0.48)
+            else:
+                kal = synth_kalimba(midi_to_hz(td_m), beat * 1.4, vel=0.54 * dyn)
+                canvas.add_Mono(kal, t0 + td_b * beat, gain=0.60, pan=-0.30 if td_b < 2.0 else 0.30, reverb_send=0.50)
+
+        # Shimmering Glass Harp & Airy Choir Hydro-Bloom (Sections B & C)
+        if sec in (1, 2):
+            pad = synth_warm_string_pad(chord, bar_len * 1.04, vel=(0.68 if sec == 2 else 0.44) * dyn, choir_blend=0.52, seed=800 + b)
+            canvas.add_Stereo(pad, t0, gain=0.90, reverb_send=0.52)
+        if b % 2 == 1:
+            gh = synth_glass_harp(midi_to_hz(chord[-1] + 12), bar_len * 0.85, vel=0.42 * dyn)
+            canvas.add_Stereo(gh, t0 + 0.5 * beat, gain=0.64, reverb_send=0.62)
+
+        # Propulsive clay udu water-pot, deep aqua tom & silky sand-shaker
+        canvas.add_Mono(synth_udu_pot(82.0, vel=0.66 * dyn), t0, gain=0.68, pan=-0.12, reverb_send=0.24)
+        canvas.add_Mono(synth_udu_pot(112.0, vel=0.52 * dyn), t0 + 1.5 * beat, gain=0.58, pan=0.16, reverb_send=0.26)
+        canvas.add_Mono(synth_udu_pot(92.0, vel=0.58 * dyn), t0 + 2.5 * beat, gain=0.62, pan=-0.10, reverb_send=0.24)
+        if sec in (1, 2):
+            canvas.add_Mono(synth_orchestral_tom(54.0, vel=0.52 * dyn), t0, gain=0.52, pan=0.0, reverb_send=0.28)
+            canvas.add_Mono(synth_orchestral_tom(72.0, vel=0.44 * dyn), t0 + 3.0 * beat, gain=0.46, pan=0.18, reverb_send=0.28)
+        for sh_b in (0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5):
+            sh_v = (0.46 if sh_b in (1.0, 3.0) else 0.28) * dyn
+            canvas.add_Mono(synth_gentle_shaker(rng, vel=sh_v, dur=0.11), t0 + sh_b * beat, gain=0.54, pan=0.26 if sh_b % 1.0 == 0 else -0.26, reverb_send=0.22)
+
+        # Sparkling water droplets rushing past the descent tube
+        if b % 2 == 0:
+            for _ in range(2):
+                d_off = float(rng.uniform(0.2, bar_len - 0.2))
+                d_m = rng.choice(chord) + 24
+                canvas.add_Mono(synth_water_droplet(min(1850.0, midi_to_hz(d_m)), vel=0.38 * dyn), t0 + d_off, gain=0.50, pan=float(rng.uniform(-0.7, 0.7)), reverb_send=0.68)
+
+    # Soaring Canyon Bamboo Flute & Cello Plunge Counter-Melody (Sections B & C)
+    descent_melody = [
+        (8, 0.0, 76, 2.0, 0.76, -2.0),
+        (8, 2.0, 79, 2.0, 0.78, 0.0),
+        (9, 0.0, 81, 2.5, 0.82, -2.0),
+        (9, 2.5, 79, 1.5, 0.76, 2.0),
+        (10, 0.0, 76, 2.0, 0.78, 0.0),
+        (10, 2.0, 74, 2.0, 0.74, 2.0),
+        (11, 0.0, 71, 3.4, 0.74, 0.0),
+        (12, 0.0, 76, 1.5, 0.78, -2.0),
+        (12, 1.5, 79, 1.5, 0.80, 0.0),
+        (12, 3.0, 81, 1.0, 0.82, -2.0),
+        (13, 0.0, 83, 2.5, 0.84, -2.0),
+        (13, 2.5, 81, 1.5, 0.78, 2.0),
+        (14, 0.0, 79, 2.0, 0.80, 0.0),
+        (14, 2.0, 76, 2.0, 0.76, 2.0),
+        (15, 0.0, 74, 3.4, 0.76, 0.0),
+        # Sec C Crystal Core Surge
+        (16, 0.0, 79, 2.0, 0.82, -2.0),
+        (16, 2.0, 83, 2.0, 0.86, 0.0),
+        (17, 0.0, 86, 2.5, 0.88, -2.0),
+        (17, 2.5, 83, 1.5, 0.82, 2.0),
+        (18, 0.0, 81, 2.0, 0.84, 0.0),
+        (18, 2.0, 79, 2.0, 0.80, 2.0),
+        (19, 0.0, 78, 3.4, 0.82, 0.0),
+        (20, 0.0, 76, 2.0, 0.82, -2.0),
+        (20, 2.0, 79, 2.0, 0.84, 0.0),
+        (21, 0.0, 81, 2.5, 0.86, -2.0),
+        (21, 2.5, 79, 1.5, 0.80, 2.0),
+        (22, 0.0, 76, 2.0, 0.80, 0.0),
+        (22, 2.0, 74, 2.0, 0.76, 2.0),
+        (23, 0.0, 76, 3.6, 0.80, -2.0),
+    ]
+    for bar_i, b_off, m_n, b_dur, vel, grace in descent_melody:
+        fl = synth_bamboo_flute(midi_to_hz(m_n), b_dur * beat, vel=vel, rng=rng, grace_semi=grace)
+        canvas.add_Mono(fl, bar_i * bar_len + b_off * beat, gain=0.82, pan=0.14, reverb_send=0.54)
+
+    ir = build_space_ir(rt60=3.1, pre_delay_ms=19.0, hf_damping_hz=2400.0, canyon_echo=True, seed=208)
+    return canvas.render_seamless(ir, wet_mix=0.39, cutoff_hz=5100.0)
+
+
 # ---------------------------------------------------------------------------
 # 5 Natural Stereo Water Ambience Loops (40.0s Seamless Periodic Soundscapes)
 # ---------------------------------------------------------------------------
@@ -1782,6 +2095,11 @@ def encode_and_verify_ogg(
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Build studio-mastered .ogg audio stems.")
+    parser.add_argument("--only", nargs="*", default=None, help="Optional subset of filenames to render.")
+    args = parser.parse_args()
+    only_set = set(args.only) if args.only else None
+
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     ffmpeg_path = find_ffmpeg()
     ffprobe_path = find_ffprobe(ffmpeg_path)
@@ -1794,6 +2112,8 @@ def main() -> None:
         ("music_mist_bayou.ogg", compose_mist_bayou, "3.7"),
         ("music_coral_sea.ogg", compose_coral_sea, "3.7"),
         ("music_storm_ocean.ogg", compose_storm_ocean, "3.7"),
+        ("music_warden_boss.ogg", compose_warden_boss, "3.6"),
+        ("music_core_descent.ogg", compose_core_descent, "3.6"),
         ("amb_river_rapids.ogg", build_amb_river_rapids, "3.3"),
         ("amb_alpine_lap.ogg", build_amb_alpine_lap, "3.3"),
         ("amb_bayou_night.ogg", build_amb_bayou_night, "3.3"),
@@ -1802,11 +2122,12 @@ def main() -> None:
     ]
 
     report: List[Dict[str, object]] = []
-    total_bytes = 0
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_root = Path(tmp_dir)
         for filename, builder, q_val in jobs:
+            if only_set is not None and filename not in only_set:
+                continue
             print(f"[audio_studio] Synthesizing & mastering {filename} ...", flush=True)
             stereo = builder()
             metrics = inspect_spectrum_and_seam(stereo)
@@ -1817,7 +2138,6 @@ def main() -> None:
             ogg_path = OUT_DIR / filename
             write_wav_16bit_tpdf(wav_path, stereo, dither_rng)
             size_b = encode_and_verify_ogg(ffmpeg_path, ffprobe_path, wav_path, ogg_path, q_level=q_val)
-            total_bytes += size_b
 
             entry = {
                 "file": filename,
@@ -1831,10 +2151,11 @@ def main() -> None:
                 flush=True,
             )
 
+    total_bytes = sum(p.stat().st_size for p in OUT_DIR.glob("*.ogg"))
     total_mb = total_bytes / (1024.0 * 1024.0)
     print(f"\n[audio_studio] Total assets/audio/ payload: {total_mb:.2f} MB ({total_bytes:,} bytes)", flush=True)
-    if total_mb >= 9.8:
-        raise RuntimeError(f"Audio payload exceeded 9.8 MB budget ({total_mb:.2f} MB)!")
+    if total_mb >= 7.95:
+        raise RuntimeError(f"Audio payload exceeded 8.0 MB budget ({total_mb:.2f} MB)!")
 
     summary_json = json.dumps({"total_mb": round(total_mb, 3), "tracks": report}, indent=2)
     print(summary_json, flush=True)

@@ -839,7 +839,7 @@ class WatershedGeometryBuilder {
     }
   }
 
-  // 2. 3D Towering Coast Redwood / Alpine Conifer Forest Cluster (`matKind = 1`)
+  // 2. 3D Towering Coast Redwood / Alpine Conifer Forest Cluster (`matKind = 5` Alpha-Cutout Botanical Boughs — ZERO Cones!)
   addRedwoodPineCluster(ang, radius, baseY, count, spreadR, minH, maxH, seedVal, layer, snowDusted = false) {
     let s = (seedVal * 747796405 + 2891336453) >>> 0;
     const rnd = () => {
@@ -855,37 +855,81 @@ class WatershedGeometryBuilder {
       const tx = cx + Math.cos(oa) * or;
       const tz = cz + Math.sin(oa) * or;
       const th = minH + rnd() * (maxH - minH);
-      const tw = th * (0.22 + rnd() * 0.07);
+      const tw = th * (0.28 + rnd() * 0.08);
       const ty = baseY - rnd() * 0.45;
+      const crownCenter = new THREE.Vector3(tx, ty + th * 0.56, tz);
 
-      // Rich cinnamon-redwood / mountain bark trunk
-      const trunk = new THREE.CylinderGeometry(tw * 0.13, tw * 0.24, th * 0.40, 6, 1, true);
-      trunk.translate(0, th * 0.20, 0);
+      // Tall tapered cinnamon-redwood / mountain bark trunk reaching up into the bough crown
+      const trunk = new THREE.CylinderGeometry(tw * 0.055, tw * 0.21, th * 0.84, 7, 2, true);
+      trunk.translate(0, th * 0.42, 0);
       const mTrunk = new THREE.Matrix4().makeTranslation(tx, ty, tz);
-      this._pushGeo(trunk, mTrunk, layer, ty + th, 3, 0.0, '#4f2414', '#703820');
+      this._pushGeo(trunk, mTrunk, layer, ty + th, 3, 0.0, '#4f2414', '#7a3e24');
 
-      // 4 stacked lush evergreen bough tiers
-      const foliageLow = snowDusted ? '#133b2f' : '#0f3d22';
-      const foliageHigh = snowDusted ? '#dff4f8' : '#2e7d3b';
-      for (let tier = 0; tier < 4; tier++) {
-        const tf = tier / 3;
-        const coneH = th * (0.38 - tier * 0.055);
-        const coneR = tw * (1.08 - tier * 0.20);
-        const coneY = ty + th * (0.26 + tier * 0.19);
-        const cone = new THREE.ConeGeometry(coneR, coneH, 7, 1, false);
-        cone.translate(0, coneH * 0.5, 0);
-        const mCone = new THREE.Matrix4()
-          .makeTranslation(tx, coneY, tz)
-          .multiply(new THREE.Matrix4().makeRotationY(rnd() * TWO_PI));
-        this._pushGeo(
-          cone,
-          mCone,
+      // 4 Whorls of Radiating Curved 3D Botanical Redwood/Fir Bough Cards (`biome_foliage_redwood.webp`)!
+      const foliageLow = snowDusted ? '#cce8f4' : '#c8ebd0';
+      const foliageHigh = snowDusted ? '#ffffff' : '#fffbe6';
+      const whorls = 4;
+      for (let tier = 0; tier < whorls; tier++) {
+        const tf = tier / (whorls - 1);
+        const cardsInWhorl = tier < 2 ? 4 : 3;
+        const boughLen = tw * (1.58 - tf * 0.58);
+        const boughW = boughLen * 0.96;
+        const whorlY = ty + th * (0.24 + tf * 0.48);
+        const baseYaw = rnd() * TWO_PI;
+
+        for (let bIdx = 0; bIdx < cardsInWhorl; bIdx++) {
+          const yaw = baseYaw + (bIdx / cardsInWhorl) * TWO_PI + (rnd() - 0.5) * 0.28;
+          // Plane with stem at (0,0,0) reaching upward/outward in +Y -> tilted outward by `tiltOut`
+          const card = new THREE.PlaneGeometry(boughW, boughLen, 2, 3);
+          card.translate(0, boughLen * 0.48, 0);
+          const cp = card.attributes.position;
+          for (let vi = 0; vi < cp.count; vi++) {
+            const vy = cp.getY(vi) / Math.max(0.1, boughLen);
+            const vx = cp.getX(vi);
+            // Natural bough droop + subtle V-cupping for rich 3D volume from every view angle
+            const archZ = Math.sin(vy * Math.PI) * boughLen * 0.14 - vy * vy * boughLen * 0.18 + Math.abs(vx) * 0.18;
+            cp.setZ(vi, archZ);
+          }
+          card.computeVertexNormals();
+          const tiltOut = 0.92 - tf * 0.46; // Lower boughs spread wide (~53 deg), upper boughs sweep skyward (~26 deg)!
+          const mCard = new THREE.Matrix4()
+            .makeTranslation(tx, whorlY, tz)
+            .multiply(new THREE.Matrix4().makeRotationY(yaw))
+            .multiply(new THREE.Matrix4().makeRotationX(tiltOut));
+          this._pushDoubleSidedCard(
+            card,
+            mCard,
+            layer,
+            ty + th + 1.2,
+            5,
+            snowDusted ? 0.85 : 0.25,
+            foliageLow,
+            foliageHigh,
+            null,
+            crownCenter
+          );
+        }
+      }
+
+      // Crossed Upright Apex Crown Leader Sprays at tree summit!
+      const apexH = th * 0.34;
+      for (let c = 0; c < 2; c++) {
+        const apex = new THREE.PlaneGeometry(apexH * 0.88, apexH, 2, 2);
+        apex.translate(0, apexH * 0.46, 0);
+        const mApex = new THREE.Matrix4()
+          .makeTranslation(tx, ty + th * 0.72, tz)
+          .multiply(new THREE.Matrix4().makeRotationY(c * Math.PI * 0.5 + oa));
+        this._pushDoubleSidedCard(
+          apex,
+          mApex,
           layer,
-          ty + th + 1.0,
-          1,
-          snowDusted ? 0.55 : 0.22,
+          ty + th + 1.2,
+          5,
+          snowDusted ? 0.95 : 0.30,
           foliageLow,
-          tf > 0.55 ? foliageHigh : '#1f6332'
+          foliageHigh,
+          null,
+          crownCenter
         );
       }
     }
@@ -1027,73 +1071,74 @@ class WatershedGeometryBuilder {
         this._pushGeo(branch, mBranch, layer, height, 3, 0.0, '#2b1d14', '#5c3f2b');
       }
 
-      // Multi-tiered overlapping organic leaf tufts (rich jade-olive core + warm golden-amber twilight crown!)
-      for (let sub = 0; sub < 2; sub++) {
-        const subOffA = la + (sub - 0.5) * 0.9;
-        const sx = lx + (sub === 0 ? 0 : Math.cos(subOffA) * domeR * 0.48);
-        const sz = lz + (sub === 0 ? 0 : Math.sin(subOffA) * domeR * 0.48);
-        const sy = ly + sub * domeR * 0.26;
-        const sr = domeR * (sub === 0 ? 1.0 : 0.76);
-
-        const canopy = new THREE.IcosahedronGeometry(sr, 2);
-        const cp = canopy.attributes.position;
-        for (let vi = 0; vi < cp.count; vi++) {
-          const vx = cp.getX(vi);
-          const vy = cp.getY(vi);
-          const vz = cp.getZ(vi);
-          const uN = (Math.atan2(vz, vx) + Math.PI) / TWO_PI;
-          const vN = (vy / sr) * 0.5 + 0.5;
-          const n1 = fastPeriodicNoise(uN, vN, 8, 8, PERM_A, (seedVal + l * 17 + sub * 31) & 255);
-          const n2 = fastPeriodicNoise(uN * 2.0, vN * 2.0, 16, 16, PERM_B, (seedVal + l * 9) & 255);
-          // Feathered organic foliage tufts (NOT blocky blobs!)
-          const tuft = 0.72 + (1.0 - Math.abs(2.0 * n1 - 1.0)) * 0.42 + (n2 - 0.5) * 0.24;
-          cp.setXYZ(vi, vx * 1.46 * tuft, vy * 0.54 * tuft, vz * 1.38 * tuft);
+      // Airy Layered 3D Botanical Bald-Cypress Compound-Leaf Sprays (`uv = [0.02..0.48]` of `biome_foliage_bayou.webp`, ZERO blobs!)
+      const crownCenter = new THREE.Vector3(lx, ly, lz);
+      const cypressUv = [0.02, 0.02, 0.46, 0.96];
+      const mossUv = [0.52, 0.02, 0.46, 0.96];
+      for (let sub = 0; sub < 5; sub++) {
+        const cardYaw = la + (sub / 5) * TWO_PI + rnd() * 0.35;
+        const cardW = domeR * (2.25 + (sub % 2) * 0.45);
+        const cardH = domeR * (1.55 + (sub % 2) * 0.28);
+        const leafCard = new THREE.PlaneGeometry(cardW, cardH, 3, 2);
+        const lp = leafCard.attributes.position;
+        for (let vi = 0; vi < lp.count; vi++) {
+          const nx = lp.getX(vi) / Math.max(0.1, cardW * 0.5);
+          const ny = lp.getY(vi) / Math.max(0.1, cardH * 0.5);
+          lp.setZ(vi, (1.0 - nx * nx * 0.55) * domeR * 0.28 - ny * ny * domeR * 0.12);
         }
-        canopy.computeVertexNormals();
-        const mCan = new THREE.Matrix4().makeTranslation(sx, sy, sz);
-        this._pushGeo(
-          canopy,
-          mCan,
+        leafCard.computeVertexNormals();
+        const tiltX = sub === 0 ? 0.38 : 0.72 + (sub % 2) * 0.26;
+        const mLeaf = new THREE.Matrix4()
+          .makeTranslation(lx, ly + (sub === 0 ? domeR * 0.25 : 0), lz)
+          .multiply(new THREE.Matrix4().makeRotationY(cardYaw))
+          .multiply(new THREE.Matrix4().makeRotationX(tiltX));
+        this._pushDoubleSidedCard(
+          leafCard,
+          mLeaf,
           layer,
           height + 2.0,
-          1,
+          7,
           0.42,
-          sub === 0 ? '#183d24' : '#26542c',
-          sub === 0 ? '#5b9444' : '#8ec458'
+          '#b8d9a6',
+          '#ffe6a3',
+          cypressUv,
+          crownCenter
         );
       }
 
-      // Draped, Curved & Feathered Tapered Spanish Moss Festoons (S-curved catenary curtains, NEVER stiff rectangles!)
+      // Pendulous S-Curved Lacy Filamentous Spanish Moss Curtains (`uv = [0.52..0.98]` of `biome_foliage_bayou.webp`!)
       for (let m = 0; m < 3; m++) {
-        const ma = la + (m - 1) * 0.72 + rnd() * 0.25;
-        const mr = domeR * (0.55 + (m % 2) * 0.34);
+        const ma = la + (m - 1) * 0.82 + rnd() * 0.28;
+        const mr = domeR * (0.45 + (m % 2) * 0.38);
         const mx = lx + Math.cos(ma) * mr;
         const mz = lz + Math.sin(ma) * mr;
-        const mossLen = height * (0.14 + rnd() * 0.17);
-        const topW = 0.20 + rnd() * 0.14;
-        // Cone oriented downward: wide feathery attachment under bough tapering to delicate wisp point!
-        const moss = new THREE.ConeGeometry(topW, mossLen, 5, 5, true);
-        moss.rotateX(Math.PI); // apex at bottom (-mossLen/2), wide base at top (+mossLen/2)
-        moss.translate(0, -mossLen * 0.5, 0);
-        const mp = moss.attributes.position;
-        const drapeAng = ma + 0.6;
-        const dx = Math.cos(drapeAng);
-        const dz = Math.sin(drapeAng);
+        const mossH = height * (0.20 + rnd() * 0.16);
+        const mossW = mossH * (0.52 + rnd() * 0.16);
+
+        const mossCard = new THREE.PlaneGeometry(mossW, mossH, 2, 4);
+        mossCard.translate(0, -mossH * 0.48, 0);
+        const mp = mossCard.attributes.position;
         for (let vi = 0; vi < mp.count; vi++) {
-          let vx = mp.getX(vi);
-          const vy = mp.getY(vi);
-          let vz = mp.getZ(vi);
-          const dropT = Math.min(1.0, Math.max(0.0, -vy / mossLen)); // 0 at bough -> 1 at tip
-          // Graceful S-curve catenary wind drape + scalloped wispy silhouette
-          const curve = Math.pow(dropT, 1.7) * (0.42 + (m % 2) * 0.22) + Math.sin(dropT * Math.PI * 2.0 + m) * 0.10;
-          const scallop = 0.75 + 0.45 * Math.sin(dropT * 9.0 + vi);
-          vx = vx * scallop * 1.15 + dx * curve;
-          vz = vz * scallop * 0.55 + dz * curve;
-          mp.setXYZ(vi, vx, vy, vz);
+          const dropT = Math.min(1.0, Math.max(0.0, -mp.getY(vi) / mossH));
+          const swayZ = Math.pow(dropT, 1.65) * 0.48 + Math.sin(dropT * Math.PI * 2.0 + m) * 0.12;
+          mp.setZ(vi, swayZ);
         }
-        moss.computeVertexNormals();
-        const mMoss = new THREE.Matrix4().makeTranslation(mx, ly - domeR * 0.08, mz);
-        this._pushGeo(moss, mMoss, layer, height + 2.0, 1, 0.92, '#4c6e3d', '#c5db82');
+        mossCard.computeVertexNormals();
+        const mMoss = new THREE.Matrix4()
+          .makeTranslation(mx, ly - domeR * 0.02, mz)
+          .multiply(new THREE.Matrix4().makeRotationY(ang + (m - 1) * 0.68 + rnd() * 0.25));
+        this._pushDoubleSidedCard(
+          mossCard,
+          mMoss,
+          layer,
+          height + 2.0,
+          7,
+          0.95,
+          '#d4e6b5',
+          '#fff0b8',
+          mossUv,
+          crownCenter
+        );
       }
     }
   }
@@ -1171,58 +1216,51 @@ class WatershedGeometryBuilder {
     beach.translate(0, 0.06, 0);
     this._pushGeo(beach, mBase, layer, archH + 4.0, 0, 0.15, '#e8ce9c', '#fff9e6');
 
-    // Helper: Build an organic, multi-tuft jagged tropical scrub cluster (NEVER squashed green pancakes!)
+    // Helper: Build 3D Crossed Botanical Sword-Fern & Scarlet-Bromeliad Rosettes (`matKind = 8`, ZERO green blobs!)
+    const fernUv = [0.02, 0.52, 0.46, 0.46];
     const addJungleTuftCluster = (localX, localY, localZ, baseR, count) => {
+      const worldCenter = new THREE.Vector3(localX, localY + baseR * 0.35, localZ).applyMatrix4(mBase);
       for (let tIdx = 0; tIdx < count; tIdx++) {
-        const ta = (tIdx / count) * TWO_PI + rnd() * 0.5;
-        const tr = tIdx === 0 ? 0 : baseR * (0.45 + rnd() * 0.45);
+        const ta = (tIdx / count) * TWO_PI + rnd() * 0.45;
+        const tr = tIdx === 0 ? 0 : baseR * (0.42 + rnd() * 0.48);
         const tx = localX + Math.cos(ta) * tr;
-        const tz = localZ + Math.sin(ta) * tr * 0.75;
-        const ty = localY + (tIdx === 0 ? baseR * 0.22 : (rnd() - 0.3) * baseR * 0.28);
-        const tuftR = baseR * (tIdx === 0 ? 0.68 : 0.42 + rnd() * 0.26);
+        const tz = localZ + Math.sin(ta) * tr * 0.80;
+        const ty = localY + (tIdx === 0 ? 0.05 : -0.15 + rnd() * 0.25);
+        const cardW = baseR * (tIdx === 0 ? 2.15 : 1.55 + rnd() * 0.45);
+        const cardH = cardW * 0.78;
 
-        const tuft = new THREE.IcosahedronGeometry(tuftR, 2);
-        const tp = tuft.attributes.position;
-        for (let vi = 0; vi < tp.count; vi++) {
-          const vx = tp.getX(vi);
-          const vy = tp.getY(vi);
-          const vz = tp.getZ(vi);
-          const uN = (Math.atan2(vz, vx) + Math.PI) / TWO_PI;
-          const vN = (vy / tuftR) * 0.5 + 0.5;
-          const n = fastPeriodicNoise(uN, vN, 8, 8, PERM_A, (seedVal + tIdx * 23) & 255);
-          // Leafy spiky bromeliad/fern ridge lobes
-          const spike = 0.68 + Math.pow(1.0 - Math.abs(2.0 * n - 1.0), 0.85) * 0.68;
-          tp.setXYZ(vi, vx * 1.18 * spike, vy * (0.78 + vN * 0.32) * spike, vz * 1.08 * spike);
+        for (let cross = 0; cross < 2; cross++) {
+          const fern = new THREE.PlaneGeometry(cardW, cardH, 3, 2);
+          fern.translate(0, cardH * 0.42, 0);
+          const fp = fern.attributes.position;
+          for (let vi = 0; vi < fp.count; vi++) {
+            const nx = fp.getX(vi) / Math.max(0.1, cardW * 0.5);
+            const ny = fp.getY(vi) / Math.max(0.1, cardH);
+            fp.setZ(vi, Math.sin(ny * Math.PI) * cardW * 0.14 - nx * nx * cardW * 0.12);
+          }
+          fern.computeVertexNormals();
+          const mFern = mBase
+            .clone()
+            .multiply(new THREE.Matrix4().makeTranslation(tx, ty, tz))
+            .multiply(new THREE.Matrix4().makeRotationY(ta + cross * Math.PI * 0.52))
+            .multiply(new THREE.Matrix4().makeRotationX(0.22 - cross * 0.36));
+          this._pushDoubleSidedCard(
+            fern,
+            mFern,
+            layer,
+            archH + 4.0,
+            8,
+            0.45,
+            '#d9f7dc',
+            '#ffffff',
+            fernUv,
+            worldCenter
+          );
         }
-        tuft.computeVertexNormals();
-        const mTuft = mBase.clone().multiply(new THREE.Matrix4().makeTranslation(tx, ty, tz));
-        this._pushGeo(
-          tuft,
-          mTuft,
-          layer,
-          archH + 4.0,
-          1,
-          0.35,
-          tIdx % 2 === 0 ? '#115e32' : '#1e7836',
-          tIdx % 2 === 0 ? '#52d669' : '#8ce868'
-        );
-      }
-
-      // Radiating sword-fern / pandanus frond bursts & draping coastal vines!
-      for (let f = 0; f < 5; f++) {
-        const fa = (f / 5) * TWO_PI + rnd() * 0.4;
-        const blade = new THREE.ConeGeometry(baseR * 0.16, baseR * 1.05, 4, 1, false);
-        blade.rotateZ(-0.78 - rnd() * 0.35);
-        blade.translate(baseR * 0.35, baseR * 0.22, 0);
-        const mBlade = mBase
-          .clone()
-          .multiply(new THREE.Matrix4().makeTranslation(localX, localY, localZ))
-          .multiply(new THREE.Matrix4().makeRotationY(fa));
-        this._pushGeo(blade, mBlade, layer, archH + 4.0, 1, 0.65, '#166934', '#7ae56e');
       }
     };
 
-    // Helper: Build a curved coconut/cliff palm at local coordinates relative to `mBase`
+    // Helper: Build a 3D Curved Coconut Palm with Alpha-Tested Pinnate Frond Leaflets (`matKind = 6`!)
     const addCurvedPalmLocal = (lx, ly, lz, palmH, lean, leanYaw, frondScale = 1.0) => {
       const mPalm = mBase
         .clone()
@@ -1230,22 +1268,33 @@ class WatershedGeometryBuilder {
         .multiply(new THREE.Matrix4().makeRotationY(leanYaw))
         .multiply(new THREE.Matrix4().makeRotationZ(lean));
 
-      const trunk = new THREE.CylinderGeometry(0.10 * frondScale, 0.23 * frondScale, palmH, 6, 4, true);
+      const trunk = new THREE.CylinderGeometry(0.10 * frondScale, 0.24 * frondScale, palmH, 7, 5, true);
       const tp = trunk.attributes.position;
       for (let ti = 0; ti < tp.count; ti++) {
         const ty = tp.getY(ti) + palmH * 0.5;
-        const bow = Math.pow(ty / palmH, 2.0) * 0.52 * frondScale;
-        tp.setXYZ(ti, tp.getX(ti) + bow, ty, tp.getZ(ti));
+        const ring = 1.0 + 0.08 * Math.sin(ty * 9.5);
+        const bow = Math.pow(ty / palmH, 2.0) * 0.54 * frondScale;
+        tp.setXYZ(ti, tp.getX(ti) * ring + bow, ty, tp.getZ(ti) * ring);
       }
       trunk.computeVertexNormals();
-      this._pushGeo(trunk, mPalm, layer, archH + palmH + 3.0, 3, 0.0, '#6e4b30', '#a67b56');
+      this._pushGeo(trunk, mPalm, layer, archH + palmH + 3.0, 3, 0.0, '#6b472c', '#ad815c');
 
-      const crownX = 0.52 * frondScale;
-      const fronds = 8;
+      const crownX = 0.54 * frondScale;
+      const crownWorld = new THREE.Vector3(crownX, palmH, 0).applyMatrix4(mPalm);
+
+      for (let c = 0; c < 3; c++) {
+        const ca = (c / 3) * TWO_PI;
+        const nut = new THREE.SphereGeometry(0.16 * frondScale, 6, 5);
+        nut.translate(crownX + Math.cos(ca) * 0.14 * frondScale, palmH - 0.14 * frondScale, Math.sin(ca) * 0.14 * frondScale);
+        this._pushGeo(nut, mPalm, layer, archH + palmH + 3.0, 3, 0.0, '#4a2e16', '#7d522b');
+      }
+
+      const fronds = 10;
       for (let f = 0; f < fronds; f++) {
-        const fa = (f / fronds) * TWO_PI + rnd() * 0.20;
-        const frondLen = 2.85 * frondScale;
-        const frondW = 0.92 * frondScale;
+        const isUpper = f % 2 === 0;
+        const fa = (f / fronds) * TWO_PI + rnd() * 0.18;
+        const frondLen = (isUpper ? 2.75 : 3.15) * frondScale;
+        const frondW = (isUpper ? 1.42 : 1.58) * frondScale;
         const frond = new THREE.PlaneGeometry(frondLen, frondW, 6, 2);
         frond.rotateX(-Math.PI * 0.5);
         const fp = frond.attributes.position;
@@ -1253,18 +1302,29 @@ class WatershedGeometryBuilder {
           const uDist = (fp.getX(fi) + frondLen * 0.5) / frondLen;
           const zRaw = fp.getZ(fi);
           const xOut = uDist * frondLen;
-          const taperZ = zRaw * Math.sin(Math.max(0.10, uDist) * Math.PI);
-          // 3D V-chevron leaflet fold so fronds have thick 3D silhouette from below & edge-on!
-          const leafletDrop = Math.abs(taperZ) * 0.55;
-          const yArc = (Math.sin(uDist * Math.PI * 0.68) * 0.52 - uDist * uDist * 1.28) * frondScale - leafletDrop;
-          fp.setXYZ(fi, xOut, yArc, taperZ);
+          const leafletDrop = Math.abs(zRaw) * 0.28;
+          const rise = isUpper ? 0.72 : 0.38;
+          const droop = isUpper ? 1.05 : 1.52;
+          const yArc = (Math.sin(uDist * Math.PI * 0.68) * rise - uDist * uDist * droop) * frondScale - leafletDrop;
+          fp.setXYZ(fi, xOut, yArc, zRaw);
         }
         frond.computeVertexNormals();
         const mFrond = mPalm
           .clone()
           .multiply(new THREE.Matrix4().makeTranslation(crownX, palmH, 0))
           .multiply(new THREE.Matrix4().makeRotationY(fa));
-        this._pushGeo(frond, mFrond, layer, archH + palmH + 3.0, 1, 0.75, '#136e37', '#6fe376');
+        this._pushDoubleSidedCard(
+          frond,
+          mFrond,
+          layer,
+          archH + palmH + 3.0,
+          6,
+          0.80,
+          '#d6f5c9',
+          '#fffce0',
+          null,
+          crownWorld
+        );
       }
     };
 
@@ -1440,6 +1500,7 @@ class WatershedGeometryBuilder {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(this.norm, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(this.uvs, 2));
     geo.setAttribute('aVista', new THREE.Float32BufferAttribute(this.vista, 4));
     geo.setAttribute('aColor', new THREE.Float32BufferAttribute(this.col, 3));
     geo.setIndex(this.idx);
@@ -1583,11 +1644,63 @@ function buildBiomeVistaGeometry(kind) {
   return b.build();
 }
 
-function createWatershedVistaMaterial(cloudPanoTex) {
+function createHorizonVistaPanoramaMaterial(fallbackTex) {
+  return new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    transparent: true,
+    depthWrite: false,
+    fog: false,
+    uniforms: {
+      uVistaTex: { value: fallbackTex },
+      uSunColor: { value: new THREE.Color('#fff2cc') },
+      uMistColor: { value: new THREE.Color('#fae0aa') },
+      uBlackout: { value: 0.0 },
+      uLightning: { value: 0.0 },
+      uPurification: { value: 0.0 },
+    },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D uVistaTex;
+      uniform vec3 uSunColor;
+      uniform vec3 uMistColor;
+      uniform float uBlackout;
+      uniform float uLightning;
+      uniform float uPurification;
+      varying vec2 vUv;
+
+      void main() {
+        vec4 pano = texture2D(uVistaTex, vec2(vUv.x * 3.0, clamp(vUv.y, 0.005, 0.995)));
+        if (pano.a < 0.025) discard;
+        float darkScale = mix(1.0, 0.34, clamp(uBlackout, 0.0, 1.0));
+        vec3 col = pano.rgb * mix(vec3(0.95), uSunColor * 1.05, 0.28) * (1.0 + uPurification * 0.10) * darkScale;
+        col += vec3(0.22, 0.40, 0.62) * uLightning * 0.42;
+        float botHaze = exp(-vUv.y * 5.8) * 0.34;
+        col = mix(col, uMistColor * 0.88 * darkScale, botHaze);
+        gl_FragColor = vec4(col, pano.a * 0.94);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+}
+
+function createWatershedVistaMaterial(cloudPanoTex, fallbackWhiteTex, fallbackNormalTex) {
   return new THREE.ShaderMaterial({
     fog: false,
     uniforms: {
       uPanoTex: { value: cloudPanoTex },
+      uRockAlbedoTex: { value: fallbackWhiteTex },
+      uRockNormalTex: { value: fallbackNormalTex },
+      uRedwoodTex: { value: fallbackWhiteTex },
+      uPalmTex: { value: fallbackWhiteTex },
+      uBayouTex: { value: fallbackWhiteTex },
+      uCoralAtlasTex: { value: fallbackWhiteTex },
       uTime: { value: 0 },
       uWaterY: { value: -0.82 },
       uSunDir: { value: new THREE.Vector3(0.42, 0.36, -0.83).normalize() },
@@ -1608,17 +1721,20 @@ function createWatershedVistaMaterial(cloudPanoTex) {
 
       varying vec3 vWorldPos;
       varying vec3 vNormalW;
+      varying vec2 vUv;
       varying vec4 vVista;
       varying vec3 vVertCol;
 
       void main() {
         vVista = aVista;
         vVertCol = aColor;
+        vUv = uv;
         vec3 p = position;
 
-        // Gentle organic wind sway on foliage, palm fronds & draped Spanish moss (matKind == 1)
-        if (abs(aVista.z - 1.0) < 0.25 && aVista.w > 0.1) {
-          float swayAmp = aVista.w * 0.28;
+        // Gentle organic wind sway on solid leaves (matKind == 1) & alpha-cutout botanical boughs/fronds/moss (matKind >= 4.5)
+        bool isBotanical = abs(aVista.z - 1.0) < 0.25 || aVista.z > 4.5;
+        if (isBotanical && aVista.w > 0.08) {
+          float swayAmp = aVista.w * 0.26;
           p.x += sin(uTime * 1.45 + position.x * 0.35 + position.z * 0.35) * swayAmp;
           p.z += cos(uTime * 1.15 + position.y * 0.45) * swayAmp * 0.65;
         }
@@ -1631,6 +1747,12 @@ function createWatershedVistaMaterial(cloudPanoTex) {
     `,
     fragmentShader: /* glsl */ `
       uniform sampler2D uPanoTex;
+      uniform sampler2D uRockAlbedoTex;
+      uniform sampler2D uRockNormalTex;
+      uniform sampler2D uRedwoodTex;
+      uniform sampler2D uPalmTex;
+      uniform sampler2D uBayouTex;
+      uniform sampler2D uCoralAtlasTex;
       uniform float uTime;
       uniform float uWaterY;
       uniform vec3 uSunDir;
@@ -1646,6 +1768,7 @@ function createWatershedVistaMaterial(cloudPanoTex) {
 
       varying vec3 vWorldPos;
       varying vec3 vNormalW;
+      varying vec2 vUv;
       varying vec4 vVista;
       varying vec3 vVertCol;
 
@@ -1681,8 +1804,7 @@ function createWatershedVistaMaterial(cloudPanoTex) {
         float detailParam = vVista.w;
 
         // Emissive Shrine Braziers, Lotus Hearts & Siphon Plasma Cores/Beacons (matKind == 4)
-        // Saturated emissive values (< 1.25) so cyan & warm-amber glow richly without white-clipping!
-        if (matKind > 3.5) {
+        if (matKind > 3.5 && matKind < 4.5) {
           float pulse = 0.78 + 0.22 * sin(uTime * 3.0 + vWorldPos.x * 0.3 + vWorldPos.z * 0.3);
           vec3 emCol = detailParam > 1.5
             ? mix(vec3(0.0, 0.90, 0.98), vec3(0.18, 0.98, 0.78), 0.5 + 0.5 * sin(uTime * 2.4 + vWorldPos.y * 0.45))
@@ -1695,80 +1817,129 @@ function createWatershedVistaMaterial(cloudPanoTex) {
 
         float darkScale = mix(1.0, 0.34, clamp(uBlackout, 0.0, 1.0));
         float hAboveWater = max(0.0, vWorldPos.y - uWaterY);
+        vec3 L = normalize(uSunDir);
+        vec3 V = normalize(cameraPosition - vWorldPos);
+
+        // Alpha-Tested High-Detail Botanical Foliage Cards (matKind 5: Redwood, 6: Palm, 7: Bayou Moss/Cypress, 8: Tropical Fern)!
+        if (matKind > 4.5) {
+          vec4 botTex = vec4(1.0);
+          float alphaCut = 0.28;
+          if (matKind < 5.5) {
+            botTex = texture2D(uRedwoodTex, vUv);
+            alphaCut = 0.28;
+          } else if (matKind < 6.5) {
+            botTex = texture2D(uPalmTex, vUv);
+            alphaCut = 0.26;
+          } else if (matKind < 7.5) {
+            botTex = texture2D(uBayouTex, vUv);
+            alphaCut = 0.22;
+          } else {
+            botTex = texture2D(uCoralAtlasTex, vUv);
+            alphaCut = 0.28;
+          }
+          if (botTex.a < alphaCut) discard;
+
+          vec3 nBot = normalize(vNormalW);
+          float ndlBot = 0.34 + 0.66 * max(0.0, dot(nBot, L));
+          float hemiBot = 0.5 + 0.5 * nBot.y;
+          float leafSss = pow(max(0.0, dot(-V, L) * 0.5 + 0.5), 2.0) * 0.52;
+          float rimFres = pow(1.0 - abs(dot(nBot, V)), 2.0) * 0.28;
+
+          vec3 leafAlb = botTex.rgb * mix(vec3(1.0), vVertCol, 0.38) * (1.06 + uPurification * 0.16);
+          // Crisp alpine snow-dusting on upper conifer needle tips ('alpine_lake', matKind == 5, detailParam > 0.65)
+          if (matKind < 5.5 && detailParam > 0.65) {
+            float needleSnow = smoothstep(0.48, 0.86, vUv.y + max(0.0, nBot.y) * 0.25);
+            leafAlb = mix(leafAlb, vec3(0.90, 0.96, 1.0), needleSnow * 0.68);
+          }
+
+          vec3 botCol = leafAlb * (uSunColor * (0.28 + 0.88 * ndlBot + leafSss) + uSkyFillColor * (0.30 + 0.34 * hemiBot)) * darkScale;
+          botCol += uSunColor * rimFres * (matKind > 6.5 && matKind < 7.5 ? 0.26 : 0.10) * darkScale;
+
+          float aerialB = clamp(exp(-hAboveWater * 0.42) * 0.16 + layer * layer * 0.36, 0.0, 0.62);
+          botCol = mix(botCol, uMistColor * 0.86 * darkScale, aerialB);
+
+          gl_FragColor = vec4(botCol, 1.0);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+          return;
+        }
+
         float cliffAz = atan(vWorldPos.x, vWorldPos.z) * 0.159154943;
         vec4 tex = texture2D(uPanoTex, vec2(cliffAz * 14.0, clamp(hAboveWater * 0.038, 0.02, 0.98)));
-
-        // High-frequency 3D world-space sandstone/limestone micro-grain for foreground boulders & cliffs!
         float gCoarse = rockGrain3D(vWorldPos * 1.85);
         float gFine = rockGrain3D(vWorldPos * 5.60);
         float rockMicro = gCoarse * 0.62 + gFine * 0.38;
 
-        vec3 n = normalize(
-          vNormalW
-          + vec3((tex.g - 0.5) * 0.38 + (gFine - 0.5) * 0.28, (tex.b - 0.5) * 0.24 + (gCoarse - 0.5) * 0.20, (tex.r - 0.5) * 0.38 + (gFine - 0.5) * 0.28)
-        );
-        vec3 L = normalize(uSunDir);
-        vec3 V = normalize(cameraPosition - vWorldPos);
+        // True 3-Axis World-Space Triplanar PBR Albedo + Normal Map Sampling!
+        // Foreground boulders (layer < 0.10) sample higher texel density (0.42) for crisp close-up mineral grain!
+        float triScale = layer < 0.10 ? 0.42 : 0.115;
+        vec3 pTri = vWorldPos * triScale;
+        vec3 wTri = pow(abs(vNormalW), vec3(4.0));
+        wTri /= max(1e-5, wTri.x + wTri.y + wTri.z);
+
+        vec3 albX = texture2D(uRockAlbedoTex, pTri.zy).rgb;
+        vec3 albY = texture2D(uRockAlbedoTex, pTri.xz).rgb;
+        vec3 albZ = texture2D(uRockAlbedoTex, pTri.xy).rgb;
+        vec3 pbrRockAlb = albX * wTri.x + albY * wTri.y + albZ * wTri.z;
+
+        vec3 tnX = texture2D(uRockNormalTex, pTri.zy).rgb * 2.0 - 1.0;
+        vec3 tnY = texture2D(uRockNormalTex, pTri.xz).rgb * 2.0 - 1.0;
+        vec3 tnZ = texture2D(uRockNormalTex, pTri.xy).rgb * 2.0 - 1.0;
+        vec3 triPerturb = vec3(tnZ.x * wTri.z + tnY.x * wTri.y, tnX.y * wTri.x + tnZ.y * wTri.z, tnX.x * wTri.x + tnY.y * wTri.y);
+
+        vec3 n = normalize(vNormalW + triPerturb * 0.88 + vec3((gFine - 0.5) * 0.14));
         float ndl = max(0.0, dot(n, L));
         float hemi = 0.5 + 0.5 * n.y;
 
-        vec3 alb = vVertCol * (0.76 + 0.28 * tex.r + 0.24 * rockMicro);
+        vec3 alb = mix(vVertCol * (0.80 + 0.32 * rockMicro), pbrRockAlb * mix(vec3(1.0), vVertCol * 1.45, 0.45), 0.72);
         float wetSpec = 0.0;
         vec3 warmBounce = vec3(0.0);
         float aerialScale = 1.0;
 
         if (matKind < 0.5) {
-          // Stratified Rock / Karst Limestone / Canyon Sandstone / Alpine Granite + Snowpack
+          // PBR Rock / Karst Limestone / Canyon Sandstone / Alpine Granite + Snowpack
           if (detailParam > 0.45 && detailParam <= 0.68) {
-            // Sun-Bleached Striated Golden-Cream Karst Limestone + Dark Wet Tidal Base ('coral_sea')!
+            // Sun-Bleached Striated Golden-Cream Karst Limestone + PBR Travertine + Dark Wet Tidal Base ('coral_sea')!
             float karstBand = sin(hAboveWater * 2.45 + tex.a * 2.1 + gFine * 0.9);
-            float fineTravertine = sin(hAboveWater * 6.8 + tex.r * 2.6);
-            vec3 sunBleachedCream = vec3(1.16, 0.96, 0.62) * (0.90 + 0.18 * gFine);
-            vec3 warmOchreTravertine = vec3(0.82, 0.56, 0.28) * (0.86 + 0.22 * gFine);
-            alb = mix(warmOchreTravertine, sunBleachedCream, smoothstep(-0.48, 0.48, karstBand * 0.74 + fineTravertine * 0.26));
+            vec3 sunBleachedCream = pbrRockAlb * vec3(1.22, 1.05, 0.76);
+            vec3 warmOchreTravertine = pbrRockAlb * vec3(0.92, 0.66, 0.38);
+            alb = mix(warmOchreTravertine, sunBleachedCream, smoothstep(-0.45, 0.45, karstBand));
 
-            // Dark wet mossy-slate & barnacle tidal undercut base right along the lagoon waterline!
             float tideLine = smoothstep(0.35, 2.75, hAboveWater + (tex.r - 0.5) * 0.55);
-            vec3 wetTidalRock = mix(vec3(0.09, 0.16, 0.14), vec3(0.22, 0.26, 0.18), gFine);
+            vec3 wetTidalRock = pbrRockAlb * vec3(0.18, 0.28, 0.24);
             alb = mix(wetTidalRock, alb, tideLine);
             wetSpec = (1.0 - tideLine) * 0.65;
-            // Warm sunlit coral-sand bounce light keeps sun-shaded limestone golden-cream instead of grey!
             warmBounce = alb * vec3(0.46, 0.34, 0.16) * tideLine;
-            aerialScale = 0.42;
+            aerialScale = 0.40;
           } else if (detailParam > 0.70 && detailParam < 0.92) {
-            // Vivid Zion/Sedona Red-Rock Sandstone strata + Glossy Dark Wet-Waterline Skirt on river boulders!
-            float strata = sin(hAboveWater * 2.25 + tex.a * 2.6 + gCoarse * 1.9);
-            float fineLayer = sin(hAboveWater * 6.8 + gFine * 3.2);
-            vec3 fierySandstone = alb * vec3(1.34, 0.90, 0.58);
-            vec3 deepTerracotta = alb * vec3(0.68, 0.34, 0.24);
-            alb = mix(deepTerracotta, fierySandstone, smoothstep(-0.48, 0.52, strata * 0.72 + fineLayer * 0.28));
+            // Vivid Zion Red-Rock Sandstone PBR Cliffs & River Boulders + Glossy Dark Wet-Waterline Skirt!
+            float strata = sin(hAboveWater * 2.25 + tex.a * 2.4 + gCoarse * 1.6);
+            alb = pbrRockAlb * mix(vec3(0.84, 0.62, 0.52), vec3(1.26, 0.98, 0.78), smoothstep(-0.45, 0.48, strata));
 
-            // Dark glossy wet-sandstone skirt on river boulders & cliff bases!
             float wetZone = 1.0 - smoothstep(0.08, 0.68, hAboveWater + (gFine - 0.5) * 0.14);
-            alb *= mix(1.0, 0.32, wetZone);
-            wetSpec = wetZone * 0.85;
+            alb *= mix(1.0, 0.30, wetZone);
+            wetSpec = wetZone * 0.88;
           } else if (detailParam >= 0.95) {
-            // True Two-Tone Chiseled Granite + High-Altitude Snowcaps ('alpine_lake')!
-            float snowDrivers = hRatio * 0.68 + max(0.0, n.y) * 0.52 + (tex.r - 0.5) * 0.26;
+            // Cleaved Banff Slate-Granite PBR Rock + High-Altitude Snowcaps & Rose-Gold Alpenglow ('alpine_lake')!
+            alb = pbrRockAlb * vec3(0.92, 0.98, 1.08);
+            float snowDrivers = hRatio * 0.68 + max(0.0, n.y) * 0.52 + (tex.r - 0.5) * 0.24;
             float snowMask = smoothstep(0.56, 0.78, snowDrivers) * smoothstep(0.24, 0.48, hRatio);
             vec3 snowAlb = mix(vec3(0.74, 0.85, 0.96), vec3(0.96, 0.97, 1.0), ndl);
             snowAlb += uAlpenglowColor * (0.34 * pow(ndl, 1.3) * smoothstep(0.45, 0.90, hRatio));
             alb = mix(alb, snowAlb, snowMask);
           }
         } else if (matKind < 1.5) {
-          // Foliage / Redwood / Cypress / Draped Spanish Moss / Tropical Jungle: subsurface scattering + warm twilight rim!
-          float leafSss = pow(max(0.0, dot(-V, L) * 0.5 + 0.5), 2.0) * 0.46;
-          float rimFres = pow(1.0 - abs(dot(n, V)), 2.1) * (0.35 + 0.65 * max(0.0, n.y + 0.35));
-          alb *= (0.88 + 0.28 * gFine) * (1.0 + uPurification * 0.18);
-          alb += alb * uSunColor * leafSss + uSunColor * rimFres * (0.12 + detailParam * 0.16);
+          // Solid Floating Water-Lily Pads & Lotus Petals ('mist_bayou')
+          alb = vVertCol * (0.86 + 0.28 * gFine) * (1.0 + uPurification * 0.18);
+          float leafSss = pow(max(0.0, dot(-V, L) * 0.5 + 0.5), 2.0) * 0.42;
+          alb += alb * uSunColor * leafSss;
         } else if (matKind < 2.5) {
-          // Translucent Turquoise Glacial Iceberg ('storm_ocean')
+          // Crystalline Polar Glacier Iceberg PBR ('storm_ocean')
           float fresIce = pow(1.0 - max(0.0, dot(n, V)), 2.5);
           float iceSss = pow(max(0.0, dot(-V, L) * 0.5 + 0.5), 2.0);
-          float crevasse = smoothstep(0.62, 0.28, tex.r);
-          alb = mix(alb, vec3(0.04, 0.42, 0.64), crevasse * 0.55);
+          alb = mix(vVertCol, pbrRockAlb * 1.12, 0.78);
           float snowCap = smoothstep(0.58, 0.88, n.y + hRatio * 0.30);
-          alb = mix(alb, vec3(0.90, 0.97, 1.0), snowCap * 0.70);
+          alb = mix(alb, vec3(0.90, 0.97, 1.0), snowCap * 0.68);
           alb += vec3(0.08, 0.56, 0.72) * (iceSss * 0.48 + fresIce * 0.38);
         }
 
@@ -1783,7 +1954,6 @@ function createWatershedVistaMaterial(cloudPanoTex) {
           col += vec3(0.24, 0.42, 0.62) * uLightning * (0.3 + 0.7 * max(0.0, n.y));
         }
 
-        // Gentle atmospheric depth cueing preserving rich foreground/midground rock & foliage colors!
         float baseMist = exp(-hAboveWater * 0.42) * 0.18;
         float aerial = clamp((baseMist + layer * layer * 0.40) * aerialScale, 0.0, 0.66);
         col = mix(col, uMistColor * 0.86 * darkScale, aerial);
@@ -2033,7 +2203,11 @@ function buildCoralReefShelfGeometry() {
       .multiply(new THREE.Matrix4().makeRotationY(ang));
     b._pushGeo(shelf, mShelf, 0.0, 2.0, 0, 0.0, '#7bd5d4', '#daf6f4');
 
-    const heads = 6;
+    const stagUv = [0.52, 0.52, 0.46, 0.46];
+    const brainUv = [0.02, 0.02, 0.46, 0.46];
+    const fanUv = [0.52, 0.02, 0.46, 0.46];
+
+    const heads = 7;
     for (let h = 0; h < heads; h++) {
       const ha = rnd() * TWO_PI;
       const hr = rnd() * shelfW * 0.68;
@@ -2041,34 +2215,46 @@ function buildCoralReefShelfGeometry() {
       const hz = cz + Math.sin(ha) * hr;
       const pal = coralPalette[(i + h) % coralPalette.length];
       const kind = (i + h) % 3;
+      const cWorld = new THREE.Vector3(hx, shelfY + 0.35, hz);
 
       if (kind === 0) {
-        // Ruffled Brain Coral Dome
-        const rDome = 0.36 + rnd() * 0.36;
-        const dome = new THREE.IcosahedronGeometry(rDome, 2);
-        const dp = dome.attributes.position;
-        for (let di = 0; di < dp.count; di++) {
-          const groove = 0.88 + 0.16 * Math.sin(dp.getX(di) * 18.0 + dp.getZ(di) * 18.0);
-          dp.setXYZ(di, dp.getX(di) * 1.2 * groove, dp.getY(di) * 0.75 * groove, dp.getZ(di) * 1.1 * groove);
+        // Turing-Grooved Brain Coral Cushion (tilted horizontal + low crossed dome cards)
+        const rDome = 0.75 + rnd() * 0.55;
+        const flat = new THREE.PlaneGeometry(rDome * 1.4, rDome * 1.4, 2, 2);
+        flat.rotateX(-Math.PI * 0.5);
+        const fp = flat.attributes.position;
+        for (let fi = 0; fi < fp.count; fi++) {
+          const d = Math.hypot(fp.getX(fi), fp.getZ(fi)) / (rDome * 0.72);
+          fp.setY(fi, Math.max(0, 1.0 - d * d) * 0.34);
         }
-        dome.computeVertexNormals();
-        b._pushGeo(dome, new THREE.Matrix4().makeTranslation(hx, shelfY + rDome * 0.34, hz), 0.0, 1.5, 1, 0.0, pal[0], pal[1]);
+        flat.computeVertexNormals();
+        const mFlat = new THREE.Matrix4()
+          .makeTranslation(hx, shelfY + 0.08, hz)
+          .multiply(new THREE.Matrix4().makeRotationY(rnd() * TWO_PI));
+        b._pushDoubleSidedCard(flat, mFlat, 0.0, 1.5, 8, 0.1, pal[0], pal[1], brainUv, cWorld);
       } else if (kind === 1) {
-        // Scalloped Table / Sea-Fan Coral
-        const rTab = 0.48 + rnd() * 0.42;
-        const tab = new THREE.CylinderGeometry(rTab, rTab * 0.26, 0.24, 10, 1, false);
-        b._pushGeo(tab, new THREE.Matrix4().makeTranslation(hx, shelfY + 0.22, hz), 0.0, 1.5, 1, 0.0, pal[0], pal[1]);
+        // Crossed 3D Lacy Gorgonia Sea-Fan Cards swaying in lagoon current!
+        const fanSz = 0.92 + rnd() * 0.58;
+        for (let cr = 0; cr < 2; cr++) {
+          const fan = new THREE.PlaneGeometry(fanSz, fanSz, 2, 2);
+          fan.translate(0, fanSz * 0.46, 0);
+          const mFan = new THREE.Matrix4()
+            .makeTranslation(hx, shelfY, hz)
+            .multiply(new THREE.Matrix4().makeRotationY(ha + cr * Math.PI * 0.48))
+            .multiply(new THREE.Matrix4().makeRotationX((cr - 0.5) * 0.18));
+          b._pushDoubleSidedCard(fan, mFan, 0.0, 1.5, 8, 0.45, '#f0abfc', '#ffffff', fanUv, cWorld);
+        }
       } else {
-        // Multi-Branching Staghorn Antler Cluster
-        for (let br = 0; br < 4; br++) {
-          const bh = 0.52 + rnd() * 0.48;
-          const stag = new THREE.CylinderGeometry(0.045, 0.10, bh, 5, 1, false);
-          stag.translate(0, bh * 0.5, 0);
+        // Crossed 3D Branching Acropora Staghorn Coral Cluster with glowing polyp tips!
+        const stagSz = 0.95 + rnd() * 0.62;
+        for (let cr = 0; cr < 2; cr++) {
+          const stag = new THREE.PlaneGeometry(stagSz, stagSz * 0.95, 2, 2);
+          stag.translate(0, stagSz * 0.44, 0);
           const mStag = new THREE.Matrix4()
-            .makeTranslation(hx + (br - 1.5) * 0.15, shelfY, hz + ((br % 2) - 0.5) * 0.15)
-            .multiply(new THREE.Matrix4().makeRotationY(br * 1.4))
-            .multiply(new THREE.Matrix4().makeRotationZ((br - 1.5) * 0.28));
-          b._pushGeo(stag, mStag, 0.0, 1.5, 1, 0.0, pal[0], pal[1]);
+            .makeTranslation(hx, shelfY, hz)
+            .multiply(new THREE.Matrix4().makeRotationY(ha + cr * Math.PI * 0.52))
+            .multiply(new THREE.Matrix4().makeRotationX((cr - 0.5) * 0.24));
+          b._pushDoubleSidedCard(stag, mStag, 0.0, 1.5, 8, 0.25, pal[0], '#ffffff', stagUv, cWorld);
         }
       }
     }
@@ -2111,10 +2297,11 @@ function buildMantaRayGeometry() {
   return b.build();
 }
 
-function createUnderwaterReefMaterial() {
+function createUnderwaterReefMaterial(fallbackWhiteTex) {
   return new THREE.ShaderMaterial({
     fog: false,
     uniforms: {
+      uCoralAtlasTex: { value: fallbackWhiteTex },
       uTime: { value: 0 },
       uPurification: { value: 0 },
       uWaterTint: { value: new THREE.Color('#0ea5b8') },
@@ -2125,14 +2312,21 @@ function createUnderwaterReefMaterial() {
       attribute vec4 aVista;
       uniform float uTime;
       varying vec3 vWorldPos;
-      varying vec3 vLocalPos;
       varying vec3 vNormalW;
+      varying vec2 vUv;
+      varying vec4 vVista;
       varying vec3 vCol;
 
       void main() {
         vCol = aColor;
+        vUv = uv;
+        vVista = aVista;
         vec3 p = position;
-        vLocalPos = p;
+        #ifndef USE_INSTANCING
+          if (aVista.z > 7.5 && aVista.w > 0.15) {
+            p.x += sin(uTime * 1.65 + p.y * 1.4 + p.z * 0.5) * aVista.w * 0.12;
+          }
+        #endif
         vec4 wp = modelMatrix * vec4(p, 1.0);
         #ifdef USE_INSTANCING
           // Graceful traveling pectoral wingbeat for instanced 3D Manta Rays!
@@ -2150,13 +2344,15 @@ function createUnderwaterReefMaterial() {
       }
     `,
     fragmentShader: /* glsl */ `
+      uniform sampler2D uCoralAtlasTex;
       uniform float uTime;
       uniform float uPurification;
       uniform vec3 uWaterTint;
       uniform vec3 uSunDir;
       varying vec3 vWorldPos;
-      varying vec3 vLocalPos;
       varying vec3 vNormalW;
+      varying vec2 vUv;
+      varying vec4 vVista;
       varying vec3 vCol;
 
       float hash(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 15731.743); }
@@ -2169,8 +2365,17 @@ function createUnderwaterReefMaterial() {
       }
 
       void main() {
+        vec3 baseAlb = vCol;
+        #ifndef USE_INSTANCING
+          if (vVista.z > 7.5) {
+            vec4 cSample = texture2D(uCoralAtlasTex, vUv);
+            if (cSample.a < 0.26) discard;
+            baseAlb = cSample.rgb * mix(vec3(1.0), vCol, 0.35);
+          }
+        #endif
+
         vec3 n = normalize(vNormalW);
-        float ndl = 0.42 + 0.58 * max(0.0, dot(n, normalize(uSunDir)));
+        float ndl = 0.46 + 0.54 * max(0.0, dot(n, normalize(uSunDir)));
 
         // Bright dancing sunlit underwater caustic webs projected across reef & manta wings!
         vec2 cp = vWorldPos.xz * 1.45;
@@ -2178,10 +2383,9 @@ function createUnderwaterReefMaterial() {
         float c2 = 1.0 - abs(noise(cp * 1.65 - vec2(uTime * 0.35, uTime * 0.38)) * 2.0 - 1.0);
         float caust = pow(clamp(c1 * 0.55 + c2 * 0.45, 0.0, 1.0), 3.0);
 
-        vec3 col = vCol * ndl * (1.05 + uPurification * 0.22);
+        vec3 col = baseAlb * ndl * (1.08 + uPurification * 0.22);
         col += vec3(0.45, 0.98, 0.96) * caust * 0.52;
 
-        // Subtle turquoise lagoon water absorption with distance
         float dist = length(cameraPosition - vWorldPos);
         col = mix(col, uWaterTint * 0.65, clamp(smoothstep(14.0, 48.0, dist), 0.0, 0.82));
 
@@ -2242,21 +2446,19 @@ function buildRiverBouldersAndWakesGeometry() {
       .multiply(new THREE.Matrix4().makeRotationY(rnd() * TWO_PI));
     boulderBuilder._pushGeo(rock, mRock, 0.06, 2.0, 0, 0.82, '#42160c', '#df6d35');
 
-    // Multi-tuft emerald river-moss cushion on larger boulders
-    if (i % 2 === 0) {
-      for (let mIdx = 0; mIdx < 2; mIdx++) {
-        const moss = new THREE.IcosahedronGeometry(bw * (mIdx === 0 ? 0.54 : 0.38), 2);
-        moss.scale(1.18, 0.32, 0.96);
-        boulderBuilder._pushGeo(
-          moss,
-          new THREE.Matrix4().makeTranslation(bx + (mIdx - 0.5) * bw * 0.36, bh * (0.55 - mIdx * 0.06), bz),
-          0.06,
-          2.0,
-          1,
-          0.12,
-          '#184d28',
-          '#55b852'
-        );
+    // Crossed 3D botanical river-fern & scarlet-blossom tufts on larger boulders (ZERO icosahedron moss blobs!)
+    if (i % 2 === 0 && rad > 8.5) {
+      const fernUv = [0.02, 0.52, 0.46, 0.46];
+      const fSz = bw * 0.92;
+      const cWorld = new THREE.Vector3(bx, bh * 0.55, bz);
+      for (let cr = 0; cr < 2; cr++) {
+        const fern = new THREE.PlaneGeometry(fSz * 1.15, fSz * 0.85, 2, 2);
+        fern.translate(0, fSz * 0.36, 0);
+        const mFern = new THREE.Matrix4()
+          .makeTranslation(bx, bh * 0.42, bz)
+          .multiply(new THREE.Matrix4().makeRotationY(rnd() * TWO_PI + cr * Math.PI * 0.5))
+          .multiply(new THREE.Matrix4().makeRotationX((cr - 0.5) * 0.25));
+        boulderBuilder._pushDoubleSidedCard(fern, mFern, 0.06, 2.0, 8, 0.20, '#d9f7dc', '#ffffff', fernUv, cWorld);
       }
     }
 
@@ -3183,11 +3385,126 @@ export class StormAtmosphere {
     return m;
   }
 
+  whenReady() {
+    return this.readyPromise || Promise.resolve(this);
+  }
+
   _buildSharedTextures() {
     this.cloudPanoTex = this._trackTex(createHighResCloudPanoramaTexture(1024, 512));
     this.celestialTex = this._trackTex(createCelestialDiscTexture(512));
     this.wispTex = this._trackTex(createSoftWispTexture());
     this.glowTex = this._trackTex(createRadialGlowTexture(64));
+
+    // Instant 1x1 neutral fallback textures so frame-0 synchronous renders never stall or flash black
+    const whiteData = new THREE.DataTexture(new Uint8Array([235, 235, 235, 255]), 1, 1, THREE.RGBAFormat);
+    whiteData.colorSpace = THREE.SRGBColorSpace;
+    whiteData.needsUpdate = true;
+    this._fallbackWhiteTex = this._trackTex(whiteData);
+
+    const clearData = new THREE.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1, THREE.RGBAFormat);
+    clearData.needsUpdate = true;
+    this._fallbackClearTex = this._trackTex(clearData);
+
+    const flatNorm = new THREE.DataTexture(new Uint8Array([128, 128, 255, 255]), 1, 1, THREE.RGBAFormat);
+    flatNorm.needsUpdate = true;
+    this._fallbackNormalTex = this._trackTex(flatNorm);
+
+    // Load Wave 2 AAA PBR Rock Albedo/Normal pairs, Alpha-Cutout Botanical Sheets & 360-deg Horizon Vistas
+    // strictly from local relative `./assets/textures/biome_*.webp` paths!
+    const loader = new THREE.TextureLoader();
+    const pending = [];
+    const loadBiomeTex = (relPath, { srgb = true, repeatX = true, repeatY = true, aniso = 4 } = {}) => {
+      const resolvedUrl = new URL(relPath.replace(/^\.\//, '../'), import.meta.url).href;
+      let tex = null;
+      const p = new Promise((resolve) => {
+        tex = loader.load(
+          resolvedUrl,
+          (loaded) => {
+            loaded.anisotropy = aniso;
+            loaded.needsUpdate = true;
+            resolve(loaded);
+          },
+          undefined,
+          () => resolve(tex)
+        );
+      });
+      tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+      tex.wrapS = repeatX ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+      tex.wrapT = repeatY ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+      this._trackTex(tex);
+      pending.push(p);
+      return tex;
+    };
+
+    this.biomeRockTextures = {
+      canyon: {
+        albedo: loadBiomeTex('./assets/textures/biome_rock_canyon_albedo.webp', { srgb: true }),
+        normal: loadBiomeTex('./assets/textures/biome_rock_canyon_normal.webp', { srgb: false }),
+      },
+      granite: {
+        albedo: loadBiomeTex('./assets/textures/biome_rock_granite_albedo.webp', { srgb: true }),
+        normal: loadBiomeTex('./assets/textures/biome_rock_granite_normal.webp', { srgb: false }),
+      },
+      limestone: {
+        albedo: loadBiomeTex('./assets/textures/biome_rock_limestone_albedo.webp', { srgb: true }),
+        normal: loadBiomeTex('./assets/textures/biome_rock_limestone_normal.webp', { srgb: false }),
+      },
+      glacier: {
+        albedo: loadBiomeTex('./assets/textures/biome_rock_glacier_albedo.webp', { srgb: true }),
+        normal: loadBiomeTex('./assets/textures/biome_rock_glacier_normal.webp', { srgb: false }),
+      },
+    };
+
+    this.foliageRedwoodTex = loadBiomeTex('./assets/textures/biome_foliage_redwood.webp', {
+      srgb: true,
+      repeatX: false,
+      repeatY: false,
+    });
+    this.foliagePalmTex = loadBiomeTex('./assets/textures/biome_foliage_palm.webp', {
+      srgb: true,
+      repeatX: false,
+      repeatY: false,
+    });
+    this.foliageBayouTex = loadBiomeTex('./assets/textures/biome_foliage_bayou.webp', {
+      srgb: true,
+      repeatX: false,
+      repeatY: false,
+    });
+    this.foliageCoralTex = loadBiomeTex('./assets/textures/biome_foliage_coral.webp', {
+      srgb: true,
+      repeatX: false,
+      repeatY: false,
+    });
+
+    this.biomeVistaPanoTextures = {
+      canyon_river: loadBiomeTex('./assets/textures/biome_vista_canyon_river.webp', {
+        srgb: true,
+        repeatX: true,
+        repeatY: false,
+      }),
+      alpine_lake: loadBiomeTex('./assets/textures/biome_vista_alpine_lake.webp', {
+        srgb: true,
+        repeatX: true,
+        repeatY: false,
+      }),
+      mist_bayou: loadBiomeTex('./assets/textures/biome_vista_mist_bayou.webp', {
+        srgb: true,
+        repeatX: true,
+        repeatY: false,
+      }),
+      coral_sea: loadBiomeTex('./assets/textures/biome_vista_coral_sea.webp', {
+        srgb: true,
+        repeatX: true,
+        repeatY: false,
+      }),
+      storm_ocean: loadBiomeTex('./assets/textures/biome_vista_storm_ocean.webp', {
+        srgb: true,
+        repeatX: true,
+        repeatY: false,
+      }),
+    };
+
+    this.readyPromise = Promise.all(pending).then(() => this);
   }
 
   _buildSkyDome() {
@@ -3201,7 +3518,23 @@ export class StormAtmosphere {
 
   _buildWatershedVistasAndMist() {
     this.archipelagoGroup = new THREE.Group();
-    this.vistaMat = this._trackMat(createWatershedVistaMaterial(this.cloudPanoTex));
+
+    // 360-deg Seamless Sky-Keyed Horizon Vista Panorama Cylinder (`r = 98m`, behind 3D cliffs & visible in water reflections!)
+    const vistaCylGeo = this._trackGeo(new THREE.CylinderGeometry(98, 98, 35.0, 64, 1, true));
+    vistaCylGeo.translate(0, 16.5, 0);
+    this.vistaPanoramaMat = this._trackMat(createHorizonVistaPanoramaMaterial(this._fallbackClearTex));
+    this.vistaPanoramaRing = new THREE.Mesh(vistaCylGeo, this.vistaPanoramaMat);
+    this.vistaPanoramaRing.frustumCulled = false;
+    this.vistaPanoramaRing.renderOrder = -650;
+    this.archipelagoGroup.add(this.vistaPanoramaRing);
+
+    this.vistaMat = this._trackMat(
+      createWatershedVistaMaterial(this.cloudPanoTex, this._fallbackWhiteTex, this._fallbackNormalTex)
+    );
+    this.vistaMat.uniforms.uRedwoodTex.value = this.foliageRedwoodTex;
+    this.vistaMat.uniforms.uPalmTex.value = this.foliagePalmTex;
+    this.vistaMat.uniforms.uBayouTex.value = this.foliageBayouTex;
+    this.vistaMat.uniforms.uCoralAtlasTex.value = this.foliageCoralTex;
 
     this.vistaMeshes = {};
     for (let i = 0; i < BIOME_KEYS.length; i++) {
@@ -3396,7 +3729,7 @@ export class StormAtmosphere {
     // 2. Underwater Coral Reef Shelves & Gliding 3D Manta Rays (`underwaterGroup`, `y < waterY`, opaque!)
     //    Rendered BEFORE transparent `OceanSurface` so reefs & manta rays shine right through `coral_sea` water!
     this.underwaterGroup = new THREE.Group();
-    this.reefMat = this._trackMat(createUnderwaterReefMaterial());
+    this.reefMat = this._trackMat(createUnderwaterReefMaterial(this.foliageCoralTex));
 
     const reefGeo = this._trackGeo(buildCoralReefShelfGeometry());
     this.coralReefMesh = new THREE.Mesh(reefGeo, this.reefMat);
@@ -3872,6 +4205,25 @@ export class StormAtmosphere {
     }
     this._activeVistaKey = resolved;
 
+    // Bind Wave 2 360-deg Horizon Vista Panorama + Triplanar PBR Rock Albedo/Normal Maps for this biome!
+    if (this.vistaPanoramaMat && this.biomeVistaPanoTextures?.[resolved]) {
+      this.vistaPanoramaMat.uniforms.uVistaTex.value = this.biomeVistaPanoTextures[resolved];
+    }
+    if (this.vistaMat && this.biomeRockTextures) {
+      const rockKey = resolved === 'canyon_river'
+        ? 'canyon'
+        : resolved === 'alpine_lake'
+          ? 'granite'
+          : resolved === 'storm_ocean'
+            ? 'glacier'
+            : 'limestone';
+      const rockPair = this.biomeRockTextures[rockKey];
+      if (rockPair) {
+        this.vistaMat.uniforms.uRockAlbedoTex.value = rockPair.albedo;
+        this.vistaMat.uniforms.uRockNormalTex.value = rockPair.normal;
+      }
+    }
+
     // Toggle biome-specific waterfalls & foreground water ecosystems!
     this.canyonWaterfallMesh.visible = resolved === 'canyon_river';
     this.alpineWaterfallMesh.visible = resolved === 'alpine_lake';
@@ -4106,6 +4458,13 @@ export class StormAtmosphere {
     this.waterWorldGroup.rotation.y = waterWorldYaw;
     this.underwaterGroup.position.set(0, waterY, 0);
     this.underwaterGroup.rotation.y = waterWorldYaw;
+
+    const vpU = this.vistaPanoramaMat.uniforms;
+    vpU.uSunColor.value.set(preset.celestialTint);
+    vpU.uMistColor.value.set(preset.horizonMist);
+    vpU.uBlackout.value = blackout;
+    vpU.uPurification.value = purify;
+    vpU.uLightning.value = Math.max(0, Math.min(1.5, state?.lightningFlash || 0));
 
     const vU = this.vistaMat.uniforms;
     vU.uTime.value = t;

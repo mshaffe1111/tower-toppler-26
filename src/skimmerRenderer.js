@@ -382,6 +382,50 @@ function buildSteppedCliffGeo(seed = 1) {
   return geo;
 }
 
+function buildRockBoulderGeo(radius = 0.78, seed = 11) {
+  // UV-clean SphereGeometry displaced into a craggy river boulder (continuous 0..1 UVs!)
+  const geo = new THREE.SphereGeometry(radius, 18, 14);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    let x = pos.getX(i);
+    let y = pos.getY(i);
+    let z = pos.getZ(i);
+    const n =
+      1.0 +
+      0.16 * Math.sin(x * 4.2 + seed) * Math.cos(z * 3.8 - seed) +
+      0.10 * Math.cos(y * 5.5 + x * 3.1);
+    x *= n * 1.22;
+    y *= n * 0.76;
+    z *= n * 1.08;
+    pos.setXYZ(i, x, y, z);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function loadLocalWebpTex(url, isSrgb = true, repeatX = 1, repeatY = 1, onReady = null) {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return null;
+  try {
+    const loader = new THREE.TextureLoader();
+    const tex = loader.load(
+      url,
+      (t) => {
+        t.wrapS = repeatX > 1 ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+        t.wrapT = repeatY > 1 ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+        if (repeatX > 1 || repeatY > 1) t.repeat.set(repeatX, repeatY);
+        t.colorSpace = isSrgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+        t.needsUpdate = true;
+        onReady?.(t);
+      },
+      undefined,
+      () => {}
+    );
+    return tex;
+  } catch {
+    return null;
+  }
+}
+
 function buildRapidsEnvMap(webgl) {
   if (!webgl || typeof THREE.PMREMGenerator !== 'function') return null;
   try {
@@ -514,80 +558,92 @@ export class SkimmerRenderer {
 
     this.camera = new THREE.PerspectiveCamera(56, this.width / Math.max(1, this.height), 0.2, 180);
 
-    // Radiant Golden Morning Sun + Turquoise River Bounce Lighting
-    this.hemiLight = new THREE.HemisphereLight('#e0f2fe', '#0d9488', 1.15);
+    // Radiant Golden Morning Sun (front-lit onto Sedona gorge cliffs!) + Warm Rim + River Bounce
+    this.hemiLight = new THREE.HemisphereLight('#fffbeb', '#14b8a6', 1.45);
     this.scene.add(this.hemiLight);
 
-    this.sunLight = new THREE.DirectionalLight('#fff7ed', 2.45);
-    this.sunLight.position.set(14, 24, -18);
+    this.sunLight = new THREE.DirectionalLight('#fff7ed', 2.75);
+    this.sunLight.position.set(16, 26, 22);
     this.scene.add(this.sunLight);
 
-    this.wakeLight = new THREE.PointLight('#5efce8', 1.6, 9);
+    this.rimLight = new THREE.DirectionalLight('#fbbf24', 1.35);
+    this.rimLight.position.set(-16, 14, 8);
+    this.scene.add(this.rimLight);
+
+    this.wakeLight = new THREE.PointLight('#5efce8', 1.8, 10);
     this.scene.add(this.wakeLight);
 
-    // Sunlit Atmospheric Horizon Backdrop + Golden Sun Disc & Distant Canyon Mesa Silhouettes
-    const skyBackdrop = new THREE.Mesh(
-      new THREE.PlaneGeometry(180, 75),
-      new THREE.MeshBasicMaterial({ map: this.skyBackdropTex, fog: false, depthWrite: false })
-    );
-    skyBackdrop.position.set(0, 22, -102);
+    // Sunlit Cumulus Canyon Sky Cyclorama (`assets/textures/mg_canyon_sky.webp`) + Golden Sun Disc
+    this.skyBackdropMat = new THREE.MeshBasicMaterial({
+      map: this.skyBackdropTex,
+      fog: false,
+      depthWrite: false,
+    });
+    const skyBackdrop = new THREE.Mesh(new THREE.PlaneGeometry(210, 92), this.skyBackdropMat);
+    skyBackdrop.position.set(0, 20, -102);
     this.scene.add(skyBackdrop);
 
     const sunDisc = new THREE.Mesh(
-      new THREE.CircleGeometry(6.2, 28),
+      new THREE.CircleGeometry(5.6, 28),
       new THREE.MeshBasicMaterial({ color: '#fffbeb', fog: false })
     );
-    sunDisc.position.set(8, 20, -98);
+    sunDisc.position.set(10, 22, -98);
     this.scene.add(sunDisc);
 
-    // Rushing Whitewater Canyon River Surface
-    const riverGeo = new THREE.PlaneGeometry(30, 130, 36, 64);
+    // Rushing Whitewater Canyon River Surface (`mg_whitewater_rapids.webp` + bright foam streaks!)
+    const riverGeo = new THREE.PlaneGeometry(32, 130, 36, 64);
     riverGeo.rotateX(-Math.PI * 0.5);
     this.riverGeo = riverGeo;
     this._riverBaseY = new Float32Array(riverGeo.attributes.position.count);
     this.riverMat = new THREE.MeshStandardMaterial({
-      color: '#14b8a6',
+      color: '#ffffff',
       map: this.rapidsTex,
       bumpMap: this.rapidsTex,
-      bumpScale: 0.14,
-      emissive: '#0d9488',
-      emissiveIntensity: 0.30,
-      roughness: 0.12,
-      metalness: 0.22,
+      bumpScale: 0.16,
+      emissive: '#0891b2',
+      emissiveMap: this.rapidsTex,
+      emissiveIntensity: 0.34,
+      roughness: 0.10,
+      metalness: 0.18,
     });
     this.riverMesh = new THREE.Mesh(riverGeo, this.riverMat);
     this.riverMesh.position.set(0, 0, -42);
     this.scene.add(this.riverMesh);
 
-    // Enclosing 3D Stratified Sandstone Canyon Gorge Walls, Clustered Pines & Feathered Waterfalls
+    // Enclosing 3D Sedona Red-Rock Sandstone Gorge (`mg_sedona_cliff_albedo.webp` + `normal` + Redwood Cards!)
     this.gorgeSegments = [];
     this.cliffMat = new THREE.MeshStandardMaterial({
-      color: '#d98a6c',
+      color: '#ffffff',
       map: this.sandstoneTex,
-      bumpMap: this.sandstoneTex,
-      bumpScale: 0.28,
-      roughness: 0.80,
+      roughness: 0.72,
       metalness: 0.04,
     });
-    this.foliageMat = new THREE.MeshStandardMaterial({ color: '#166534', roughness: 0.68 });
-    const trunkMat = new THREE.MeshStandardMaterial({ color: '#5c3317', roughness: 0.85 });
+    this.foliageCardMat = new THREE.MeshStandardMaterial({
+      color: '#ffffff',
+      roughness: 0.65,
+      alphaTest: 0.32,
+      side: THREE.DoubleSide,
+      transparent: true,
+    });
     this.waterfallMat = new THREE.MeshBasicMaterial({
       map: this.waterfallTex,
       color: '#f0fdfa',
       transparent: true,
-      opacity: 0.88,
+      opacity: 0.90,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
-    const mistRingGeo = new THREE.CircleGeometry(2.1, 18);
+    const mistRingGeo = new THREE.CircleGeometry(2.4, 20);
     mistRingGeo.rotateX(-Math.PI * 0.5);
     const mistRingMat = new THREE.MeshBasicMaterial({
-      color: '#e0f2fe',
+      color: '#f0fdfa',
       transparent: true,
-      opacity: 0.42,
+      opacity: 0.52,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
+    const shelfProtoGeo = buildRockBoulderGeo(2.35, 77);
+    const treeCardGeo = new THREE.PlaneGeometry(4.4, 5.2);
 
     for (let i = 0; i < MAX_GORGE_SEGS; i++) {
       const seg = new THREE.Group();
@@ -595,33 +651,30 @@ export class SkimmerRenderer {
         const cliffGeo = buildSteppedCliffGeo(i * 19 + (side > 0 ? 7 : 0));
         const cliff = new THREE.Mesh(cliffGeo, this.cliffMat);
         cliff.scale.set(1.15, 1.0 + (i % 3) * 0.18, 1.18);
-        cliff.position.set(side * (11.2 + (i % 2) * 0.85), 5.6, 0);
+        cliff.position.set(side * (11.4 + (i % 2) * 0.85), 5.6, 0);
         cliff.rotation.y = i * 0.65 + (side > 0 ? 1.2 : 0);
         seg.add(cliff);
 
-        // Wet river-bank sandstone shelf ledge
-        const bankShelf = new THREE.Mesh(new THREE.DodecahedronGeometry(2.3, 1), this.cliffMat);
-        bankShelf.scale.set(1.2, 0.55, 1.6);
-        bankShelf.position.set(side * (7.3 + (i % 2) * 0.5), 0.45, 1.2);
+        // UV-clean terraced sandstone river-bank ledge
+        const bankShelf = new THREE.Mesh(shelfProtoGeo, this.cliffMat);
+        bankShelf.scale.set(1.15, 0.55, 1.45);
+        bankShelf.position.set(side * (7.5 + (i % 2) * 0.45), 0.38, 1.2);
         seg.add(bankShelf);
 
-        // Multi-cluster organic redwood/pine canopy crowning canyon rims
-        const tx = side * 9.8;
-        const ty = 11.4 + (i % 3) * 0.9;
-        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.30, 2.2, 7), trunkMat);
-        trunk.position.set(tx, ty, 0.5);
-        seg.add(trunk);
-        for (let c = 0; c < 3; c++) {
-          const puff = new THREE.Mesh(new THREE.DodecahedronGeometry(1.35 - c * 0.22, 1), this.foliageMat);
-          puff.scale.set(1.15, 0.85, 1.15);
-          puff.position.set(tx + (c - 1) * 0.38, ty + 1.3 + c * 0.85, 0.5 + (c % 2) * 0.25);
-          seg.add(puff);
+        // Feathered Alpha-Cutout Redwood/Pine Botanical Cross-Cards on Rim (ZERO green sphere dots!)
+        const tx = side * 9.6;
+        const ty = 13.0 + (i % 3) * 0.9;
+        for (const rotY of [0.25, -0.55]) {
+          const card = new THREE.Mesh(treeCardGeo, this.foliageCardMat);
+          card.position.set(tx, ty, 0.5);
+          card.rotation.y = rotY;
+          seg.add(card);
         }
 
-        // Alpha-feathered Cliffside Waterfall + Plunge-Pool Foam Ring (zero hard box quads!)
+        // Alpha-feathered Cliffside Waterfall + Plunge-Pool Foam Ring
         if ((i + (side > 0 ? 1 : 0)) % 3 === 0) {
-          const falls = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 11.2), this.waterfallMat);
-          falls.position.set(side * 7.6, 5.2, 0);
+          const falls = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 11.4), this.waterfallMat);
+          falls.position.set(side * 7.7, 5.2, 0);
           falls.rotation.y = -side * 0.48;
           const plungeFoam = new THREE.Mesh(mistRingGeo, mistRingMat);
           plungeFoam.position.set(side * 6.9, 0.14, 0);
@@ -730,21 +783,15 @@ export class SkimmerRenderer {
     this.rampInst.frustumCulled = false;
     this.scene.add(this.rampInst);
 
-    // Hazards (Wet Textured River Boulders, Driftwood/Siphon Crates, Siphon Surge Mines)
-    const boulderGeo = new THREE.DodecahedronGeometry(0.72, 1);
-    boulderGeo.scale(1.18, 0.78, 1.05);
-    this.boulderInst = new THREE.InstancedMesh(
-      boulderGeo,
-      new THREE.MeshStandardMaterial({
-        color: '#8c7a6b',
-        map: this.sandstoneTex,
-        bumpMap: this.sandstoneTex,
-        bumpScale: 0.18,
-        roughness: 0.38,
-        metalness: 0.08,
-      }),
-      MAX_HAZARDS
-    );
+    // Hazards (Wet PBR Sedona Sandstone River Boulders, Driftwood Crates, Siphon Surge Mines)
+    const boulderGeo = buildRockBoulderGeo(0.76, 33);
+    this.boulderMat = new THREE.MeshStandardMaterial({
+      color: '#f5ebe0',
+      map: this.sandstoneTex,
+      roughness: 0.34,
+      metalness: 0.08,
+    });
+    this.boulderInst = new THREE.InstancedMesh(boulderGeo, this.boulderMat, MAX_HAZARDS);
     this.crateInst = new THREE.InstancedMesh(
       new THREE.BoxGeometry(0.95, 0.85, 0.95),
       new THREE.MeshStandardMaterial({ color: '#92400e', roughness: 0.65, metalness: 0.25 }),
@@ -810,6 +857,42 @@ export class SkimmerRenderer {
 
   _loadGlbs() {
     if (typeof window === 'undefined' || typeof fetch !== 'function') return;
+    // Mount 1K Seamless PBR WebP Textures (`mg_sedona_cliff_*`, `mg_whitewater_rapids.webp`, `mg_canyon_sky.webp`, `biome_foliage_redwood.webp`)
+    loadLocalWebpTex('assets/textures/mg_sedona_cliff_albedo.webp', true, 2, 2, (t) => {
+      if (this._disposed) return;
+      this.cliffMat.map = t;
+      this.cliffMat.needsUpdate = true;
+      this.boulderMat.map = t;
+      this.boulderMat.needsUpdate = true;
+    });
+    loadLocalWebpTex('assets/textures/mg_sedona_cliff_normal.webp', false, 2, 2, (t) => {
+      if (this._disposed) return;
+      this.cliffMat.normalMap = t;
+      this.cliffMat.normalScale.set(1.25, 1.25);
+      this.cliffMat.needsUpdate = true;
+      this.boulderMat.normalMap = t;
+      this.boulderMat.normalScale.set(1.1, 1.1);
+      this.boulderMat.needsUpdate = true;
+    });
+    loadLocalWebpTex('assets/textures/mg_whitewater_rapids.webp', true, 3, 12, (t) => {
+      if (this._disposed) return;
+      this.rapidsWebp = t;
+      this.riverMat.map = t;
+      this.riverMat.bumpMap = t;
+      this.riverMat.emissiveMap = t;
+      this.riverMat.needsUpdate = true;
+    });
+    loadLocalWebpTex('assets/textures/mg_canyon_sky.webp', true, 1, 1, (t) => {
+      if (this._disposed) return;
+      this.skyBackdropMat.map = t;
+      this.skyBackdropMat.needsUpdate = true;
+    });
+    loadLocalWebpTex('assets/textures/biome_foliage_redwood.webp', true, 1, 1, (t) => {
+      if (this._disposed) return;
+      this.foliageCardMat.map = t;
+      this.foliageCardMat.needsUpdate = true;
+    });
+
     try {
       const loader = new GLTFLoader();
       loader.load(
@@ -875,14 +958,15 @@ export class SkimmerRenderer {
     this.scene.background.set(th.skyTop);
     this.scene.fog.color.set(th.fog);
     this.sunLight.color.set(th.sun);
-    this.riverMat.color.set(th.water);
-    this.riverMat.emissive.set(th.waterEmissive);
-    this.cliffMat.color.set(th.cliff);
-    this.foliageMat.color.set(th.cliffCap);
+    // Keep neutral/bright albedo multiplier so 1K PBR sandstone & whitewater foam pop cleanly!
+    this.cliffMat.color.set(bKey === 'alpine_lake' ? '#cbd5e1' : bKey === 'storm_ocean' ? '#94a3b8' : '#ffffff');
 
     const dist = Number(sk.distance) || time * 18;
     const boostMult = Math.max(1, Number(sk.boostMult) || 1);
     this.rapidsTex.offset.set(Math.sin(time * 0.5) * 0.04, -(dist * 0.065) % 1);
+    if (this.rapidsWebp) {
+      this.rapidsWebp.offset.set(Math.sin(time * 0.5) * 0.04, -(dist * 0.065) % 1);
+    }
     this.waterfallTex.offset.set(0, -(time * 1.45) % 1);
 
     // Animate 3D Standing Whitewater Swells on River Mesh

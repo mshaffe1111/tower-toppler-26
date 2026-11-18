@@ -648,32 +648,29 @@ def build_core_reactor_props():
     # Central turbine hub & glowing bearing ring
     add_swept_curve(bm_t, [(0.0, 0.0, -0.26), (0.0, 0.0, 0.0), (0.0, 0.0, 0.28)], [0.42, 0.56, 0.34], segs=16, up_t3=(0.0, 1.0, 0.0), mat_idx=1)
     add_swept_curve(bm_t, [(0.0, 0.0, -0.06), (0.0, 0.0, 0.06)], [0.60, 0.60], segs=16, up_t3=(0.0, 1.0, 0.0), mat_idx=3)
-    # Outer partial shroud ring (open across sector 0: angles -0.46 .. +0.46 rad!)
+    # Outer bronze/titanium shroud ring
     shroud_pts = []
-    for k in range(21):
-        ang = 0.50 + (k / 20.0) * (math.pi * 2.0 - 1.00)
+    for k in range(25):
+        ang = (k / 24.0) * (math.pi * 2.0)
         shroud_pts.append((math.cos(ang) * 2.42, math.sin(ang) * 2.42, 0.0))
     add_swept_curve(bm_t, shroud_pts, 0.11, segs=8, up_t3=(0.0, 0.0, 1.0), cap_start=True, cap_end=True, mat_idx=0)
 
-    # 5 full hydrofoil blades (sectors 1..5) + 1 broken stub at sector 0
-    for b_idx in range(6):
-        ang = (b_idx * math.pi * 2.0) / 6.0
+    # 5 evenly spaced hydrofoil blades (`b_idx = 0..4`, `ang = b_idx * TAU / 5`) matching `game.js` `bladeCount: 5` 1:1!
+    for b_idx in range(5):
+        ang = (b_idx * math.pi * 2.0) / 5.0
         ca, sa = math.cos(ang), math.sin(ang)
-        if b_idx == 0:
-            add_bevel_box(bm_t, (ca * 0.66, sa * 0.66, 0.0), (0.28, 0.22, 0.10), bevel=0.015, rot_t3=(0.0, 0.0, ang + 0.18), mat_idx=1)
-        else:
-            for seg in range(4):
-                r_mid = 0.72 + seg * 0.42
-                w_blade = 0.34 + seg * 0.07
-                pitch = 0.34 - seg * 0.04
-                add_bevel_box(
-                    bm_t,
-                    (ca * r_mid, sa * r_mid, math.sin(seg * 0.4) * 0.03),
-                    (0.46, w_blade, 0.075),
-                    bevel=0.012,
-                    rot_t3=(ca * pitch, sa * pitch, ang),
-                    mat_idx=0 if seg < 3 else 1,
-                )
+        for seg in range(4):
+            r_mid = 0.72 + seg * 0.42
+            w_blade = 0.32 + seg * 0.06
+            pitch = 0.34 - seg * 0.04
+            add_bevel_box(
+                bm_t,
+                (ca * r_mid, sa * r_mid, math.sin(seg * 0.4) * 0.03),
+                (0.46, w_blade, 0.075),
+                bevel=0.012,
+                rot_t3=(ca * pitch, sa * pitch, ang),
+                mat_idx=0 if seg < 3 else 1,
+            )
     finalize_mesh_obj("turbine_rotor", bm_t, [mat_titanium, mat_bronze, mat_siphon_crystal, mat_aqua_glow], parent=turb_grp)
 
     # 2. `siphon_crystal_lock`
@@ -1068,14 +1065,8 @@ def main():
     report["assets"].append(build_reef_grotto_arch())
     report["assets"].append(build_aqueduct_sanctum_props())
 
-    with open(DONE_PATH, "w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2)
+    print(json.dumps(report, indent=2))
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception:
-        with open(ERR_PATH, "w", encoding="utf-8") as ef:
-            ef.write(traceback.format_exc())
-        raise
+    main()

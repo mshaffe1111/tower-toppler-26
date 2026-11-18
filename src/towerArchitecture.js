@@ -2255,9 +2255,10 @@ function getSharedArchGeometries() {
   };
 
   const buildButtressSegGeo = () => {
-    // Tapered architectural pilaster/buttress segment centered at (0, 0, 0) height 1.0
-    const spine = new RoundedBoxGeometry(0.34, 1.0, 0.42, 1, 0.028);
-    const fin = new RoundedBoxGeometry(0.18, 0.96, 0.56, 1, 0.022);
+    // 1-floor native height (`FLOOR_HEIGHT - 0.04`) so `sy = 1.0` preserves crisp 1:1 unstretched stone/timber UVs!
+    const h = FLOOR_HEIGHT - 0.04;
+    const spine = new RoundedBoxGeometry(0.34, h, 0.42, 1, 0.028);
+    const fin = new RoundedBoxGeometry(0.18, h - 0.04, 0.56, 1, 0.022);
     fin.translate(0, 0, 0.06);
     return mergeGeometries([spine, fin]);
   };
@@ -2597,15 +2598,17 @@ function materializeWallBands(
   baseGeo.dispose();
 }
 
-function selectClearSpireAngles(count, offsetFrac, shafts, holes, totalH) {
+function selectClearSpireAngles(count, offsetFrac, shafts, holes, totalH, avoidSpawnPhi = null) {
   const out = [];
   for (let i = 0; i < count; i++) {
     const basePhi = ((i + offsetFrac) / count) * TWO_PI;
-    // Try small angular nudges if an elevator shaft sits right on basePhi
+    // Try small angular nudges if an elevator shaft or hero spawn bay sits right on basePhi
     let chosen = null;
-    for (const nudge of [0, 0.14, -0.14, 0.26, -0.26]) {
+    for (const nudge of [0, 0.14, -0.14, 0.26, -0.26, 0.36, -0.36]) {
       const cand = (basePhi + nudge + TWO_PI) % TWO_PI;
-      if (!isInChannel(cand, totalH * 0.45, shafts, 0.18)) {
+      const hitsSpawn =
+        typeof avoidSpawnPhi === 'number' && Math.abs(angDist(cand, avoidSpawnPhi)) < COL_ANGLE * 0.95;
+      if (!hitsSpawn && !isInChannel(cand, totalH * 0.45, shafts, 0.18)) {
         chosen = cand;
         break;
       }
@@ -2891,14 +2894,7 @@ function buildTowerMasonryAndAccents(
     wallAoTex,
     totalH,
   });
-  const trimMetalMat = attachWaterlineShader(
-    new THREE.MeshStandardMaterial({
-      color: spec.metalTrim,
-      roughness: 0.28,
-      metalness: 0.86,
-    }),
-    0.55
-  );
+  const trimMetalMat = createTrimMetalMaterial(rbTheme, spec);
   const darkMetalMat = attachWaterlineShader(
     new THREE.MeshStandardMaterial({
       color: spec.metalDark,
@@ -2911,19 +2907,43 @@ function buildTowerMasonryAndAccents(
 
   const buttressSegs = [];
   const buttressCaps = [];
+  const buttressCollars = [];
+  const maxFloorInt = Math.max(4, (tower?.floors || 18) - 1);
+  const spawnColRef = typeof tower?.spawn?.col === 'number' ? wrapTowerCol(tower.spawn.col) : 0;
+  const spawnFloorRef = Math.round(Number(tower?.spawn?.floor) || 0);
+  const spawnPhiRef = (spawnColRef + 0.5) * COL_ANGLE;
+
+  const isButtressFloorClear = (bPhi, fl) => {
+    const midY = (fl + 0.5) * fh;
+    if (midY > totalH - 0.85) return false;
+    if (isNearOpening(bPhi, midY, pipeAvoidHoles, 0.18, fh * 0.55)) return false;
+    // Keep 100% unobstructed headroom above hero spawn & every walkable stair/terrace ledge!
+    if (fl >= spawnFloorRef - 1 && fl <= spawnFloorRef + 2 && Math.abs(angDist(bPhi, spawnPhiRef)) < COL_ANGLE * 0.95) {
+      return false;
+    }
+    const nearCol = wrapTowerCol(Math.floor(((bPhi % TWO_PI) + TWO_PI) % TWO_PI / COL_ANGLE));
+    for (const cOff of [-1, 0, 1]) {
+      const checkCol = wrapTowerCol(nearCol + cOff);
+      const colCenterPhi = (checkCol + 0.5) * COL_ANGLE;
+      if (Math.abs(angDist(bPhi, colCenterPhi)) > COL_ANGLE * 0.68) continue;
+      if (walkableSet.has(`${checkCol}_${fl}`) || walkableSet.has(`${checkCol}_${fl - 1}`)) {
+        return false;
+      }
+    }
+    return true;
+  };
+
   for (let b = 0; b < buttressAngles.length; b++) {
     const bPhi = buttressAngles[b];
-    const tierStep = 4 * fh; // 6.0u tiers stepping gracefully inward
-    for (let by = -1.5; by < totalH - 1.2; by += tierStep) {
-      const segH = Math.min(tierStep - 0.14, totalH - 0.8 - by);
-      if (segH < 0.8) continue;
-      const midY = by + segH * 0.5;
-      if (isNearOpening(bPhi, midY, pipeAvoidHoles, 0.18, segH * 0.48)) continue;
-
-      const altFrac = Math.max(0, Math.min(1, midY / Math.max(12, totalH)));
-      const tierOut = 0.26 * (1 - altFrac * 0.58) + (by < 0 ? 0.18 : 0);
+    for (let fl = -1; fl < maxFloorInt; fl++) {
+      if (!isButtressFloorClear(bPhi, fl)) continue;
+      const midY = (fl + 0.5) * fh;
+      const tierIdx = Math.max(0, Math.floor(Math.max(0, fl) / 4));
+      const altFrac = Math.max(0, Math.min(1, (tierIdx * 4 * fh) / Math.max(12, totalH)));
+      const tierOut = 0.25 * (1 - altFrac * 0.58) + (fl < 0 ? 0.16 : 0);
       const br = R + tierOut;
-      const depthScale = 1.15 - altFrac * 0.42;
+      const depthScale = 1.12 - altFrac * 0.4;
+      const sy = fh / FLOOR_HEIGHT;
 
       pushInstance(
         buttressSegs,
@@ -2934,28 +2954,45 @@ function buildTowerMasonryAndAccents(
         bPhi,
         0,
         0.95 - altFrac * 0.18,
-        segH,
-        depthScale
-      );
-      pushInstance(
-        buttressCaps,
-        Math.sin(bPhi) * (br + 0.02),
-        by + segH + 0.04,
-        Math.cos(bPhi) * (br + 0.02),
-        0,
-        bPhi,
-        0,
-        0.98 - altFrac * 0.18,
-        1.0,
+        sy,
         depthScale
       );
 
-      // Warm hanging temple lanterns on Bayou buttress tiers!
-      if (spec.hasLanterns && by > 0.5 && by < totalH - 3.0) {
-        const ly = by + segH * 0.65;
+      const nextClear = fl + 1 < maxFloorInt && isButtressFloorClear(bPhi, fl + 1);
+      const isTierStepTop = (fl + 1) > 0 && (fl + 1) % 4 === 0;
+      if (!nextClear || isTierStepTop) {
+        pushInstance(
+          buttressCaps,
+          Math.sin(bPhi) * (br + 0.02),
+          (fl + 1) * fh - 0.06,
+          Math.cos(bPhi) * (br + 0.02),
+          0,
+          bPhi,
+          0,
+          0.98 - altFrac * 0.18,
+          1.0,
+          depthScale
+        );
+      } else if (fl >= 0 && fl % 2 === 1) {
+        pushInstance(
+          buttressCollars,
+          Math.sin(bPhi) * (br + 0.015),
+          (fl + 1) * fh,
+          Math.cos(bPhi) * (br + 0.015),
+          0,
+          bPhi,
+          0,
+          0.98 - altFrac * 0.18,
+          1.0,
+          depthScale
+        );
+      }
+
+      // Warm hanging temple lanterns on Bayou buttress piers!
+      if (spec.hasLanterns && fl > 0 && fl % 4 === 2 && midY < totalH - 3.0) {
         const lr = br + 0.18;
-        pushInstance(lanternBodyList, Math.sin(bPhi) * lr, ly, Math.cos(bPhi) * lr, 0, bPhi, 0, 1, 1, 1);
-        pushInstance(lanternGlowList, Math.sin(bPhi) * lr, ly, Math.cos(bPhi) * lr, 0, bPhi, 0, 1, 1, 1);
+        pushInstance(lanternBodyList, Math.sin(bPhi) * lr, midY + 0.2, Math.cos(bPhi) * lr, 0, bPhi, 0, 1, 1, 1);
+        pushInstance(lanternGlowList, Math.sin(bPhi) * lr, midY + 0.2, Math.cos(bPhi) * lr, 0, bPhi, 0, 1, 1, 1);
       }
     }
   }
@@ -2965,6 +3002,10 @@ function buildTowerMasonryAndAccents(
   });
   buildBandedInstancedFromList(group, bandedMeshes, G.buttressCap, trimMetalMat, buttressCaps, PROP_SPAN_Y, {
     castShadow: true,
+    keepInReflection: true,
+  });
+  buildBandedInstancedFromList(group, bandedMeshes, G.buttressCollar, trimMetalMat, buttressCollars, PROP_SPAN_Y, {
+    castShadow: false,
     keepInReflection: true,
   });
 
@@ -3035,9 +3076,11 @@ function buildTowerMasonryAndAccents(
   }
   buildBandedInstancedFromList(group, bandedMeshes, G.conduitClamp, trimMetalMat, clampList, PROP_SPAN_Y);
 
-  // 5. Arched Colonnade / Aqueduct Cornice Bands Every 4 Floors
+  // 5. Arched Colonnade / Aqueduct Blind-Arcade Cornice Bands Every 4 Floors
   const corniceParts = [];
+  const corniceMetalParts = [];
   for (let fy = 4 * fh; fy < totalH - 1.5; fy += 4 * fh) {
+    const flIdx = Math.round(fy / fh);
     for (let col = 0; col < COLS; col++) {
       const aPhi = (col + 0.5) * COL_ANGLE;
       if (
@@ -3048,9 +3091,10 @@ function buildTowerMasonryAndAccents(
         continue;
       }
       const altTaper = -0.085 * Math.min(1, fy / Math.max(14, totalH));
+      const rOutBand = R + BRICK_PROUD + 0.095 + altTaper;
       const bandSlab = arcSlab(
         R - 0.04,
-        R + BRICK_PROUD + 0.095 + altTaper,
+        rOutBand,
         COL_ANGLE * 0.92,
         0.16,
         0.022,
@@ -3062,6 +3106,22 @@ function buildTowerMasonryAndAccents(
       bandSlab.rotateY(aPhi);
       bandSlab.translate(0, fy + 0.08, 0);
       corniceParts.push(bandSlab);
+
+      // Sculpted semicircular blind-arcade arch hood + hammered bronze rosette boss on open masonry bays
+      if (!walkableSet.has(`${col}_${flIdx}`) && !walkableSet.has(`${col}_${flIdx - 1}`)) {
+        const archR = R * COL_ANGLE * 0.36;
+        const rFace = R + BRICK_PROUD + 0.032 + altTaper;
+        const hood = new THREE.TorusGeometry(archR, 0.038, 6, 12, Math.PI);
+        hood.translate(0, fy - 0.34, rFace);
+        hood.rotateY(aPhi);
+        corniceParts.push(hood);
+
+        const medallion = new THREE.CylinderGeometry(0.068, 0.078, 0.042, 8);
+        medallion.rotateX(Math.PI * 0.5);
+        medallion.translate(0, fy - 0.28, rFace + 0.016);
+        medallion.rotateY(aPhi);
+        corniceMetalParts.push(medallion);
+      }
     }
   }
   if (corniceParts.length) {
@@ -3070,6 +3130,13 @@ function buildTowerMasonryAndAccents(
     corniceMesh.receiveShadow = true;
     corniceMesh.userData.keepInReflection = true;
     group.add(corniceMesh);
+  }
+  if (corniceMetalParts.length) {
+    const corniceMetalMesh = new THREE.Mesh(mergeGeometries(corniceMetalParts), trimMetalMat);
+    corniceMetalMesh.castShadow = false;
+    corniceMetalMesh.receiveShadow = true;
+    corniceMetalMesh.userData.keepInReflection = true;
+    group.add(corniceMetalMesh);
   }
 
   // 6. Spinning 3D Hydro-Turbines / Pelton Waterwheels (`hydro_turbine.glb`) on Clear Spire Bays!
@@ -4173,7 +4240,15 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     }))
   );
 
-  const buttressAngles = selectClearSpireAngles(spec.buttressCount || 5, 0.12, shafts, pipeAvoidHoles, totalH);
+  const heroSpawnPhi = ((typeof tower?.spawn?.col === 'number' ? wrapTowerCol(tower.spawn.col) : 0) + 0.5) * COL_ANGLE;
+  const buttressAngles = selectClearSpireAngles(
+    spec.buttressCount || 5,
+    0.15,
+    shafts,
+    pipeAvoidHoles,
+    totalH,
+    heroSpawnPhi
+  );
   const conduitAngles = selectClearSpireAngles(
     spec.conduitCount || 5,
     0.12 + 0.5 / (spec.conduitCount || 5),

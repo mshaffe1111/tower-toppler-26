@@ -49,6 +49,15 @@ const THEME_TO_BIOME = Object.freeze({
   sinking: 'storm_ocean',
   blackout: 'storm_ocean',
   apex: 'storm_ocean',
+
+  warden_boss: 'warden_boss',
+  warden_gauntlet: 'warden_boss',
+  boss: 'warden_boss',
+  siphon_warden: 'warden_boss',
+
+  core_descent: 'core_descent',
+  descent: 'core_descent',
+  flood_rush: 'core_descent',
 });
 
 const MINIGAME_ALIASES = Object.freeze({
@@ -72,6 +81,8 @@ const MUSIC_STEMS = Object.freeze({
   mist_bayou: 'music_mist_bayou.ogg',
   coral_sea: 'music_coral_sea.ogg',
   storm_ocean: 'music_storm_ocean.ogg',
+  warden_boss: 'music_warden_boss.ogg',
+  core_descent: 'music_core_descent.ogg',
 });
 
 const AMBIENCE_STEMS = Object.freeze({
@@ -81,6 +92,8 @@ const AMBIENCE_STEMS = Object.freeze({
   mist_bayou: 'amb_bayou_night.ogg',
   coral_sea: 'amb_coral_surf.ogg',
   storm_ocean: 'amb_ocean_swell.ogg',
+  warden_boss: 'amb_ocean_swell.ogg',
+  core_descent: 'amb_river_rapids.ogg',
 });
 
 // Biome-synchronized musical scales (root Hz + pentatonic/Lydian semitone offsets)
@@ -115,6 +128,16 @@ const BIOME_HARMONICS = Object.freeze({
     rootHz: 261.63, // C4 (C Minor9 / Eb Heroic Pentatonic: C, Eb, F, G, Bb)
     scale: [0, 3, 5, 7, 10, 12, 15, 17, 19, 22, 24],
     padMidi: [48, 55, 60, 63],
+  },
+  warden_boss: {
+    rootHz: 293.66, // D4 (D Minor / F Heroic Pentatonic: D, F, G, A, C)
+    scale: [0, 3, 5, 7, 10, 12, 15, 17, 19, 22, 24],
+    padMidi: [50, 57, 62, 65],
+  },
+  core_descent: {
+    rootHz: 440.0, // A4 (A Dorian / C Lydian Pentatonic: A, C, D, E, G)
+    scale: [0, 3, 5, 7, 10, 12, 15, 17, 19, 22, 24],
+    padMidi: [57, 60, 64, 67],
   },
 });
 
@@ -299,6 +322,7 @@ export class SoundEngine {
     this.theme = 'canyon_river';
     this.biome = 'canyon_river';
     this.gameMode = 'campaign';
+    this.bossActive = false;
     this.zenMode = false;
     this.miniGameMode = null;
 
@@ -682,11 +706,13 @@ export class SoundEngine {
   }
 
   _resolveDesiredStems() {
+    const activeBiome = CANONICAL_BIOMES.includes(this.biome) ? this.biome : 'canyon_river';
+
     if (this.miniGameMode === 'core_descent') {
       return {
-        harmonyKey: 'storm_ocean',
-        musicFile: MUSIC_STEMS.storm_ocean,
-        ambienceFile: AMBIENCE_STEMS.canyon_river,
+        harmonyKey: 'core_descent',
+        musicFile: MUSIC_STEMS.core_descent,
+        ambienceFile: AMBIENCE_STEMS.core_descent,
       };
     }
     if (this.miniGameMode === 'reef_swim') {
@@ -718,6 +744,26 @@ export class SoundEngine {
       };
     }
 
+    if (
+      this.bossActive ||
+      this.gameMode === 'warden_gauntlet' ||
+      this.theme === 'warden_boss'
+    ) {
+      return {
+        harmonyKey: 'warden_boss',
+        musicFile: MUSIC_STEMS.warden_boss,
+        ambienceFile: AMBIENCE_STEMS[activeBiome] || AMBIENCE_STEMS.warden_boss,
+      };
+    }
+
+    if (this.gameMode === 'flood_rush' || this.theme === 'core_descent') {
+      return {
+        harmonyKey: 'core_descent',
+        musicFile: MUSIC_STEMS.core_descent,
+        ambienceFile: AMBIENCE_STEMS[activeBiome] || AMBIENCE_STEMS.core_descent,
+      };
+    }
+
     if (this.theme === 'sanctum_menu') {
       return {
         harmonyKey: 'sanctum_menu',
@@ -727,15 +773,13 @@ export class SoundEngine {
     }
 
     if (this.zenMode || this.gameMode === 'sanctum_trials') {
-      const ambKey = CANONICAL_BIOMES.includes(this.biome) ? this.biome : 'alpine_lake';
       return {
         harmonyKey: 'sanctum_menu',
         musicFile: MUSIC_STEMS.sanctum_menu,
-        ambienceFile: AMBIENCE_STEMS[ambKey],
+        ambienceFile: AMBIENCE_STEMS[activeBiome],
       };
     }
 
-    const activeBiome = CANONICAL_BIOMES.includes(this.biome) ? this.biome : 'canyon_river';
     return {
       harmonyKey: activeBiome,
       musicFile: MUSIC_STEMS[activeBiome],
@@ -857,7 +901,7 @@ export class SoundEngine {
     const mapped = THEME_TO_BIOME[raw];
     if (mapped) {
       this.theme = mapped;
-      if (mapped !== 'sanctum_menu') {
+      if (CANONICAL_BIOMES.includes(mapped)) {
         this.biome = mapped;
       }
     }
@@ -870,7 +914,7 @@ export class SoundEngine {
     if (typeof theme === 'string' && THEME_TO_BIOME[theme.trim().toLowerCase()]) {
       const mapped = THEME_TO_BIOME[theme.trim().toLowerCase()];
       this.theme = mapped;
-      if (mapped !== 'sanctum_menu') {
+      if (CANONICAL_BIOMES.includes(mapped)) {
         this.biome = mapped;
       }
     } else {
@@ -888,9 +932,24 @@ export class SoundEngine {
   setGameMode(mode = 'campaign') {
     if (typeof mode === 'string' && mode.trim()) {
       this.gameMode = mode.trim().toLowerCase();
+      if (this.gameMode !== 'warden_gauntlet' && this.theme === 'warden_boss') {
+        this.theme = this.biome;
+      }
       this._syncPlayback();
     }
     return this.gameMode;
+  }
+
+  setBossActive(active = false) {
+    const next = Boolean(active);
+    if (this.bossActive === next) return this.bossActive;
+    this.bossActive = next;
+    this._syncPlayback();
+    return this.bossActive;
+  }
+
+  setBossMode(active = false) {
+    return this.setBossActive(active);
   }
 
   setZenMode(zen = false) {
@@ -1617,6 +1676,15 @@ export class SoundEngine {
 
   rescueCreature() {
     this.catchFish();
+  }
+
+  critterRescue() {
+    if (!this._canPlay('critterRescue', 0.08)) return;
+    // Joyful hidden Earth Water-Critter pod release: ascending water-droplet & kalimba bloom
+    this._waterDrop(this._scaleFreq(2, 0), 0.11, 0.04, 0, -0.14, true);
+    [0, 2, 4, 5, 7].forEach((d, idx) => {
+      this._kalimbaChime(this._scaleFreq(d, 0), 0.36, 0.046, 0.02 + idx * 0.052, (idx - 2) * 0.1, true);
+    });
   }
 
   pipeValve() {

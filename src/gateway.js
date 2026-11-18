@@ -664,9 +664,11 @@ export class GatewayRig {
     );
     this.flashMat = this._trackMat(
       new THREE.MeshBasicMaterial({
-        color: '#e0f2fe',
+        color: '#67e8f9',
         transparent: true,
-        opacity: 0.92,
+        opacity: 0.62,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
       })
     );
     // Legacy compatibility map if external code inspects `rig.mats`
@@ -828,16 +830,15 @@ export class GatewayRig {
       this._hydroEmitterGroup.name = 'GatewayHydroCasterEmitter';
 
       const muzzle = new THREE.Group();
-      const flashStar = new THREE.Mesh(
-        this._trackGeo(new THREE.OctahedronGeometry(0.068, 0)),
+      const flashRing = new THREE.Mesh(
+        this._trackGeo(new THREE.TorusGeometry(0.034, 0.006, 8, 20)),
         this.flashMat
       );
-      flashStar.scale.set(1, 1, 1.75);
       const flashCore = new THREE.Mesh(
-        this._trackGeo(new THREE.SphereGeometry(0.042, 10, 10)),
+        this._trackGeo(new THREE.SphereGeometry(0.020, 12, 10)),
         this.accentMat
       );
-      muzzle.add(flashStar, flashCore);
+      muzzle.add(flashRing, flashCore);
       muzzle.visible = false;
       this._muzzleNode = muzzle;
 

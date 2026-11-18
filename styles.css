@@ -529,6 +529,19 @@ body {
   transform: scale(0.93);
 }
 
+#btn-pause {
+  min-width: 42px !important;
+  min-height: 40px !important;
+  width: 42px;
+  height: 40px;
+  padding: 0;
+}
+
+#btn-pause .ico-svg {
+  width: 17px;
+  height: 17px;
+}
+
 /* ================= IN-STAGE TELEMETRY & REACTOR CORE DESCENT HUD ================= */
 .altitude-meter {
   position: absolute;
@@ -1669,9 +1682,9 @@ body {
 
 /* Crystal-Clear Center Live 3D Vista Window */
 .title-diorama-stage {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   width: 100%;
-  min-height: clamp(170px, 42dvh, 520px);
+  min-height: 0;
   background: transparent !important;
   pointer-events: auto;
   cursor: pointer;
@@ -2139,6 +2152,12 @@ body {
 .mode-hub-card:active {
   transform: translateY(-2px);
   box-shadow: inset 0 0 0 1.8px var(--bronze-gleam);
+}
+
+.mode-hub-card-wide {
+  grid-column: 1 / -1;
+  min-height: 92px;
+  box-shadow: inset 0 0 0 1.5px rgba(251, 113, 133, 0.58);
 }
 
 .mode-hub-art {
@@ -3092,11 +3111,74 @@ body {
   cursor: pointer;
 }
 
+#app[data-cutscene-open="true"] #overlay-title,
+#app[data-cutscene-open="true"] #hud,
+#app[data-cutscene-open="true"] #touch-controls {
+  display: none !important;
+}
+
 .cinema-stage-window {
+  position: relative;
   flex: 1 1 auto;
   width: 100%;
+  min-height: 0;
   background: transparent;
   cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-start;
+  padding: 12px calc(16px + var(--safe-right)) 12px calc(16px + var(--safe-left));
+}
+
+.cinema-keyframe-card {
+  margin: 0;
+  width: min(84vw, 296px);
+  clip-path: var(--poly-oct-sm);
+  background: linear-gradient(160deg, rgba(8, 38, 60, 0.92), rgba(4, 18, 32, 0.96));
+  box-shadow: inset 0 0 0 1.5px rgba(94, 252, 232, 0.58);
+  filter: drop-shadow(0 12px 26px rgba(0, 0, 0, 0.78));
+  overflow: hidden;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+@media (max-width: 600px) and (orientation: portrait) {
+  .cinema-stage-window {
+    padding: 8px calc(10px + var(--safe-right)) 8px calc(10px + var(--safe-left));
+  }
+
+  .cinema-keyframe-card {
+    width: 158px;
+  }
+
+  .cinema-keyframe-caption {
+    font-size: 6.5px;
+    letter-spacing: 0.1em;
+    padding: 2.5px 6px 3px;
+  }
+}
+
+.cinema-keyframe-img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+.cinema-keyframe-caption {
+  padding: 4px 10px 5px;
+  font-family: var(--font-ui);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: var(--bronze-gleam);
+  text-align: center;
+  border-top: 1px solid rgba(94, 252, 232, 0.28);
+  background: rgba(4, 18, 32, 0.92);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .cinema-bar-bottom {
@@ -3123,18 +3205,22 @@ body {
 .cinema-comms-card[data-speaker="warden"] { box-shadow: inset 0 0 0 1.6px #fb7185; }
 
 .cinema-portrait {
-  width: 58px;
-  height: 58px;
+  width: 66px;
+  height: 66px;
   clip-path: polygon(25% 4%, 75% 4%, 98% 50%, 75% 96%, 25% 96%, 2% 50%);
   flex-shrink: 0;
   display: grid;
   place-items: center;
-  background: radial-gradient(circle at 50% 40%, rgba(94, 252, 232, 0.25), rgba(5, 22, 38, 0.95));
+  background: radial-gradient(circle at 50% 40%, rgba(94, 252, 232, 0.28), rgba(5, 22, 38, 0.96));
+  overflow: hidden;
 }
 
-.cinema-portrait svg {
-  width: 50px;
-  height: 50px;
+.cinema-portrait svg,
+.cinema-portrait img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
 
 .cinema-dialogue-col {
@@ -3455,13 +3541,27 @@ body {
   }
 
   .cinema-portrait {
-    width: 44px;
-    height: 44px;
+    width: 48px;
+    height: 48px;
   }
 
-  .cinema-portrait svg {
-    width: 36px;
-    height: 36px;
+  .cinema-portrait svg,
+  .cinema-portrait img {
+    width: 100%;
+    height: 100%;
+  }
+
+  .cinema-stage-window {
+    padding: 6px calc(14px + var(--safe-right)) 6px calc(14px + var(--safe-left));
+  }
+
+  .cinema-keyframe-card {
+    width: min(26vw, 184px);
+  }
+
+  .cinema-keyframe-caption {
+    font-size: 7px;
+    padding: 2.5px 6px 3px;
   }
 
   .cinema-dialogue-text {

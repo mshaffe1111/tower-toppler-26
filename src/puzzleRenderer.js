@@ -228,14 +228,19 @@ function createSanctumCausticTex(size = 256) {
     const x = (i * 59) % size;
     const y = (i * 97) % size;
     const r = 14 + (i % 24);
-    const g = ctx.createRadialGradient(x, y, 2, x, y, r);
-    g.addColorStop(0, 'rgba(207, 250, 254, 0.46)');
-    g.addColorStop(0.6, 'rgba(94, 252, 232, 0.16)');
-    g.addColorStop(1, 'rgba(8, 145, 178, 0)');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
+    // 3x3 periodic wrap eliminates 100% of square tile border seams!
+    for (const ox of [-size, 0, size]) {
+      for (const oy of [-size, 0, size]) {
+        const g = ctx.createRadialGradient(x + ox, y + oy, 2, x + ox, y + oy, r);
+        g.addColorStop(0, 'rgba(207, 250, 254, 0.42)');
+        g.addColorStop(0.6, 'rgba(94, 252, 232, 0.14)');
+        g.addColorStop(1, 'rgba(8, 145, 178, 0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(x + ox, y + oy, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
   }
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = THREE.RepeatWrapping;
@@ -567,11 +572,18 @@ export class PuzzleRenderer {
 
     this.mirrorSlots = [];
     const crystalMirrorMat = new THREE.MeshStandardMaterial({
-      color: '#e0f7ff',
-      emissive: '#38bdf8',
-      emissiveIntensity: 0.45,
-      metalness: 0.88,
-      roughness: 0.05,
+      color: '#bae6fd',
+      emissive: '#0284c7',
+      emissiveIntensity: 0.16,
+      metalness: 0.48,
+      roughness: 0.12,
+    });
+    const mirrorFrameMat = new THREE.MeshStandardMaterial({
+      color: '#e5a945',
+      emissive: '#3d2508',
+      emissiveIntensity: 0.14,
+      metalness: 0.85,
+      roughness: 0.22,
     });
     for (let i = 0; i < MAX_MIRRORS; i++) {
       const root = new THREE.Group();
@@ -579,10 +591,13 @@ export class PuzzleRenderer {
       base.position.y = 0.14;
       const turret = new THREE.Group();
       turret.position.y = 0.28;
-      const pane = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.82, 0.06), crystalMirrorMat);
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.88, 0.05), mirrorFrameMat);
+      frame.position.y = 0.48;
+      const pane = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.76, 0.07), crystalMirrorMat);
       pane.position.y = 0.48;
       pane.castShadow = true;
-      turret.add(pane);
+      frame.castShadow = true;
+      turret.add(frame, pane);
       root.add(base, turret);
       root.visible = false;
       this.scene.add(root);
@@ -681,6 +696,26 @@ export class PuzzleRenderer {
   _loadPropsGlb() {
     if (typeof window === 'undefined' || typeof fetch !== 'function') return;
     try {
+      const texLoader = new THREE.TextureLoader();
+      texLoader.load(
+        'assets/textures/mg_whitewater_rapids.webp',
+        (t) => {
+          if (this._disposed) return;
+          t.wrapS = THREE.RepeatWrapping;
+          t.wrapT = THREE.RepeatWrapping;
+          t.repeat.set(5, 5);
+          t.colorSpace = THREE.SRGBColorSpace;
+          this.waterWebp = t;
+          this.waterMat.map = t;
+          this.waterMat.bumpMap = t;
+          this.waterMat.emissiveMap = t;
+          this.waterMat.color.set('#ffffff');
+          this.waterMat.emissiveIntensity = 0.28;
+          this.waterMat.needsUpdate = true;
+        },
+        undefined,
+        () => {}
+      );
       const loader = new GLTFLoader();
       loader.load(
         'assets/models/puzzle_props.glb',
@@ -699,7 +734,15 @@ export class PuzzleRenderer {
               const cl = bellSrc.clone(true);
               cl.position.set(0, 0, 0);
               cl.traverse((o) => {
-                if (o.isMesh) o.castShadow = true;
+                if (o.isMesh) {
+                  o.castShadow = true;
+                  // Clamp mirror pane emissive so facets & brass frame never blow out to pure white!
+                  if (o.material && o.material.emissiveIntensity > 0.22) {
+                    o.material = o.material.clone();
+                    o.material.emissiveIntensity = 0.18;
+                    o.material.color.set('#bae6fd');
+                  }
+                }
               });
               const body = cl.getObjectByName('bell_body');
               if (body) {
@@ -717,7 +760,15 @@ export class PuzzleRenderer {
               const cl = mirSrc.clone(true);
               cl.position.set(0, 0, 0);
               cl.traverse((o) => {
-                if (o.isMesh) o.castShadow = true;
+                if (o.isMesh) {
+                  o.castShadow = true;
+                  // Clamp mirror pane emissive so facets & brass frame never blow out to pure white!
+                  if (o.material && o.material.emissiveIntensity > 0.22) {
+                    o.material = o.material.clone();
+                    o.material.emissiveIntensity = 0.18;
+                    o.material.color.set('#bae6fd');
+                  }
+                }
               });
               const tur = cl.getObjectByName('mirror_turret');
               if (tur) {
@@ -734,7 +785,15 @@ export class PuzzleRenderer {
               const cl = monoSrc.clone(true);
               cl.position.set(0, 0, 0);
               cl.traverse((o) => {
-                if (o.isMesh) o.castShadow = true;
+                if (o.isMesh) {
+                  o.castShadow = true;
+                  // Clamp mirror pane emissive so facets & brass frame never blow out to pure white!
+                  if (o.material && o.material.emissiveIntensity > 0.22) {
+                    o.material = o.material.clone();
+                    o.material.emissiveIntensity = 0.18;
+                    o.material.color.set('#bae6fd');
+                  }
+                }
               });
               slot.root.add(cl);
             }

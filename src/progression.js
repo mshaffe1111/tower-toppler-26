@@ -274,7 +274,7 @@ const LEGACY_FX_ALIAS = {
 };
 
 // ============================================================================
-// 7 SELECTABLE ROGUELITE BIO-MUTATIONS ('expedition' Mode)
+// 14 SELECTABLE STACKABLE ROGUELITE BIO-MUTATIONS ('expedition' Mode)
 // ============================================================================
 
 export const BIO_MUTATIONS = [
@@ -315,7 +315,7 @@ export const BIO_MUTATIONS = [
     badge: 'HARVEST',
     icon: '✦',
     accentColor: '#fbbf24',
-    shortDesc: 'Draws nearby Hydro-Gears & Curios within 2.6 cols and grants +25% Gear yield.',
+    shortDesc: 'Draws nearby Hydro-Gears & Critters within 2.6 cols and grants +25% Gear yield.',
     description: 'Harmonic currents pull nearby Hydro-Gears, Salvage Parts, and Harmonic Seeds straight into Gateway’s orbit while boosting Gear rewards.'
   },
   {
@@ -347,7 +347,123 @@ export const BIO_MUTATIONS = [
     accentColor: '#f472b6',
     shortDesc: 'Hold Jump while descending to flare Gateway’s neck-frills for feather-fall glide.',
     description: 'Flares Gateway’s iridescent webbed neck-frills in mid-air, softening descent speed and extending horizontal chasm reach.'
+  },
+  {
+    id: 'hydro_dash',
+    name: 'Riptide Tail-Dash',
+    title: 'Riptide Tail-Dash',
+    badge: 'MOBILITY',
+    icon: '➤',
+    accentColor: '#22d3ee',
+    shortDesc: 'Mid-air Tail-Whip surges Gateway forward across wide chasms with brief invulnerability.',
+    description: 'Triggers a focused hydro-jet burst whenever Gateway Tail-Whips in mid-air, rocketing 2.4 columns forward while deflecting hazards.'
+  },
+  {
+    id: 'carapace_vault',
+    name: 'Turbo Carapace Vault',
+    title: 'Turbo Carapace Vault',
+    badge: 'SPRINGBOARD',
+    icon: '⇑',
+    accentColor: '#fb7185',
+    shortDesc: '+28% higher Snap-Crab springboard & geyser launches plus a +3s velocity surge.',
+    description: 'Amplifies elastic recoil off flipped Snap-Crabs and Hydro-Geysers so Gateway vaults 4+ floors in a single soaring arc.'
+  },
+  {
+    id: 'harmonic_overdrive',
+    name: 'Harmonic Overdrive',
+    title: 'Harmonic Overdrive',
+    badge: 'COMBO',
+    icon: '★',
+    accentColor: '#fde047',
+    shortDesc: 'Combo multiplier climbs to 10x and every 4-hit streak adds +4s to the Siphon Clock.',
+    description: 'Synchronizes Gateway’s strikes with Pelagian resonance—doubling combo gain speed and harvesting bonus time from every fourth chain hit.'
+  },
+  {
+    id: 'twin_pulse',
+    name: 'Twin-Stream Caster',
+    title: 'Twin-Stream Caster',
+    badge: 'BARRAGE',
+    icon: '❖',
+    accentColor: '#60a5fa',
+    shortDesc: 'Fires paired dual-altitude Hydro-Pulses to clear staggered drones & upper valves.',
+    description: 'Splits Gateway’s gauntlet beam into parallel high and low hydro-bolts, shredding elevated Volt-Eels and multi-tier Mortar turrets.'
+  },
+  {
+    id: 'storm_siphon',
+    name: 'Tempest Capacitor',
+    title: 'Tempest Capacitor',
+    badge: 'SHOCKWAVE',
+    icon: '⚡',
+    accentColor: '#c084fc',
+    shortDesc: 'Defeating foes or crates blasts a 2.5-col hydro-shockwave flipping nearby Dredgers.',
+    description: 'Converts shattered Siphon locks and defeated Syndicate drones into an expanding sea-glass nova that flips crabs and stuns nearby threats.'
+  },
+  {
+    id: 'aqua_step',
+    name: 'Water-Strider Skim',
+    title: 'Water-Strider Skim',
+    badge: 'SURVIVAL',
+    icon: '≈',
+    accentColor: '#5efce8',
+    shortDesc: 'Auto-skims off Siphon Surge water with an emergency upward leap (10s recharge).',
+    description: 'Hydrophobic lizard toe-frills repel corrupted waterline surges once every 10 seconds, catapulting Gateway safely back toward the terraces.'
+  },
+  {
+    id: 'pelagian_grace',
+    name: 'Pelagian Grace',
+    title: 'Pelagian Grace',
+    badge: 'SANCTUARY',
+    icon: '✧',
+    accentColor: '#a7f3d0',
+    shortDesc: '+35% longer coyote time & grace invulnerability + bonus life every 3rd spire.',
+    description: 'Channels Pelagia’s ancient tidal blessing for forgiving ledge timing, extended recovery frames, and periodic heart restoration.'
   }
+];
+
+// ============================================================================
+// 30 HIDDEN RESCUABLE EARTH WATER-CRITTER PODS (3 PER CAMPAIGN SPIRE!)
+// ============================================================================
+
+export const CRITTER_CATALOG = [
+  // Act I — Redwood Canyon Rivers (6 River Otters)
+  { id: 'critter_s1_1', towerId: 1, act: 1, biome: 'canyon_river', species: 'River Otter', name: 'Pebble the Gorge Otter', gearBonus: 3, lore: 'Playful juvenile river otter rescued from a cedar sluice alcove above the canyon rapids.' },
+  { id: 'critter_s1_2', towerId: 1, act: 1, biome: 'canyon_river', species: 'River Otter', name: 'Alder the Riffle Diver', gearBonus: 3, lore: 'Expert trout tracker trapped beside the Sunlit Gorge spark-conduit terrace.' },
+  { id: 'critter_s1_3', towerId: 1, act: 1, biome: 'canyon_river', species: 'River Otter', name: 'Cedar the Crown Swimmer', gearBonus: 3, lore: 'Perched near the highest redwood waterfall crest before the Crown Valve.' },
+  { id: 'critter_s2_1', towerId: 2, act: 1, biome: 'canyon_river', species: 'River Otter', name: 'Cascade the Dam Scout', gearBonus: 3, lore: 'Found swimming beside the lower floodgate basin once clean canyon water returned.' },
+  { id: 'critter_s2_2', towerId: 2, act: 1, biome: 'canyon_river', species: 'River Otter', name: 'Bramble the Timber Pup', gearBonus: 3, lore: 'Sheltered near the Core Vault sluice gate above the rotating timber dam wheels.' },
+  { id: 'critter_s2_3', towerId: 2, act: 1, biome: 'canyon_river', species: 'River Otter', name: 'Oakhaven’s Envoy Otter', gearBonus: 3, lore: 'Rescued from the summit dam parapet right beneath the Act I Siphon Warden.' },
+
+  // Act II — Crystal Alpine Lakes (6 Alpine Newts)
+  { id: 'critter_s3_1', towerId: 3, act: 2, biome: 'alpine_lake', species: 'Alpine Newt', name: 'Lumi’s Frost Newt', gearBonus: 3, lore: 'Cobalt-bellied mountain newt resting in a sunlit snowmelt basin.' },
+  { id: 'critter_s3_2', towerId: 3, act: 2, biome: 'alpine_lake', species: 'Alpine Newt', name: 'Quartz the Tarn Climber', gearBonus: 3, lore: 'Found clinging to the wet granite crystals atop the first Gecko Wall-Scamper strip.' },
+  { id: 'critter_s3_3', towerId: 3, act: 2, biome: 'alpine_lake', species: 'Alpine Newt', name: 'Rime the Bell-Keeper', gearBonus: 3, lore: 'Loves the pentatonic echoes of the Mirror Tarn harmonic bells sanctum.' },
+  { id: 'critter_s4_1', towerId: 4, act: 2, biome: 'alpine_lake', species: 'Alpine Newt', name: 'Alpen the Viaduct Sprite', gearBonus: 3, lore: 'Freed beside the rose-gold snowmelt aqueduct bridge.' },
+  { id: 'critter_s4_2', towerId: 4, act: 2, biome: 'alpine_lake', species: 'Alpine Newt', name: 'Cirrus the Chasm Hopper', gearBonus: 3, lore: 'Nestled on the high glacial terrace just past the Tail-Grapple swing ring.' },
+  { id: 'critter_s4_3', towerId: 4, act: 2, biome: 'alpine_lake', species: 'Alpine Newt', name: 'Glacier’s Crown Newt', gearBonus: 3, lore: 'Rescued high above the alpenglow spillway under the alpine summit.' },
+
+  // Act III — Emerald Mist Bayous (6 Bayou Axolotls)
+  { id: 'critter_s5_1', towerId: 5, act: 3, biome: 'mist_bayou', species: 'Bayou Axolotl', name: 'Lotus the Golden Gill', gearBonus: 3, lore: 'Bioluminescent frilled axolotl glowing softly among the cypress root lanterns.' },
+  { id: 'critter_s5_2', towerId: 5, act: 3, biome: 'mist_bayou', species: 'Bayou Axolotl', name: 'Cypress the Dew-Walker', gearBonus: 3, lore: 'Discovered near the reversing flume conveyor switches in the sunken temple.' },
+  { id: 'critter_s5_3', towerId: 5, act: 3, biome: 'mist_bayou', species: 'Bayou Axolotl', name: 'Glimmer the Firefly Twin', gearBonus: 3, lore: 'Dances with marsh fireflies atop the mossy temple prism cornice.' },
+  { id: 'critter_s6_1', towerId: 6, act: 3, biome: 'mist_bayou', species: 'Bayou Axolotl', name: 'Mossback’s Reed Axolotl', gearBonus: 3, lore: 'Freed from a Siphon pod along the bioluminescent delta root terrace.' },
+  { id: 'critter_s6_2', towerId: 6, act: 3, biome: 'mist_bayou', species: 'Bayou Axolotl', name: 'Amber the Marsh Dancer', gearBonus: 3, lore: 'Perched above the emerald mist spillway next to the ancient water bells.' },
+  { id: 'critter_s6_3', towerId: 6, act: 3, biome: 'mist_bayou', species: 'Bayou Axolotl', name: 'Delta’s Sovereign Axolotl', gearBonus: 3, lore: 'Rescued from the summit mangrove altar guarded by the Bayou Warden.' },
+
+  // Act IV — Sunlit Coral Seas (6 Sea Turtles)
+  { id: 'critter_s7_1', towerId: 7, act: 4, biome: 'coral_sea', species: 'Sea Turtle', name: 'Koru the Hatchling', gearBonus: 3, lore: 'Bright green lagoon sea turtle freed above the turquoise staghorn coral shelves.' },
+  { id: 'critter_s7_2', towerId: 7, act: 4, biome: 'coral_sea', species: 'Sea Turtle', name: 'Atoll the Reef Glider', gearBonus: 3, lore: 'Found basking on a sunlit travertine sea-arch terrace beside a pearl chime.' },
+  { id: 'critter_s7_3', towerId: 7, act: 4, biome: 'coral_sea', species: 'Sea Turtle', name: 'Aurelia’s Wave-Rider', gearBonus: 3, lore: 'Swims alongside lagoon manta rays once the Atoll Spire’s crown opens.' },
+  { id: 'critter_s8_1', towerId: 8, act: 4, biome: 'coral_sea', species: 'Sea Turtle', name: 'Nacre the Shell-Keeper', gearBonus: 3, lore: 'Rescued from a Sea-Glass Citadel alcove overlooking the coral lagoon.' },
+  { id: 'critter_s8_2', towerId: 8, act: 4, biome: 'coral_sea', species: 'Sea Turtle', name: 'Lagoona the Prism Swimmer', gearBonus: 3, lore: 'Tucked beside the twin coral counterweight elevators.' },
+  { id: 'critter_s8_3', towerId: 8, act: 4, biome: 'coral_sea', species: 'Sea Turtle', name: 'Sunburst the Reef Elder', gearBonus: 3, lore: 'Ancient hawksbill navigator freed on the upper Sea-Glass Citadel parapet.' },
+
+  // Act V — Polar & Tempest Oceans (6 Polar Puffins)
+  { id: 'critter_s9_1', towerId: 9, act: 5, biome: 'storm_ocean', species: 'Polar Puffin', name: 'Borealis the Frost Diver', gearBonus: 3, lore: 'Plucky sea-bird sheltering from polar crosswinds behind an obsidian arch.' },
+  { id: 'critter_s9_2', towerId: 9, act: 5, biome: 'storm_ocean', species: 'Polar Puffin', name: 'Flurry the Aurora Wing', gearBonus: 3, lore: 'Found perched above the emerald-violet glacial trench grapple chasm.' },
+  { id: 'critter_s9_3', towerId: 9, act: 5, biome: 'storm_ocean', species: 'Polar Puffin', name: 'Drift the Ice-Skimmer', gearBonus: 3, lore: 'Calls out to migrating whales from the Aurora Spire summit terrace.' },
+  { id: 'critter_s10_1', towerId: 10, act: 5, biome: 'storm_ocean', species: 'Polar Puffin', name: 'Vortex the Brave Chick', gearBonus: 3, lore: 'Rescued from the outer hull ring of the colossal Mother Siphon platform.' },
+  { id: 'critter_s10_2', towerId: 10, act: 5, biome: 'storm_ocean', species: 'Polar Puffin', name: 'Solstice the Deep Scout', gearBonus: 3, lore: 'Hid inside a heated hydro-pipe niche halfway up the Mother Siphon.' },
+  { id: 'critter_s10_3', towerId: 10, act: 5, biome: 'storm_ocean', species: 'Polar Puffin', name: 'Pelagia’s Polar Herald', gearBonus: 3, lore: 'The thirtieth and final Earth Water-Critter, freed at the apex of the Mother Siphon!' }
 ];
 
 // ============================================================================
@@ -995,7 +1111,9 @@ const VALID_BUCKETS = new Set([
   'flood_rush',
   'sanctum_trials',
   'expedition',
-  'daily_tide'
+  'daily_tide',
+  'warden_gauntlet',
+  'master_watershed'
 ]);
 const BUCKET_ALIASES = {
   reboot: 'campaign',
@@ -1005,7 +1123,11 @@ const BUCKET_ALIASES = {
   endless: 'flood_rush',
   casual: 'sanctum_trials',
   endless_casual: 'sanctum_trials',
-  daily: 'daily_tide'
+  daily: 'daily_tide',
+  boss_rush: 'warden_gauntlet',
+  gauntlet: 'warden_gauntlet',
+  ng_plus: 'master_watershed',
+  master: 'master_watershed'
 };
 
 const VALID_MINIGAMES = new Set([
@@ -1027,6 +1149,7 @@ const SKIN_BY_ID = new Map(SKIN_CATALOG.map((s) => [s.id, s]));
 const FX_BY_ID = new Map(HYDRO_FX_CATALOG.map((b) => [b.id, b]));
 const LOG_BY_ID = new Map(WATERSHED_LOGS.map((r) => [r.id, r]));
 const CURIO_BY_ID = new Map(CURIO_CATALOG.map((c) => [c.id, c]));
+const CRITTER_BY_ID = new Map(CRITTER_CATALOG.map((c) => [c.id, c]));
 const MUTATION_BY_ID = new Map(BIO_MUTATIONS.map((m) => [m.id, m]));
 const TROPHY_BY_ID = new Map(TROPHIES.map((t) => [t.id, t]));
 const BIOME_KEYS = WATERSHED_BIOMES.map((b) => b.key);
@@ -1077,7 +1200,7 @@ function normalizeStarRecord(rec = {}) {
 
 function createFreshState() {
   return {
-    version: 5,
+    version: 6,
     settings: { ...DEFAULT_SETTINGS },
     highScores: {
       campaign: 0,
@@ -1085,7 +1208,9 @@ function createFreshState() {
       flood_rush: 0,
       sanctum_trials: 0,
       expedition: 0,
-      daily_tide: 0
+      daily_tide: 0,
+      warden_gauntlet: 0,
+      master_watershed: 0
     },
     watershedHealth: {
       canyon_river: 0,
@@ -1100,6 +1225,8 @@ function createFreshState() {
     unlockedBlasterFx: ['tidal_pearl'],
     collectedRelics: [],
     collectedCurios: [],
+    rescuedCritters: [],
+    sanctumSpireClears: [],
     unlockedTrophies: [],
     playedMiniGames: [],
     seenCutscenes: [],
@@ -1114,7 +1241,11 @@ function createFreshState() {
     puristClears: 0,
     casualExpeditionsCleared: 0,
     bestCasualDepth: 0,
-    vaultsCracked: 0
+    vaultsCracked: 0,
+    wardenGauntletClears: 0,
+    bestWardenGauntletBosses: 0,
+    bestWardenGauntletTimeSec: null,
+    masterWatershedClears: 0
   };
 }
 
@@ -1219,6 +1350,20 @@ export class ProgressionManager {
         fresh.collectedCurios = Array.from(cSet);
       }
 
+      if (Array.isArray(parsed.rescuedCritters)) {
+        const crSet = new Set();
+        for (const id of parsed.rescuedCritters) {
+          if (CRITTER_BY_ID.has(id)) crSet.add(id);
+        }
+        fresh.rescuedCritters = Array.from(crSet);
+      }
+
+      if (Array.isArray(parsed.sanctumSpireClears)) {
+        fresh.sanctumSpireClears = Array.from(
+          new Set(parsed.sanctumSpireClears.map((n) => Math.floor(Number(n))).filter((n) => n >= 1 && n <= 15))
+        );
+      }
+
       if (Array.isArray(parsed.unlockedTrophies)) {
         const tSet = new Set();
         for (const id of parsed.unlockedTrophies) {
@@ -1313,11 +1458,17 @@ export class ProgressionManager {
         'puristClears',
         'casualExpeditionsCleared',
         'bestCasualDepth',
-        'vaultsCracked'
+        'vaultsCracked',
+        'wardenGauntletClears',
+        'bestWardenGauntletBosses',
+        'masterWatershedClears'
       ]) {
         if (Number.isFinite(Number(parsed[field])) && Number(parsed[field]) > 0) {
           fresh[field] = Math.floor(Number(parsed[field]));
         }
+      }
+      if (parsed.bestWardenGauntletTimeSec != null && Number.isFinite(Number(parsed.bestWardenGauntletTimeSec))) {
+        fresh.bestWardenGauntletTimeSec = Math.max(0, Number(parsed.bestWardenGauntletTimeSec));
       }
 
       this.state = fresh;
@@ -1781,6 +1932,177 @@ export class ProgressionManager {
     return this.state.collectedCurios.length;
   }
 
+  // ================= 30 RESCUABLE EARTH WATER-CRITTER PODS =================
+
+  rescueCritter(critterId = null) {
+    let resolvedId = critterId ? String(critterId) : '';
+    if (!CRITTER_BY_ID.has(resolvedId)) {
+      const nextUnrescued = CRITTER_CATALOG.find((c) => !this.state.rescuedCritters.includes(c.id));
+      resolvedId = nextUnrescued ? nextUnrescued.id : CRITTER_CATALOG[0].id;
+    }
+    const def = CRITTER_BY_ID.get(resolvedId);
+    if (!def) return null;
+
+    const firstTime = !this.state.rescuedCritters.includes(resolvedId);
+    const newlyUnlockedTrophies = [];
+
+    if (firstTime) {
+      this.state.rescuedCritters.push(resolvedId);
+      const bonus = Math.max(1, def.gearBonus || 3);
+      this.state.gears += bonus;
+      this.state.lifetimeGears = Math.max(this.state.gears, (this.state.lifetimeGears || 0) + bonus);
+
+      const grant = (id) => {
+        const t = this._unlockTrophyNoSave(id);
+        if (t) newlyUnlockedTrophies.push(t);
+      };
+      grant('first_gear');
+      const count = this.state.rescuedCritters.length;
+      if (count >= 1) grant('relic_finder_1');
+      if (count >= 10) grant('curio_collector_4');
+      if (count >= 20) grant('relic_hunter_4');
+      if (count >= CRITTER_CATALOG.length) grant('curio_archivist_12');
+      for (const extra of this.drainPendingTrophies()) {
+        newlyUnlockedTrophies.push(extra);
+      }
+      this._save();
+    }
+
+    return {
+      rescued: true,
+      firstTime,
+      critter: { ...def },
+      totalRescued: this.state.rescuedCritters.length,
+      totalCatalog: CRITTER_CATALOG.length,
+      newlyUnlockedTrophies
+    };
+  }
+
+  isCritterRescued(critterId) {
+    return this.state.rescuedCritters.includes(String(critterId || ''));
+  }
+
+  getRescuedCritters() {
+    return [...this.state.rescuedCritters];
+  }
+
+  getCritterCount() {
+    return this.state.rescuedCritters.length;
+  }
+
+  getCritterStats() {
+    const byBiome = {};
+    const byTower = {};
+    for (const c of CRITTER_CATALOG) {
+      if (!byBiome[c.biome]) byBiome[c.biome] = { rescued: 0, total: 0 };
+      byBiome[c.biome].total += 1;
+      if (!byTower[c.towerId]) byTower[c.towerId] = { rescued: 0, total: 0 };
+      byTower[c.towerId].total += 1;
+      if (this.state.rescuedCritters.includes(c.id)) {
+        byBiome[c.biome].rescued += 1;
+        byTower[c.towerId].rescued += 1;
+      }
+    }
+    return {
+      rescued: this.state.rescuedCritters.length,
+      total: CRITTER_CATALOG.length,
+      byBiome,
+      byTower
+    };
+  }
+
+  // ================= WARDEN GAUNTLET, MASTER WATERSHED NG+ & 15 SANCTUMS =================
+
+  recordWardenGauntletRun({ bossesDefeated = 0, cleared = false, timeSec = null, score = 0 } = {}) {
+    const defeated = Math.max(0, Math.min(5, Math.floor(Number(bossesDefeated) || 0)));
+    const cleanScore = Math.max(0, Math.floor(Number(score) || 0));
+    const newlyUnlockedTrophies = [];
+    const grant = (id) => {
+      const t = this._unlockTrophyNoSave(id);
+      if (t) newlyUnlockedTrophies.push(t);
+    };
+
+    if (defeated > (this.state.bestWardenGauntletBosses || 0)) {
+      this.state.bestWardenGauntletBosses = defeated;
+    }
+    if (cleanScore > (this.state.highScores.warden_gauntlet || 0)) {
+      this.state.highScores.warden_gauntlet = cleanScore;
+    }
+    if (defeated >= 1) grant('warden_slayer');
+    if (cleared || defeated >= 5) {
+      this.state.wardenGauntletClears = (this.state.wardenGauntletClears || 0) + 1;
+      this.state.gears += 25;
+      this.state.lifetimeGears = Math.max(this.state.gears, (this.state.lifetimeGears || 0) + 25);
+      if (timeSec != null && Number.isFinite(Number(timeSec))) {
+        const t = Math.max(0, Number(timeSec));
+        if (this.state.bestWardenGauntletTimeSec == null || t < this.state.bestWardenGauntletTimeSec) {
+          this.state.bestWardenGauntletTimeSec = Math.round(t * 10) / 10;
+        }
+      }
+      grant('flawless_sector');
+      grant('watershed_envoy');
+    }
+    for (const extra of this.drainPendingTrophies()) newlyUnlockedTrophies.push(extra);
+    this._save();
+    return {
+      clears: this.state.wardenGauntletClears || 0,
+      bestBosses: this.state.bestWardenGauntletBosses || 0,
+      bestTimeSec: this.state.bestWardenGauntletTimeSec,
+      newlyUnlockedTrophies
+    };
+  }
+
+  getWardenGauntletStats() {
+    return {
+      clears: this.state.wardenGauntletClears || 0,
+      bestBosses: this.state.bestWardenGauntletBosses || 0,
+      bestTimeSec: this.state.bestWardenGauntletTimeSec ?? null,
+      highScore: this.state.highScores.warden_gauntlet || 0
+    };
+  }
+
+  recordMasterWatershedClear({ towerId = 1, score = 0, fullCampaignClear = false } = {}) {
+    const cleanScore = Math.max(0, Math.floor(Number(score) || 0));
+    const newlyUnlockedTrophies = [];
+    if (cleanScore > (this.state.highScores.master_watershed || 0)) {
+      this.state.highScores.master_watershed = cleanScore;
+    }
+    this.state.gears += 10;
+    this.state.lifetimeGears = Math.max(this.state.gears, (this.state.lifetimeGears || 0) + 10);
+    if (fullCampaignClear || Number(towerId) >= 10) {
+      this.state.masterWatershedClears = (this.state.masterWatershedClears || 0) + 1;
+      const t = this._unlockTrophyNoSave('watershed_sovereign');
+      if (t) newlyUnlockedTrophies.push(t);
+    }
+    for (const extra of this.drainPendingTrophies()) newlyUnlockedTrophies.push(extra);
+    this._save();
+    return {
+      clears: this.state.masterWatershedClears || 0,
+      highScore: this.state.highScores.master_watershed || 0,
+      newlyUnlockedTrophies
+    };
+  }
+
+  getMasterWatershedStats() {
+    return {
+      clears: this.state.masterWatershedClears || 0,
+      highScore: this.state.highScores.master_watershed || 0
+    };
+  }
+
+  recordSanctumSpireClear(spireNum = 1) {
+    const n = Math.floor(Number(spireNum) || 0);
+    if (n >= 1 && n <= 15 && !this.state.sanctumSpireClears.includes(n)) {
+      this.state.sanctumSpireClears.push(n);
+      this._save();
+    }
+    return [...this.state.sanctumSpireClears];
+  }
+
+  getSanctumSpireClears() {
+    return [...(this.state.sanctumSpireClears || [])];
+  }
+
   // ================= SANCTUM TRIALS, EXPEDITION & FLOOD RUSH =================
 
   recordCasualExpedition({
@@ -2115,8 +2437,21 @@ export class ProgressionManager {
           if (res?.newlyUnlockedTrophies?.length) {
             unlockedNow.push(...res.newlyUnlockedTrophies);
           }
+        } else if (payload.type === 'critter_pod' || payload.type === 'critterPod') {
+          const res = this.rescueCritter(payload.critterId || payload.id || null);
+          if (res?.newlyUnlockedTrophies?.length) {
+            unlockedNow.push(...res.newlyUnlockedTrophies);
+          }
         }
         break;
+
+      case 'critter_rescue': {
+        const res = this.rescueCritter(payload.critterId || payload.id || null);
+        if (res?.newlyUnlockedTrophies?.length) {
+          unlockedNow.push(...res.newlyUnlockedTrophies);
+        }
+        break;
+      }
 
       case 'sub_complete':
       case 'reef_swim_complete':

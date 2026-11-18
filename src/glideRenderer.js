@@ -16,8 +16,8 @@ import { GatewayRig } from './gateway.js';
 
 const TAU = Math.PI * 2;
 const DEG = Math.PI / 180;
-const FOV = 50;
-const CAM_Z = 16;
+const FOV = 48;
+const CAM_Z = 10.4;
 
 const MAX_DEW = 80;
 const MAX_GATES = 10;
@@ -165,8 +165,9 @@ class AdaptiveFrillGliderHero {
     this._liveMount = new THREE.Group();
     this._liveMount.rotation.order = 'YXZ';
     this._liveMount.rotation.set(1.28, Math.PI * 0.5, 0);
-    this._liveMount.scale.setScalar(1.76);
-    this._liveMount.position.set(-0.88, -0.18, 0);
+    this._liveMount.scale.setScalar(1.92);
+    this._liveMount.position.set(-0.95, -0.18, 0);
+    this.frillWingsGroup.scale.setScalar(1.28);
     this._liveMount.add(this.liveRig.group);
     this.bodyCarrier.add(this._liveMount);
     this.fallback = this._buildSculptedFallback(pal);
@@ -500,46 +501,75 @@ function createFeatheredCascadeTexture() {
 
 function buildCraggyMesaGeo(w, h, seed) {
   const parts = [];
-  // Flat-topped terraced canyon mesa with craggy vertical facets (ZERO cylinder+cone look!)
-  const core = new THREE.CylinderGeometry(w * 0.82, w * 1.28, h, 11, 8);
+  // UV-clean multi-tiered Sedona/Karst sea-stack & mesa with stepped talus & secondary pinnacle!
+  const core = new THREE.CylinderGeometry(w * 0.68, w * 1.32, h, 18, 10);
   const pos = core.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     let x = pos.getX(i);
     let y = pos.getY(i);
     let z = pos.getZ(i);
     const yn = (y + h * 0.5) / h;
-    const step = 1.0 + 0.14 * Math.sin(yn * 16.0 + seed) + 0.10 * Math.cos(Math.atan2(z, x) * 5 + seed * 1.7);
+    const ang = Math.atan2(z, x);
+    const step =
+      1.0 -
+      yn * 0.14 +
+      0.16 * Math.sin(yn * 14.0 + seed) +
+      0.14 * Math.cos(ang * 3 + seed * 1.3) +
+      0.08 * Math.sin(ang * 5 - yn * 8.0);
     x *= step;
-    z *= step * 0.82;
-    if (yn > 0.94) {
-      y += Math.sin(x * 1.8 + seed) * 0.18;
+    z *= step * 0.85;
+    if (yn > 0.92) {
+      y += (Math.sin(ang * 2 + seed) * 0.35 + Math.cos(ang * 3) * 0.22) * w * 0.35;
     }
     pos.setXYZ(i, x, y, z);
   }
   core.computeVertexNormals();
   parts.push(core);
 
-  // Side sandstone talus buttresses for natural geological silhouette
+  // UV-clean SphereGeometry side rock buttresses (continuous 0..1 UVs, zero broken polyhedron UVs!)
   for (const dir of [-1, 1]) {
-    const buttress = new THREE.DodecahedronGeometry(w * 0.58, 1);
-    buttress.scale(1.15, 1.35, 0.78);
-    buttress.translate(dir * w * 0.78, -h * 0.24, 0.15 * dir);
+    const buttress = new THREE.SphereGeometry(w * 0.64, 14, 10);
+    const bp = buttress.attributes.position;
+    for (let k = 0; k < bp.count; k++) {
+      const bx = bp.getX(k);
+      const by = bp.getY(k);
+      const bz = bp.getZ(k);
+      const jag = 1.0 + 0.14 * Math.sin(by * 3.2 + seed + dir);
+      bp.setXYZ(k, bx * 1.15 * jag, by * 1.55 * jag, bz * 0.82 * jag);
+    }
+    buttress.computeVertexNormals();
+    buttress.translate(dir * w * 0.82, -h * 0.22, 0.15 * dir);
     parts.push(buttress);
   }
 
   if (BufferGeometryUtils && typeof BufferGeometryUtils.mergeGeometries === 'function') {
-    const normalized = parts.map((g) => {
-      const ng = g.index ? g.toNonIndexed() : g;
-      if (!ng.attributes.uv) {
-        const cnt = ng.attributes.position.count;
-        ng.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(cnt * 2), 2));
-      }
-      return ng;
-    });
+    const normalized = parts.map((g) => (g.index ? g.toNonIndexed() : g));
     const merged = BufferGeometryUtils.mergeGeometries(normalized, false);
     if (merged) return merged;
   }
   return core;
+}
+
+function loadGlideWebp(url, isSrgb = true, rx = 1, ry = 1, onReady = null) {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return null;
+  try {
+    const loader = new THREE.TextureLoader();
+    return loader.load(
+      url,
+      (t) => {
+        t.wrapS = rx > 1 ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+        t.wrapT = ry > 1 ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+        if (rx > 1 || ry > 1) t.repeat.set(rx, ry);
+        t.colorSpace = isSrgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+        t.needsUpdate = true;
+        onReady?.(t);
+      },
+      undefined,
+      () => {}
+    );
+  } catch {
+    return null;
+  }
 }
 
 function buildGlideEnvMap(webgl) {
@@ -662,78 +692,94 @@ export class GlideRenderer {
     this.camera = new THREE.PerspectiveCamera(FOV, this.width / Math.max(1, this.height), 0.2, 240);
     this.camera.position.set(0, 0, CAM_Z);
 
-    this.hemiLight = new THREE.HemisphereLight('#fffbeb', '#0d9488', 1.35);
+    this.hemiLight = new THREE.HemisphereLight('#fffbeb', '#14b8a6', 1.45);
     this.scene.add(this.hemiLight);
 
-    this.sunLight = new THREE.DirectionalLight('#fff7ed', 2.45);
-    this.sunLight.position.set(12, 22, 10);
+    this.sunLight = new THREE.DirectionalLight('#fff7ed', 2.65);
+    this.sunLight.position.set(14, 22, 18);
     this.scene.add(this.sunLight);
 
-    // Multi-Band Atmospheric Sky Cyclorama + Soft Sun Halo Backdrop
-    this.skyBackdrop = new THREE.Mesh(
-      new THREE.PlaneGeometry(240, 108),
-      new THREE.MeshBasicMaterial({ map: this.skyTex, fog: false, depthWrite: false })
-    );
-    this.skyBackdrop.position.set(0, 6.5, -78);
+    // Multi-Band Cumulus Sky & Layered Gorge Horizon (`assets/textures/mg_canyon_sky.webp`)
+    // Sized & centered at `z = -56` so clouds + distant canyon mountains fill 100% of the sky above the water!
+    this.skyBackdropMat = new THREE.MeshBasicMaterial({ map: this.skyTex, fog: false, depthWrite: false });
+    this.skyBackdrop = new THREE.Mesh(new THREE.PlaneGeometry(165, 52), this.skyBackdropMat);
+    this.skyBackdrop.position.set(0, 8.8, -56);
     this.scene.add(this.skyBackdrop);
 
     this.sunDisc = new THREE.Mesh(
-      new THREE.CircleGeometry(4.2, 28),
+      new THREE.CircleGeometry(3.2, 28),
       new THREE.MeshBasicMaterial({ color: '#fffbeb', fog: false, depthWrite: false })
     );
-    this.sunDisc.position.set(11, 8.2, -72);
+    this.sunDisc.position.set(12, 10.5, -52);
     this.scene.add(this.sunDisc);
 
-    // Parallax 3D Stratified Canyon Mesas / Snow-Capped Buttes + Feathered Waterfalls + Mist!
+    // Parallax 3D PBR Sedona Mesas + Feathered Redwood/Palm Foliage Cards + Shore-Foam Rings!
     this.canyonGroup = new THREE.Group();
     this.cliffMat = new THREE.MeshStandardMaterial({
-      color: '#d98a6c',
+      color: '#ffffff',
       map: this.mesaTex,
-      bumpMap: this.mesaTex,
-      bumpScale: 0.26,
-      roughness: 0.80,
+      roughness: 0.72,
       metalness: 0.04,
     });
-    this.capMat = new THREE.MeshStandardMaterial({ color: '#15803d', roughness: 0.68 });
+    this.foliageCardMat = new THREE.MeshStandardMaterial({
+      color: '#ffffff',
+      roughness: 0.65,
+      alphaTest: 0.32,
+      side: THREE.DoubleSide,
+      transparent: true,
+    });
     this.fallsMat = new THREE.MeshBasicMaterial({
       map: this.cascadeTex,
       color: '#f0fdfa',
       transparent: true,
-      opacity: 0.88,
+      opacity: 0.90,
       depthWrite: false,
     });
     const mistPlumeMat = new THREE.MeshBasicMaterial({
-      color: '#e0f2fe',
+      color: '#f0fdfa',
       transparent: true,
-      opacity: 0.34,
+      opacity: 0.42,
       blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const shoreFoamMat = new THREE.MeshBasicMaterial({
+      color: '#f0fdfa',
+      transparent: true,
+      opacity: 0.68,
+      side: THREE.DoubleSide,
       depthWrite: false,
     });
 
     this.canyonPillars = [];
     for (let i = 0; i < MAX_CANYON_PILLARS; i++) {
       const p = new THREE.Group();
-      const h = 8.2 + (i % 4) * 2.9;
-      const w = 2.9 + (i % 3) * 1.05;
+      const h = 7.6 + (i % 4) * 2.4;
+      const w = 2.4 + (i % 3) * 0.85;
       const mesaGeo = buildCraggyMesaGeo(w, h, 300 + i * 29);
       const mesa = new THREE.Mesh(mesaGeo, this.cliffMat);
-      mesa.position.y = h * 0.5 - 8.5;
+      mesa.position.y = h * 0.5 - 2.2;
       p.add(mesa);
 
-      // Organic multi-cluster rim vegetation / snow-shelf cushions (ZERO cones!)
-      for (let c = 0; c < 4; c++) {
-        const shrub = new THREE.Mesh(new THREE.DodecahedronGeometry(w * (0.34 - c * 0.04), 1), this.capMat);
-        shrub.scale.set(1.35, 0.52, 1.05);
-        shrub.position.set((c - 1.5) * w * 0.38, h - 8.45 + (c % 2) * 0.18, (c % 2 - 0.5) * 0.45);
-        p.add(shrub);
+      // Whitewater shore-foam collar ring where the mesa meets the sparkling river/lagoon!
+      const foamRing = new THREE.Mesh(new THREE.RingGeometry(w * 1.05, w * 1.55, 24), shoreFoamMat);
+      foamRing.rotation.x = -Math.PI * 0.49;
+      foamRing.position.y = 0.08;
+      p.add(foamRing);
+
+      // Feathered Alpha-Cutout Redwood/Pine Clifftop Botanical Cards (ZERO green pancake caps!)
+      for (let c = 0; c < 3; c++) {
+        const card = new THREE.Mesh(new THREE.PlaneGeometry(w * 1.15, w * 1.28), this.foliageCardMat);
+        card.position.set((c - 1) * w * 0.48, h - 1.55 + (c % 2) * 0.25, (c - 1) * 0.22);
+        card.rotation.y = (c - 1) * 0.35;
+        p.add(card);
       }
 
       if (i % 3 === 0) {
-        const wf = new THREE.Mesh(new THREE.PlaneGeometry(1.85, h * 0.92), this.fallsMat);
-        wf.position.set(0.15, h * 0.44 - 8.5, w * 0.92);
-        const mist = new THREE.Mesh(new THREE.SphereGeometry(w * 0.65, 12, 8), mistPlumeMat);
-        mist.scale.set(1.4, 0.55, 0.85);
-        mist.position.set(0.15, -7.8, w * 1.05);
+        const wf = new THREE.Mesh(new THREE.PlaneGeometry(1.75, h * 0.88), this.fallsMat);
+        wf.position.set(0.12, h * 0.44 - 1.8, w * 0.96);
+        const mist = new THREE.Mesh(new THREE.SphereGeometry(w * 0.62, 12, 8), mistPlumeMat);
+        mist.scale.set(1.45, 0.52, 0.85);
+        mist.position.set(0.12, 0.25, w * 1.12);
         p.add(wf, mist);
       }
       this.canyonGroup.add(p);
@@ -764,22 +810,54 @@ export class GlideRenderer {
       this.rainbows.push(rg);
     }
 
-    // Sparkling Canyon River / Coral Lagoon Water Surface below (`seaY`)
+    // Sparkling Canyon River / Coral Lagoon Water Surface (`mg_whitewater_rapids.webp`, zero grid lines!)
     this.waterMat = new THREE.MeshStandardMaterial({
-      color: '#14b8a6',
+      color: '#ffffff',
       map: this.waterRippleTex,
       bumpMap: this.waterRippleTex,
-      bumpScale: 0.10,
-      emissive: '#0d9488',
+      bumpScale: 0.12,
+      emissive: '#0891b2',
       emissiveMap: this.waterRippleTex,
-      emissiveIntensity: 0.32,
-      roughness: 0.12,
-      metalness: 0.22,
+      emissiveIntensity: 0.28,
+      roughness: 0.10,
+      metalness: 0.20,
     });
-    this.waterMesh = new THREE.Mesh(new THREE.PlaneGeometry(120, 48, 48, 12), this.waterMat);
-    this.waterMesh.rotation.x = -Math.PI * 0.48;
-    this.waterMesh.position.set(0, -6.2, -8);
+    this.waterGeo = new THREE.PlaneGeometry(110, 44, 48, 16);
+    this.waterMesh = new THREE.Mesh(this.waterGeo, this.waterMat);
+    this.waterMesh.rotation.x = -Math.PI * 0.49;
+    this.waterMesh.position.set(0, -4.2, -12);
     this.scene.add(this.waterMesh);
+
+    // Mount 1K Seamless PBR WebP Textures (`mg_canyon_sky.webp`, `mg_sedona_cliff_*`, `mg_whitewater_rapids.webp`, `biome_foliage_redwood.webp`)
+    loadGlideWebp('assets/textures/mg_canyon_sky.webp', true, 1, 1, (t) => {
+      if (this._disposed) return;
+      this.skyBackdropMat.map = t;
+      this.skyBackdropMat.needsUpdate = true;
+    });
+    loadGlideWebp('assets/textures/mg_sedona_cliff_albedo.webp', true, 2, 2, (t) => {
+      if (this._disposed) return;
+      this.cliffMat.map = t;
+      this.cliffMat.needsUpdate = true;
+    });
+    loadGlideWebp('assets/textures/mg_sedona_cliff_normal.webp', false, 2, 2, (t) => {
+      if (this._disposed) return;
+      this.cliffMat.normalMap = t;
+      this.cliffMat.normalScale.set(1.25, 1.25);
+      this.cliffMat.needsUpdate = true;
+    });
+    loadGlideWebp('assets/textures/mg_whitewater_rapids.webp', true, 5, 2, (t) => {
+      if (this._disposed) return;
+      this.waterWebp = t;
+      this.waterMat.map = t;
+      this.waterMat.bumpMap = t;
+      this.waterMat.emissiveMap = t;
+      this.waterMat.needsUpdate = true;
+    });
+    loadGlideWebp('assets/textures/biome_foliage_redwood.webp', true, 1, 1, (t) => {
+      if (this._disposed) return;
+      this.foliageCardMat.map = t;
+      this.foliageCardMat.needsUpdate = true;
+    });
 
     // Departure Spire Crown (`summit`) & Arrival Spire + Sunlit Shore (`tower`)
     const spireMat = new THREE.MeshStandardMaterial({ color: '#64748b', roughness: 0.55, metalness: 0.18 });
@@ -970,28 +1048,38 @@ export class GlideRenderer {
     this.scene.background.set(pal.skyTop);
     this.scene.fog.color.set(pal.fog);
     this.sunLight.color.set(pal.sun);
-    this.cliffMat.color.set(pal.cliff);
-    this.capMat.color.set(pal.cap);
-    this.waterMat.color.set(pal.water);
+    this.cliffMat.color.set(bKey === 'alpine_lake' ? '#cbd5e1' : bKey === 'storm_ocean' ? '#94a3b8' : '#ffffff');
 
     const scroll = Number(stage.scroll) || time * 110;
     this.cascadeTex.offset.set(0, -(time * 1.35) % 1);
     this.waterRippleTex.offset.set((scroll * 0.0025) % 1, Math.sin(time * 0.4) * 0.05);
+    if (this.waterWebp) {
+      this.waterWebp.offset.set((scroll * 0.0022) % 1, Math.sin(time * 0.4) * 0.04);
+    }
+    // Animate organic water swells so zero flat plane lines ever appear
+    const wPos = this.waterGeo.attributes.position;
+    for (let i = 0; i < wPos.count; i++) {
+      const wx = wPos.getX(i);
+      const wy = wPos.getY(i);
+      wPos.setZ(i, Math.sin(wx * 0.35 + scroll * 0.02 + time * 1.6) * 0.16 + Math.cos(wy * 0.45 + time * 1.2) * 0.10);
+    }
+    wPos.needsUpdate = true;
+
     const seaY = stage.seaY ?? this.height * 0.905;
     const seaW = this._screenToWorld(this.width * 0.5, seaY, 0);
-    this.waterMesh.position.y = seaW.y - 0.15;
+    this.waterMesh.position.y = seaW.y - 0.12;
 
-    // Scroll Parallax 3D Canyon Pillars, Waterfalls & Prismatic Rainbow Mist Arcs
+    // Scroll Parallax 3D Canyon Mesas (aligned at `seaW.y` waterline so shore-foam rings sit on the water!)
     for (let i = 0; i < MAX_CANYON_PILLARS; i++) {
       const p = this.canyonPillars[i];
-      const z = -12 - (i % 3) * 8;
-      const px = (((i * 9.5 - scroll * (0.016 - (i % 3) * 0.003)) % 112) + 112) % 112 - 56;
-      p.position.set(px, seaW.y, z);
+      const z = -9.5 - (i % 3) * 6.5;
+      const px = (((i * 8.2 - scroll * (0.014 - (i % 3) * 0.0025)) % 96) + 96) % 96 - 48;
+      p.position.set(px, seaW.y - 0.15, z);
     }
     for (let r = 0; r < MAX_RAINBOWS; r++) {
       const rg = this.rainbows[r];
-      const rx = (((r * 24 - scroll * 0.014) % 96) + 96) % 96 - 48;
-      rg.position.set(rx, seaW.y + 0.6, -13.5);
+      const rx = (((r * 22 - scroll * 0.012) % 88) + 88) % 88 - 44;
+      rg.position.set(rx, seaW.y + 0.35, -11.5);
     }
 
     // Summit Departure Spire & Arrival Spire

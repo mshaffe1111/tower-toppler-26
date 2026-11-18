@@ -683,23 +683,14 @@ def run_blender_pipeline():
             su = (0.16 + 0.10 * ang) if tx >= 0 else (0.84 + 0.10 * ang)
             sv = v_override if v_override is not None else clamp01(ty / 1.16)
         else:
-            z_ref = (tz + 0.028) if ty > 0.94 else tz
-            su_raw = 0.5 + math.atan2(tx, z_ref if abs(z_ref) > 1e-5 else 1e-5) / (2.0 * math.pi)
-            if tz < -0.05 and ty < 0.62:
-                t_tail = clamp01((-tz - 0.05) / 0.12)
-                su_tail = 0.5 + (su_raw - 0.5) * 0.44
-                su = su_raw * (1.0 - t_tail) + su_tail * t_tail
-                sv_tail = clamp01(0.56 - (-tz - 0.05) * 0.52)
+            z_eff = tz + max(0.0, ty - 0.955) * 0.95
+            su = 0.5 + math.atan2(tx, z_eff if abs(z_eff) > 1e-5 else 1e-5) / (2.0 * math.pi)
+            if ty > 0.955:
+                h_blend = clamp01((ty - 0.955) / 0.035)
+                sv_head = clamp01(0.76 + (ty - 0.955) * 0.85 + max(0.0, tz) * 0.48)
                 sv_base = v_override if v_override is not None else clamp01(ty / 1.16)
-                sv = sv_base * (1.0 - t_tail) + sv_tail * t_tail
-            elif ty > 0.95:
-                h_blend = clamp01((ty - 0.95) / 0.04)
-                sv_head = clamp01(0.76 + (ty - 0.95) * 0.85 + max(0.0, tz) * 0.62)
-                sv_base = v_override if v_override is not None else clamp01(ty / 1.16)
-                su = su_raw
                 sv = sv_base * (1.0 - h_blend) + sv_head * h_blend
             else:
-                su = su_raw
                 sv = v_override if v_override is not None else clamp01(ty / 1.16)
         return (0.04 + clamp01(su) * 0.62, 0.03 + clamp01(sv) * 0.70)
 

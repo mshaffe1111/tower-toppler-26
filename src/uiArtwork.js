@@ -636,7 +636,8 @@ export function getPlayMedallionSVG(modeId = 'campaign') {
 export function getGameModeArtSVG(modeId = 'campaign') {
   const raw = String(modeId || 'campaign').toLowerCase();
   let kind = 'campaign';
-  if (raw.includes('purist') || raw.includes('arcade')) kind = 'purist';
+  if (raw.includes('gauntlet') || raw.includes('warden') || raw.includes('boss')) kind = 'warden_gauntlet';
+  else if (raw.includes('purist') || raw.includes('arcade')) kind = 'purist';
   else if (raw.includes('flood') || raw.includes('rush') || raw.includes('survival')) kind = 'flood_rush';
   else if (raw.includes('sanctum') || raw.includes('trial') || raw.includes('puzzle') || raw.includes('casual')) kind = 'sanctum_trials';
   else if (raw.includes('expedition') || raw.includes('endless') || raw.includes('rogue')) kind = 'expedition';
@@ -780,6 +781,17 @@ export function getGameModeArtSVG(modeId = 'campaign') {
     `;
   }
 
+  const modePlateMap = {
+    campaign: './assets/textures/story_keyframe_prologue.webp',
+    purist: './assets/textures/story_portrait_warden.webp',
+    flood_rush: './assets/textures/story_keyframe_finale.webp',
+    sanctum_trials: './assets/textures/story_keyframe_purification.webp',
+    expedition: './assets/textures/story_portrait_gateway.webp',
+    daily_tide: './assets/textures/story_keyframe_purification.webp',
+    warden_gauntlet: './assets/textures/story_portrait_warden.webp',
+  };
+  const plateHref = modePlateMap[kind] || modePlateMap.campaign;
+
   return `
 <svg class="spire-art-bg spire-art-${kind}" viewBox="0 0 220 250" preserveAspectRatio="xMidYMid slice" style="position:absolute;inset:1.6px;width:calc(100% - 3.2px);height:calc(100% - 3.2px);z-index:1;clip-path:var(--poly-spire-arch,none);pointer-events:none;" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
   <defs>
@@ -803,17 +815,18 @@ export function getGameModeArtSVG(modeId = 'campaign') {
     </linearGradient>
     <linearGradient id="${uid}-veil" x1="0%" y1="0%" x2="0%" y2="100%">
       <stop offset="0%" stop-color="#041828" stop-opacity="0"/>
-      <stop offset="56%" stop-color="#041828" stop-opacity="0.18"/>
+      <stop offset="56%" stop-color="#041828" stop-opacity="0.22"/>
       <stop offset="80%" stop-color="#041828" stop-opacity="0.82"/>
       <stop offset="100%" stop-color="#03111d" stop-opacity="0.95"/>
     </linearGradient>
   </defs>
 
   <rect width="220" height="250" fill="url(#${uid}-sky)"/>
-  ${sceneBody}
+  <g opacity="0.46">${sceneBody}</g>
+  <image href="${plateHref}" x="0" y="0" width="220" height="218" preserveAspectRatio="xMidYMid slice" opacity="0.72"/>
   <rect width="220" height="250" fill="url(#${uid}-veil)"/>
   <path d="M 7 243 L 7 88 Q 7 24 110 7 Q 213 24 213 88 L 213 243 Z"
-        fill="none" stroke="url(#${uid}-bronze)" stroke-width="1.9" opacity="0.78"/>
+        fill="none" stroke="url(#${uid}-bronze)" stroke-width="1.9" opacity="0.84"/>
 </svg>`.trim();
 }
 
@@ -981,96 +994,34 @@ export function getMinigamePortalSVG(gameId = 'core_descent') {
 // ============================================================================
 
 export function getCutscenePortraitSVG(speaker = 'gateway') {
-  const key = String(speaker || 'gateway').toLowerCase();
+  const raw = String(speaker || 'gateway').toLowerCase();
+  const key = raw.includes('naiad')
+    ? 'naiad'
+    : raw.includes('guardian')
+    ? 'guardian'
+    : raw.includes('warden')
+    ? 'warden'
+    : 'gateway';
   const uid = nextUid(`port-${key}`);
 
-  if (key === 'naiad') {
-    const lotusStar = buildStarBurstPath(32, 30, 18, 7, 8, 22.5);
-    return `
-      <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <defs>
-          <radialGradient id="${uid}-g" cx="50%" cy="45%" r="52%">
-            <stop offset="0%" stop-color="#e0f2fe"/>
-            <stop offset="48%" stop-color="#38bdf8"/>
-            <stop offset="100%" stop-color="#0369a1" stop-opacity="0.2"/>
-          </radialGradient>
-        </defs>
-        <circle cx="32" cy="32" r="28" fill="none" stroke="#7dd3fc" stroke-width="1.2" stroke-dasharray="6 3"/>
-        <circle cx="32" cy="32" r="22" fill="url(#${uid}-g)" opacity="0.45"/>
-        <path d="${lotusStar}" fill="rgba(125,211,252,0.35)" stroke="#bae6fd" stroke-width="1.3"/>
-        <path d="M 32 14 C 24 24, 22 31, 22 36 A 10 10 0 0 0 42 36 C 42 31, 40 24, 32 14 Z" fill="#38bdf8" stroke="#ffffff" stroke-width="1.5"/>
-        <ellipse cx="28" cy="34" rx="2.2" ry="3.2" fill="#ffffff"/>
-        <ellipse cx="36" cy="34" rx="2.2" ry="3.2" fill="#ffffff"/>
-        <path d="M 18 49 Q 32 55 46 49" fill="none" stroke="#5efce8" stroke-width="1.8" stroke-linecap="round"/>
-      </svg>`.trim();
-  }
+  const rimPalette = {
+    gateway: { stroke: '#5efce8', inner: '#fde047', bg: '#083344' },
+    naiad: { stroke: '#7dd3fc', inner: '#e0f2fe', bg: '#082f49' },
+    guardian: { stroke: '#fde047', inner: '#6ee7b7', bg: '#064e3b' },
+    warden: { stroke: '#fb7185', inner: '#fda4af', bg: '#2e1065' },
+  }[key];
 
-  if (key === 'guardian') {
-    return `
-      <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <circle cx="32" cy="32" r="28" fill="none" stroke="#fde047" stroke-width="1.2" stroke-dasharray="5 3"/>
-        <!-- Flowing River-Kelp Crown & Elemental Spirit Crest -->
-        <path d="M 18 26 C 10 16, 14 8, 23 14 M 46 26 C 54 16, 50 8, 41 14" fill="none" stroke="#34d399" stroke-width="3" stroke-linecap="round"/>
-        <path d="M 32 10 L 37 19 L 32 24 L 27 19 Z" fill="#fde047" stroke="#ffffff" stroke-width="1"/>
-        <path d="M 18 32 C 18 21, 24 16, 32 16 C 40 16, 46 21, 46 32 C 46 43, 39 50, 32 52 C 25 50, 18 43, 18 32 Z"
-              fill="rgba(16,185,129,0.34)" stroke="#6ee7b7" stroke-width="1.8"/>
-        <ellipse cx="25.5" cy="32" rx="3.4" ry="2.4" fill="#fef08a"/>
-        <ellipse cx="38.5" cy="32" rx="3.4" ry="2.4" fill="#fef08a"/>
-        <path d="M 24 42 Q 32 46 40 42" fill="none" stroke="#a7f3d0" stroke-width="1.8" stroke-linecap="round"/>
-      </svg>`.trim();
-  }
-
-  if (key === 'warden') {
-    return `
-      <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <polygon points="32,4 56,18 56,46 32,60 8,46 8,18" fill="rgba(159,18,57,0.28)" stroke="#fb7185" stroke-width="1.8"/>
-        <polygon points="16,22 32,12 48,22 44,46 32,53 20,46" fill="#1e1b4b" stroke="#fda4af" stroke-width="1.4"/>
-        <!-- Siphon Turbine Visor & Crimson Core -->
-        <polygon points="18,28 46,28 42,35 22,35" fill="#be123c"/>
-        <circle cx="32" cy="31.5" r="5.5" fill="#fb7185" stroke="#ffffff" stroke-width="1.2"/>
-        <circle cx="32" cy="31.5" r="2.2" fill="#fef08a"/>
-        <path d="M 23 42 H 41 M 26 46 H 38" stroke="#fb7185" stroke-width="1.6" stroke-linecap="round"/>
-      </svg>`.trim();
-  }
-
-  // Default: GATEWAY — Iridescent Female Alien Hydro-Lizard with Aquatic Head-Frills & Soulful Eyes!
   return `
     <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <defs>
-        <linearGradient id="${uid}-scale" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#99f6e4"/>
-          <stop offset="52%" stop-color="#14b8a6"/>
-          <stop offset="100%" stop-color="#0e7490"/>
-        </linearGradient>
-        <linearGradient id="${uid}-frill" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#5efce8"/>
-          <stop offset="60%" stop-color="#fb7185"/>
-          <stop offset="100%" stop-color="#fde047"/>
-        </linearGradient>
+        <clipPath id="${uid}-hex">
+          <polygon points="16,3 48,3 62,32 48,61 16,61 2,32"/>
+        </clipPath>
       </defs>
-      <!-- Swept-Back Iridescent Aquatic Lizard Head-Frills -->
-      <path d="M 19 24 C 8 15, 4 23, 12 31 C 5 33, 7 40, 18 38 Z" fill="url(#${uid}-frill)" stroke="#ccfbf1" stroke-width="1.2"/>
-      <path d="M 45 24 C 56 15, 60 23, 52 31 C 59 33, 57 40, 46 38 Z" fill="url(#${uid}-frill)" stroke="#ccfbf1" stroke-width="1.2"/>
-      <!-- Sleek Shoulders, Pearlescent Hydro-Conduit Collar & Harmonic Water Seed -->
-      <path d="M 15 57 C 18 47, 24 44, 32 44 C 40 44, 46 47, 49 57" fill="#0f766e" stroke="#99f6e4" stroke-width="1.6" stroke-linecap="round"/>
-      <polygon points="32,46 36,52 32,58 28,52" fill="#5efce8" stroke="#ffffff" stroke-width="1"/>
-      <!-- Feminine Sculpted Alien Lizard Head & Crown Crest -->
-      <path d="M 32 10 C 35 14, 35 18, 32 21 C 29 18, 29 14, 32 10 Z" fill="#fde047"/>
-      <path d="M 32 14 C 21 14, 17 22, 18 31 C 19 39, 25 44, 32 45 C 39 44, 45 39, 46 31 C 47 22, 43 14, 32 14 Z"
-            fill="url(#${uid}-scale)" stroke="#ccfbf1" stroke-width="1.6"/>
-      <!-- Large Soulful Amber-Emerald Reptilian Eyes + Eyelashes + Corneal Catchlights -->
-      <path d="M 20 27 Q 24.5 24 28.5 28" fill="none" stroke="#042f2e" stroke-width="1.6" stroke-linecap="round"/>
-      <path d="M 44 27 Q 39.5 24 35.5 28" fill="none" stroke="#042f2e" stroke-width="1.6" stroke-linecap="round"/>
-      <ellipse cx="24.5" cy="30" rx="4.4" ry="3.4" transform="rotate(-10 24.5 30)" fill="#042f2e" stroke="#fde047" stroke-width="1.2"/>
-      <ellipse cx="24.8" cy="30" rx="1.3" ry="2.5" fill="#fde047"/>
-      <circle cx="26" cy="28.7" r="1.2" fill="#ffffff"/>
-      <ellipse cx="39.5" cy="30" rx="4.4" ry="3.4" transform="rotate(10 39.5 30)" fill="#042f2e" stroke="#fde047" stroke-width="1.2"/>
-      <ellipse cx="39.2" cy="30" rx="1.3" ry="2.5" fill="#fde047"/>
-      <circle cx="38" cy="28.7" r="1.2" fill="#ffffff"/>
-      <!-- Expressive Confident Smile & Bioluminescent Cheek Scales -->
-      <circle cx="21" cy="36" r="1.3" fill="#5efce8"/>
-      <circle cx="43" cy="36" r="1.3" fill="#5efce8"/>
-      <path d="M 27.5 38.5 Q 32 41.2 36.5 38.5" fill="none" stroke="#042f2e" stroke-width="1.5" stroke-linecap="round"/>
+      <polygon points="16,3 48,3 62,32 48,61 16,61 2,32" fill="${rimPalette.bg}"/>
+      <image href="./assets/textures/story_portrait_${key}.webp" x="1" y="1" width="62" height="62" preserveAspectRatio="xMidYMid slice" clip-path="url(#${uid}-hex)"/>
+      <polygon points="16,3 48,3 62,32 48,61 16,61 2,32" fill="none" stroke="${rimPalette.stroke}" stroke-width="2.1" stroke-linejoin="round"/>
+      <polygon points="18,6.2 46,6.2 58.4,32 46,57.8 18,57.8 5.6,32" fill="none" stroke="${rimPalette.inner}" stroke-width="0.8" opacity="0.72" stroke-linejoin="round"/>
     </svg>`.trim();
 }
 
@@ -1089,8 +1040,14 @@ export function getMutationIconSVG(mutationId = 'triple_whip') {
   if (id.includes('gecko') || id.includes('sprint') || id.includes('climb')) {
     return `<svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" fill="rgba(52,211,153,0.18)" stroke="#34d399" stroke-width="1.5"/><path d="M 20 29 V 15 M 20 15 L 13 11 M 20 15 L 20 9 M 20 15 L 27 11" fill="none" stroke="#6ee7b7" stroke-width="2.5" stroke-linecap="round"/><circle cx="13" cy="11" r="2.2" fill="#fde047"/><circle cx="20" cy="9" r="2.2" fill="#fde047"/><circle cx="27" cy="11" r="2.2" fill="#fde047"/></svg>`;
   }
-  if (id.includes('aegis') || id.includes('bubble') || id.includes('shield')) {
+  if (id.includes('aegis') || id.includes('bubble') || id.includes('shield') || id.includes('shell')) {
     return `<svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" fill="rgba(165,243,252,0.22)" stroke="#a5f3fc" stroke-width="1.8"/><circle cx="15" cy="14" r="3.5" fill="#ffffff" opacity="0.75"/><polygon points="20,11 27,20 20,29 13,20" fill="none" stroke="#fde047" stroke-width="1.8"/></svg>`;
+  }
+  if (id.includes('prism') || id.includes('split') || id.includes('multi') || id.includes('volley')) {
+    return `<svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" fill="rgba(251,113,133,0.18)" stroke="#fda4af" stroke-width="1.5"/><polygon points="20,9 29,26 11,26" fill="none" stroke="#5efce8" stroke-width="2"/><line x1="20" y1="18" x2="32" y2="12" stroke="#fde047" stroke-width="2"/><line x1="20" y1="18" x2="33" y2="20" stroke="#5efce8" stroke-width="2"/></svg>`;
+  }
+  if (id.includes('chrono') || id.includes('time') || id.includes('clock') || id.includes('tide')) {
+    return `<svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" fill="rgba(253,224,71,0.18)" stroke="#fde047" stroke-width="1.5"/><circle cx="20" cy="20" r="10" fill="none" stroke="#5efce8" stroke-width="1.8"/><polyline points="20,14 20,20 25,23" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/></svg>`;
   }
   return `<svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" fill="rgba(251,191,36,0.18)" stroke="#fde047" stroke-width="1.5"/><polygon points="20,8 24,17 33,20 24,23 20,32 16,23 7,20 16,17" fill="#5efce8" stroke="#ffffff" stroke-width="1"/></svg>`;
 }

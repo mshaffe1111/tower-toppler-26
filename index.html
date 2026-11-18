@@ -534,6 +534,17 @@
               <span id="meta-mode-daily" class="mode-hub-meta">TODAY'S SEED</span>
             </div>
           </button>
+
+          <!-- Bonus Boss Challenge: Siphon Warden Gauntlet -->
+          <button id="btn-mode-gauntlet" class="mode-hub-card mode-hub-card-wide" data-mode-pick="warden_gauntlet" type="button">
+            <div data-mode-art="warden_gauntlet" class="mode-hub-art" aria-hidden="true"></div>
+            <div class="mode-hub-body">
+              <span class="mode-hub-badge badge-coral">5-ACT BOSS RUSH • ESCALATING PHASES</span>
+              <span class="mode-hub-title">SIPHON WARDEN BOSS GAUNTLET</span>
+              <span class="mode-hub-desc">Confront all 5 Sovereign Siphon Wardens back-to-back across escalating shield, tentacle, and whirlpool phases!</span>
+              <span id="meta-mode-gauntlet" class="mode-hub-meta">APEX CHALLENGE</span>
+            </div>
+          </button>
         </div>
       </div>
     </div>
@@ -852,8 +863,13 @@
         <button id="btn-cutscene-skip" class="btn-cinema-skip" type="button">SKIP ››</button>
       </div>
 
-      <!-- Crystal-clear center window showcasing live sweeping 3D WebGL crane & water purification shot -->
-      <div id="cutscene-tap-stage" class="cinema-stage-window" title="Tap to advance"></div>
+      <!-- Crystal-clear center window showcasing live sweeping 3D WebGL crane & water purification shot + Bespoke Story Keyframe Plate -->
+      <div id="cutscene-tap-stage" class="cinema-stage-window" title="Tap to advance">
+        <figure id="cutscene-keyframe-card" class="cinema-keyframe-card">
+          <img id="cutscene-keyframe-img" class="cinema-keyframe-img" src="./assets/textures/story_keyframe_prologue.webp" alt="Story Keyframe" decoding="async" />
+          <figcaption id="cutscene-keyframe-caption" class="cinema-keyframe-caption">PELAGIAN STAR-POD ENTRY</figcaption>
+        </figure>
+      </div>
 
       <div class="cinema-bar cinema-bar-bottom">
         <div id="cutscene-comms-box" class="cinema-comms-card" data-speaker="gateway">
