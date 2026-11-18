@@ -1,0 +1,23 @@
+{
+  "name": "towering-waters-gateways-descent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Towering Waters: Gateway's Descent — 100% Offline WebGL2 3D Action-Platformer & Google Play Store Bundle",
+  "author": "Matt Shaffer",
+  "license": "UNLICENSED",
+  "scripts": {
+    "serve": "npx --yes serve . -l 8080",
+    "vendor:three": "node -e \"const fs=require('fs');fs.mkdirSync('vendor/three/build',{recursive:true});fs.cpSync('node_modules/three/build/three.module.min.js','vendor/three/build/three.module.min.js');fs.cpSync('node_modules/three/build/three.core.min.js','vendor/three/build/three.core.min.js');fs.cpSync('node_modules/three/examples/jsm','vendor/three/examples/jsm',{recursive:true});\"",
+    "gltf:inspect": "gltf-transform inspect",
+    "gltf:optimize": "gltf-transform optimize",
+    "cap:sync": "npx cap sync android",
+    "cap:open": "npx cap open android"
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "@gltf-transform/cli": "^4.1.0"
+  }
+}

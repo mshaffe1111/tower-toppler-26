@@ -1,10 +1,9 @@
-// TOWER TOPPLER '26 — THE GLIDE (Sky-Wing Inter-Sector Ride)
+// TOWERING WATERS: GATEWAY'S DESCENT — CANYON UPDRAFT FRILL-GLIDE (`src/glideStage.js`)
 // Pure gameplay logic leaf module (zero imports).
 //
-// Pogo launches off the summit monolith crown, glides over the storm-tossed sea through a living
-// sky, and touches down on the beach beside the next sector monolith. All gameplay state lives in
-// CSS-pixel screen coordinates (x right, y down) so particle/popup systems wire directly via `fx`,
-// and `GlideRenderer` (src/glideRenderer.js) projects every entity onto the 3D z = 0 plane.
+// Gateway launches from a Spire's summit crown, flaring her iridescent webbed neck & rib frills
+// with streaming water-wing ribbons across sunlit canyon gorges, rainbow waterfall mists, and
+// golden thermal updraft rings before touching down beside the next Spire.
 
 const TAU = Math.PI * 2;
 const RIDE_TIME = 22; // nominal seconds of gliding (progress 0 -> 1); diving/tucking arrives faster
@@ -42,20 +41,16 @@ function removeOrdered(arr, i) {
   arr.pop();
 }
 
-// Sky themes indexed by sector summit departure (0-based) or explicit `themeKey`.
-// Index 0 is our signature Reboot reference look (`moonlit_storm`).
+// Sunlit canyon, alpine, bayou, coral & aurora glide themes indexed by watershed act (0-based) or `themeKey`.
 export const GLIDE_THEMES = [
-  { key: 'moonlit_storm', label: 'MOONLIT TEMPEST', storm: 0.95, gust: 0.95, gull: 0.95 }, // Sector I -> II (Reference Moonlit Storm)
-  { key: 'aurora', label: 'BOREAL AURORA', storm: 0.85, gust: 1.25, gull: 0.85 }, // Sector II -> III (Boreal Spire -> Prism Core)
-  { key: 'storm', label: 'MAELSTROM APPROACH', storm: 1.55, gust: 1.35, gull: 0.75 }, // Sector III -> IV (Tidal Rig -> Tempest Citadel)
-  { key: 'ember', label: 'FOUNDRY EMBER SKY', storm: 1.35, gust: 1.2, gull: 0.95 },
-  { key: 'dawn', label: 'DAWN FLIGHT', storm: 0.65, gust: 0.8, gull: 1.0 },
+  { key: 'canyon_river', label: 'REDWOOD CANYON UPDRAFTS', storm: 0.72, gust: 0.90, gull: 0.95 },
+  { key: 'alpine_lake', label: 'ALPENGLOW MIRROR PEAKS', storm: 0.78, gust: 1.05, gull: 0.90 },
+  { key: 'mist_bayou', label: 'AMBER BAYOU THERMALS', storm: 0.85, gust: 0.95, gull: 0.85 },
+  { key: 'coral_sea', label: 'SUNLIT CORAL TRADEWINDS', storm: 0.75, gust: 1.0, gull: 1.05 },
+  { key: 'storm_ocean', label: 'POLAR AURORA TEMPEST', storm: 1.25, gust: 1.25, gull: 0.80 },
+  { key: 'dawn', label: 'GOLDEN GORGE FLIGHT', storm: 0.65, gust: 0.8, gull: 1.0 },
   { key: 'day', label: 'HIGH TRADEWINDS', storm: 0.8, gust: 1.0, gull: 1.1 },
-  { key: 'snow', label: 'FROSTBITE GALE', storm: 0.75, gust: 1.3, gull: 0.8 },
-  { key: 'sunset', label: 'TWILIGHT SQUALL', storm: 0.9, gust: 1.0, gull: 1.15 },
-  { key: 'night', label: 'LANTERN NIGHT', storm: 0.9, gust: 0.9, gull: 0.75 },
-  { key: 'rain', label: 'AFTER THE SQUALL', storm: 1.0, gust: 1.0, gull: 1.1 },
-  { key: 'gale', label: 'GALE FORCE', storm: 0.95, gust: 1.85, gull: 1.0 },
+  { key: 'sunset', label: 'TWILIGHT UPDRAFT', storm: 0.9, gust: 1.0, gull: 1.15 },
 ];
 
 const LANTERN_POP = ['#fdba74', '#fde68a', '#7be8ff', '#f9a8d4'];
@@ -83,7 +78,7 @@ export class GlideStage {
     this.tower = { active: false, x: 0, r: 100, targetX: 0, depth: 0, glow: '#5efce8', name: '' };
     this.summit = { x: 0, y: 0, r: 60, glow: '#fbbf24' };
     this.theme = GLIDE_THEMES[0];
-    this.themeKey = 'moonlit_storm';
+    this.themeKey = 'canyon_river';
     this._resetStats();
   }
 
@@ -391,9 +386,9 @@ export class GlideStage {
       if (!this._bannerShown) {
         this._bannerShown = true;
         const subLabel = this.standalone
-          ? 'SKY-WING ARCADE'
-          : `SECTOR ${Math.min(4, this.worldIndex + 1)} SUMMIT`;
-        fx.banner?.(subLabel, 'THE GLIDE');
+          ? 'WATERSHED UPDRAFTS'
+          : `ACT ${Math.min(5, this.worldIndex + 1)} SUMMIT`;
+        fx.banner?.(subLabel, 'CANYON FRILL-GLIDE');
         (sound?.gust)?.call(sound);
       }
       if (this.t >= INTRO_TIME) {
@@ -787,7 +782,7 @@ export class GlideStage {
         fx.particles?.(g.x, this.landY, '#ffffff', 6, 70);
         this._vfx('dust', g.x, this.landY, { life: 1.1, size: g.rx * 1.6 });
         fx.shake?.(2);
-        (sound?.pogoCheer || sound?.collectStar)?.call(sound);
+        (sound?.victory || sound?.collectStar)?.call(sound);
       }
     } else {
       g.landed = Math.min(1, g.landed + dt * 1.4);
@@ -1493,4 +1488,5 @@ export class GlideStage {
   }
 }
 
+export { GlideStage as FrillGlideStage };
 export const GLIDE_STAGE_TIMING = { RIDE_TIME, INTRO_TIME, ARRIVE_TIME, TOWER_LEAD };

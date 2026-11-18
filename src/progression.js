@@ -1,106 +1,188 @@
-// Tower Toppler '26 — Persistent Progression, 100 Trophies (1,000 PTS), 8 Lore Relics,
-// 12 Exploration Curios & Blueprints, 6 Cryo-Blaster FX Styles, 5-Medal Mastery & 8 Pogo Skins
-// Pure leaf module (zero internal imports per ARCHITECTURE_CONTRACT.md §1)
+// Towering Waters: Gateway's Descent — Persistent Progression, Watershed Restoration,
+// 5-Act Story Arc, 7 Bio-Mutations, 100 Trophies (1,000 PTS), 10 Field Logs, 12 Curios,
+// 6 Hydro-Pulse Styles & 8 Gateway Skins (Created by Matt Shaffer)
+// Pure leaf module (zero internal imports)
 
 const DEFAULT_SETTINGS = Object.freeze({
-  era: 'reboot',                 // 'reboot' | 'original'
-  controlMode: 'gesture',        // 'gesture' | 'joystick' | 'dpad' | 'tilt'
-  zenMode: false,                // Casual Zen modifier
-  muted: false,                  // Master audio mute
-  musicEnabled: true,            // Music bus toggle
-  hapticsEnabled: true,          // navigator.vibrate pulses
-  tiltSensitivity: 1.0,          // 0.5 .. 2.0
-  skinId: 'default_amphibian',   // active Pogo skin ID
-  blasterFxId: 'standard_cryo'   // active Cryo-Blaster projectile/trail FX ID
+  controlMode: 'gesture',           // 'gesture' | 'joystick' | 'dpad' | 'tilt'
+  zenMode: false,                   // Peaceful / Assist modifier
+  muted: false,                     // Master audio mute
+  musicEnabled: true,               // Music bus toggle
+  musicVolume: 0.85,                // 0.0 .. 1.0 (Music slider)
+  ambienceVolume: 0.80,             // 0.0 .. 1.0 (Natural Water Ambience slider)
+  sfxVolume: 0.85,                  // 0.0 .. 1.0 (Organic Foley & Chimes slider)
+  hapticsEnabled: true,             // navigator.vibrate pulses
+  tiltSensitivity: 1.0,             // 0.5 .. 2.0
+  skinId: 'sea_glass_guardian',     // active Gateway skin ID
+  blasterFxId: 'tidal_pearl'       // active Hydro-Pulse FX ID
 });
 
-export const SKIN_CATALOG = [
+export const WATERSHED_BIOMES = [
   {
-    id: 'default_amphibian',
-    name: 'Explorer Pogo',
-    description: 'Standard Amphibious Corps field harness, canvas pack, and lime-emerald camo.',
-    gearCost: 0,
-    milestoneText: 'Unlocked by Default',
-    previewColors: ['#56b847', '#d8e89b', '#7c5832']
+    id: 1,
+    act: 1,
+    key: 'canyon_river',
+    name: 'Redwood Canyon Rivers',
+    guardianName: 'Elder Oakhaven',
+    guardianTitle: 'River Otter Steward of the Gorge',
+    spireIds: [1, 2],
+    parchedColor: '#786352',
+    restoredColor: '#14b8a6',
+    accentColor: '#2dd4bf',
+    summary: 'Sunlit sandstone gorges, towering coastal redwoods, and roaring whitewater cataracts.'
   },
   {
-    id: 'deep_diver',
-    name: 'Abyssal Diver',
-    description: 'Matte midnight-teal trench wetsuit with riveted MK.7 brass collar and cyan glow.',
-    gearCost: 75,
-    milestoneText: '75 Golden Gears',
-    previewColors: ['#0f4c5c', '#5efce8', '#b45309']
+    id: 2,
+    act: 2,
+    key: 'alpine_lake',
+    name: 'Crystal Alpine Lakes',
+    guardianName: 'Spirit Lumi',
+    guardianTitle: 'Silver-Trout Keeper of the High Tarns',
+    spireIds: [3, 4],
+    parchedColor: '#64748b',
+    restoredColor: '#38bdf8',
+    accentColor: '#7dd3fc',
+    summary: 'Mirror-clear glacial lakes cradled by rose-gold alpenglow granite peaks and stone aqueducts.'
   },
   {
-    id: 'poison_dart',
-    name: 'Cobalt Dart',
-    description: 'Vivid cobalt-blue amphibian patterning crowned by a fiery tangerine dorsal crest.',
-    gearCost: 120,
-    milestoneText: '120 Golden Gears',
-    previewColors: ['#1d4ed8', '#0f172a', '#f97316']
+    id: 3,
+    act: 3,
+    key: 'mist_bayou',
+    name: 'Emerald Mist Bayous',
+    guardianName: 'Keeper Mossback',
+    guardianTitle: 'Great Heron Warden of the Cypress Delta',
+    spireIds: [5, 6],
+    parchedColor: '#57534e',
+    restoredColor: '#10b981',
+    accentColor: '#fbbf24',
+    summary: 'Twilight cypress arches draped in Spanish moss, glowing lotus channels, and golden fireflies.'
   },
   {
-    id: 'clockwork_brass',
-    name: 'Foundry Automaton',
-    description: 'Burnished brass and copper articulated plates powered by a miniature steam-gauge pack.',
-    gearCost: 160,
-    milestoneText: 'Clear Reboot Tower 3 or 160 Gears',
-    previewColors: ['#b45309', '#fbbf24', '#78350f']
+    id: 4,
+    act: 4,
+    key: 'coral_sea',
+    name: 'Sunlit Coral Seas',
+    guardianName: 'Matriarch Aurelia',
+    guardianTitle: 'Reef Manta Sovereign of the Lagoon',
+    spireIds: [7, 8],
+    parchedColor: '#78716c',
+    restoredColor: '#06b6d4',
+    accentColor: '#f472b6',
+    summary: 'Dazzling turquoise atoll lagoons with living underwater coral shelves and gliding rays.'
   },
   {
-    id: 'frost_warden',
-    name: 'Glacier Warden',
-    description: 'Translucent arctic-cyan hide with snow-white frost crest and crystalline cryo-pack.',
-    gearCost: 200,
-    milestoneText: 'Clear Reboot Tower 4 or 200 Gears',
-    previewColors: ['#67e8f9', '#f8fafc', '#0284c7']
-  },
-  {
-    id: 'shadow_infiltrator',
-    name: 'Night Ops',
-    description: 'Stealth obsidian-indigo operative suit with carbon harness and emerald night-vision pips.',
-    gearCost: 250,
-    milestoneText: 'Crack 5 Secret Vaults/Chambers or 250 Gears',
-    previewColors: ['#1e1b4b', '#312e81', '#22c55e']
-  },
-  {
-    id: 'retro_1987',
-    name: "Classic '87 Tribute",
-    description: 'Bright 1987 arcade emerald skin, sunny yellow belly, and classic Destructo blaster.',
-    gearCost: 180,
-    milestoneText: 'Clear any 4 Original Mode Towers or 180 Gears',
-    previewColors: ['#22c55e', '#fde047', '#ef4444']
-  },
-  {
-    id: 'golden_toppler',
-    name: 'Sovereign Gold',
-    description: 'Brushed celestial gold scales with royal amethyst crest reserved for elite operatives.',
-    gearCost: 400,
-    milestoneText: 'Earn 18 Star Cores or 400 Gears',
-    previewColors: ['#eab308', '#9333ea', '#fef08a']
+    id: 5,
+    act: 5,
+    key: 'storm_ocean',
+    name: 'Polar & Tempest Oceans',
+    guardianName: 'Oracle Borealis',
+    guardianTitle: 'Leviathan Songkeeper of the Deep Current',
+    spireIds: [9, 10],
+    parchedColor: '#334155',
+    restoredColor: '#6366f1',
+    accentColor: '#5efce8',
+    summary: 'Electric deep-ocean swells, translucent turquoise icebergs, and emerald-violet polar auroras.'
   }
 ];
 
-export const BLASTER_FX_CATALOG = [
+export const SKIN_CATALOG = [
   {
-    id: 'standard_cryo',
-    name: 'MK.4 Standard Cryo',
-    description: 'Factory Destructo Inc. compressed cryo-orb with crisp ice-cyan vapor wake.',
+    id: 'sea_glass_guardian',
+    name: 'Sea-Glass Guardian',
+    description: 'Gateway’s signature Pelagian iridescent sea-glass teal scales, coral head-frills, and pearlescent hydro-conduit harness.',
+    gearCost: 0,
+    milestoneText: 'Unlocked by Default',
+    previewColors: ['#2dd4bf', '#99f6e4', '#fb7185']
+  },
+  {
+    id: 'coral_reef_empress',
+    name: 'Coral Reef Empress',
+    description: 'Sunlit mother-of-pearl scales accented with vibrant living-coral magenta frills and turquoise lagoon bioluminescence.',
+    gearCost: 75,
+    milestoneText: '75 Hydro-Gears',
+    previewColors: ['#fb7185', '#fef3c7', '#22d3ee']
+  },
+  {
+    id: 'canyon_rapids_ranger',
+    name: 'Canyon Rapids Ranger',
+    description: 'Warm burnished copper-sandstone hide with emerald river-moss crests and whitewater foam tail markings.',
+    gearCost: 120,
+    milestoneText: 'Restore Act I Canyon Rivers or 120 Gears',
+    previewColors: ['#d97706', '#34d399', '#fef08a']
+  },
+  {
+    id: 'alpine_glacier_mystic',
+    name: 'Alpine Glacier Mystic',
+    description: 'Crystalline frost-azure scales with snow-quartz dorsal frills and rose-gold alpenglow conduit trim.',
+    gearCost: 160,
+    milestoneText: 'Restore Act II Alpine Lakes or 160 Gears',
+    previewColors: ['#38bdf8', '#f8fafc', '#f472b6']
+  },
+  {
+    id: 'bayou_biolume',
+    name: 'Bayou Biolume',
+    description: 'Deep jade-moss scales illuminated by warm firefly-amber frill veins and twilight lotus luminescence.',
+    gearCost: 200,
+    milestoneText: 'Restore Act III Mist Bayous or 200 Gears',
+    previewColors: ['#059669', '#fbbf24', '#a7f3d0']
+  },
+  {
+    id: 'abyssal_leviathan',
+    name: 'Abyssal Leviathan',
+    description: 'Midnight-indigo pelagic armor with electric cyan lateral stripes and ultraviolet deep-trench glow.',
+    gearCost: 240,
+    milestoneText: 'Solve 5 Aqueduct Sanctums/Vaults or 240 Gears',
+    previewColors: ['#1e1b4b', '#22d3ee', '#c084fc']
+  },
+  {
+    id: 'solar_oasis',
+    name: 'Solar Oasis',
+    description: 'Radiant golden-sunstone scales paired with shimmering aquamarine crests and polished bronze clasps.',
+    gearCost: 280,
+    milestoneText: 'Restore Act IV Coral Seas or 280 Gears',
+    previewColors: ['#f59e0b', '#2dd4bf', '#fef9c3']
+  },
+  {
+    id: 'sovereign_starlight',
+    name: 'Sovereign Starlight',
+    description: 'Celestial diamond-opal scales of Pelagia’s High Envoys, trailing a full-spectrum aurora water wake.',
+    gearCost: 400,
+    milestoneText: 'Earn 20 Harmonic Seeds or 400 Gears',
+    previewColors: ['#5efce8', '#e879f9', '#fde047']
+  }
+];
+
+export const GATEWAY_SKIN_CATALOG = SKIN_CATALOG;
+
+const LEGACY_SKIN_ALIAS = {
+  default_amphibian: 'sea_glass_guardian',
+  deep_diver: 'abyssal_leviathan',
+  poison_dart: 'coral_reef_empress',
+  clockwork_brass: 'canyon_rapids_ranger',
+  frost_warden: 'alpine_glacier_mystic',
+  shadow_infiltrator: 'bayou_biolume'
+};
+
+export const HYDRO_FX_CATALOG = [
+  {
+    id: 'tidal_pearl',
+    name: 'Pelagic Sea-Glass',
+    description: 'Pure Pelagian harmonic water pulse trailing crystalline seafoam droplets.',
     trophyPointsReq: 0,
     pointsRequired: 0,
     pointsReq: 0,
     gearCost: 0,
     milestoneText: 'Unlocked by Default',
-    coreColor: '#e0f2fe',
-    emissiveColor: '#38bdf8',
-    muzzleColor: '#7be8ff',
-    trailColors: ['#e0f2fe', '#67e8f9'],
-    previewColors: ['#38bdf8', '#e0f2fe', '#0284c7']
+    coreColor: '#f0fdfa',
+    emissiveColor: '#2dd4bf',
+    muzzleColor: '#5efce8',
+    trailColors: ['#99f6e4', '#67e8f9'],
+    previewColors: ['#2dd4bf', '#f0fdfa', '#0284c7']
   },
   {
     id: 'emerald_plasma',
-    name: 'Bioluminescent Surge',
-    description: 'Deep-trench bio-plasma bolt trailing ionized emerald and seafoam firefly motes.',
+    name: 'Bayou Biolume Surge',
+    description: 'Living emerald river-spirit bolt shedding glowing jade and firefly motes.',
     trophyPointsReq: 100,
     pointsRequired: 100,
     pointsReq: 100,
@@ -114,8 +196,8 @@ export const BLASTER_FX_CATALOG = [
   },
   {
     id: 'solar_ember',
-    name: 'Foundry Slag Bolt',
-    description: 'Superheated Clockwork Foundry arc-charge shedding bright forge-gold sparks.',
+    name: 'Canyon Sunburst',
+    description: 'Golden-hour thermal geyser pulse shimmering with warm amber spray.',
     trophyPointsReq: 250,
     pointsRequired: 250,
     pointsReq: 250,
@@ -129,8 +211,8 @@ export const BLASTER_FX_CATALOG = [
   },
   {
     id: 'amethyst_void',
-    name: 'Prism Singularity',
-    description: 'Resonator-tuned crystalline bolt pulsing with ultraviolet and magenta rift energy.',
+    name: 'Abyssal Prism Current',
+    description: 'Refractive deep-sea crystal pulse resonating with violet and magenta harmonics.',
     trophyPointsReq: 450,
     pointsRequired: 450,
     pointsReq: 450,
@@ -143,24 +225,24 @@ export const BLASTER_FX_CATALOG = [
     previewColors: ['#a855f7', '#f5d0fe', '#581c87']
   },
   {
-    id: 'retro_voxel',
-    name: '1987 Arcade Pulse',
-    description: 'High-contrast 8-bit tribute concussion pulse flashing sunny gold and cobalt.',
-    trophyPointsReq: 700,
-    pointsRequired: 700,
-    pointsReq: 700,
+    id: 'coral_bloom',
+    name: 'Coral Lagoon Shimmer',
+    description: 'Tropical reef hydro-orb weaving rose-coral ribbons with sunlit turquoise foam.',
+    trophyPointsReq: 680,
+    pointsRequired: 680,
+    pointsReq: 680,
     gearCost: 300,
-    milestoneText: '700 Trophy Pts or 300 Gears',
-    coreColor: '#ffffff',
-    emissiveColor: '#fde047',
-    muzzleColor: '#facc15',
-    trailColors: ['#fde047', '#38bdf8'],
-    previewColors: ['#eab308', '#38bdf8', '#ef4444']
+    milestoneText: '680 Trophy Pts or 300 Gears',
+    coreColor: '#fff1f2',
+    emissiveColor: '#fb7185',
+    muzzleColor: '#2dd4bf',
+    trailColors: ['#fda4af', '#5eead4'],
+    previewColors: ['#fb7185', '#2dd4bf', '#fef08a']
   },
   {
     id: 'diamond_prism',
     name: 'Sovereign Starlight',
-    description: 'Refractive diamond-tier starcore lance leaving a tri-spectrum aurora wake.',
+    description: 'Celestial Pelagian starcore lance leaving a tri-spectrum polar aurora wake.',
     trophyPointsReq: 900,
     pointsRequired: 900,
     pointsReq: 900,
@@ -174,120 +256,434 @@ export const BLASTER_FX_CATALOG = [
   }
 ];
 
-export const RELIC_CODEX = [
+export const BLASTER_FX_CATALOG = HYDRO_FX_CATALOG;
+
+const LEGACY_FX_ALIAS = {
+  standard_cryo: 'tidal_pearl',
+  pelagic_tide: 'tidal_pearl',
+  sea_glass_pulse: 'tidal_pearl',
+  emerald_biolume: 'emerald_plasma',
+  emerald_lotus: 'emerald_plasma',
+  canyon_sunburst: 'solar_ember',
+  amethyst_current: 'amethyst_void',
+  coral_aurora: 'coral_bloom',
+  coral_prism: 'coral_bloom',
+  alpine_glacier: 'tidal_pearl',
+  aurora_sovereign: 'diamond_prism',
+  sovereign_starlight: 'diamond_prism'
+};
+
+// ============================================================================
+// 7 SELECTABLE ROGUELITE BIO-MUTATIONS ('expedition' Mode)
+// ============================================================================
+
+export const BIO_MUTATIONS = [
+  {
+    id: 'triple_whip',
+    name: 'Triple Tail-Whip',
+    title: 'Triple Tail-Whip',
+    badge: 'TAIL MASTERY',
+    icon: '◎',
+    accentColor: '#2dd4bf',
+    shortDesc: '+40% whip radius, faster spin cooldown & triple shockwave cascade.',
+    description: 'Gateway’s 360° Lizard Tail-Whip unleashes 3 cascading hydro-rings, expanding reach to 1.75 columns and reflecting mortar bubbles at 2x speed.'
+  },
+  {
+    id: 'gecko_sprint',
+    name: 'Gecko Sprint',
+    title: 'Gecko Sprint',
+    badge: 'AGILITY',
+    icon: '»',
+    accentColor: '#34d399',
+    shortDesc: '+22% run & staircase speed, +30% Wall-Scamper climb & full glacier traction.',
+    description: 'Micro-setae toe pads grant full dry-stone grip on Alpine ice, +22% sprint speed up real staircases, and rapid Gecko Wall-Scamper climbs.'
+  },
+  {
+    id: 'hydro_double_jump',
+    name: 'Hydro-Jet Double Jump',
+    title: 'Hydro-Jet Double Jump',
+    badge: 'AERIAL',
+    icon: '▲',
+    accentColor: '#38bdf8',
+    shortDesc: 'Tap Jump in mid-air for a full pressurized water-jet second leap.',
+    description: 'Vents pressurized water from Gateway’s harness nozzles to trigger a crisp mid-air second jump, resetting on every landing, wall-strip, or grapple ring.'
+  },
+  {
+    id: 'tidal_magnet',
+    name: 'Tidal Magnet',
+    title: 'Tidal Magnet',
+    badge: 'HARVEST',
+    icon: '✦',
+    accentColor: '#fbbf24',
+    shortDesc: 'Draws nearby Hydro-Gears & Curios within 2.6 cols and grants +25% Gear yield.',
+    description: 'Harmonic currents pull nearby Hydro-Gears, Salvage Parts, and Harmonic Seeds straight into Gateway’s orbit while boosting Gear rewards.'
+  },
+  {
+    id: 'bubble_aegis',
+    name: 'Bubble Aegis',
+    title: 'Bubble Aegis',
+    badge: 'DEFENSE',
+    icon: '◈',
+    accentColor: '#67e8f9',
+    shortDesc: 'Starts every spire with a Sea-Glass Shield that regenerates every 18s.',
+    description: 'Wraps Gateway in a refractive Sea-Glass Aegis that absorbs any hazard hit and automatically reforms after 18 seconds of unhit climbing.'
+  },
+  {
+    id: 'pulse_ricochet',
+    name: 'Prismatic Hydro-Pulse',
+    title: 'Prismatic Hydro-Pulse',
+    badge: 'CASTER',
+    icon: '◇',
+    accentColor: '#e879f9',
+    shortDesc: '+35% Hydro-Pulse velocity, pierces stunned foes & spins distant Pipe-Valves.',
+    description: 'Supercharges Gateway’s wrist Hydro-Caster so pulses fly 35% faster, pierce through bubbled drones, and spin Wall Pipe-Valves from afar.'
+  },
+  {
+    id: 'frill_updraft',
+    name: 'Frill Thermal Glide',
+    title: 'Frill Thermal Glide',
+    badge: 'GLIDE',
+    icon: '∆',
+    accentColor: '#f472b6',
+    shortDesc: 'Hold Jump while descending to flare Gateway’s neck-frills for feather-fall glide.',
+    description: 'Flares Gateway’s iridescent webbed neck-frills in mid-air, softening descent speed and extending horizontal chasm reach.'
+  }
+];
+
+// ============================================================================
+// MEANINGFUL 5-ACT STORY ARC & CUTSCENE SCRIPTS
+// ============================================================================
+
+export const STORY_ARC = {
+  title: "Towering Waters: Gateway's Descent",
+  hero: {
+    name: 'Gateway',
+    homeworld: 'Pelagia',
+    species: 'Pelagian Hydro-Saurian Envoy',
+    role: 'Keeper of the Harmonic Water Seeds'
+  },
+  companion: {
+    name: 'Naiad',
+    role: 'Pelagian Bio-Acoustic Navigator AI'
+  },
+  antagonist: {
+    name: 'The Siphon Syndicate',
+    leader: 'Arch-Dredger Vane & The Mother Siphon',
+    motive: 'Draining Earth’s five great freshwater and marine watersheds through ten colossal atmospheric Siphon Spires to bottle living biospheres as corporate fuel.'
+  },
+  cutscenes: {
+    prologue: {
+      id: 'prologue',
+      act: 'PROLOGUE • ORBITAL DESCENT',
+      title: 'THE PARCHED BLUE WORLD',
+      biome: 'canyon_river',
+      towerIdx: 0,
+      cameraCue: 'prologue_skyfall',
+      beats: [
+        {
+          speaker: 'naiad',
+          name: 'NAIAD • BIO-ACOUSTIC NAVIGATOR',
+          text: 'Atmospheric entry complete, Gateway. Below us lies Earth—once a jewel of singing rivers and sapphire seas. Now ten Siphon Syndicate spires are drinking its watersheds dry.'
+        },
+        {
+          speaker: 'gateway',
+          name: 'GATEWAY • ENVOY OF PELAGIA',
+          text: 'I can feel the riverbed cracking through my scales, Naiad... The Redwood Gorge below is gasping. Our Harmonic Water Seeds are warm—they want to take root.'
+        },
+        {
+          speaker: 'naiad',
+          name: 'NAIAD • BIO-ACOUSTIC NAVIGATOR',
+          text: 'Each Spire locks stolen water inside its central bedrock shaft. Climb to the Crown Valve, dive straight down the flooded Reactor Core, and plant a Harmonic Seed!'
+        }
+      ]
+    },
+    act_1_clear: {
+      id: 'act_1_clear',
+      act: 'ACT I RESTORED • REDWOOD CANYON RIVERS',
+      title: 'THE CATARACTS ROAR AGAIN',
+      biome: 'canyon_river',
+      towerIdx: 2,
+      watershedPct: 100,
+      cameraCue: 'purification_crane',
+      beats: [
+        {
+          speaker: 'guardian',
+          name: 'ELDER OAKHAVEN • RIVER GUARDIAN',
+          text: 'Listen to that thunder, little star-lizard! From the redwoods to the canyon floor, whitewater is pouring over every cliffside waterfall again!'
+        },
+        {
+          speaker: 'gateway',
+          name: 'GATEWAY • ENVOY OF PELAGIA',
+          text: 'The salmon and river otters are already returning to the rapids! Where does the Siphon conduit lead next, Naiad?'
+        },
+        {
+          speaker: 'naiad',
+          name: 'NAIAD • BIO-ACOUSTIC NAVIGATOR',
+          text: 'High into the snow-crowned granite peaks! The Syndicate has frozen the Crystal Alpine Lakes behind twin cryo-spillways. Catch the canyon updraft—spread your frills!'
+        }
+      ]
+    },
+    act_2_clear: {
+      id: 'act_2_clear',
+      act: 'ACT II RESTORED • CRYSTAL ALPINE LAKES',
+      title: 'MIRROR OF THE SNOW PEAKS',
+      biome: 'alpine_lake',
+      towerIdx: 4,
+      watershedPct: 100,
+      cameraCue: 'purification_crane',
+      beats: [
+        {
+          speaker: 'guardian',
+          name: 'SPIRIT LUMI • ALPINE GUARDIAN',
+          text: 'Look upon the tarn, Gateway—so pure and still it reflects the rose-gold alpenglow of every summit! Our mountain springs feed the lowlands once more.'
+        },
+        {
+          speaker: 'naiad',
+          name: 'NAIAD • BIO-ACOUSTIC NAVIGATOR',
+          text: 'Intercepting a Siphon Syndicate transmission: their lowland Bayou refineries are choking the southern river delta with dark brine.'
+        },
+        {
+          speaker: 'gateway',
+          name: 'GATEWAY • ENVOY OF PELAGIA',
+          text: 'Not for long. Let’s ride the snowmelt down into the Emerald Mist Bayous and relight the lotus channels!'
+        }
+      ]
+    },
+    act_3_clear: {
+      id: 'act_3_clear',
+      act: 'ACT III RESTORED • EMERALD MIST BAYOUS',
+      title: 'LANTERNS OF THE CYPRESS DELTA',
+      biome: 'mist_bayou',
+      towerIdx: 6,
+      watershedPct: 100,
+      cameraCue: 'purification_crane',
+      beats: [
+        {
+          speaker: 'guardian',
+          name: 'KEEPER MOSSBACK • BAYOU GUARDIAN',
+          text: 'Ten thousand fireflies dancing over jade water, and every lotus blossom open to the twilight! You’ve given the wetlands their heartbeat back, Gateway.'
+        },
+        {
+          speaker: 'gateway',
+          name: 'GATEWAY • ENVOY OF PELAGIA',
+          text: 'The delta is breathing sweet mist again—and look past the mangroves! The open tropical sea is calling.'
+        },
+        {
+          speaker: 'naiad',
+          name: 'NAIAD • BIO-ACOUSTIC NAVIGATOR',
+          text: 'Ahead lie the Sunlit Coral Seas. Two offshore Siphon rigs are bleaching the reef lagoons—dive straight in and free the reef guardians!'
+        }
+      ]
+    },
+    act_4_clear: {
+      id: 'act_4_clear',
+      act: 'ACT IV RESTORED • SUNLIT CORAL SEAS',
+      title: 'SONG OF THE TURQUOISE ATOLL',
+      biome: 'coral_sea',
+      towerIdx: 8,
+      watershedPct: 100,
+      cameraCue: 'purification_crane',
+      beats: [
+        {
+          speaker: 'guardian',
+          name: 'MATRIARCH AURELIA • REEF SOVEREIGN',
+          text: 'Sunlight dances across living coral shelves once more, Sister of Pelagia! Our manta wings glide through warm turquoise lagoons thanks to your courage.'
+        },
+        {
+          speaker: 'warden',
+          name: 'MOTHER SIPHON • POLAR TELEMETRY',
+          text: 'WARNING: FOUR CONTINENTAL WATERSHEDS LOST TO PELAGIAN INTERFERENCE. ENGAGING MAXIMUM VORTEX DRAW AT POLAR NEXUS.'
+        },
+        {
+          speaker: 'gateway',
+          name: 'GATEWAY • ENVOY OF PELAGIA',
+          text: 'That’s the Mother Siphon at the Polar Ocean nexus. Hold tight, Naiad—one final tempest between Earth and total restoration!'
+        }
+      ]
+    },
+    epilogue: {
+      id: 'epilogue',
+      act: 'FINALE • EARTH WATERSHEDS 100% RESTORED',
+      title: 'SYMPHONY OF LIVING WATERS',
+      biome: 'storm_ocean',
+      towerIdx: 10,
+      watershedPct: 100,
+      cameraCue: 'finale_aurora_bloom',
+      beats: [
+        {
+          speaker: 'guardian',
+          name: 'ORACLE BOREALIS • DEEP OCEAN GUARDIAN',
+          text: 'The Mother Siphon fractures into sea-glass, and the polar aurora sings from pole to equator! Every river, lake, bayou, reef, and ocean beats as one living tide.'
+        },
+        {
+          speaker: 'naiad',
+          name: 'NAIAD • BIO-ACOUSTIC NAVIGATOR',
+          text: 'Global hydrosphere telemetry reads 100.0% harmonic balance! Pelagia will rejoice—shall I chart our return star-course, Gateway?'
+        },
+        {
+          speaker: 'gateway',
+          name: 'GATEWAY • GUARDIAN OF TWO WORLDS',
+          text: 'Give me one more sunrise on those redwood rapids first, Naiad. Earth’s waters are safe—and the tide is just getting fun!'
+        }
+      ]
+    }
+  }
+};
+
+export const STORY_CUTSCENES = STORY_ARC.cutscenes;
+
+// ============================================================================
+// 10 WATERSHED FIELD LOGS (1 PER CAMPAIGN SPIRE, ALIASED AS RELIC_CODEX)
+// ============================================================================
+
+export const WATERSHED_LOGS = [
   {
     id: 'relic_t1',
     towerId: 1,
     index: 1,
-    code: 'DATA LOG 01',
-    title: 'Project Nebulus Directive',
-    sector: 'Sector I • Watchtower of the Mist',
-    author: 'Destructo Inc. Orbital Recon',
-    accentColor: '#5efce8',
+    code: 'HYDRO LOG 01',
+    title: 'Arrival at Redwood Gorge',
+    sector: 'Act I • Sunlit Gorge Sluice',
+    author: 'Naiad • Pelagian Survey',
+    accentColor: '#2dd4bf',
     icon: '◈',
-    lore: 'Eight dormant Abyssal Terraform Monoliths have ignited under a lunar super-storm. MK.7 Specialist Pogo is cleared for vertical insertion: reach each crown portal, arm the core charges, and topple every tower into the sea.',
-    text: 'Eight dormant Abyssal Terraform Monoliths have ignited under a lunar super-storm. MK.7 Specialist Pogo is cleared for vertical insertion: reach each crown portal, arm the core charges, and topple every tower into the sea.',
-    description: 'Recovered from Watchtower of the Mist (Tower 1).'
+    lore: 'Siphon Spire One clamps straight over the upper redwood cataract, diverting snow-fed river rapids into copper pressure conduits. Gateway’s Tail-Whip can spin their exterior Pipe-Valves to turn their own water pressure against them.',
+    text: 'Siphon Spire One clamps straight over the upper redwood cataract, diverting snow-fed river rapids into copper pressure conduits. Gateway’s Tail-Whip can spin their exterior Pipe-Valves to turn their own water pressure against them.',
+    description: 'Recovered from Sunlit Gorge Sluice (Spire 1).'
   },
   {
     id: 'relic_t2',
     towerId: 2,
     index: 2,
-    code: 'DATA LOG 02',
-    title: 'Abyssal Sluice Telemetry',
-    sector: 'Sector I • The Sinking Reliquary',
-    author: 'Chief Hydrologist V. Kael',
-    accentColor: '#22d3ee',
+    code: 'HYDRO LOG 02',
+    title: 'Oakhaven’s Floodgate Pact',
+    sector: 'Act I • Redwood Cataract Dam',
+    author: 'Elder Oakhaven • Gorge Ranger',
+    accentColor: '#34d399',
     icon: '≈',
-    lore: 'Trench intake gates beneath Monolith Two have ruptured! Seawater is surging upward at 0.17 tiers per second. Only emergency brass Drain Valves wired into the exterior masonry can vent head pressure long enough to reach the crown.',
-    text: 'Trench intake gates beneath Monolith Two have ruptured! Seawater is surging upward at 0.17 tiers per second. Only emergency brass Drain Valves wired into the exterior masonry can vent head pressure long enough to reach the crown.',
-    description: 'Recovered from The Sinking Reliquary (Tower 2).'
+    lore: 'When the Syndicate smashed our lower timber bridges, they forgot one thing: open the brass Floodgate Valves and clean river water fills the basin so an agile swimmer can cross any chasm!',
+    text: 'When the Syndicate smashed our lower timber bridges, they forgot one thing: open the brass Floodgate Valves and clean river water fills the basin so an agile swimmer can cross any chasm!',
+    description: 'Recovered from Redwood Cataract Dam (Spire 2).'
   },
   {
     id: 'relic_t3',
     towerId: 3,
     index: 3,
-    code: 'DATA LOG 03',
-    title: 'Automaton Forge Manifest',
-    sector: 'Sector II • Clockwork Foundry',
-    author: 'Foundry Overseer Unit 09',
-    accentColor: '#f59e0b',
-    icon: '❖',
-    lore: 'Geothermal boilers feed both the reversible ore-conveyor belts and the Clockwork Sentinel patrols. Caution: cracked grate nozzles hiss for one second before venting vertical superheated steam plumes.',
-    text: 'Geothermal boilers feed both the reversible ore-conveyor belts and the Clockwork Sentinel patrols. Caution: cracked grate nozzles hiss for one second before venting vertical superheated steam plumes.',
-    description: 'Recovered from Clockwork Foundry (Tower 3).'
+    code: 'HYDRO LOG 03',
+    title: 'Crystal Tarn Resonance',
+    sector: 'Act II • Mirror Tarn Aqueduct',
+    author: 'Dr. Elena Vance • Alpine Hydrology',
+    accentColor: '#38bdf8',
+    icon: '✳',
+    lore: 'Wet quartz-crystal veins grow vertically up the silver-granite aqueducts. Native rock-salamanders—and Pelagian hydro-lizards—can scamper straight up those wet crystal strips on all fours.',
+    text: 'Wet quartz-crystal veins grow vertically up the silver-granite aqueducts. Native rock-salamanders—and Pelagian hydro-lizards—can scamper straight up those wet crystal strips on all fours.',
+    description: 'Recovered from Mirror Tarn Aqueduct (Spire 3).'
   },
   {
     id: 'relic_t4',
     towerId: 4,
     index: 4,
-    code: 'DATA LOG 04',
-    title: 'Cryogenic Vortex Anomaly',
-    sector: 'Sector II • Boreal Spire',
-    author: 'Boreal Weather Array',
-    accentColor: '#67e8f9',
-    icon: '✳',
-    lore: 'Monolith Four vents endothermic exhaust straight into the upper troposphere, glazing every corbel in mirror-ice and whipping 6-second cyclonic crosswinds around the cylinder. Hug recessed stone doorways to break the gale.',
-    text: 'Monolith Four vents endothermic exhaust straight into the upper troposphere, glazing every corbel in mirror-ice and whipping 6-second cyclonic crosswinds around the cylinder. Hug recessed stone doorways to break the gale.',
-    description: 'Recovered from Boreal Spire (Tower 4).'
+    code: 'HYDRO LOG 04',
+    title: 'Alpenglow Wind & Bronze Rings',
+    sector: 'Act II • Alpenglow Spillway Spire',
+    author: 'Spirit Lumi • High Tarn Steward',
+    accentColor: '#7dd3fc',
+    icon: '∆',
+    lore: 'Mountain gales sweep across the high glacial spillways every six seconds, but ancient bronze bell-rings hang over the widest chasms—perfect for a prehensile lizard tail to snag mid-leap!',
+    text: 'Mountain gales sweep across the high glacial spillways every six seconds, but ancient bronze bell-rings hang over the widest chasms—perfect for a prehensile lizard tail to snag mid-leap!',
+    description: 'Recovered from Alpenglow Spillway Spire (Spire 4).'
   },
   {
     id: 'relic_t5',
     towerId: 5,
     index: 5,
-    code: 'DATA LOG 05',
-    title: 'Resonator Cipher Tablet',
-    sector: 'Sector III • Prism Labyrinth',
-    author: 'Archivist S. Phillips',
-    accentColor: '#e879f9',
+    code: 'HYDRO LOG 05',
+    title: 'Cipher of the Sunken Temple',
+    sector: 'Act III • Firefly Cypress Reliquary',
+    author: 'Keeper Mossback • Delta Archive',
+    accentColor: '#fbbf24',
     icon: '◇',
-    lore: 'The builders hid Star Cores behind runic chambers whose combinations are carved in plain sight along the outer tower masonry—glowing tile grids and colored bronze bell banners waiting five stories away for keen eyes.',
-    text: 'The builders hid Star Cores behind runic chambers whose combinations are carved in plain sight along the outer tower masonry—glowing tile grids and colored bronze bell banners waiting five stories away for keen eyes.',
-    description: 'Recovered from Prism Labyrinth (Tower 5).'
+    lore: 'Our ancestors built sunlit Aqueduct Sanctums inside the bayou limestone. Each chamber’s glyph mosaic or water-bell sequence is carved onto the exterior wall stele just above the doorway.',
+    text: 'Our ancestors built sunlit Aqueduct Sanctums inside the bayou limestone. Each chamber’s glyph mosaic or water-bell sequence is carved onto the exterior wall stele just above the doorway.',
+    description: 'Recovered from Firefly Cypress Reliquary (Spire 5).'
   },
   {
     id: 'relic_t6',
     towerId: 6,
     index: 6,
-    code: 'DATA LOG 06',
-    title: 'Derrick Hydraulic Spec',
-    sector: 'Sector III • Tidal Piston Rig',
-    author: 'Offshore Structural Log',
-    accentColor: '#34d399',
-    icon: '⬡',
-    lore: 'Twelve-ton brass hydraulic rams anchor Monolith Six to the abyssal shelf, cycling in and out of the bulkhead in 3-second pneumatic cadences. Mistime a foothold on a retracting ram and the ocean claims another diver.',
-    text: 'Twelve-ton brass hydraulic rams anchor Monolith Six to the abyssal shelf, cycling in and out of the bulkhead in 3-second pneumatic cadences. Mistime a foothold on a retracting ram and the ocean claims another diver.',
-    description: 'Recovered from Tidal Piston Rig (Tower 6).'
+    code: 'HYDRO LOG 06',
+    title: 'Barnacle Mortar Counter-Play',
+    sector: 'Act III • Sunken Lotus Floodgate',
+    author: 'Naiad • Tactical Combat Scan',
+    accentColor: '#10b981',
+    icon: '◎',
+    lore: 'Siphon Barnacle Mortars peel open five iron petals with an orange-cyan pressure glow before lobbing volatile water-sludge globes. Time a 360° Tail-Whip to bat the globe straight back!',
+    text: 'Siphon Barnacle Mortars peel open five iron petals with an orange-cyan pressure glow before lobbing volatile water-sludge globes. Time a 360° Tail-Whip to bat the globe straight back!',
+    description: 'Recovered from Sunken Lotus Floodgate (Spire 6).'
   },
   {
     id: 'relic_t7',
     towerId: 7,
     index: 7,
-    code: 'DATA LOG 07',
-    title: 'Tempest Capacitor Grid',
-    sector: 'Sector IV • Blackout Citadel',
-    author: 'High-Voltage Telemetry',
-    accentColor: '#818cf8',
-    icon: '↯',
-    lore: 'Columnar basalt lightning conductors drink the storm itself, plunging the citadel into periodic twilight blackouts before discharging blinding megavolt forks across the rain-slick battlements.',
-    text: 'Columnar basalt lightning conductors drink the storm itself, plunging the citadel into periodic twilight blackouts before discharging blinding megavolt forks across the rain-slick battlements.',
-    description: 'Recovered from Blackout Citadel (Tower 7).'
+    code: 'HYDRO LOG 07',
+    title: 'Atoll Reef Bio-Telemetry',
+    sector: 'Act IV • Mother-of-Pearl Atoll Spire',
+    author: 'Matriarch Aurelia • Lagoon Choir',
+    accentColor: '#f472b6',
+    icon: '✦',
+    lore: 'Beneath the translucent turquoise lagoon, Siphon Snap-Claw Dredgers patrol the coral terraces. Flip a Dredger onto its curved dorsal shell with a Tail-Whip and bounce skyward off its carapace!',
+    text: 'Beneath the translucent turquoise lagoon, Siphon Snap-Claw Dredgers patrol the coral terraces. Flip a Dredger onto its curved dorsal shell with a Tail-Whip and bounce skyward off its carapace!',
+    description: 'Recovered from Mother-of-Pearl Atoll Spire (Spire 7).'
   },
   {
     id: 'relic_t8',
     towerId: 8,
     index: 8,
-    code: 'DATA LOG 08',
-    title: 'Operative Dossier: 1987–2026',
-    sector: 'Sector IV • Apex of Nebulus',
-    author: 'Destructo Inc. Command Vault',
-    accentColor: '#fbbf24',
+    code: 'HYDRO LOG 08',
+    title: 'Syndicate Tanker Ledger',
+    sector: 'Act IV • Pelagic Reef Conduit',
+    author: 'Intercepted Syndicate Dispatch',
+    accentColor: '#22d3ee',
+    icon: '⬡',
+    lore: 'Arch-Dredger Vane didn’t come merely for H2O—Earth’s living microbial & harmonic water memory powers the Syndicate’s warp drives. Every Harmonic Seed Gateway plants permanently severs their siphon lock.',
+    text: 'Arch-Dredger Vane didn’t come merely for H2O—Earth’s living microbial & harmonic water memory powers the Syndicate’s warp drives. Every Harmonic Seed Gateway plants permanently severs their siphon lock.',
+    description: 'Recovered from Pelagic Reef Conduit (Spire 8).'
+  },
+  {
+    id: 'relic_t9',
+    towerId: 9,
+    index: 9,
+    code: 'HYDRO LOG 09',
+    title: 'Aurora Maelstrom Convergence',
+    sector: 'Act V • Aurora Iceberg Bastion',
+    author: 'Oracle Borealis • Polar Deep',
+    accentColor: '#818cf8',
+    icon: '↯',
+    lore: 'Where emerald auroras touch the glacial sea, Spire Nine channels megavolt storm-veins through dark basalt ribs. Use recessed sanctum archways to shelter from tempest gusts.',
+    text: 'Where emerald auroras touch the glacial sea, Spire Nine channels megavolt storm-veins through dark basalt ribs. Use recessed sanctum archways to shelter from tempest gusts.',
+    description: 'Recovered from Aurora Iceberg Bastion (Spire 9).'
+  },
+  {
+    id: 'relic_t10',
+    towerId: 10,
+    index: 10,
+    code: 'HYDRO LOG 10',
+    title: 'Covenant of Pelagia & Earth',
+    sector: 'Act V • The Mother Siphon Citadel',
+    author: 'Gateway • Personal Star-Log',
+    accentColor: '#5efce8',
     icon: '♛',
-    lore: 'Thirty-nine cycles after the first eight Nebulus towers fell, the master Eclipsed Reactor has surfaced at the center of the maelstrom. Topple the Apex crown, and Planet Nebulus breathes free at last.',
-    text: 'Thirty-nine cycles after the first eight Nebulus towers fell, the master Eclipsed Reactor has surfaced at the center of the maelstrom. Topple the Apex crown, and Planet Nebulus breathes free at last.',
-    description: 'Recovered from Apex of Nebulus (Tower 8).'
+    lore: 'Ten spires climbed, five watersheds singing again. When this final Harmonic Seed blooms at the bedrock of the Mother Siphon, Pelagia and Earth will share a living tide forever.',
+    text: 'Ten spires climbed, five watersheds singing again. When this final Harmonic Seed blooms at the bedrock of the Mother Siphon, Pelagia and Earth will share a living tide forever.',
+    description: 'Recovered from The Mother Siphon Citadel (Spire 10).'
   }
 ];
+
+export const RELIC_CODEX = WATERSHED_LOGS;
+
+// ============================================================================
+// 12 NATURALIST CURIOS & HARMONIC BLUEPRINTS
+// ============================================================================
 
 export const CURIO_CATALOG = [
   {
@@ -296,166 +692,166 @@ export const CURIO_CATALOG = [
     category: 'curio',
     name: 'Tidal Brass Astrolabe',
     title: 'Tidal Brass Astrolabe',
-    sector: 'Endless Casual • Artifact Survey',
+    sector: 'Sanctum & Expedition • Survey',
     gearBonus: 5,
     accentColor: '#fbbf24',
     icon: '◎',
-    lore: 'Gilded three-ring celestial dial calibrated to Nebulus twin-tide harmonics.',
-    text: 'Gilded three-ring celestial dial calibrated to Nebulus twin-tide harmonics.',
-    description: 'Gilded three-ring celestial dial calibrated to Nebulus twin-tide harmonics.'
+    lore: 'Gilded three-ring celestial dial calibrated to Earth’s lunar spring-tide harmonics.',
+    text: 'Gilded three-ring celestial dial calibrated to Earth’s lunar spring-tide harmonics.',
+    description: 'Gilded three-ring celestial dial calibrated to Earth’s lunar spring-tide harmonics.'
   },
   {
     id: 'curio_nautilus',
     index: 2,
     category: 'curio',
-    name: 'Iridescent Glass Nautilus',
-    title: 'Iridescent Glass Nautilus',
-    sector: 'Endless Casual • Artifact Survey',
+    name: 'Iridescent Sea-Glass Nautilus',
+    title: 'Iridescent Sea-Glass Nautilus',
+    sector: 'Coral Seas • Reef Survey',
     gearBonus: 5,
     accentColor: '#5efce8',
     icon: '◈',
-    lore: 'Crystalline spiral shell resonating with low-frequency ocean trench currents.',
-    text: 'Crystalline spiral shell resonating with low-frequency ocean trench currents.',
-    description: 'Crystalline spiral shell resonating with low-frequency ocean trench currents.'
+    lore: 'Crystalline spiral shell resonating with warm pelagic lagoon currents.',
+    text: 'Crystalline spiral shell resonating with warm pelagic lagoon currents.',
+    description: 'Crystalline spiral shell resonating with warm pelagic lagoon currents.'
   },
   {
     id: 'curio_chronometer',
     index: 3,
     category: 'curio',
-    name: 'Submerged MK.1 Chronometer',
-    title: 'Submerged MK.1 Chronometer',
-    sector: 'Endless Casual • Lost Treasure',
+    name: 'Redwood River Sundial',
+    title: 'Redwood River Sundial',
+    sector: 'Canyon Rivers • Gorge Cache',
     gearBonus: 5,
     accentColor: '#38bdf8',
     icon: '◷',
-    lore: 'Watertight 1987 Destructo Inc. diver pocket watch—still ticking on ruby bearings.',
-    text: 'Watertight 1987 Destructo Inc. diver pocket watch—still ticking on ruby bearings.',
-    description: 'Watertight 1987 Destructo Inc. diver pocket watch—still ticking on ruby bearings.'
+    lore: 'Carved copper-and-redwood pocket sundial left by canyon dam keepers—still gleaming in waterfall mist.',
+    text: 'Carved copper-and-redwood pocket sundial left by canyon dam keepers—still gleaming in waterfall mist.',
+    description: 'Carved copper-and-redwood pocket sundial left by canyon dam keepers—still gleaming in waterfall mist.'
   },
   {
     id: 'curio_prism_lens',
     index: 4,
     category: 'curio',
-    name: 'Refractive Starlight Prism',
-    title: 'Refractive Starlight Prism',
-    sector: 'Endless Casual • Master Puzzle Spire',
+    name: 'Refractive Rainbow Prism',
+    title: 'Refractive Rainbow Prism',
+    sector: 'Sanctum Trials • Optic Vault',
     gearBonus: 5,
     accentColor: '#e879f9',
     icon: '◇',
-    lore: 'Precision-ground amethyst octahedron used to split resonator laser beams.',
-    text: 'Precision-ground amethyst octahedron used to split resonator laser beams.',
-    description: 'Precision-ground amethyst octahedron used to split resonator laser beams.'
+    lore: 'Precision-ground amethyst octahedron used to split sunlit aqueduct beams.',
+    text: 'Precision-ground amethyst octahedron used to split sunlit aqueduct beams.',
+    description: 'Precision-ground amethyst octahedron used to split sunlit aqueduct beams.'
   },
   {
     id: 'curio_compass',
     index: 5,
     category: 'curio',
-    name: 'Mariner Lodestone Compass',
-    title: 'Mariner Lodestone Compass',
-    sector: 'Endless Casual • Lost Treasure',
+    name: 'Pelagian Wayfinder Compass',
+    title: 'Pelagian Wayfinder Compass',
+    sector: 'Watershed Expedition • Hoard',
     gearBonus: 5,
     accentColor: '#34d399',
     icon: '✦',
-    lore: 'Floating magnetized meteorite needle pointing unerringly toward submerged Star Cores.',
-    text: 'Floating magnetized meteorite needle pointing unerringly toward submerged Star Cores.',
-    description: 'Floating magnetized meteorite needle pointing unerringly toward submerged Star Cores.'
+    lore: 'Floating star-stone needle pointing unerringly toward dormant Harmonic Water Seeds.',
+    text: 'Floating star-stone needle pointing unerringly toward dormant Harmonic Water Seeds.',
+    description: 'Floating star-stone needle pointing unerringly toward dormant Harmonic Water Seeds.'
   },
   {
     id: 'curio_automaton_heart',
     index: 6,
     category: 'curio',
-    name: 'Clockwork Escapement Core',
-    title: 'Clockwork Escapement Core',
-    sector: 'Endless Casual • Artifact Survey',
+    name: 'Purified Hydro-Turbine Core',
+    title: 'Purified Hydro-Turbine Core',
+    sector: 'Canyon Rivers • Dam Salvage',
     gearBonus: 5,
     accentColor: '#f59e0b',
     icon: '❖',
-    lore: 'Mainspring governor salvaged from a decommissioned Foundry sentinel.',
-    text: 'Mainspring governor salvaged from a decommissioned Foundry sentinel.',
-    description: 'Mainspring governor salvaged from a decommissioned Foundry sentinel.'
+    lore: 'Miniature copper waterwheel governor reclaimed from a purified Siphon sluice.',
+    text: 'Miniature copper waterwheel governor reclaimed from a purified Siphon sluice.',
+    description: 'Miniature copper waterwheel governor reclaimed from a purified Siphon sluice.'
   },
   {
     id: 'curio_frost_orchid',
     index: 7,
     category: 'curio',
-    name: 'Cryo-Preserved Abyssal Orchid',
-    title: 'Cryo-Preserved Abyssal Orchid',
-    sector: 'Endless Casual • Artifact Survey',
+    name: 'Alpenglow Ice-Lotus',
+    title: 'Alpenglow Ice-Lotus',
+    sector: 'Alpine Lakes • Glacial Tarn',
     gearBonus: 5,
     accentColor: '#67e8f9',
     icon: '✳',
-    lore: 'Bioluminescent pelagic blossom flash-frozen inside crystal Boreal ice.',
-    text: 'Cryo-Preserved pelagic blossom flash-frozen inside crystal Boreal ice.',
-    description: 'Bioluminescent pelagic blossom flash-frozen inside crystal Boreal ice.'
+    lore: 'Bioluminescent snow-blossom preserved inside crystal-clear mountain quartz.',
+    text: 'Bioluminescent snow-blossom preserved inside crystal-clear mountain quartz.',
+    description: 'Bioluminescent snow-blossom preserved inside crystal-clear mountain quartz.'
   },
   {
     id: 'curio_thunder_glass',
     index: 8,
     category: 'curio',
-    name: 'Fulgurite Lightning Vial',
-    title: 'Fulgurite Lightning Vial',
-    sector: 'Endless Casual • Lost Treasure',
+    name: 'Aurora Fulgurite Vial',
+    title: 'Aurora Fulgurite Vial',
+    sector: 'Polar Oceans • Tempest Cache',
     gearBonus: 5,
     accentColor: '#818cf8',
     icon: '↯',
-    lore: 'Hollow tube of vitrified sea-sand humming with trapped tempest static.',
-    text: 'Hollow tube of vitrified sea-sand humming with trapped tempest static.',
-    description: 'Hollow tube of vitrified sea-sand humming with trapped tempest static.'
+    lore: 'Hollow tube of vitrified sea-sand humming with trapped polar aurora light.',
+    text: 'Hollow tube of vitrified sea-sand humming with trapped polar aurora light.',
+    description: 'Hollow tube of vitrified sea-sand humming with trapped polar aurora light.'
   },
   {
     id: 'blueprint_beacon_dynamo',
     index: 9,
     category: 'blueprint',
-    name: 'Blueprint: Summit Beacon Dynamo',
-    title: 'Blueprint: Summit Beacon Dynamo',
-    sector: 'Workbench Craft • Tower Repair',
+    name: 'Blueprint: Harmonic Sluice Dynamo',
+    title: 'Blueprint: Harmonic Sluice Dynamo',
+    sector: 'Workbench Craft • Watershed Repair',
     gearBonus: 8,
     accentColor: '#fbbf24',
     icon: '⬡',
-    lore: 'Field schematic assembling a Copper Coil, Prism Lens, and Brass Shaft into a self-exciting monolith stabilizer.',
-    text: 'Field schematic assembling a Copper Coil, Prism Lens, and Brass Shaft into a self-exciting monolith stabilizer.',
-    description: 'Crafted at a Tinker Workbench during a Fix-the-Monolith expedition.'
+    lore: 'Field schematic assembling a Copper Impeller, Sea-Glass Lens, and Redwood Viva-Shaft into a self-purifying spire stabilizer.',
+    text: 'Field schematic assembling a Copper Impeller, Sea-Glass Lens, and Redwood Viva-Shaft into a self-purifying spire stabilizer.',
+    description: 'Crafted at a Hydro-Workbench during a Sanctum or Expedition climb.'
   },
   {
     id: 'blueprint_mk7_thruster',
     index: 10,
     category: 'blueprint',
-    name: 'Blueprint: MK.7 Hydro-Impeller',
-    title: 'Blueprint: MK.7 Hydro-Impeller',
-    sector: 'Workbench Craft • Naval Engineering',
+    name: 'Blueprint: Hydro-Wake Tail Fin',
+    title: 'Blueprint: Hydro-Wake Tail Fin',
+    sector: 'Workbench Craft • Rapids Surf',
     gearBonus: 8,
     accentColor: '#22d3ee',
     icon: '≈',
-    lore: 'Whisper-quiet magnetohydrodynamic shroud specs for deep-trench MK.7 voyages.',
-    text: 'Whisper-quiet magnetohydrodynamic shroud specs for deep-trench MK.7 voyages.',
-    description: 'Recovered from coastal salvage & workbench calibration.'
+    lore: 'Harmonic harness tuning allowing Gateway’s lizard tail to carve standing whitewater rapids at high speed.',
+    text: 'Harmonic harness tuning allowing Gateway’s lizard tail to carve standing whitewater rapids at high speed.',
+    description: 'Unlocked through Sanctum & Expedition milestones.'
   },
   {
     id: 'blueprint_skywing_rib',
     index: 11,
     category: 'blueprint',
-    name: 'Blueprint: Storm-Silk Glider Frame',
-    title: 'Blueprint: Storm-Silk Glider Frame',
-    sector: 'Workbench Craft • Aero-Rigging',
+    name: 'Blueprint: Iridescent Frill-Weave',
+    title: 'Blueprint: Iridescent Frill-Weave',
+    sector: 'Workbench Craft • Canyon Updrafts',
     gearBonus: 8,
     accentColor: '#a7f3d0',
     icon: '∆',
-    lore: 'Ultralight hinged carbon-reed spar enabling Pogo to ride violent summit thermals.',
-    text: 'Ultralight hinged carbon-reed spar enabling Pogo to ride violent summit thermals.',
+    lore: 'Resonant water-ribbon amplifiers that stream from Gateway’s flared neck-frills in canyon thermals.',
+    text: 'Resonant water-ribbon amplifiers that stream from Gateway’s flared neck-frills in canyon thermals.',
     description: 'Recovered from high-altitude spire expeditions.'
   },
   {
     id: 'blueprint_cryo_condenser',
     index: 12,
     category: 'blueprint',
-    name: 'Blueprint: MK.4 Cryo-Condenser',
-    title: 'Blueprint: MK.4 Cryo-Condenser',
-    sector: 'Workbench Craft • Armory',
+    name: 'Blueprint: Pelagian Seed Amplifier',
+    title: 'Blueprint: Pelagian Seed Amplifier',
+    sector: 'Workbench Craft • Hydro-Caster',
     gearBonus: 8,
     accentColor: '#f472b6',
     icon: '★',
-    lore: 'Triple-baffled phase chamber allowing custom prismatic cryo-bolt modulation.',
-    text: 'Triple-baffled phase chamber allowing custom prismatic cryo-bolt modulation.',
+    lore: 'Triple-chambered sea-glass resonator enabling custom prismatic Hydro-Pulse waveforms.',
+    text: 'Triple-chambered sea-glass resonator enabling custom prismatic Hydro-Pulse waveforms.',
     description: 'Recovered from deep expedition vaults and chests.'
   }
 ];
@@ -468,140 +864,172 @@ function tDef(id, title, description, tier, points, category, icon) {
 // 50 aluminum (5 pts = 250) + 30 copper (10 pts = 300) + 15 platinum (20 pts = 300) + 5 diamond (30 pts = 150)
 export const TROPHIES = [
   // ================= ALUMINUM TIER: 50 × 5 PTS = 250 PTS =================
-  // Reboot Campaign & Mechanics (16)
-  tDef('first_topple', 'Monolith Breaker', 'Topple your first tower in any mode.', 'aluminum', 5, 'campaign', '❖'),
-  tDef('mist_walker', 'Watchtower Cleared', 'Complete Reboot Tower 1 (Watchtower of the Mist).', 'aluminum', 5, 'campaign', '◈'),
-  tDef('clear_reboot_t2', 'Reliquary Survivor', 'Complete Reboot Tower 2 (The Sinking Reliquary).', 'aluminum', 5, 'campaign', '≈'),
-  tDef('clear_reboot_t3', 'Smelter Veteran', 'Complete Reboot Tower 3 (Clockwork Foundry).', 'aluminum', 5, 'campaign', '❖'),
-  tDef('clear_reboot_t4', 'Gale Climber', 'Complete Reboot Tower 4 (Boreal Spire).', 'aluminum', 5, 'campaign', '✳'),
-  tDef('clear_reboot_t5', 'Prism Initiate', 'Complete Reboot Tower 5 (Prism Labyrinth).', 'aluminum', 5, 'campaign', '◇'),
-  tDef('clear_reboot_t6', 'Derrick Rigger', 'Complete Reboot Tower 6 (Tidal Piston Rig).', 'aluminum', 5, 'campaign', '⬡'),
-  tDef('clear_reboot_t7', 'Tempest Walker', 'Complete Reboot Tower 7 (Blackout Citadel).', 'aluminum', 5, 'campaign', '↯'),
-  tDef('clear_reboot_t8', 'Reactor Breacher', 'Complete Reboot Tower 8 (Apex of Nebulus).', 'aluminum', 5, 'campaign', '★'),
-  tDef('lift_rider', 'Cage Ascender', 'Ride a wrought-iron cage elevator to its upper stop.', 'aluminum', 5, 'campaign', '▲'),
-  tDef('lift_caller', 'Remote Recall', 'Recall a distant cage elevator to your floor with a cryo-shot.', 'aluminum', 5, 'campaign', '◎'),
-  tDef('tunnel_runner', 'Misty Passage', 'Traverse an interior stone doorway shortcut.', 'aluminum', 5, 'campaign', '◈'),
-  tDef('spark_diver', 'Welder Shortcut', 'Thread a spark-showering arched side tunnel.', 'aluminum', 5, 'campaign', '✦'),
-  tDef('drain_plumber', 'Pressure Relief', 'Trigger a brass Drain Valve to lower surging sea levels.', 'aluminum', 5, 'campaign', '≈'),
-  tDef('steam_surfer', 'Thermal Updraft', 'Launch skyward on an erupting Foundry steam vent.', 'aluminum', 5, 'campaign', '»'),
-  tDef('belt_flipper', 'Reverse Polarity', 'Reverse conveyor belt direction using a Foundry switch.', 'aluminum', 5, 'campaign', '⇄'),
+  // Campaign Spires 1-10 & Core Mechanics (18)
+  tDef('first_purify', 'Seed Planter', 'Purify your first Siphon Spire in any mode.', 'aluminum', 5, 'campaign', '❖'),
+  tDef('mist_walker', 'Gorge Sluice Purified', 'Purify Campaign Spire 1 (Sunlit Gorge Sluice).', 'aluminum', 5, 'campaign', '◈'),
+  tDef('clear_reboot_t2', 'Cataract Liberator', 'Purify Campaign Spire 2 (Redwood Cataract Dam).', 'aluminum', 5, 'campaign', '≈'),
+  tDef('clear_reboot_t3', 'Mirror Tarn Cleansed', 'Purify Campaign Spire 3 (Mirror Tarn Aqueduct).', 'aluminum', 5, 'campaign', '❖'),
+  tDef('clear_reboot_t4', 'Alpenglow Climber', 'Purify Campaign Spire 4 (Alpenglow Spillway Spire).', 'aluminum', 5, 'campaign', '✳'),
+  tDef('clear_reboot_t5', 'Firefly Reliquary Freed', 'Purify Campaign Spire 5 (Firefly Cypress Reliquary).', 'aluminum', 5, 'campaign', '◇'),
+  tDef('clear_reboot_t6', 'Lotus Floodgate Opened', 'Purify Campaign Spire 6 (Sunken Lotus Floodgate).', 'aluminum', 5, 'campaign', '⬡'),
+  tDef('clear_reboot_t7', 'Atoll Pearl Awakened', 'Purify Campaign Spire 7 (Mother-of-Pearl Atoll Spire).', 'aluminum', 5, 'campaign', '↯'),
+  tDef('clear_reboot_t8', 'Reef Conduit Healed', 'Purify Campaign Spire 8 (Pelagic Reef Conduit).', 'aluminum', 5, 'campaign', '★'),
+  tDef('clear_spire_9', 'Aurora Bastion Breached', 'Purify Campaign Spire 9 (Aurora Iceberg Bastion).', 'aluminum', 5, 'campaign', '✳'),
+  tDef('clear_spire_10', 'Mother Siphon Shattered', 'Purify Campaign Spire 10 (The Mother Siphon Citadel).', 'aluminum', 5, 'campaign', '♛'),
+  tDef('lift_rider', 'Mechanical Ascender', 'Ride a twin-rail mechanical elevator to its upper stop.', 'aluminum', 5, 'campaign', '▲'),
+  tDef('lift_caller', 'Hydro Recall', 'Recall or power a mechanical elevator using Hydro-Pulse or a Pipe-Valve.', 'aluminum', 5, 'campaign', '◎'),
+  tDef('tunnel_runner', 'Sanctum Passage', 'Traverse an interior stone archway shortcut.', 'aluminum', 5, 'campaign', '◈'),
+  tDef('spark_diver', 'Conduit Shortcut', 'Thread a glowing hydro-conduit archway.', 'aluminum', 5, 'campaign', '✦'),
+  tDef('drain_plumber', 'Valve Engineer', 'Spin a brass Pipe-Valve or Drain Valve to route spire water.', 'aluminum', 5, 'campaign', '≈'),
+  tDef('steam_surfer', 'Geyser Updraft', 'Launch skyward on an erupting hydro-geyser vent.', 'aluminum', 5, 'campaign', '»'),
+  tDef('belt_flipper', 'Current Reversal', 'Reverse hydro-channel flow direction using a sluice switch.', 'aluminum', 5, 'campaign', '⇄'),
 
-  // Original 1987 Classic Towers & Rules (10)
-  tDef('clear_orig_t1', 'Eyes Wide Open', 'Topple 1987 Original Tower 1 (The Tower of Eyes).', 'aluminum', 5, 'original', '▲'),
-  tDef('clear_orig_t2', 'Robot Wrangler', 'Topple 1987 Original Tower 2 (The Realm of Robots).', 'aluminum', 5, 'original', '▲'),
-  tDef('clear_orig_t3', 'Deception Dodger', 'Topple 1987 Original Tower 3 (Trap of Tricks).', 'aluminum', 5, 'original', '▲'),
-  tDef('clear_orig_t4', 'Glacier Skater', 'Topple 1987 Original Tower 4 (Slippery Slide).', 'aluminum', 5, 'original', '▲'),
-  tDef('clear_orig_t5', 'Ruin Hopper', 'Topple 1987 Original Tower 5 (Broken Path).', 'aluminum', 5, 'original', '▲'),
-  tDef('clear_orig_t6', 'High Dive Dry', "Topple 1987 Original Tower 6 (Swimmer's Delight).", 'aluminum', 5, 'original', '▲'),
-  tDef('clear_orig_t7', 'No Doors Needed', 'Topple 1987 Original Tower 7 (Nasty One).', 'aluminum', 5, 'original', '▲'),
-  tDef('clear_orig_t8', 'Summit Gambler', 'Topple 1987 Original Tower 8 (Edge of Doom).', 'aluminum', 5, 'original', '▲'),
-  tDef('chute_breaker', 'Chimney Drop', 'Dissolve a crumbling step in Original Mode.', 'aluminum', 5, 'original', '▾'),
-  tDef('classic_extra_life', '5,000-Point 1-UP', 'Earn an extra life at a 5,000-point arcade threshold.', 'aluminum', 5, 'original', '✦'),
+  // Lizard Abilities, Purist Arcade & Flood Rush Onboarding (8)
+  tDef('tail_whip_first', 'Lizard Snap', 'Unleash Gateway’s 360° Tail-Whip inside a spire.', 'aluminum', 5, 'combat', '◎'),
+  tDef('crab_flipper', 'Carapace Springboard', 'Flip a Snap-Claw Dredger onto its back and bounce high off its shell.', 'aluminum', 5, 'combat', '▲'),
+  tDef('gecko_climber', 'Gecko Grip', 'Scamper vertically up a wet crystal or moss Wall-Strip.', 'aluminum', 5, 'exploration', '»'),
+  tDef('grapple_swinger', 'Prehensile Vault', 'Snag an aerial Grapple Ring with Gateway’s tail to cross a chasm.', 'aluminum', 5, 'exploration', '∆'),
+  tDef('floodgate_swimmer', 'Buoyant Hydro-Saurian', 'Raise clean Floodgate water and swim across a broken lower bridge.', 'aluminum', 5, 'exploration', '≈'),
+  tDef('purist_first', 'Purist Initiate', 'Clear a spire under strict 1-Hit Purist Arcade stakes.', 'aluminum', 5, 'purist', '▲'),
+  tDef('flood_rush_first', 'Surge Outrunner', 'Survive Spire 1 in Flash-Flood Survival mode.', 'aluminum', 5, 'endless_daily', '≈'),
+  tDef('classic_extra_life', '5,000-Point 1-UP', 'Earn a bonus life at a 5,000-point score threshold.', 'aluminum', 5, 'purist', '✦'),
 
-  // Combat & Cryo-Blaster (6)
-  tDef('first_snowball', 'Cryo Calibration', 'Fire your MK.4 Cryo-Blaster inside a tower.', 'aluminum', 5, 'combat', '✳'),
-  tDef('box_breaker', 'Crate Shatter', 'Demolish a barricade block with a cryo-bolt.', 'aluminum', 5, 'combat', '❖'),
-  tDef('roller_shatter', 'Furnace Cracker', 'Neutralize a Rolling Sphere with a direct shot.', 'aluminum', 5, 'combat', '◎'),
-  tDef('bouncer_freeze', 'Spore Stasis', 'Freeze or pop a Bouncing Hopper with your blaster.', 'aluminum', 5, 'combat', '✳'),
-  tDef('sentinel_short', 'Clockwork Jammer', 'Short-circuit a patrolling Clockwork Sentinel in Reboot Mode.', 'aluminum', 5, 'combat', '↯'),
-  tDef('shield_saver', 'Cryo-Barrier Saved', 'Absorb a hazard or enemy impact with an active Cryo-Shield.', 'aluminum', 5, 'combat', '◎'),
+  // Combat & Hydro-Caster (6)
+  tDef('first_snowball', 'Hydro Calibration', 'Fire Gateway’s wrist Hydro-Caster inside a spire.', 'aluminum', 5, 'combat', '✳'),
+  tDef('box_breaker', 'Siphon Lock Shatter', 'Demolish a Siphon barrier crate with Hydro-Pulse or Tail-Whip.', 'aluminum', 5, 'combat', '❖'),
+  tDef('roller_shatter', 'Dredger Neutralized', 'Flip or neutralize a Snap-Claw Dredger.', 'aluminum', 5, 'combat', '◎'),
+  tDef('bouncer_freeze', 'Hopper Bubbled', 'Encase a Gulp-Hopper Drone in a sea-glass bubble.', 'aluminum', 5, 'combat', '✳'),
+  tDef('sentinel_short', 'Skater Grounded', 'Stun a patrolling Riptide Rail-Skater or Volt-Eel.', 'aluminum', 5, 'combat', '↯'),
+  tDef('shield_saver', 'Bubble Aegis Saved', 'Absorb an enemy or hazard impact with an active Sea-Glass Shield.', 'aluminum', 5, 'combat', '◎'),
 
-  // Mini-Games Onboarding (8)
-  tDef('sub_novice', 'Trench Diver', 'Complete a voyage in MK.7 Sub-Hunter.', 'aluminum', 5, 'minigames', '◎'),
-  tDef('sub_mine_sweeper', 'Ordnance Disposal', 'Detonate a chained abyssal sea mine in MK.7 Sub-Hunter.', 'aluminum', 5, 'minigames', '✦'),
-  tDef('skimmer_novice', 'Wake Runner', 'Complete an ocean sprint in Hydro-Skimmer Run.', 'aluminum', 5, 'minigames', '»'),
-  tDef('skimmer_ramp_air', 'Crest Jumper', 'Launch off a curling foam wave-ramp in Hydro-Skimmer Run.', 'aluminum', 5, 'minigames', '∆'),
-  tDef('skimmer_crate_buster', 'Flotsam Blaster', 'Blast floating cargo crates during Hydro-Skimmer Run.', 'aluminum', 5, 'minigames', '❖'),
-  tDef('glide_novice', 'First Flight', 'Complete a sky-wing flight in The Glide.', 'aluminum', 5, 'minigames', '∆'),
-  tDef('glide_thermal', 'Updraft Rider', 'Gain altitude inside a rising sea thermal in The Glide.', 'aluminum', 5, 'minigames', '≈'),
-  tDef('vault_novice', 'Tumbler Apprentice', 'Lock your first rotating ring inside a Core Lock Vault.', 'aluminum', 5, 'minigames', '⬡'),
+  // 5 Gateway Mini-Games Onboarding (9)
+  tDef('core_dive_novice', 'Into the Reactor Tube', 'Complete your first playable Reactor Core Descent.', 'aluminum', 5, 'minigames', '▾'),
+  tDef('sub_novice', 'Reef Swimmer', 'Complete an underwater voyage in Coral & Lakebed Free-Swim.', 'aluminum', 5, 'minigames', '◎'),
+  tDef('sub_mine_sweeper', 'Cage Breaker', 'Shatter a Siphon snare or mine during Reef Free-Swim.', 'aluminum', 5, 'minigames', '✦'),
+  tDef('skimmer_novice', 'Rapids Tail-Surfer', 'Complete a canyon sprint in Whitewater Rapids Tail-Surf.', 'aluminum', 5, 'minigames', '»'),
+  tDef('skimmer_ramp_air', 'Whitewater Crest Leap', 'Launch off a foaming river wave-ramp in Rapids Tail-Surf.', 'aluminum', 5, 'minigames', '∆'),
+  tDef('skimmer_crate_buster', 'Driftwood Clearing', 'Shatter Siphon flotsam crates during Rapids Tail-Surf.', 'aluminum', 5, 'minigames', '❖'),
+  tDef('glide_novice', 'Frill Flyer', 'Complete a sunlit canyon flight in Updraft Frill-Glide.', 'aluminum', 5, 'minigames', '∆'),
+  tDef('glide_thermal', 'Mist Updraft Rider', 'Gain altitude inside a rainbow waterfall thermal in Frill-Glide.', 'aluminum', 5, 'minigames', '≈'),
+  tDef('vault_novice', 'Tumbler Apprentice', 'Lock your first rotating ring inside a Harmonic Core Vault.', 'aluminum', 5, 'minigames', '⬡'),
 
-  // Exploration, Casual Expeditions & Endless/Daily Onboarding (10)
-  tDef('first_gear', 'Cog Scavenger', 'Collect your first Golden Gear.', 'aluminum', 5, 'exploration', '❖'),
-  tDef('first_star_core', 'Core Harvester', 'Earn your first Star Core.', 'aluminum', 5, 'exploration', '★'),
-  tDef('relic_finder_1', 'Ancient Signal', 'Recover your first Destructo Inc. Lore Relic tablet.', 'aluminum', 5, 'exploration', '◈'),
-  tDef('casual_explorer', 'Peaceful Expedition', 'Complete a peaceful monolith climb in Endless Casual mode.', 'aluminum', 5, 'exploration', '✧'),
-  tDef('tinker_apprentice', 'Monolith Tinker', 'Scavenge 3 Salvage Parts and craft a Beacon Dynamo at a Workbench.', 'aluminum', 5, 'exploration', '⬡'),
-  tDef('chest_plunderer', 'Sunken Hoard', 'Find 3 Compass Keys and unlock a Summit Treasure Chest.', 'aluminum', 5, 'exploration', '★'),
-  tDef('era_switcher', 'Time Traveler', 'Switch between the 2026 Reboot and 1987 Original eras.', 'aluminum', 5, 'exploration', '⇄'),
-  tDef('zen_voyager', 'Calm Amidst the Storm', 'Climb a monolith with Casual Zen Mode enabled.', 'aluminum', 5, 'exploration', '✧'),
-  tDef('daily_try', 'Global Contender', 'Attempt a UTC Daily Seeded Tower challenge.', 'aluminum', 5, 'endless_daily', '◷'),
-  tDef('endless_1', 'Into the Abyss', 'Topple Sector 1 in Endless Abyss mode.', 'aluminum', 5, 'endless_daily', '∞'),
+  // Exploration, Sanctum Trials, Expedition & Daily Tide Onboarding (9)
+  tDef('first_gear', 'Hydro-Gear Gatherer', 'Collect your first golden Hydro-Gear.', 'aluminum', 5, 'exploration', '❖'),
+  tDef('first_star_core', 'Seed Keeper', 'Earn your first Harmonic Water Seed.', 'aluminum', 5, 'exploration', '★'),
+  tDef('relic_finder_1', 'Watershed Signal', 'Recover your first Watershed Field Log tablet.', 'aluminum', 5, 'exploration', '◈'),
+  tDef('casual_explorer', 'Sanctum Pilgrim', 'Complete a timer-free spire in Sanctum Puzzle Trials.', 'aluminum', 5, 'exploration', '✧'),
+  tDef('tinker_apprentice', 'Watershed Tinker', 'Gather 3 Salvage Parts and craft a Harmonic Dynamo at a Workbench.', 'aluminum', 5, 'exploration', '⬡'),
+  tDef('chest_plunderer', 'Sunken Reliquary', 'Find 3 Wayfinder Keys and unlock a Summit Treasure Chest.', 'aluminum', 5, 'exploration', '★'),
+  tDef('expedition_first', 'Bio-Mutant Envoy', 'Draft your first Bio-Mutation in Watershed Expedition mode.', 'aluminum', 5, 'endless_daily', '✦'),
+  tDef('daily_try', 'Tide Contender', 'Attempt a UTC Daily Tide Run challenge.', 'aluminum', 5, 'endless_daily', '◷'),
+  tDef('zen_voyager', 'Gentle Current', 'Purify a spire with Zen Assist or Sanctum calm active.', 'aluminum', 5, 'exploration', '✧'),
 
   // ================= COPPER TIER: 30 × 10 PTS = 300 PTS =================
-  // Speed Pars, Biome Survival & Casual Surveys (10)
-  tDef('speed_reboot_t1', 'Mist Sprinter', 'Beat the Speed Par time on Watchtower of the Mist (T1).', 'copper', 10, 'campaign', '↯'),
-  tDef('speed_reboot_t2', 'Surge Outrunner', 'Beat the Speed Par time on The Sinking Reliquary (T2).', 'copper', 10, 'campaign', '↯'),
-  tDef('speed_demon', 'Chrono Blitz', 'Earn the Speed Star Core on 3 different towers.', 'copper', 10, 'campaign', '↯'),
-  tDef('tide_runner', 'Outrun the Abyss', 'Clear The Sinking Reliquary (Reboot T2) without touching the rising sea.', 'copper', 10, 'campaign', '≈'),
-  tDef('wind_walker', 'Anchor Footing', 'Clear Boreal Spire (Reboot T4) without plunging into the sea.', 'copper', 10, 'campaign', '✳'),
-  tDef('piston_dancer', 'Pneumatic Rhythm', 'Clear Tidal Piston Rig (Reboot T6) with zero enemy or hazard hits.', 'copper', 10, 'campaign', '⬡'),
-  tDef('blackout_beacon', 'Night Vision', 'Clear Blackout Citadel (Reboot T7) without touching the sea.', 'copper', 10, 'campaign', '✧'),
-  tDef('storm_ghost', 'Untouchable Operative', 'Clear any tower without taking a single enemy hit.', 'copper', 10, 'combat', '✧'),
-  tDef('curio_collector_4', 'Field Naturalist', 'Catalog 4 Exploration Curios or Blueprints in your Codex.', 'copper', 10, 'exploration', '◎'),
-  tDef('casual_voyager_5', 'Horizon Wanderer', 'Complete 5 Endless Casual expeditions across the archipelago.', 'copper', 10, 'exploration', '✧'),
+  // Speed Pars, Biome Mastery & Bosses (10)
+  tDef('speed_reboot_t1', 'Gorge Sprinter', 'Beat the Speed Par time on Sunlit Gorge Sluice (Spire 1).', 'copper', 10, 'campaign', '↯'),
+  tDef('speed_reboot_t2', 'Cataract Dasher', 'Beat the Speed Par time on Redwood Cataract Dam (Spire 2).', 'copper', 10, 'campaign', '↯'),
+  tDef('speed_demon', 'Chrono Stream', 'Earn the Speed Seed medal on 3 different spires.', 'copper', 10, 'campaign', '↯'),
+  tDef('tide_runner', 'Dry Scales', 'Clear Sunken Lotus Floodgate (Spire 6) without falling into unpurified brine.', 'copper', 10, 'campaign', '≈'),
+  tDef('wind_walker', 'Mountain Surefoot', 'Clear Alpenglow Spillway Spire (Spire 4) without falling into the tarn.', 'copper', 10, 'campaign', '✳'),
+  tDef('piston_dancer', 'Coral Rhythm', 'Clear Pelagic Reef Conduit (Spire 8) with zero enemy or hazard hits.', 'copper', 10, 'campaign', '⬡'),
+  tDef('blackout_beacon', 'Aurora Pathfinder', 'Clear Aurora Iceberg Bastion (Spire 9) with zero falls.', 'copper', 10, 'campaign', '✧'),
+  tDef('storm_ghost', 'Untouchable Lizard', 'Purify any combat spire without taking a single hit.', 'copper', 10, 'combat', '✧'),
+  tDef('warden_slayer', 'Warden Breaker', 'Defeat an Act-End Siphon Warden Leviathan-Mech.', 'copper', 10, 'combat', '♛'),
+  tDef('mortar_reflector', 'Return to Sender', 'Deflect a Barnacle Mortar bubble with Tail-Whip to shatter a foe.', 'copper', 10, 'combat', '◎'),
 
-  // Secret Rune Chambers & Core Lock Vaults (8)
-  tDef('rune_scholar', 'Rune Reader', 'Decipher an exterior tower clue and solve a hidden Rune Puzzle Chamber.', 'copper', 10, 'exploration', '◈'),
-  tDef('rune_lights_clear', 'Mosaic Illuminator', 'Solve a Lights Mosaic Rune Chamber.', 'copper', 10, 'minigames', '◈'),
-  tDef('rune_bells_clear', 'Carillon Virtuoso', 'Ring the exact banner sequence in a Bell Choir Rune Chamber.', 'copper', 10, 'minigames', '◈'),
-  tDef('rune_beam_clear', 'Optic Architect', 'Align the crystal mirrors to solve a Prism Beam Rune Chamber.', 'copper', 10, 'minigames', '◇'),
-  tDef('rune_blocks_clear', 'Ashlar Tactician', 'Seal every stone pressure plate in a Blocks Rune Chamber.', 'copper', 10, 'minigames', '❖'),
-  tDef('switch_architect', 'Prism Tactician', 'Clear Prism Labyrinth (Reboot T5) collecting its Explorer Star Core.', 'copper', 10, 'campaign', '◇'),
-  tDef('vault_cracker', 'Master Locksmith', 'Crack open a Core Lock Vault with zero missed strikes.', 'copper', 10, 'minigames', '⬡'),
-  tDef('vault_t8_clear', 'Reactor Vault Breached', 'Crack the hidden Core Lock Vault on Apex of Nebulus (T8).', 'copper', 10, 'exploration', '★'),
+  // Secret Aqueduct Sanctums & Core Vaults (8)
+  tDef('rune_scholar', 'Glyph Reader', 'Decipher an exterior stele clue and solve an Aqueduct Sanctum.', 'copper', 10, 'exploration', '◈'),
+  tDef('rune_lights_clear', 'Mosaic Illuminator', 'Solve an Aqueduct Mosaic Sanctum.', 'copper', 10, 'minigames', '◈'),
+  tDef('rune_bells_clear', 'Water-Bell Virtuoso', 'Chime the exact sequence in a Harmonic Bells Sanctum.', 'copper', 10, 'minigames', '◈'),
+  tDef('rune_beam_clear', 'Sea-Glass Optician', 'Align rotary mirrors to solve a Sea-Glass Prism Sanctum.', 'copper', 10, 'minigames', '◇'),
+  tDef('rune_blocks_clear', 'Sluice Tactician', 'Seal every pressure basin in a Sluice Basins Sanctum.', 'copper', 10, 'minigames', '❖'),
+  tDef('switch_architect', 'Bayou Conduit Master', 'Purify Firefly Cypress Reliquary (Spire 5) solving its Sanctum.', 'copper', 10, 'campaign', '◇'),
+  tDef('vault_cracker', 'Harmonic Locksmith', 'Unlock a Harmonic Core Vault with zero missed strikes.', 'copper', 10, 'minigames', '⬡'),
+  tDef('vault_t8_clear', 'Mother Vault Breached', 'Unlock the Harmonic Core Vault on Spire 8 or Spire 10.', 'copper', 10, 'exploration', '★'),
 
-  // Combat, Mini-Game Aces & Classic Technique (7)
-  tDef('snowball_sniper', 'Cryo Sharpshooter', 'Achieve a 4x snowball hit combo inside a tower.', 'copper', 10, 'combat', '✳'),
-  tDef('sub_ace', 'Abyssal Angler', 'Catch 10+ bioluminescent fish in a single MK.7 Sub-Hunter stage.', 'copper', 10, 'minigames', '✦'),
-  tDef('warp_finder', 'Trench Secret', 'Discover the secret bioluminescent Warp Cave in MK.7 Sub-Hunter.', 'copper', 10, 'minigames', '◎'),
-  tDef('skimmer_pro', 'Wave Carver', 'Reach a 4x Boost Gate multiplier in Hydro-Skimmer Run.', 'copper', 10, 'minigames', '»'),
-  tDef('sky_rider', 'Storm Wing Ace', 'Complete The Glide catching a Golden Lantern or 4x Ring Gate chain.', 'copper', 10, 'minigames', '∆'),
-  tDef('arcade_tourist', 'Pentathlon Operative', 'Experience all 5 playable 3D Mini-Games and Secret Chambers.', 'copper', 10, 'minigames', '★'),
-  tDef('orig_technique_perfect', '1,000-Point Technique', 'Earn a flawless 1,000-point Technique Bonus on Original Towers 2–8.', 'copper', 10, 'original', '▲'),
+  // Combat Combos & 5 Mini-Game Aces (7)
+  tDef('snowball_sniper', 'Hydro Virtuoso', 'Achieve a 4x combat action combo inside a spire.', 'copper', 10, 'combat', '✳'),
+  tDef('core_triple_smash', 'Core Crystal Crusher', 'Smash all 3 Siphon Crystal Cores during a single Reactor Core Descent.', 'copper', 10, 'minigames', '▾'),
+  tDef('sub_ace', 'Wildlife Rescuer', 'Rescue 10+ reef creatures in a single Free-Swim stage.', 'copper', 10, 'minigames', '✦'),
+  tDef('warp_finder', 'Grotto Secret', 'Swim into the hidden bioluminescent Grotto Cavern in Reef Free-Swim.', 'copper', 10, 'minigames', '◎'),
+  tDef('skimmer_pro', 'Canyon Wake Carver', 'Reach a 4x Hydro-Gate multiplier in Rapids Tail-Surf.', 'copper', 10, 'minigames', '»'),
+  tDef('sky_rider', 'Canyon Frill Ace', 'Complete Frill-Glide catching a Golden Orb or 4x Thermal Ring chain.', 'copper', 10, 'minigames', '∆'),
+  tDef('arcade_tourist', 'Watershed Pentathlete', 'Experience all 5 signature Gateway Mini-Games.', 'copper', 10, 'minigames', '★'),
 
-  // Endless, Daily & Collection Milestones (5)
-  tDef('daily_climber', 'Daily Vanguard', 'Complete a Daily Seeded Tower challenge.', 'copper', 10, 'endless_daily', '◷'),
-  tDef('endless_3', 'Abyssal Stride', 'Topple 3 consecutive towers in a single Endless Abyss run.', 'copper', 10, 'endless_daily', '∞'),
-  tDef('relic_hunter_4', 'Encrypted Archive', 'Recover 4 Destructo Inc. Lore Relic tablets.', 'copper', 10, 'exploration', '◈'),
-  tDef('first_skin', 'Custom Operative', 'Unlock an additional Pogo Skin in the Wardrobe.', 'copper', 10, 'exploration', '❖'),
-  tDef('first_blaster_fx', 'Modded Cryo-Core', 'Unlock an additional Cryo-Blaster FX style.', 'copper', 10, 'combat', '✳'),
+  // Modes & Collection Milestones (5)
+  tDef('daily_climber', 'Daily Tide Champion', 'Complete a UTC Daily Tide Run spire.', 'copper', 10, 'endless_daily', '◷'),
+  tDef('endless_3', 'Rising Surge Veteran', 'Survive 3 consecutive spires in Flash-Flood Survival or Expedition.', 'copper', 10, 'endless_daily', '∞'),
+  tDef('curio_collector_4', 'Watershed Naturalist', 'Catalog 4 Naturalist Curios or Blueprints in your Codex.', 'copper', 10, 'exploration', '◎'),
+  tDef('relic_hunter_4', 'Field Hydrologist', 'Recover 5 Watershed Field Log tablets.', 'copper', 10, 'exploration', '◈'),
+  tDef('first_skin', 'Iridescent Shed', 'Unlock an additional Gateway Skin or Hydro-Pulse FX.', 'copper', 10, 'exploration', '❖'),
 
   // ================= PLATINUM TIER: 15 × 20 PTS = 300 PTS =================
-  tDef('sector_1_master', 'Lords of the Drowned Watch', 'Earn all 6 Star Cores across Sector I (Reboot Towers 1 & 2).', 'platinum', 20, 'campaign', '★'),
-  tDef('sector_2_master', 'Masters of Fire & Frost', 'Earn all 6 Star Cores across Sector II (Reboot Towers 3 & 4).', 'platinum', 20, 'campaign', '★'),
-  tDef('sector_3_master', 'Wardens of Prism & Iron', 'Earn all 6 Star Cores across Sector III (Reboot Towers 5 & 6).', 'platinum', 20, 'campaign', '★'),
-  tDef('sector_4_master', 'Conquerors of the Maelstrom', 'Earn all 6 Star Cores across Sector IV (Reboot Towers 7 & 8).', 'platinum', 20, 'campaign', '★'),
-  tDef('operation_nebulus', 'Savior of Nebulus', 'Clear all 8 Story Towers in 2026 Reboot Mode.', 'platinum', 20, 'campaign', '★'),
-  tDef('classic_hero', '1987 Purist', 'Clear all 8 cell-for-cell 1987 towers in Original Mode.', 'platinum', 20, 'original', '▲'),
-  tDef('pacifist_climb', 'Ghost of Destructo', 'Topple any non-casual tower without firing a single shot.', 'platinum', 20, 'combat', '✧'),
-  tDef('chrono_olympian', 'Chrono Olympian', 'Earn all 8 Speed Star Cores across the 2026 Reboot Campaign.', 'platinum', 20, 'campaign', '↯'),
-  tDef('endless_5', 'Deep Horizon', 'Topple 5 consecutive towers in a single Endless Abyss run.', 'platinum', 20, 'endless_daily', '∞'),
-  tDef('daily_speed_ace', 'Global Pace-Setter', 'Complete a Daily Seeded Tower beating its Speed Par time.', 'platinum', 20, 'endless_daily', '◷'),
-  tDef('archivist_nebulus', 'Keeper of the Monoliths', 'Recover all 8 Destructo Inc. Lore Relic tablets (8/8).', 'platinum', 20, 'exploration', '◈'),
-  tDef('curio_archivist_12', 'Master Curio Curator', 'Collect all 12 Exploration Curios and Tinker Blueprints (12/12).', 'platinum', 20, 'exploration', '◎'),
-  tDef('nebulus_legend', "Grand Toppler '26", 'Collect at least 24 Star Cores and unlock 6 Pogo Skins.', 'platinum', 20, 'exploration', '♛'),
-  tDef('wardrobe_complete', 'Amphibian Couture', 'Unlock all 8 Pogo Skins in the Wardrobe.', 'platinum', 20, 'exploration', '❖'),
-  tDef('arsenal_complete', 'Prismatic Armory', 'Unlock all 6 Cryo-Blaster FX styles.', 'platinum', 20, 'combat', '✳'),
+  tDef('sector_1_master', 'Guardian of Redwood Rivers', 'Restore Act I Canyon Rivers to 100% and earn all 6 Act I Seeds.', 'platinum', 20, 'campaign', '★'),
+  tDef('sector_2_master', 'Guardian of Alpine Lakes', 'Restore Act II Alpine Lakes to 100% and earn all 6 Act II Seeds.', 'platinum', 20, 'campaign', '★'),
+  tDef('sector_3_master', 'Guardian of Mist Bayous', 'Restore Act III Mist Bayous to 100% and earn all 6 Act III Seeds.', 'platinum', 20, 'campaign', '★'),
+  tDef('sector_4_master', 'Guardian of Coral Seas', 'Restore Act IV Coral Seas to 100% and earn all 6 Act IV Seeds.', 'platinum', 20, 'campaign', '★'),
+  tDef('sector_5_master', 'Guardian of Polar Oceans', 'Restore Act V Polar Oceans to 100% and earn all 6 Act V Seeds.', 'platinum', 20, 'campaign', '★'),
+  tDef('watershed_envoy', 'Envoy of Living Waters', 'Purify all 10 Story Spires across Earth’s 5 Watersheds.', 'platinum', 20, 'campaign', '★'),
+  tDef('purist_master', 'Purist Arcade Master', 'Clear 5 spires in strict 1-Hit Purist Arcade Mode.', 'platinum', 20, 'purist', '▲'),
+  tDef('pacifist_climb', 'Silent Current', 'Reach a non-zen spire’s Crown Valve without firing a single Hydro-Pulse.', 'platinum', 20, 'combat', '✧'),
+  tDef('chrono_olympian', 'Tidal Speedster', 'Earn 8 Speed Seed medals across Campaign or Purist spires.', 'platinum', 20, 'campaign', '↯'),
+  tDef('endless_5', 'Apex of the Surge', 'Clear 5 consecutive spires in Flash-Flood Survival or Watershed Expedition.', 'platinum', 20, 'endless_daily', '∞'),
+  tDef('daily_speed_ace', 'Global Tide-Setter', 'Complete a Daily Tide Run beating its Speed Par time.', 'platinum', 20, 'endless_daily', '◷'),
+  tDef('chronicler_five_seas', 'Chronicler of Five Seas', 'Recover all 10 Watershed Field Log tablets (10/10).', 'platinum', 20, 'exploration', '◈'),
+  tDef('curio_archivist_12', 'Master Naturalist', 'Collect all 12 Watershed Curios and Harmonic Blueprints (12/12).', 'platinum', 20, 'exploration', '◎'),
+  tDef('wardrobe_complete', 'Pelagian Regalia', 'Unlock all 8 Gateway Skins in the Wardrobe.', 'platinum', 20, 'exploration', '❖'),
+  tDef('arsenal_complete', 'Prismatic Resonator', 'Unlock all 6 Hydro-Pulse FX styles.', 'platinum', 20, 'combat', '✳'),
 
   // ================= DIAMOND TIER: 5 × 30 PTS = 150 PTS =================
-  tDef('nebulus_sovereign', 'Nebulus Sovereign', 'Earn all 24 Star Cores and all 40 Mastery Medals in 2026 Reboot Mode.', 'diamond', 30, 'campaign', '♛'),
-  tDef('immortal_1987', '1987 Arcade Immortal', 'Conquer all 8 real 1987 Original Towers in a single campaign run from Tower 1.', 'diamond', 30, 'original', '♛'),
-  tDef('abyssal_titan', 'Abyssal Titan', 'Topple 15 consecutive monoliths in a single Endless Abyss run.', 'diamond', 30, 'endless_daily', '♛'),
-  tDef('flawless_sector', 'Flawless Sector Sweep', 'Clear a Sector Summit tower with 0 hits, secret, speed par, and a 4x Summit Glide.', 'diamond', 30, 'campaign', '♛'),
-  tDef('millennium_toppler', 'Millennium Toppler', 'Unlock all other 99 Trophies to achieve a perfect 1,000 / 1,000 Trophy Score.', 'diamond', 30, 'exploration', '♛')
+  tDef('watershed_sovereign', 'Sovereign of Earth’s Waters', 'Restore all 5 Watersheds to 100% and earn 30 Harmonic Water Seeds.', 'diamond', 30, 'campaign', '♛'),
+  tDef('purist_immortal', 'Purist Immortal', 'Conquer a full Purist Arcade gauntlet with an 8x Skill Multiplier.', 'diamond', 30, 'purist', '♛'),
+  tDef('abyssal_titan', 'Expedition Leviathan', 'Clear a 10-spire Watershed Expedition or survive 10 Flash-Flood spires.', 'diamond', 30, 'endless_daily', '♛'),
+  tDef('flawless_sector', 'Flawless Watershed Sweep', 'Purify an Act Boss spire with 0 hits, Sanctum/Vault, Speed Par & 3 Core Crystals.', 'diamond', 30, 'campaign', '♛'),
+  tDef('harmonic_millennium', 'Harmonic Millennium', 'Unlock all other 99 Trophies to achieve a perfect 1,000 / 1,000 Trophy Score.', 'diamond', 30, 'exploration', '♛')
 ];
 
-const VALID_ERAS = new Set(['reboot', 'original']);
 const VALID_CONTROLS = new Set(['gesture', 'joystick', 'dpad', 'tilt']);
-const VALID_BUCKETS = new Set(['reboot', 'original', 'endless', 'daily', 'casual']);
-const VALID_MINIGAMES = new Set(['submarine', 'skimmer', 'glide', 'puzzle', 'vault']);
+const VALID_BUCKETS = new Set([
+  'campaign',
+  'purist',
+  'flood_rush',
+  'sanctum_trials',
+  'expedition',
+  'daily_tide'
+]);
+const BUCKET_ALIASES = {
+  reboot: 'campaign',
+  reboot_campaign: 'campaign',
+  original: 'purist',
+  original_campaign: 'purist',
+  endless: 'flood_rush',
+  casual: 'sanctum_trials',
+  endless_casual: 'sanctum_trials',
+  daily: 'daily_tide'
+};
+
+const VALID_MINIGAMES = new Set([
+  'core_descent',
+  'reef_swim',
+  'rapids_surf',
+  'frill_glide',
+  'aqueduct_sanctum'
+]);
+const MINIGAME_ALIASES = {
+  submarine: 'reef_swim',
+  skimmer: 'rapids_surf',
+  glide: 'frill_glide',
+  puzzle: 'aqueduct_sanctum',
+  vault: 'aqueduct_sanctum'
+};
 
 const SKIN_BY_ID = new Map(SKIN_CATALOG.map((s) => [s.id, s]));
-const BLASTER_BY_ID = new Map(BLASTER_FX_CATALOG.map((b) => [b.id, b]));
-const RELIC_BY_ID = new Map(RELIC_CODEX.map((r) => [r.id, r]));
+const FX_BY_ID = new Map(HYDRO_FX_CATALOG.map((b) => [b.id, b]));
+const LOG_BY_ID = new Map(WATERSHED_LOGS.map((r) => [r.id, r]));
 const CURIO_BY_ID = new Map(CURIO_CATALOG.map((c) => [c.id, c]));
+const MUTATION_BY_ID = new Map(BIO_MUTATIONS.map((m) => [m.id, m]));
 const TROPHY_BY_ID = new Map(TROPHIES.map((t) => [t.id, t]));
+const BIOME_KEYS = WATERSHED_BIOMES.map((b) => b.key);
 
 const TIER_META = {
   aluminum: { total: 50, pointsEach: 5, maxPoints: 250 },
@@ -609,6 +1037,32 @@ const TIER_META = {
   platinum: { total: 15, pointsEach: 20, maxPoints: 300 },
   diamond: { total: 5, pointsEach: 30, maxPoints: 150 }
 };
+
+function resolveBucket(bucket) {
+  const b = String(bucket || 'campaign');
+  if (VALID_BUCKETS.has(b)) return b;
+  return BUCKET_ALIASES[b] || 'campaign';
+}
+
+function resolveSkinId(skinId) {
+  const s = String(skinId || '');
+  if (SKIN_BY_ID.has(s)) return s;
+  if (LEGACY_SKIN_ALIAS[s]) return LEGACY_SKIN_ALIAS[s];
+  return 'sea_glass_guardian';
+}
+
+function resolveFxId(fxId) {
+  const f = String(fxId || '');
+  if (FX_BY_ID.has(f)) return f;
+  if (LEGACY_FX_ALIAS[f]) return LEGACY_FX_ALIAS[f];
+  return 'tidal_pearl';
+}
+
+function resolveMiniGameId(mode) {
+  const m = String(mode || '');
+  if (VALID_MINIGAMES.has(m)) return m;
+  return MINIGAME_ALIASES[m] || null;
+}
 
 function normalizeStarRecord(rec = {}) {
   const clear = Boolean(rec.clear);
@@ -623,61 +1077,97 @@ function normalizeStarRecord(rec = {}) {
 
 function createFreshState() {
   return {
-    version: 4,
+    version: 5,
     settings: { ...DEFAULT_SETTINGS },
     highScores: {
-      reboot: 0,
-      original: 0,
-      endless: 0,
-      daily: 0,
-      casual: 0
+      campaign: 0,
+      purist: 0,
+      flood_rush: 0,
+      sanctum_trials: 0,
+      expedition: 0,
+      daily_tide: 0
+    },
+    watershedHealth: {
+      canyon_river: 0,
+      alpine_lake: 0,
+      mist_bayou: 0,
+      coral_sea: 0,
+      storm_ocean: 0
     },
     gears: 0,
     lifetimeGears: 0,
-    unlockedSkins: ['default_amphibian'],
-    unlockedBlasterFx: ['standard_cryo'],
+    unlockedSkins: ['sea_glass_guardian'],
+    unlockedBlasterFx: ['tidal_pearl'],
     collectedRelics: [],
     collectedCurios: [],
     unlockedTrophies: [],
     playedMiniGames: [],
-    seenEras: ['reboot'],
+    seenCutscenes: [],
     towerStars: {
-      reboot: {},
-      original: {}
+      campaign: {},
+      purist: {}
     },
     dailyRecords: {},
     bestEndlessDepth: 0,
+    bestFloodMeters: 0,
+    bestExpeditionDepth: 0,
+    puristClears: 0,
     casualExpeditionsCleared: 0,
     bestCasualDepth: 0,
     vaultsCracked: 0
   };
 }
 
+function getBrowserStorage() {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage && typeof window.localStorage.getItem === 'function') {
+      return window.localStorage;
+    }
+  } catch (_) {}
+  return null;
+}
+
 function safeReadStorage(key) {
   try {
-    if (typeof globalThis !== 'undefined' && globalThis.localStorage) {
-      return globalThis.localStorage.getItem(key);
-    }
-  } catch (_) {
-    // Ignore sandboxed / private-mode storage errors
-  }
+    const ls = getBrowserStorage();
+    if (ls) return ls.getItem(key);
+  } catch (_) {}
   return null;
 }
 
 function safeWriteStorage(key, value) {
   try {
-    if (typeof globalThis !== 'undefined' && globalThis.localStorage) {
-      globalThis.localStorage.setItem(key, value);
+    const ls = getBrowserStorage();
+    if (ls) {
+      ls.setItem(key, value);
       return true;
     }
-  } catch (_) {
-    // Ignore quota / security errors
-  }
+  } catch (_) {}
   return false;
 }
 
+export function rollMutationChoices(ownedIds = [], seed = Date.now(), count = 3) {
+  const ownedSet = new Set(Array.isArray(ownedIds) ? ownedIds : []);
+  const available = BIO_MUTATIONS.filter((m) => !ownedSet.has(m.id));
+  const pool = available.length >= count ? [...available] : [...BIO_MUTATIONS];
+  let s = (Number(seed) || 1) >>> 0;
+  const nextRand = () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(nextRand() * (i + 1));
+    const tmp = pool[i];
+    pool[i] = pool[j];
+    pool[j] = tmp;
+  }
+  return pool.slice(0, Math.min(count, pool.length)).map((m) => ({ ...m }));
+}
+
 export class ProgressionManager {
-  constructor(storageKey = 'tt26_save_v2') {
+  constructor(storageKey = 'towering_waters_save_v1') {
     this.storageKey = storageKey;
     this.state = createFreshState();
     this._pendingAutoTrophies = [];
@@ -687,13 +1177,7 @@ export class ProgressionManager {
 
   _load() {
     const raw = safeReadStorage(this.storageKey);
-    if (!raw) {
-      const legacyHi = Number(safeReadStorage('tt26_hiscore') || 0);
-      if (Number.isFinite(legacyHi) && legacyHi > 0) {
-        this.state.highScores.original = Math.floor(legacyHi);
-      }
-      return;
-    }
+    if (!raw) return;
 
     try {
       const parsed = JSON.parse(raw);
@@ -702,17 +1186,19 @@ export class ProgressionManager {
       const fresh = createFreshState();
 
       if (Array.isArray(parsed.unlockedSkins)) {
-        const set = new Set(['default_amphibian']);
+        const set = new Set(['sea_glass_guardian']);
         for (const id of parsed.unlockedSkins) {
-          if (SKIN_BY_ID.has(id)) set.add(id);
+          const mapped = resolveSkinId(id);
+          if (SKIN_BY_ID.has(mapped)) set.add(mapped);
         }
         fresh.unlockedSkins = Array.from(set);
       }
 
       if (Array.isArray(parsed.unlockedBlasterFx)) {
-        const bSet = new Set(['standard_cryo']);
+        const bSet = new Set(['tidal_pearl']);
         for (const id of parsed.unlockedBlasterFx) {
-          if (BLASTER_BY_ID.has(id)) bSet.add(id);
+          const mapped = resolveFxId(id);
+          if (FX_BY_ID.has(mapped)) bSet.add(mapped);
         }
         fresh.unlockedBlasterFx = Array.from(bSet);
       }
@@ -720,7 +1206,7 @@ export class ProgressionManager {
       if (Array.isArray(parsed.collectedRelics)) {
         const rSet = new Set();
         for (const id of parsed.collectedRelics) {
-          if (RELIC_BY_ID.has(id)) rSet.add(id);
+          if (LOG_BY_ID.has(id)) rSet.add(id);
         }
         fresh.collectedRelics = Array.from(rSet);
       }
@@ -742,15 +1228,25 @@ export class ProgressionManager {
       }
 
       if (Array.isArray(parsed.playedMiniGames)) {
-        fresh.playedMiniGames = parsed.playedMiniGames.filter((m) => VALID_MINIGAMES.has(m));
+        const mSet = new Set();
+        for (const m of parsed.playedMiniGames) {
+          const resolved = resolveMiniGameId(m);
+          if (resolved) mSet.add(resolved);
+        }
+        fresh.playedMiniGames = Array.from(mSet);
       }
 
-      if (Array.isArray(parsed.seenEras)) {
-        const eSet = new Set(['reboot']);
-        for (const e of parsed.seenEras) {
-          if (VALID_ERAS.has(e)) eSet.add(e);
+      if (Array.isArray(parsed.seenCutscenes)) {
+        fresh.seenCutscenes = parsed.seenCutscenes.filter((s) => typeof s === 'string');
+      }
+
+      if (parsed.watershedHealth && typeof parsed.watershedHealth === 'object') {
+        for (const key of BIOME_KEYS) {
+          const v = Number(parsed.watershedHealth[key]);
+          if (Number.isFinite(v) && v >= 0) {
+            fresh.watershedHealth[key] = Math.max(0, Math.min(100, Math.round(v)));
+          }
         }
-        fresh.seenEras = Array.from(eSet);
       }
 
       if (parsed.settings && typeof parsed.settings === 'object') {
@@ -762,9 +1258,10 @@ export class ProgressionManager {
       }
 
       if (parsed.highScores && typeof parsed.highScores === 'object') {
-        for (const bucket of VALID_BUCKETS) {
-          const val = Number(parsed.highScores[bucket]);
-          if (Number.isFinite(val) && val > 0) {
+        for (const [k, rawVal] of Object.entries(parsed.highScores)) {
+          const bucket = resolveBucket(k);
+          const val = Number(rawVal);
+          if (Number.isFinite(val) && val > (fresh.highScores[bucket] || 0)) {
             fresh.highScores[bucket] = Math.floor(val);
           }
         }
@@ -780,12 +1277,12 @@ export class ProgressionManager {
       }
 
       if (parsed.towerStars && typeof parsed.towerStars === 'object') {
-        for (const era of ['reboot', 'original']) {
-          const src = parsed.towerStars[era];
+        for (const [rawMode, src] of Object.entries(parsed.towerStars)) {
+          const targetKey = rawMode === 'purist' ? 'purist' : 'campaign';
           if (src && typeof src === 'object') {
             for (const [k, v] of Object.entries(src)) {
               if (v && typeof v === 'object') {
-                fresh.towerStars[era][String(k)] = normalizeStarRecord(v);
+                fresh.towerStars[targetKey][String(k)] = normalizeStarRecord(v);
               }
             }
           }
@@ -809,23 +1306,25 @@ export class ProgressionManager {
         }
       }
 
-      if (Number.isFinite(Number(parsed.bestEndlessDepth)) && Number(parsed.bestEndlessDepth) > 0) {
-        fresh.bestEndlessDepth = Math.floor(Number(parsed.bestEndlessDepth));
-      }
-      if (Number.isFinite(Number(parsed.casualExpeditionsCleared)) && Number(parsed.casualExpeditionsCleared) > 0) {
-        fresh.casualExpeditionsCleared = Math.floor(Number(parsed.casualExpeditionsCleared));
-      }
-      if (Number.isFinite(Number(parsed.bestCasualDepth)) && Number(parsed.bestCasualDepth) > 0) {
-        fresh.bestCasualDepth = Math.floor(Number(parsed.bestCasualDepth));
-      }
-      if (Number.isFinite(Number(parsed.vaultsCracked)) && Number(parsed.vaultsCracked) > 0) {
-        fresh.vaultsCracked = Math.floor(Number(parsed.vaultsCracked));
+      for (const field of [
+        'bestEndlessDepth',
+        'bestFloodMeters',
+        'bestExpeditionDepth',
+        'puristClears',
+        'casualExpeditionsCleared',
+        'bestCasualDepth',
+        'vaultsCracked'
+      ]) {
+        if (Number.isFinite(Number(parsed[field])) && Number(parsed[field]) > 0) {
+          fresh[field] = Math.floor(Number(parsed[field]));
+        }
       }
 
       this.state = fresh;
+      this._syncWatershedFromStarsNoSave();
       this._syncBlasterFxMilestonesNoSave();
       if (!this.isBlasterFxUnlocked(this.state.settings.blasterFxId)) {
-        this.state.settings.blasterFxId = 'standard_cryo';
+        this.state.settings.blasterFxId = 'tidal_pearl';
       }
     } catch (_) {
       this.state = createFreshState();
@@ -841,9 +1340,8 @@ export class ProgressionManager {
     unlockedSkins = this.state?.unlockedSkins,
     unlockedBlasterFx = this.state?.unlockedBlasterFx
   ) {
-    const skins = Array.isArray(unlockedSkins) ? unlockedSkins : ['default_amphibian'];
-    const blasters = Array.isArray(unlockedBlasterFx) ? unlockedBlasterFx : ['standard_cryo'];
-    const era = VALID_ERAS.has(candidate.era) ? candidate.era : DEFAULT_SETTINGS.era;
+    const skins = Array.isArray(unlockedSkins) ? unlockedSkins : ['sea_glass_guardian'];
+    const blasters = Array.isArray(unlockedBlasterFx) ? unlockedBlasterFx : ['tidal_pearl'];
     const controlMode = VALID_CONTROLS.has(candidate.controlMode)
       ? candidate.controlMode
       : DEFAULT_SETTINGS.controlMode;
@@ -851,23 +1349,27 @@ export class ProgressionManager {
     const tiltSensitivity = Number.isFinite(tiltRaw)
       ? Math.max(0.5, Math.min(2.0, tiltRaw))
       : DEFAULT_SETTINGS.tiltSensitivity;
-    const skinId =
-      typeof candidate.skinId === 'string' && SKIN_BY_ID.has(candidate.skinId) && skins.includes(candidate.skinId)
-        ? candidate.skinId
-        : 'default_amphibian';
+
+    const clampVol = (v, fb) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : fb;
+    };
+
+    const reqSkin = resolveSkinId(candidate.skinId);
+    const skinId = skins.includes(reqSkin) ? reqSkin : 'sea_glass_guardian';
+
+    const reqFx = resolveFxId(candidate.blasterFxId);
     const blasterFxId =
-      typeof candidate.blasterFxId === 'string' &&
-      BLASTER_BY_ID.has(candidate.blasterFxId) &&
-      (blasters.includes(candidate.blasterFxId) || candidate.blasterFxId === 'standard_cryo')
-        ? candidate.blasterFxId
-        : 'standard_cryo';
+      blasters.includes(reqFx) || reqFx === 'tidal_pearl' ? reqFx : 'tidal_pearl';
 
     return {
-      era,
       controlMode,
       zenMode: Boolean(candidate.zenMode),
       muted: Boolean(candidate.muted),
       musicEnabled: candidate.musicEnabled !== undefined ? Boolean(candidate.musicEnabled) : true,
+      musicVolume: clampVol(candidate.musicVolume, DEFAULT_SETTINGS.musicVolume),
+      ambienceVolume: clampVol(candidate.ambienceVolume, DEFAULT_SETTINGS.ambienceVolume),
+      sfxVolume: clampVol(candidate.sfxVolume, DEFAULT_SETTINGS.sfxVolume),
       hapticsEnabled: candidate.hapticsEnabled !== undefined ? Boolean(candidate.hapticsEnabled) : true,
       tiltSensitivity,
       skinId,
@@ -888,26 +1390,96 @@ export class ProgressionManager {
       ...this.state.settings,
       ...partialSettings
     });
-    if (!this.state.seenEras.includes(this.state.settings.era)) {
-      this.state.seenEras.push(this.state.settings.era);
-    }
-    if (this.state.seenEras.length >= 2) {
-      const t = this._unlockTrophyNoSave('era_switcher');
-      if (t) this._pendingAutoTrophies.push(t);
-    }
     this._save();
     return this.getSettings();
   }
 
-  // ================= HIGH SCORES & GEARS =================
+  // ================= WATERSHED RESTORATION & CUTSCENES =================
 
-  getHighScore(bucket = 'reboot') {
-    const key = VALID_BUCKETS.has(bucket) ? bucket : 'reboot';
+  _syncWatershedFromStarsNoSave() {
+    const camp = this.state.towerStars.campaign || {};
+    for (const b of WATERSHED_BIOMES) {
+      const [s1, s2] = b.spireIds;
+      const c1 = Boolean(camp[String(s1)]?.clear);
+      const c2 = Boolean(camp[String(s2)]?.clear);
+      let computed = 0;
+      if (c1 && c2) computed = 100;
+      else if (c1 || c2) computed = 50;
+      if (computed > (this.state.watershedHealth[b.key] || 0)) {
+        this.state.watershedHealth[b.key] = computed;
+      }
+    }
+  }
+
+  getWatershedHealth(biomeOrAct = null) {
+    this._syncWatershedFromStarsNoSave();
+    if (biomeOrAct === null || biomeOrAct === undefined) {
+      const overall = this.getOverallWatershedHealth();
+      return {
+        ...this.state.watershedHealth,
+        overall,
+        global: overall
+      };
+    }
+    if (typeof biomeOrAct === 'number') {
+      if (biomeOrAct >= 0 && biomeOrAct < WATERSHED_BIOMES.length) {
+        return this.state.watershedHealth[WATERSHED_BIOMES[biomeOrAct].key] || 0;
+      }
+      const found = WATERSHED_BIOMES.find((b) => b.act === biomeOrAct || b.id === biomeOrAct);
+      return found ? this.state.watershedHealth[found.key] || 0 : 0;
+    }
+    const key = String(biomeOrAct);
+    if (key in this.state.watershedHealth) {
+      return this.state.watershedHealth[key] || 0;
+    }
+    const byAct = WATERSHED_BIOMES.find((b) => `act_${b.act}` === key || `sector_${b.act}` === key);
+    return byAct ? this.state.watershedHealth[byAct.key] || 0 : 0;
+  }
+
+  getOverallWatershedHealth() {
+    let total = 0;
+    for (const k of BIOME_KEYS) {
+      total += this.state.watershedHealth[k] || 0;
+    }
+    return Math.round(total / BIOME_KEYS.length);
+  }
+
+  setWatershedHealth(biomeKey, pct) {
+    if (!(biomeKey in this.state.watershedHealth)) return 0;
+    const clamped = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+    if (clamped > this.state.watershedHealth[biomeKey]) {
+      this.state.watershedHealth[biomeKey] = clamped;
+      this._save();
+    }
+    return this.state.watershedHealth[biomeKey];
+  }
+
+  hasSeenCutscene(cutsceneId) {
+    return this.state.seenCutscenes.includes(String(cutsceneId || ''));
+  }
+
+  markCutsceneSeen(cutsceneId) {
+    const key = String(cutsceneId || '');
+    if (!key) return;
+    if (!this.state.seenCutscenes.includes(key)) {
+      this.state.seenCutscenes.push(key);
+      this._save();
+    }
+  }
+
+  // ================= HIGH SCORES & HYDRO-GEARS =================
+
+  getHighScore(bucket = 'campaign') {
+    const key = resolveBucket(bucket);
     return this.state.highScores[key] || 0;
   }
 
+  getModeHighScore(mode = 'campaign') {
+    return this.getHighScore(mode);
+  }
+
   recordScore(bucket, score) {
-    const key = VALID_BUCKETS.has(bucket) ? bucket : 'reboot';
+    const key = resolveBucket(bucket);
     const clean = Math.max(0, Math.floor(Number(score) || 0));
     if (clean >= 5000) {
       const t = this._unlockTrophyNoSave('classic_extra_life');
@@ -938,9 +1510,7 @@ export class ProgressionManager {
 
   spendGears(amount) {
     const cost = Math.max(0, Math.floor(Number(amount) || 0));
-    if (this.state.gears < cost) {
-      return false;
-    }
+    if (this.state.gears < cost) return false;
     if (cost > 0) {
       this.state.gears -= cost;
       this._save();
@@ -948,19 +1518,21 @@ export class ProgressionManager {
     return true;
   }
 
-  // ================= POGO SKINS (8) =================
+  // ================= GATEWAY SKINS (8) =================
 
   isSkinUnlocked(skinId) {
-    if (skinId === 'default_amphibian') return true;
-    return this.state.unlockedSkins.includes(skinId);
+    const mapped = resolveSkinId(skinId);
+    if (mapped === 'sea_glass_guardian') return true;
+    return this.state.unlockedSkins.includes(mapped);
   }
 
   unlockSkin(skinId, useGears = false) {
-    const skin = SKIN_BY_ID.get(skinId);
-    if (!skin) {
+    const mapped = resolveSkinId(skinId);
+    const skin = SKIN_BY_ID.get(mapped);
+    if (!skin || (skinId !== mapped && !LEGACY_SKIN_ALIAS[skinId])) {
       return { unlocked: false, reason: 'invalid_skin' };
     }
-    if (this.isSkinUnlocked(skinId)) {
+    if (this.isSkinUnlocked(mapped)) {
       return { unlocked: true, reason: 'already_unlocked', newlyUnlockedTrophies: [] };
     }
     if (useGears) {
@@ -970,7 +1542,7 @@ export class ProgressionManager {
       }
       this.state.gears -= cost;
     }
-    this.state.unlockedSkins.push(skinId);
+    this.state.unlockedSkins.push(mapped);
 
     const newlyUnlockedTrophies = [];
     if (this.state.unlockedSkins.length >= 2) {
@@ -979,10 +1551,6 @@ export class ProgressionManager {
     }
     if (this.state.unlockedSkins.length >= SKIN_CATALOG.length) {
       const t = this._unlockTrophyNoSave('wardrobe_complete');
-      if (t) newlyUnlockedTrophies.push(t);
-    }
-    if (this.getTotalStars(null) >= 24 && this.state.unlockedSkins.length >= 6) {
-      const t = this._unlockTrophyNoSave('nebulus_legend');
       if (t) newlyUnlockedTrophies.push(t);
     }
     for (const extra of this.drainPendingTrophies()) {
@@ -994,25 +1562,26 @@ export class ProgressionManager {
   }
 
   equipSkin(skinId) {
-    if (!SKIN_BY_ID.has(skinId) || !this.isSkinUnlocked(skinId)) {
+    const mapped = resolveSkinId(skinId);
+    if (!SKIN_BY_ID.has(mapped) || !this.isSkinUnlocked(mapped)) {
       return false;
     }
-    this.state.settings.skinId = skinId;
+    this.state.settings.skinId = mapped;
     this._save();
     return true;
   }
 
   getEquippedSkin() {
-    const active = this.state.settings.skinId;
-    return this.isSkinUnlocked(active) ? active : 'default_amphibian';
+    const active = resolveSkinId(this.state.settings.skinId);
+    return this.isSkinUnlocked(active) ? active : 'sea_glass_guardian';
   }
 
-  // ================= CRYO-BLASTER FX UNLOCKABLES (6) =================
+  // ================= HYDRO-PULSE FX UNLOCKABLES (6) =================
 
   _syncBlasterFxMilestonesNoSave() {
     const pts = this.getTrophyPoints();
     let added = false;
-    for (const fx of BLASTER_FX_CATALOG) {
+    for (const fx of HYDRO_FX_CATALOG) {
       if (pts >= (fx.trophyPointsReq || 0) && !this.state.unlockedBlasterFx.includes(fx.id)) {
         this.state.unlockedBlasterFx.push(fx.id);
         added = true;
@@ -1020,10 +1589,10 @@ export class ProgressionManager {
     }
     if (added) {
       if (this.state.unlockedBlasterFx.length >= 2) {
-        const t = this._unlockTrophyNoSave('first_blaster_fx');
+        const t = this._unlockTrophyNoSave('first_skin');
         if (t) this._pendingAutoTrophies.push(t);
       }
-      if (this.state.unlockedBlasterFx.length >= BLASTER_FX_CATALOG.length) {
+      if (this.state.unlockedBlasterFx.length >= HYDRO_FX_CATALOG.length) {
         const t = this._unlockTrophyNoSave('arsenal_complete');
         if (t) this._pendingAutoTrophies.push(t);
       }
@@ -1032,23 +1601,25 @@ export class ProgressionManager {
   }
 
   isBlasterFxUnlocked(fxId) {
-    if (fxId === 'standard_cryo') return true;
-    const fx = BLASTER_BY_ID.get(fxId);
+    const mapped = resolveFxId(fxId);
+    if (mapped === 'tidal_pearl') return true;
+    const fx = FX_BY_ID.get(mapped);
     if (!fx) return false;
-    if (this.state.unlockedBlasterFx.includes(fxId)) return true;
+    if (this.state.unlockedBlasterFx.includes(mapped)) return true;
     if (this.getTrophyPoints() >= (fx.trophyPointsReq || 0)) {
-      this.state.unlockedBlasterFx.push(fxId);
+      this.state.unlockedBlasterFx.push(mapped);
       return true;
     }
     return false;
   }
 
   unlockBlasterFx(fxId, useGears = false) {
-    const fx = BLASTER_BY_ID.get(fxId);
-    if (!fx) {
+    const mapped = resolveFxId(fxId);
+    const fx = FX_BY_ID.get(mapped);
+    if (!fx || (fxId !== mapped && !LEGACY_FX_ALIAS[fxId])) {
       return { unlocked: false, reason: 'invalid_blaster_fx' };
     }
-    if (this.isBlasterFxUnlocked(fxId)) {
+    if (this.isBlasterFxUnlocked(mapped)) {
       return { unlocked: true, reason: 'already_unlocked', newlyUnlockedTrophies: [] };
     }
     if (useGears) {
@@ -1058,14 +1629,14 @@ export class ProgressionManager {
       }
       this.state.gears -= cost;
     }
-    this.state.unlockedBlasterFx.push(fxId);
+    this.state.unlockedBlasterFx.push(mapped);
 
     const newlyUnlockedTrophies = [];
     if (this.state.unlockedBlasterFx.length >= 2) {
-      const t = this._unlockTrophyNoSave('first_blaster_fx');
+      const t = this._unlockTrophyNoSave('first_skin');
       if (t) newlyUnlockedTrophies.push(t);
     }
-    if (this.state.unlockedBlasterFx.length >= BLASTER_FX_CATALOG.length) {
+    if (this.state.unlockedBlasterFx.length >= HYDRO_FX_CATALOG.length) {
       const t = this._unlockTrophyNoSave('arsenal_complete');
       if (t) newlyUnlockedTrophies.push(t);
     }
@@ -1078,29 +1649,31 @@ export class ProgressionManager {
   }
 
   equipBlasterFx(fxId) {
-    if (!BLASTER_BY_ID.has(fxId) || !this.isBlasterFxUnlocked(fxId)) {
+    const mapped = resolveFxId(fxId);
+    if (!FX_BY_ID.has(mapped) || !this.isBlasterFxUnlocked(mapped)) {
       return false;
     }
-    this.state.settings.blasterFxId = fxId;
+    this.state.settings.blasterFxId = mapped;
     this._save();
     return true;
   }
 
   getEquippedBlasterFx() {
-    const active = this.state.settings.blasterFxId;
-    return this.isBlasterFxUnlocked(active) ? active : 'standard_cryo';
+    const active = resolveFxId(this.state.settings.blasterFxId);
+    return this.isBlasterFxUnlocked(active) ? active : 'tidal_pearl';
   }
 
   getBlasterFxDef(fxId = this.getEquippedBlasterFx()) {
-    return BLASTER_BY_ID.get(fxId) || BLASTER_FX_CATALOG[0];
+    return FX_BY_ID.get(resolveFxId(fxId)) || HYDRO_FX_CATALOG[0];
   }
 
-  // ================= LORE RELIC CODEX (8 TABLETS) =================
+  // ================= WATERSHED FIELD LOG CODEX (10 TABLETS) =================
 
   collectRelic(relicId) {
-    const resolvedId =
-      typeof relicId === 'number' ? `relic_t${relicId}` : String(relicId || '');
-    const def = RELIC_BY_ID.get(resolvedId);
+    let resolvedId = typeof relicId === 'number' ? `relic_t${relicId}` : String(relicId || '');
+    const logMatch = /^log_s(\d+)$/i.exec(resolvedId);
+    if (logMatch) resolvedId = `relic_t${logMatch[1]}`;
+    const def = LOG_BY_ID.get(resolvedId);
     if (!def) return null;
 
     const firstTime = !this.state.collectedRelics.includes(resolvedId);
@@ -1113,12 +1686,12 @@ export class ProgressionManager {
         const t = this._unlockTrophyNoSave('relic_finder_1');
         if (t) newlyUnlockedTrophies.push(t);
       }
-      if (count >= 4) {
+      if (count >= 5) {
         const t = this._unlockTrophyNoSave('relic_hunter_4');
         if (t) newlyUnlockedTrophies.push(t);
       }
-      if (count >= RELIC_CODEX.length) {
-        const t = this._unlockTrophyNoSave('archivist_nebulus');
+      if (count >= WATERSHED_LOGS.length) {
+        const t = this._unlockTrophyNoSave('chronicler_five_seas');
         if (t) newlyUnlockedTrophies.push(t);
       }
       for (const extra of this.drainPendingTrophies()) {
@@ -1136,8 +1709,9 @@ export class ProgressionManager {
   }
 
   isRelicCollected(relicId) {
-    const resolvedId =
-      typeof relicId === 'number' ? `relic_t${relicId}` : String(relicId || '');
+    let resolvedId = typeof relicId === 'number' ? `relic_t${relicId}` : String(relicId || '');
+    const logMatch = /^log_s(\d+)$/i.exec(resolvedId);
+    if (logMatch) resolvedId = `relic_t${logMatch[1]}`;
     return this.state.collectedRelics.includes(resolvedId);
   }
 
@@ -1149,7 +1723,7 @@ export class ProgressionManager {
     return this.state.collectedRelics.length;
   }
 
-  // ================= EXPLORATION CURIOS & BLUEPRINTS (12) =================
+  // ================= NATURALIST CURIOS & BLUEPRINTS (12) =================
 
   collectCurio(curioId = null) {
     let resolvedId = curioId ? String(curioId) : '';
@@ -1207,6 +1781,8 @@ export class ProgressionManager {
     return this.state.collectedCurios.length;
   }
 
+  // ================= SANCTUM TRIALS, EXPEDITION & FLOOD RUSH =================
+
   recordCasualExpedition({
     towersCleared = 1,
     depth = null,
@@ -1214,7 +1790,6 @@ export class ProgressionManager {
     craftedDynamo = false,
     dynamoCrafted = false,
     chestOpened = false,
-    curiosFound = 0,
     score = 0
   } = {}) {
     const didCraft = Boolean(craftedDynamo || dynamoCrafted);
@@ -1231,16 +1806,11 @@ export class ProgressionManager {
       this.state.bestCasualDepth = curDepth;
     }
 
-    // Reward Golden Gears for Casual Expeditions (+6 per tower cleared)
     this.state.gears += 6;
     this.state.lifetimeGears = Math.max(this.state.gears, (this.state.lifetimeGears || 0) + 6);
     grant('first_gear');
     grant('casual_explorer');
     grant('zen_voyager');
-
-    if (this.state.casualExpeditionsCleared >= 5) {
-      grant('casual_voyager_5');
-    }
 
     if (didCraft || missionType === 'tower_repair') {
       if (didCraft) grant('tinker_apprentice');
@@ -1251,7 +1821,6 @@ export class ProgressionManager {
       grant('chest_plunderer');
     }
 
-    // Unlock blueprint milestones across expedition count
     if (this.state.casualExpeditionsCleared >= 2) {
       const bp = this.collectCurio('blueprint_mk7_thruster');
       if (bp?.newlyUnlockedTrophies?.length) newlyUnlockedTrophies.push(...bp.newlyUnlockedTrophies);
@@ -1266,8 +1835,8 @@ export class ProgressionManager {
     }
 
     const cleanScore = Math.max(0, Math.floor(Number(score) || 0));
-    if (cleanScore > (this.state.highScores.casual || 0)) {
-      this.state.highScores.casual = cleanScore;
+    if (cleanScore > (this.state.highScores.sanctum_trials || 0)) {
+      this.state.highScores.sanctum_trials = cleanScore;
     }
 
     for (const extra of this.drainPendingTrophies()) {
@@ -1290,12 +1859,90 @@ export class ProgressionManager {
     };
   }
 
+  recordExpeditionRun({ spiresCleared = 0, mutations = [], score = 0 } = {}) {
+    const depth = Math.max(0, Math.floor(Number(spiresCleared) || 0));
+    const cleanScore = Math.max(0, Math.floor(Number(score) || 0));
+    if (depth > (this.state.bestExpeditionDepth || 0)) {
+      this.state.bestExpeditionDepth = depth;
+    }
+    if (cleanScore > (this.state.highScores.expedition || 0)) {
+      this.state.highScores.expedition = cleanScore;
+    }
+    if (Array.isArray(mutations) && mutations.length > 0) {
+      const t = this._unlockTrophyNoSave('expedition_first');
+      if (t) this._pendingAutoTrophies.push(t);
+    }
+    if (depth >= 3) {
+      const t = this._unlockTrophyNoSave('endless_3');
+      if (t) this._pendingAutoTrophies.push(t);
+    }
+    if (depth >= 5) {
+      const t = this._unlockTrophyNoSave('endless_5');
+      if (t) this._pendingAutoTrophies.push(t);
+    }
+    if (depth >= 10) {
+      const t = this._unlockTrophyNoSave('abyssal_titan');
+      if (t) this._pendingAutoTrophies.push(t);
+    }
+    this._save();
+    return this.state.bestExpeditionDepth;
+  }
+
+  getBestExpeditionDepth() {
+    return this.state.bestExpeditionDepth || 0;
+  }
+
+  recordFloodRushRun({ spiresCleared = 0, metersClimbed = 0, score = 0 } = {}) {
+    const depth = Math.max(0, Math.floor(Number(spiresCleared) || 0));
+    const meters = Math.max(0, Math.floor(Number(metersClimbed) || 0));
+    const cleanScore = Math.max(0, Math.floor(Number(score) || 0));
+    if (depth > (this.state.bestEndlessDepth || 0)) {
+      this.state.bestEndlessDepth = depth;
+    }
+    if (meters > (this.state.bestFloodMeters || 0)) {
+      this.state.bestFloodMeters = meters;
+    }
+    if (cleanScore > (this.state.highScores.flood_rush || 0)) {
+      this.state.highScores.flood_rush = cleanScore;
+    }
+    if (depth >= 1) {
+      const t = this._unlockTrophyNoSave('flood_rush_first');
+      if (t) this._pendingAutoTrophies.push(t);
+    }
+    if (depth >= 3) {
+      const t = this._unlockTrophyNoSave('endless_3');
+      if (t) this._pendingAutoTrophies.push(t);
+    }
+    if (depth >= 5) {
+      const t = this._unlockTrophyNoSave('endless_5');
+      if (t) this._pendingAutoTrophies.push(t);
+    }
+    if (depth >= 10) {
+      const t = this._unlockTrophyNoSave('abyssal_titan');
+      if (t) this._pendingAutoTrophies.push(t);
+    }
+    this._save();
+    return { bestDepth: this.state.bestEndlessDepth, bestMeters: this.state.bestFloodMeters };
+  }
+
+  getBestFloodRush() {
+    return {
+      bestDepth: this.state.bestEndlessDepth || 0,
+      bestMeters: this.state.bestFloodMeters || 0
+    };
+  }
+
+  getBestFloodHeight() {
+    return Math.round((this.state.bestFloodMeters || 0) / 1.5);
+  }
+
   // ================= MINI-GAME & GAMEPLAY EVENT ENGINE =================
 
   recordMiniGamePlayed(mode) {
-    if (!VALID_MINIGAMES.has(mode)) return null;
-    if (!this.state.playedMiniGames.includes(mode)) {
-      this.state.playedMiniGames.push(mode);
+    const resolved = resolveMiniGameId(mode);
+    if (!resolved) return null;
+    if (!this.state.playedMiniGames.includes(resolved)) {
+      this.state.playedMiniGames.push(resolved);
       if (this.state.playedMiniGames.length >= VALID_MINIGAMES.size) {
         const t = this._unlockTrophyNoSave('arcade_tourist');
         this._save();
@@ -1306,12 +1953,6 @@ export class ProgressionManager {
     return null;
   }
 
-  /**
-   * Unified event-driven trophy evaluator called from `src/game.js` (#109 / #112).
-   * @param {string} type
-   * @param {object} [payload={}]
-   * @returns {object[]} Newly unlocked trophy definitions
-   */
   recordGameplayEvent(type, payload = {}) {
     const unlockedNow = this.drainPendingTrophies();
     const grant = (id) => {
@@ -1319,8 +1960,9 @@ export class ProgressionManager {
       if (t) unlockedNow.push(t);
     };
     const markMini = (mode) => {
-      if (VALID_MINIGAMES.has(mode) && !this.state.playedMiniGames.includes(mode)) {
-        this.state.playedMiniGames.push(mode);
+      const resolved = resolveMiniGameId(mode);
+      if (resolved && !this.state.playedMiniGames.includes(resolved)) {
+        this.state.playedMiniGames.push(resolved);
       }
       if (this.state.playedMiniGames.length >= VALID_MINIGAMES.size) {
         grant('arcade_tourist');
@@ -1329,15 +1971,50 @@ export class ProgressionManager {
 
     switch (type) {
       case 'tower_start': {
-        const era = payload.era === 'original' ? 'original' : 'reboot';
-        if (!this.state.seenEras.includes(era)) {
-          this.state.seenEras.push(era);
-        }
-        if (this.state.seenEras.length >= 2) grant('era_switcher');
-        if (payload.zenMode || payload.runType === 'endless_casual') grant('zen_voyager');
-        if (payload.runType === 'daily') grant('daily_try');
+        if (payload.zenMode || payload.runType === 'sanctum_trials') grant('zen_voyager');
+        if (payload.runType === 'daily_tide' || payload.runType === 'daily') grant('daily_try');
         break;
       }
+
+      case 'tail_whip':
+        grant('tail_whip_first');
+        break;
+
+      case 'crab_springboard':
+        grant('crab_flipper');
+        break;
+
+      case 'wall_scamper':
+        grant('gecko_climber');
+        break;
+
+      case 'grapple_swing':
+        grant('grapple_swinger');
+        break;
+
+      case 'floodgate_swim':
+        grant('floodgate_swimmer');
+        break;
+
+      case 'mortar_deflect':
+        grant('mortar_reflector');
+        break;
+
+      case 'warden_defeat':
+        grant('warden_slayer');
+        break;
+
+      case 'mutation_draft':
+        grant('expedition_first');
+        break;
+
+      case 'core_descent_complete':
+        markMini('core_descent');
+        grant('core_dive_novice');
+        if (Number(payload.crystalsSmashed) >= 3) {
+          grant('core_triple_smash');
+        }
+        break;
 
       case 'elevator_ride':
         grant('lift_rider');
@@ -1358,32 +2035,35 @@ export class ProgressionManager {
         grant('steam_surfer');
         break;
 
-      case 'crumble':
-        if (payload.era === 'original') grant('chute_breaker');
-        break;
-
       case 'snowball_fire':
+      case 'hydro_fire':
         grant('first_snowball');
         if (payload.recalledLift) grant('lift_caller');
         break;
 
-      case 'snowball_hit': {
+      case 'snowball_hit':
+      case 'hydro_hit': {
         grant('first_snowball');
         if (payload.recalledLift) grant('lift_caller');
         const kind = payload.kind;
         if (kind === 'box') grant('box_breaker');
-        else if (kind === 'roller') grant('roller_shatter');
-        else if (kind === 'bouncer') grant('bouncer_freeze');
-        else if (kind === 'robot') grant('sentinel_short');
+        else if (kind === 'roller' || kind === 'snap_crab') grant('roller_shatter');
+        else if (kind === 'bouncer' || kind === 'gulp_hopper') grant('bouncer_freeze');
+        else if (kind === 'robot' || kind === 'rail_skater' || kind === 'volt_eel') grant('sentinel_short');
 
         const combo = Number(payload.combo) || 0;
         if (combo >= 4) grant('snowball_sniper');
+        if (combo >= 8 && payload.runType === 'purist') grant('purist_immortal');
         break;
       }
 
       case 'switch_trigger':
-        if (payload.mode === 'drainValve') grant('drain_plumber');
-        else if (payload.mode === 'conveyorFlip') grant('belt_flipper');
+        if (payload.mode === 'drainValve' || payload.mode === 'pipeValve' || payload.mode === 'floodValve') {
+          grant('drain_plumber');
+          if (payload.poweredLift) grant('lift_caller');
+        } else if (payload.mode === 'conveyorFlip') {
+          grant('belt_flipper');
+        }
         break;
 
       case 'shield_absorb':
@@ -1415,10 +2095,6 @@ export class ProgressionManager {
         break;
       }
 
-      case 'salvage_collect':
-      case 'compass_key':
-        break;
-
       case 'casual_clear':
         grant('casual_explorer');
         grant('zen_voyager');
@@ -1443,7 +2119,8 @@ export class ProgressionManager {
         break;
 
       case 'sub_complete':
-        markMini('submarine');
+      case 'reef_swim_complete':
+        markMini('reef_swim');
         grant('sub_novice');
         if (Number(payload.minesDestroyed) >= 1) grant('sub_mine_sweeper');
         if (Number(payload.fishCaught) >= 10) grant('sub_ace');
@@ -1451,15 +2128,17 @@ export class ProgressionManager {
         break;
 
       case 'skimmer_complete':
-        markMini('skimmer');
+      case 'rapids_surf_complete':
+        markMini('rapids_surf');
         grant('skimmer_novice');
         if (Number(payload.rampsUsed) >= 1) grant('skimmer_ramp_air');
         if (Number(payload.cratesDestroyed) >= 1) grant('skimmer_crate_buster');
         if (Number(payload.maxBoost) >= 4) grant('skimmer_pro');
         break;
 
-      case 'glide_complete': {
-        markMini('glide');
+      case 'glide_complete':
+      case 'frill_glide_complete': {
+        markMini('frill_glide');
         grant('glide_novice');
         if (Number(payload.thermalTime) > 0.15 || Number(payload.gatesPassed) >= 2) {
           grant('glide_thermal');
@@ -1472,18 +2151,13 @@ export class ProgressionManager {
         );
         if (aceGlide) {
           grant('sky_rider');
-          if (this._armedFlawlessSector) {
-            grant('flawless_sector');
-            this._armedFlawlessSector = false;
-          }
-        } else {
-          this._armedFlawlessSector = false;
         }
         break;
       }
 
       case 'puzzle_complete':
-        markMini('puzzle');
+      case 'sanctum_complete':
+        markMini('aqueduct_sanctum');
         if (payload.solved) {
           grant('rune_scholar');
           if (payload.puzzleType === 'lights') grant('rune_lights_clear');
@@ -1494,12 +2168,12 @@ export class ProgressionManager {
         break;
 
       case 'vault_ring_lock':
-        markMini('vault');
+        markMini('aqueduct_sanctum');
         grant('vault_novice');
         break;
 
       case 'vault_complete':
-        markMini('vault');
+        markMini('aqueduct_sanctum');
         if (payload.won || Number(payload.ringsLocked) >= 1) {
           grant('vault_novice');
         }
@@ -1521,19 +2195,23 @@ export class ProgressionManager {
     return unlockedNow;
   }
 
-  // ================= STAR CORES & 5-MEDAL TOWER MASTERY =================
+  // ================= HARMONIC SEEDS & 5-MEDAL SPIRE MASTERY =================
 
-  getTowerStars(era, towerId) {
-    const e = era === 'original' ? 'original' : 'reboot';
-    const rec = this.state.towerStars[e]?.[String(towerId)];
+  getTowerStars(modeKey = 'campaign', towerId = 1) {
+    if (typeof modeKey === 'number') {
+      towerId = modeKey;
+      modeKey = 'campaign';
+    }
+    const m = modeKey === 'purist' ? 'purist' : 'campaign';
+    const rec = this.state.towerStars[m]?.[String(towerId)];
     return normalizeStarRecord(rec || {});
   }
 
-  getTotalStars(era = null) {
-    const eras = era && VALID_ERAS.has(era) ? [era] : ['reboot', 'original'];
+  getTotalStars(modeKey = null) {
+    const modes = modeKey === 'purist' ? ['purist'] : modeKey === 'campaign' || modeKey === 'reboot' ? ['campaign'] : ['campaign', 'purist'];
     let sum = 0;
-    for (const e of eras) {
-      const map = this.state.towerStars[e] || {};
+    for (const m of modes) {
+      const map = this.state.towerStars[m] || {};
       for (const rec of Object.values(map)) {
         if (rec) {
           sum += (rec.clear ? 1 : 0) + (rec.vault ? 1 : 0) + (rec.speed ? 1 : 0);
@@ -1543,11 +2221,11 @@ export class ProgressionManager {
     return sum;
   }
 
-  getTotalMedals(era = null) {
-    const eras = era && VALID_ERAS.has(era) ? [era] : ['reboot', 'original'];
+  getTotalMedals(modeKey = null) {
+    const modes = modeKey === 'purist' ? ['purist'] : modeKey === 'campaign' || modeKey === 'reboot' ? ['campaign'] : ['campaign', 'purist'];
     let sum = 0;
-    for (const e of eras) {
-      const map = this.state.towerStars[e] || {};
+    for (const m of modes) {
+      const map = this.state.towerStars[m] || {};
       for (const rec of Object.values(map)) {
         if (rec) {
           sum += normalizeStarRecord(rec).medalsCount;
@@ -1557,20 +2235,20 @@ export class ProgressionManager {
     return sum;
   }
 
-  _countClearedTowers(era) {
-    const map = this.state.towerStars[era] || {};
+  _countClearedTowers(modeKey = 'campaign') {
+    const map = this.state.towerStars[modeKey] || {};
     let cleared = 0;
-    for (let id = 1; id <= 8; id++) {
+    for (let id = 1; id <= 10; id++) {
       if (map[String(id)]?.clear) cleared++;
     }
     return cleared;
   }
 
-  _countSpeedStars(onlyEra = null) {
-    const eras = onlyEra ? [onlyEra] : ['reboot', 'original'];
+  _countSpeedStars(onlyMode = null) {
+    const modes = onlyMode ? [onlyMode] : ['campaign', 'purist'];
     let speedCount = 0;
-    for (const era of eras) {
-      const map = this.state.towerStars[era] || {};
+    for (const m of modes) {
+      const map = this.state.towerStars[m] || {};
       for (const rec of Object.values(map)) {
         if (rec?.speed) speedCount++;
       }
@@ -1580,8 +2258,8 @@ export class ProgressionManager {
 
   _countVaultStars() {
     let vaultCount = 0;
-    for (const era of ['reboot', 'original']) {
-      const map = this.state.towerStars[era] || {};
+    for (const m of ['campaign', 'purist']) {
+      const map = this.state.towerStars[m] || {};
       for (const rec of Object.values(map)) {
         if (rec?.vault) vaultCount++;
       }
@@ -1590,8 +2268,10 @@ export class ProgressionManager {
   }
 
   recordTowerClear(data = {}) {
-    const isCasualRun = Boolean(data.casual || data.runType === 'endless_casual');
-    const era = data.era === 'original' ? 'original' : 'reboot';
+    const runType = String(data.runType || 'campaign');
+    const isSanctumTrials = Boolean(data.casual || runType === 'sanctum_trials' || runType === 'endless_casual');
+    const isPurist = runType === 'purist';
+    const starBucket = isPurist ? 'purist' : 'campaign';
     const towerId = Math.max(1, Math.floor(Number(data.towerId) || 1));
 
     const newlyUnlockedSkins = [];
@@ -1601,8 +2281,8 @@ export class ProgressionManager {
       if (unlocked) newlyUnlockedTrophies.push(unlocked);
     };
 
-    if (isCasualRun && data.clear) {
-      tryUnlockMilestoneTrophy('first_topple');
+    if (isSanctumTrials && data.clear) {
+      tryUnlockMilestoneTrophy('first_purify');
       const expRes = this.recordCasualExpedition({
         towersCleared: 1,
         depth: towerId,
@@ -1625,10 +2305,13 @@ export class ProgressionManager {
       return { stars, newlyUnlockedTrophies, newlyUnlockedSkins };
     }
 
-    const isCampaign =
-      !data.runType || data.runType === 'reboot_campaign' || data.runType === 'original_campaign';
+    const isCampaignOrPurist =
+      !data.runType ||
+      runType === 'campaign' ||
+      runType === 'reboot_campaign' ||
+      runType === 'purist';
 
-    const prev = isCampaign ? this.getTowerStars(era, towerId) : normalizeStarRecord({});
+    const prev = isCampaignOrPurist ? this.getTowerStars(starBucket, towerId) : normalizeStarRecord({});
     const earnedNohit = Boolean(
       data.nohit || (data.clear && data.hurtCount !== undefined && Number(data.hurtCount) === 0)
     );
@@ -1646,8 +2329,35 @@ export class ProgressionManager {
       this.state.vaultsCracked = (this.state.vaultsCracked || 0) + 1;
     }
 
-    if (isCampaign && towerId >= 1 && towerId <= 8) {
-      this.state.towerStars[era][String(towerId)] = stars;
+    let watershedBefore = 0;
+    let watershedAfter = 0;
+    let biomeObj = null;
+
+    if (isCampaignOrPurist && towerId >= 1 && towerId <= 10) {
+      this.state.towerStars[starBucket][String(towerId)] = stars;
+      if (!isPurist && data.clear) {
+        biomeObj = WATERSHED_BIOMES.find((b) => b.spireIds.includes(towerId)) || null;
+        if (biomeObj) {
+          watershedBefore = this.state.watershedHealth[biomeObj.key] || 0;
+          const [s1, s2] = biomeObj.spireIds;
+          const c1 = Boolean(this.state.towerStars.campaign[String(s1)]?.clear);
+          const c2 = Boolean(this.state.towerStars.campaign[String(s2)]?.clear);
+          const nextPct = c1 && c2 ? 100 : 50;
+          this.state.watershedHealth[biomeObj.key] = Math.max(watershedBefore, nextPct);
+          watershedAfter = this.state.watershedHealth[biomeObj.key];
+        }
+      }
+    }
+
+    if (isPurist && data.clear) {
+      this.state.puristClears = (this.state.puristClears || 0) + 1;
+      tryUnlockMilestoneTrophy('purist_first');
+      if (this.state.puristClears >= 5 || this._countClearedTowers('purist') >= 5) {
+        tryUnlockMilestoneTrophy('purist_master');
+      }
+      if (Number(data.maxCombo) >= 8) {
+        tryUnlockMilestoneTrophy('purist_immortal');
+      }
     }
 
     const tryUnlockMilestoneSkin = (skinId) => {
@@ -1658,27 +2368,16 @@ export class ProgressionManager {
     };
 
     const totalStars = this.getTotalStars(null);
-    const rebootStars = this.getTotalStars('reboot');
-    const rebootMedals = this.getTotalMedals('reboot');
-    const origCleared = this._countClearedTowers('original');
-    const rebootCleared = this._countClearedTowers('reboot');
+    const campaignStars = this.getTotalStars('campaign');
+    const campaignCleared = this._countClearedTowers('campaign');
     const vaultTotal = this._countVaultStars();
 
-    if (isCampaign && era === 'reboot' && towerId === 3 && stars.clear) {
-      tryUnlockMilestoneSkin('clockwork_brass');
-    }
-    if (isCampaign && era === 'reboot' && towerId === 4 && stars.clear) {
-      tryUnlockMilestoneSkin('frost_warden');
-    }
-    if (vaultTotal >= 5) {
-      tryUnlockMilestoneSkin('shadow_infiltrator');
-    }
-    if (origCleared >= 4) {
-      tryUnlockMilestoneSkin('retro_1987');
-    }
-    if (totalStars >= 18) {
-      tryUnlockMilestoneSkin('golden_toppler');
-    }
+    if (this.state.watershedHealth.canyon_river >= 100) tryUnlockMilestoneSkin('canyon_rapids_ranger');
+    if (this.state.watershedHealth.alpine_lake >= 100) tryUnlockMilestoneSkin('alpine_glacier_mystic');
+    if (this.state.watershedHealth.mist_bayou >= 100) tryUnlockMilestoneSkin('bayou_biolume');
+    if (this.state.watershedHealth.coral_sea >= 100) tryUnlockMilestoneSkin('solar_oasis');
+    if (vaultTotal >= 5) tryUnlockMilestoneSkin('abyssal_leviathan');
+    if (totalStars >= 20) tryUnlockMilestoneSkin('sovereign_starlight');
 
     if (newlyUnlockedSkins.length > 0) {
       if (this.state.unlockedSkins.length >= 2) tryUnlockMilestoneTrophy('first_skin');
@@ -1690,20 +2389,22 @@ export class ProgressionManager {
     }
 
     if (data.clear) {
-      tryUnlockMilestoneTrophy('first_topple');
+      tryUnlockMilestoneTrophy('first_purify');
 
       if (data.zenMode || this.state.settings.zenMode) {
         tryUnlockMilestoneTrophy('zen_voyager');
       }
 
-      if (isCampaign && era === 'reboot') {
+      if (isCampaignOrPurist) {
         if (towerId === 1) tryUnlockMilestoneTrophy('mist_walker');
         else if (towerId >= 2 && towerId <= 8) tryUnlockMilestoneTrophy(`clear_reboot_t${towerId}`);
+        else if (towerId === 9) tryUnlockMilestoneTrophy('clear_spire_9');
+        else if (towerId === 10) tryUnlockMilestoneTrophy('clear_spire_10');
 
         if ((towerId === 1 || towerId === 2) && stars.speed) {
           tryUnlockMilestoneTrophy(`speed_reboot_t${towerId}`);
         }
-        if (towerId === 2 && data.touchedWater === false) {
+        if (towerId === 6 && data.touchedWater === false) {
           tryUnlockMilestoneTrophy('tide_runner');
         }
         if (towerId === 4 && data.touchedWater === false) {
@@ -1712,53 +2413,32 @@ export class ProgressionManager {
         if (towerId === 5 && stars.vault) {
           tryUnlockMilestoneTrophy('switch_architect');
         }
-        if (towerId === 6 && earnedNohit) {
+        if (towerId === 8 && earnedNohit) {
           tryUnlockMilestoneTrophy('piston_dancer');
         }
-        if (towerId === 7 && data.touchedWater === false) {
+        if (towerId === 9 && data.touchedWater === false) {
           tryUnlockMilestoneTrophy('blackout_beacon');
         }
-        if (towerId === 8 && stars.vault) {
+        if ((towerId === 8 || towerId === 10) && stars.vault) {
           tryUnlockMilestoneTrophy('vault_t8_clear');
         }
         if (
-          (towerId === 2 || towerId === 4 || towerId === 6) &&
+          towerId % 2 === 0 &&
           earnedNohit &&
           Boolean(data.vault) &&
-          Boolean(data.speed)
+          Boolean(data.speed) &&
+          Number(data.crystalsSmashed ?? 3) >= 3
         ) {
-          this._armedFlawlessSector = true;
-        }
-        if (data.perfectGlideBefore && earnedNohit && Boolean(data.vault) && Boolean(data.speed)) {
           tryUnlockMilestoneTrophy('flawless_sector');
-        }
-      } else if (isCampaign && era === 'original') {
-        if (towerId >= 1 && towerId <= 8) {
-          tryUnlockMilestoneTrophy(`clear_orig_t${towerId}`);
-        }
-        if (towerId === 1 || towerId === 4 || towerId === 5 || towerId === 8) {
-          tryUnlockMilestoneTrophy('chute_breaker');
-        }
-        if (towerId >= 2 && earnedNohit) {
-          tryUnlockMilestoneTrophy('orig_technique_perfect');
-        }
-        if ((data.singleRunAll8 || data.flawlessRunFromT1) && towerId === 8) {
-          tryUnlockMilestoneTrophy('immortal_1987');
         }
       }
 
-      if (data.runType === 'daily') {
+      if (runType === 'daily_tide' || runType === 'daily') {
         tryUnlockMilestoneTrophy('daily_try');
         tryUnlockMilestoneTrophy('daily_climber');
         if (data.speed || (data.parTime && Number(data.timeRemaining) >= Number(data.parTime))) {
           tryUnlockMilestoneTrophy('daily_speed_ace');
         }
-      }
-      if (data.runType === 'endless') {
-        if (towerId >= 1) tryUnlockMilestoneTrophy('endless_1');
-        if (towerId >= 3) tryUnlockMilestoneTrophy('endless_3');
-        if (towerId >= 5) tryUnlockMilestoneTrophy('endless_5');
-        if (towerId >= 15) tryUnlockMilestoneTrophy('abyssal_titan');
       }
 
       if (earnedNohit) {
@@ -1771,31 +2451,25 @@ export class ProgressionManager {
 
     if (earnedCombo) tryUnlockMilestoneTrophy('snowball_sniper');
 
-    for (let sIdx = 0; sIdx < 4; sIdx++) {
-      const a = this.getTowerStars('reboot', sIdx * 2 + 1);
-      const b = this.getTowerStars('reboot', sIdx * 2 + 2);
-      if (a.count === 3 && b.count === 3) {
-        tryUnlockMilestoneTrophy(`sector_${sIdx + 1}_master`);
+    for (const b of WATERSHED_BIOMES) {
+      const a = this.getTowerStars('campaign', b.spireIds[0]);
+      const c = this.getTowerStars('campaign', b.spireIds[1]);
+      if (a.count === 3 && c.count === 3 && this.state.watershedHealth[b.key] >= 100) {
+        tryUnlockMilestoneTrophy(`sector_${b.act}_master`);
       }
     }
 
     if (this._countSpeedStars() >= 3) {
       tryUnlockMilestoneTrophy('speed_demon');
     }
-    if (this._countSpeedStars('reboot') >= 8) {
+    if (this._countSpeedStars() >= 8) {
       tryUnlockMilestoneTrophy('chrono_olympian');
     }
-    if (origCleared >= 8) {
-      tryUnlockMilestoneTrophy('classic_hero');
+    if (campaignCleared >= 10) {
+      tryUnlockMilestoneTrophy('watershed_envoy');
     }
-    if (rebootCleared >= 8) {
-      tryUnlockMilestoneTrophy('operation_nebulus');
-    }
-    if (totalStars >= 24 && this.state.unlockedSkins.length >= 6) {
-      tryUnlockMilestoneTrophy('nebulus_legend');
-    }
-    if (rebootStars >= 24 && rebootMedals >= 40) {
-      tryUnlockMilestoneTrophy('nebulus_sovereign');
+    if (campaignStars >= 30 && this.getOverallWatershedHealth() >= 100) {
+      tryUnlockMilestoneTrophy('watershed_sovereign');
     }
 
     for (const extra of this.drainPendingTrophies()) {
@@ -1805,12 +2479,16 @@ export class ProgressionManager {
     this._save();
     return {
       stars: { ...stars },
+      watershedBefore,
+      watershedAfter,
+      biome: biomeObj ? { ...biomeObj } : null,
+      overallWatershedHealth: this.getOverallWatershedHealth(),
       newlyUnlockedTrophies,
       newlyUnlockedSkins
     };
   }
 
-  // ================= DAILY & ENDLESS RECORDS =================
+  // ================= DAILY TIDE & ENDLESS RECORDS =================
 
   recordDailyResult({ dateKey, score = 0, clearTimeSec = null, completed = false, altitudePct = 0 } = {}) {
     if (!dateKey) return null;
@@ -1834,8 +2512,8 @@ export class ProgressionManager {
     };
 
     this.state.dailyRecords[key] = next;
-    if (cleanScore > (this.state.highScores.daily || 0)) {
-      this.state.highScores.daily = cleanScore;
+    if (cleanScore > (this.state.highScores.daily_tide || 0)) {
+      this.state.highScores.daily_tide = cleanScore;
     }
     const tTry = this._unlockTrophyNoSave('daily_try');
     if (tTry) this._pendingAutoTrophies.push(tTry);
@@ -1867,18 +2545,18 @@ export class ProgressionManager {
     if (depth > this.state.bestEndlessDepth) {
       this.state.bestEndlessDepth = depth;
     }
-    if (cleanScore > (this.state.highScores.endless || 0)) {
-      this.state.highScores.endless = cleanScore;
+    if (cleanScore > (this.state.highScores.flood_rush || 0)) {
+      this.state.highScores.flood_rush = cleanScore;
     }
     const pushIf = (cond, id) => {
       if (!cond) return;
       const t = this._unlockTrophyNoSave(id);
       if (t) this._pendingAutoTrophies.push(t);
     };
-    pushIf(depth >= 1, 'endless_1');
+    pushIf(depth >= 1, 'flood_rush_first');
     pushIf(depth >= 3, 'endless_3');
     pushIf(depth >= 5, 'endless_5');
-    pushIf(depth >= 15, 'abyssal_titan');
+    pushIf(depth >= 10, 'abyssal_titan');
     this._save();
     return this.state.bestEndlessDepth;
   }
@@ -1947,21 +2625,19 @@ export class ProgressionManager {
   _unlockTrophyNoSave(trophyId) {
     const def = TROPHY_BY_ID.get(trophyId);
     if (!def) return null;
-    if (this.state.unlockedTrophies.includes(trophyId)) {
-      return null;
-    }
+    if (this.state.unlockedTrophies.includes(trophyId)) return null;
     this.state.unlockedTrophies.push(trophyId);
 
     this._syncBlasterFxMilestonesNoSave();
 
     if (
-      trophyId !== 'millennium_toppler' &&
+      trophyId !== 'harmonic_millennium' &&
       this.state.unlockedTrophies.length === TROPHIES.length - 1 &&
-      !this.state.unlockedTrophies.includes('millennium_toppler')
+      !this.state.unlockedTrophies.includes('harmonic_millennium')
     ) {
-      const cap = TROPHY_BY_ID.get('millennium_toppler');
+      const cap = TROPHY_BY_ID.get('harmonic_millennium');
       if (cap) {
-        this.state.unlockedTrophies.push('millennium_toppler');
+        this.state.unlockedTrophies.push('harmonic_millennium');
         this._syncBlasterFxMilestonesNoSave();
         this._pendingAutoTrophies.push({ ...cap });
       }
@@ -1989,14 +2665,16 @@ export class ProgressionManager {
   resetProgress() {
     const preservedSettings = {
       ...DEFAULT_SETTINGS,
-      era: this.state.settings.era,
       controlMode: this.state.settings.controlMode,
       muted: this.state.settings.muted,
       musicEnabled: this.state.settings.musicEnabled,
+      musicVolume: this.state.settings.musicVolume,
+      ambienceVolume: this.state.settings.ambienceVolume,
+      sfxVolume: this.state.settings.sfxVolume,
       hapticsEnabled: this.state.settings.hapticsEnabled,
       tiltSensitivity: this.state.settings.tiltSensitivity,
-      skinId: 'default_amphibian',
-      blasterFxId: 'standard_cryo'
+      skinId: 'sea_glass_guardian',
+      blasterFxId: 'tidal_pearl'
     };
     this.state = createFreshState();
     this.state.settings = preservedSettings;

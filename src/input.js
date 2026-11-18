@@ -1,4 +1,4 @@
-// Tower Toppler '26 — 4-Mode Precision Touch, Context-Aware Doorway, Tilt & Keyboard Controller
+// Towering Waters: Gateway's Descent — 4-Mode Precision Touch, Tail-Whip, Context-Aware Sanctum & Keyboard Controller
 // Leaf module: zero internal src/ imports.
 
 export const CONTROL_MODES = ['gesture', 'joystick', 'dpad', 'tilt'];
@@ -81,6 +81,7 @@ export class InputController {
       down: false,
       jump: false,
       fire: false,
+      whip: false,
       analogX: 0,
       analogY: 0,
     };
@@ -90,6 +91,7 @@ export class InputController {
       down: false,
       jump: false,
       fire: false,
+      whip: false,
     };
     this._justPressed = this.justPressed;
 
@@ -138,6 +140,8 @@ export class InputController {
     this._downPulseTimer = null;
     this._firePulseActive = false;
     this._firePulseTimer = null;
+    this._whipPulseActive = false;
+    this._whipPulseTimer = null;
     this._jumpPulseActive = false;
     this._jumpPulseRemainingSec = 0;
     this._jumpPulseTimer = null;
@@ -268,14 +272,24 @@ export class InputController {
   }
 
   /**
-   * Fires an immediate context interaction (from tapping #action-prompt or tapping Pogo/doorway center zone).
-   * @param {string} [action='up'] - 'up' | 'fire' | 'down'
+   * Fires an immediate context interaction (from tapping #action-prompt or tapping Gateway/doorway center zone).
+   * @param {string} [action='up'] - 'up' | 'fire' | 'whip' | 'down'
    */
   triggerInteract(action = '') {
-    const resolved = action || (this._interactKind === 'fire' ? 'fire' : 'up');
+    const resolved =
+      action ||
+      (this._interactKind === 'whip'
+        ? 'whip'
+        : this._interactKind === 'fire'
+        ? 'fire'
+        : 'up');
     this._cancelJumpPulse();
     this._clearHorizCarry();
 
+    if (resolved === 'whip') {
+      this._triggerWhipPulse(135);
+      return true;
+    }
     if (resolved === 'fire') {
       this._triggerFirePulse(125);
       return true;
@@ -285,6 +299,12 @@ export class InputController {
       return true;
     }
     this._triggerUpPulse(170);
+    return true;
+  }
+
+  /** Triggers a crisp 360° Tail-Whip input pulse programmatically or via UI button. */
+  triggerWhip(durationMs = 125) {
+    this._triggerWhipPulse(durationMs);
     return true;
   }
 
@@ -394,6 +414,7 @@ export class InputController {
     this.justPressed.down = false;
     this.justPressed.jump = false;
     this.justPressed.fire = false;
+    this.justPressed.whip = false;
   }
 
   /** Clears all held directions/buttons (called on pause / overlay transitions). */
@@ -418,6 +439,10 @@ export class InputController {
       clearTimeout(this._firePulseTimer);
       this._firePulseTimer = null;
     }
+    if (this._whipPulseTimer !== null) {
+      clearTimeout(this._whipPulseTimer);
+      this._whipPulseTimer = null;
+    }
     if (this._jumpPulseTimer !== null) {
       clearTimeout(this._jumpPulseTimer);
       this._jumpPulseTimer = null;
@@ -427,6 +452,7 @@ export class InputController {
     this._upPulseActive = false;
     this._downPulseActive = false;
     this._firePulseActive = false;
+    this._whipPulseActive = false;
     this._jumpPulseActive = false;
     this._jumpPulseRemainingSec = 0;
     this._clearHorizCarry();
@@ -447,7 +473,7 @@ export class InputController {
     if (typeof document !== 'undefined') {
       document
         .querySelectorAll(
-          '.dpad-btn.active, #btn-jump.active, #btn-fire.active, #dpad.active, #joystick-zone.active, #joystick-puck.active, #tilt-bar.active, #tilt-puck.active'
+          '.dpad-btn.active, #btn-jump.active, #btn-fire.active, #btn-whip.active, #dpad.active, #joystick-zone.active, #joystick-puck.active, #tilt-bar.active, #tilt-puck.active'
         )
         .forEach((el) => el.classList.remove('active'));
       this._setPuckOffset(document.getElementById('dpad-puck'), 0, 0);
@@ -461,6 +487,7 @@ export class InputController {
     this.state.down = false;
     this.state.jump = false;
     this.state.fire = false;
+    this.state.whip = false;
     this.state.analogX = 0;
     this.state.analogY = 0;
     this.isLiveHorizHeld = false;
@@ -590,6 +617,7 @@ export class InputController {
     let down = this._heldKeys.has('down') || this._downPulseActive;
     let jump = this._heldKeys.has('jump') || this._jumpPulseActive;
     let fire = this._heldKeys.has('fire') || this._firePulseActive;
+    let whip = this._heldKeys.has('whip') || this._whipPulseActive;
     let liveHorizHeld = this._heldKeys.has('left') || this._heldKeys.has('right');
 
     let analogX = (right ? 1 : 0) - (left ? 1 : 0);
@@ -599,6 +627,7 @@ export class InputController {
       if (entry.type === 'button') {
         if (entry.action === 'jump') jump = true;
         else if (entry.action === 'fire') fire = true;
+        else if (entry.action === 'whip') whip = true;
       } else if (entry.type === 'dpad') {
         if (entry.dir === 'left') {
           left = true;
@@ -677,6 +706,7 @@ export class InputController {
     const prevDown = this.state.down;
     const prevJump = this.state.jump;
     const prevFire = this.state.fire;
+    const prevWhip = this.state.whip;
 
     this.state.left = left;
     this.state.right = right;
@@ -684,6 +714,7 @@ export class InputController {
     this.state.down = down;
     this.state.jump = jump;
     this.state.fire = fire;
+    this.state.whip = whip;
     this.state.analogX = Math.max(-1, Math.min(1, analogX));
     this.state.analogY = Math.max(-1, Math.min(1, analogY));
 
@@ -702,6 +733,10 @@ export class InputController {
     if (fire && !prevFire) {
       this.justPressed.fire = true;
       if (!suppressEdgeHaptic) this.haptic(12);
+    }
+    if (whip && !prevWhip) {
+      this.justPressed.whip = true;
+      if (!suppressEdgeHaptic) this.haptic(16);
     }
   }
 
@@ -775,6 +810,22 @@ export class InputController {
     this._firePulseTimer = setTimeout(() => {
       this._firePulseTimer = null;
       this._firePulseActive = false;
+      this._recomputeState(true);
+    }, durationMs);
+  }
+
+  _triggerWhipPulse(durationMs = 125) {
+    if (this._whipPulseTimer !== null) {
+      clearTimeout(this._whipPulseTimer);
+    }
+    this._whipPulseActive = true;
+    this.justPressed.whip = true;
+    this.haptic(16);
+    this._recomputeState(true);
+
+    this._whipPulseTimer = setTimeout(() => {
+      this._whipPulseTimer = null;
+      this._whipPulseActive = false;
       this._recomputeState(true);
     }, durationMs);
   }
@@ -885,14 +936,17 @@ export class InputController {
   }
 
   // ===========================================================================
-  // Direct Action Button Halo & Slide-Press Helper (#btn-fire <-> #btn-jump)
+  // Direct Action Button Halo & Slide-Press Helper (#btn-fire <-> #btn-jump <-> #btn-whip)
   // ===========================================================================
 
   _findActionButtonHalo(clientX, clientY, padPx = 10) {
     if (typeof document === 'undefined') return null;
-    if (this.controlMode !== 'joystick' && this.controlMode !== 'dpad') return null;
 
-    const candidates = [document.getElementById('btn-jump'), document.getElementById('btn-fire')];
+    const candidates = [
+      document.getElementById('btn-jump'),
+      document.getElementById('btn-fire'),
+      document.getElementById('btn-whip'),
+    ];
     let bestBtn = null;
     let bestDist = Infinity;
 
@@ -916,6 +970,7 @@ export class InputController {
     if (typeof document === 'undefined') return;
     const jumpBtn = document.getElementById('btn-jump');
     const fireBtn = document.getElementById('btn-fire');
+    const whipBtn = document.getElementById('btn-whip');
     const hitButton = (btn) => {
       if (!btn || typeof btn.getBoundingClientRect !== 'function') return false;
       const r = btn.getBoundingClientRect();
@@ -931,12 +986,15 @@ export class InputController {
 
     let nextAction = entry.action;
     let nextEl = entry.el;
-    if (entry.action === 'fire' && hitButton(jumpBtn)) {
+    if (entry.action !== 'jump' && hitButton(jumpBtn)) {
       nextAction = 'jump';
       nextEl = jumpBtn;
-    } else if (entry.action === 'jump' && hitButton(fireBtn)) {
+    } else if (entry.action !== 'fire' && hitButton(fireBtn)) {
       nextAction = 'fire';
       nextEl = fireBtn;
+    } else if (entry.action !== 'whip' && hitButton(whipBtn)) {
+      nextAction = 'whip';
+      nextEl = whipBtn;
     }
 
     if (nextAction !== entry.action) {
@@ -945,7 +1003,7 @@ export class InputController {
       entry.el = nextEl;
       if (entry.el) entry.el.classList.add('active');
       this.justPressed[nextAction] = true;
-      this.haptic(nextAction === 'jump' ? 14 : 12);
+      this.haptic(nextAction === 'whip' ? 16 : nextAction === 'jump' ? 14 : 12);
       this._recomputeState(true);
     }
   }
@@ -1080,7 +1138,18 @@ export class InputController {
     }
 
     const gmode = this._activeGameMode();
-    if (gmode === 'submarine' || gmode === 'glide' || gmode === 'puzzle' || gmode === 'skimmer' || gmode === 'vault') {
+    if (
+      gmode === 'core_descent' ||
+      gmode === 'reef_swim' ||
+      gmode === 'submarine' ||
+      gmode === 'frill_glide' ||
+      gmode === 'glide' ||
+      gmode === 'aqueduct_sanctum' ||
+      gmode === 'puzzle' ||
+      gmode === 'rapids_surf' ||
+      gmode === 'skimmer' ||
+      gmode === 'vault'
+    ) {
       this._updateMiniGameGesturePointer(entry, x, y, now, gmode);
       return;
     }
@@ -1283,7 +1352,7 @@ export class InputController {
 
     // -------------------------------------------------------------------------
     // 3A. CONTEXT-AWARE DOORWAY / LIFT PRIORITY (#270 CRITICAL FIX)
-    //     When Pogo stands at an enterable Doorway, Rune Door, Vault Door, Exit, or Lift,
+    //     When Gateway stands at an enterable Doorway, Sanctum Door, Vault Door, Exit, or Lift,
     //     ANY vertical upward swipe/pull (dy <= -16px, REGARDLESS of swipe velocity!)
     //     enters the doorway / rides the lift and MUST NEVER trigger jump!
     //     (Diagonal jump-away swipes with |dxUp| >= 22px and |dxUp| > |dyUp| * 0.85 still jump!)
@@ -1521,10 +1590,10 @@ export class InputController {
   }
 
   /**
-   * Dedicated touch-feel handler for all 5 Mini-Games ('submarine', 'glide', 'puzzle', 'skimmer', 'vault'):
-   * - submarine / glide: <=10px X & <=12px Y smooth 2D analog flight/sub steering (zero jump-flick hijacking)
-   * - puzzle: 16px crisp 4-way cardinal tile-stepping (fast upward swipe steps UP, never misfires jump/stomp)
-   * - skimmer: 10px smooth continuous lane carving + <=-18px upward swipe wave-hop
+   * Dedicated touch-feel handler for all 5 Gateway Mini-Games ('core_descent', 'reef_swim', 'frill_glide', 'aqueduct_sanctum', 'rapids_surf', 'vault'):
+   * - core_descent / reef_swim / frill_glide: <=10px X & <=12px Y smooth 2D analog steering (zero jump-flick hijacking)
+   * - aqueduct_sanctum / puzzle: 16px crisp 4-way cardinal tile-stepping (fast upward swipe steps UP, never misfires jump/stomp)
+   * - rapids_surf / skimmer: 10px smooth continuous lane carving + <=-18px upward swipe wave-hop
    * - vault: instant zero-latency tap-anywhere tumbler lock
    */
   _updateMiniGameGesturePointer(entry, x, y, now, gmode) {
@@ -1533,7 +1602,7 @@ export class InputController {
       return;
     }
 
-    if (gmode === 'puzzle') {
+    if (gmode === 'puzzle' || gmode === 'aqueduct_sanctum') {
       const dx = x - entry.anchorX;
       const dy = y - entry.anchorY;
       const stepThresh = 16;
@@ -1609,8 +1678,8 @@ export class InputController {
       entry.right = false;
     }
 
-    if (gmode === 'skimmer') {
-      // Skimmer: upward swipe <= -18px triggers crisp wave-hop jump while maintaining lateral carve!
+    if (gmode === 'skimmer' || gmode === 'rapids_surf') {
+      // Rapids Tail-Surf: upward swipe <= -18px triggers crisp wave-hop jump while maintaining lateral carve!
       if (entry.flickLatched) {
         if (y < entry.flickPeakY) entry.flickPeakY = y;
         if (y - entry.flickPeakY >= 14 || now - entry.flickLatchTime >= 180) {
@@ -1719,8 +1788,8 @@ export class InputController {
     }
 
     const gmode = this._activeGameMode();
-    if (!isCancel && gmode === 'puzzle' && entry.puzzleSwipeDir && duration <= 180) {
-      // Ensure quick <180ms cardinal swipes in Rune Chambers hold long enough for 1 exact tile step
+    if (!isCancel && (gmode === 'puzzle' || gmode === 'aqueduct_sanctum') && entry.puzzleSwipeDir && duration <= 180) {
+      // Ensure quick <180ms cardinal swipes in Aqueduct Sanctums hold long enough for 1 exact tile step
       if (entry.puzzleSwipeDir === 'left') this._triggerLeftPulse(85);
       else if (entry.puzzleSwipeDir === 'right') this._triggerRightPulse(85);
       else if (entry.puzzleSwipeDir === 'up') this._triggerUpPulse(85);
@@ -1752,7 +1821,7 @@ export class InputController {
     this._clearHorizCarry();
 
     // 5. Quick Stationary TAP:
-    //    - If _canInteract && inside middle 36%x50% Pogo/doorway zone (<=14px move) -> triggerInteract!
+    //    - If _canInteract && inside middle 36%x50% Gateway/doorway zone (<=14px move) -> triggerInteract!
     //    - Otherwise (<=16px capacitive wobble) -> 110ms Fire Pulse!
     if (
       !isCancel &&
@@ -1769,7 +1838,13 @@ export class InputController {
         entry.maxDist <= GESTURE_CENTER_TAP_MOVE_PX &&
         this._isInCenterInteractZone(entry.startX, entry.startY)
       ) {
-        this.triggerInteract(this._interactKind === 'fire' ? 'fire' : 'up');
+        this.triggerInteract(
+          this._interactKind === 'whip'
+            ? 'whip'
+            : this._interactKind === 'fire'
+            ? 'fire'
+            : 'up'
+        );
       } else {
         this._triggerFirePulse(GESTURE_FIRE_PULSE_MS);
       }
@@ -2252,7 +2327,13 @@ export class InputController {
         entry.maxDist <= GESTURE_CENTER_TAP_MOVE_PX &&
         this._isInCenterInteractZone(entry.startX, entry.startY)
       ) {
-        this.triggerInteract(this._interactKind === 'fire' ? 'fire' : 'up');
+        this.triggerInteract(
+          this._interactKind === 'whip'
+            ? 'whip'
+            : this._interactKind === 'fire'
+            ? 'fire'
+            : 'up'
+        );
       } else if (entry.type === 'rightPad') {
         this._triggerFirePulse(GESTURE_FIRE_PULSE_MS);
       } else {
@@ -2284,7 +2365,13 @@ export class InputController {
       // Tappable #action-prompt badge: trigger frame-1 interact AND let main.js listener run cleanly
       if (target.closest('#action-prompt')) {
         if (this._canInteract) {
-          this.triggerInteract(this._interactKind === 'fire' ? 'fire' : 'up');
+          this.triggerInteract(
+            this._interactKind === 'whip'
+              ? 'whip'
+              : this._interactKind === 'fire'
+              ? 'fire'
+              : 'up'
+          );
         }
         return;
       }
@@ -2301,22 +2388,24 @@ export class InputController {
       // Any new touch immediately cancels stale horizontal carry
       this._clearHorizCarry();
 
-      // 1. Direct Action Buttons (#btn-jump & #btn-fire active across ALL 4 modes, multi-touch + slide + 10px halo)
+      // 1. Direct Action Buttons (#btn-jump, #btn-fire, #btn-whip active across ALL 4 modes, multi-touch + slide + 10px halo)
       let jumpBtn = target.closest('#btn-jump');
       let fireBtn = target.closest('#btn-fire');
-      if (!jumpBtn && !fireBtn && !target.closest('button, select, input, a, #dpad, #joystick-zone')) {
+      let whipBtn = target.closest('#btn-whip');
+      if (!jumpBtn && !fireBtn && !whipBtn && !target.closest('button, select, input, a, #dpad, #joystick-zone')) {
         const nearActionBtn = this._findActionButtonHalo(e.clientX, e.clientY, 10);
         if (nearActionBtn?.id === 'btn-jump') jumpBtn = nearActionBtn;
         else if (nearActionBtn?.id === 'btn-fire') fireBtn = nearActionBtn;
+        else if (nearActionBtn?.id === 'btn-whip') whipBtn = nearActionBtn;
       }
-      if (jumpBtn || fireBtn) {
+      if (jumpBtn || fireBtn || whipBtn) {
         if (e.cancelable) e.preventDefault();
-        const el = jumpBtn || fireBtn;
-        const action = jumpBtn ? 'jump' : 'fire';
+        const el = jumpBtn || fireBtn || whipBtn;
+        const action = jumpBtn ? 'jump' : fireBtn ? 'fire' : 'whip';
         el.classList.add('active');
         this._activePointers.set(e.pointerId, { type: 'button', action, el });
         this.justPressed[action] = true;
-        this.haptic(action === 'jump' ? 14 : 12);
+        this.haptic(action === 'whip' ? 16 : action === 'jump' ? 14 : 12);
         this._tryPointerCapture(el, e.pointerId);
         this._recomputeState(true);
         return;
@@ -2492,6 +2581,11 @@ export class InputController {
       KeyX: 'fire',
       Enter: 'fire',
       KeyJ: 'fire',
+      KeyC: 'whip',
+      KeyL: 'whip',
+      KeyE: 'whip',
+      ShiftLeft: 'whip',
+      ShiftRight: 'whip',
     };
 
     this._onKeyDown = (e) => {

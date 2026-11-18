@@ -1,13 +1,26 @@
+// Towering Waters: Gateway's Descent — Created by Matt Shaffer
+// Main Application Shell, 6-Mode Hub, Story & Purification Cutscene Theater, Living Watershed Map & Android Back-Button Controller
+
 import { sound } from './audio.js';
 import { InputController, CONTROL_MODES } from './input.js';
 import { GameRenderer } from './renderer.js';
-import { TowerTopplerGame } from './game.js';
+import * as gameMod from './game.js';
 import * as progMod from './progression.js';
 import * as levelsMod from './levels.js';
 import * as uiArtMod from './uiArtwork.js';
 
-const { progression, SKIN_CATALOG, TROPHIES } = progMod;
+const { progression, SKIN_CATALOG = [], TROPHIES = [] } = progMod;
 const { createTowers, getDailySeed } = levelsMod;
+
+const GameEngineClass =
+  gameMod.ToweringWatersGame ||
+  gameMod.GatewayGame ||
+  gameMod.WatershedGame ||
+  Object.values(gameMod).find((v) => typeof v === 'function');
+
+function getWorldCols() {
+  return Number(levelsMod.COLS) || 20;
+}
 
 // ================= DOM REFERENCES =================
 const appEl = document.getElementById('app');
@@ -17,6 +30,8 @@ const hudEl = document.getElementById('hud');
 const touchControlsEl = document.getElementById('touch-controls');
 
 // Top HUD
+const hudModeLabelEl = document.getElementById('hud-mode-label');
+const hudTimerCaptionEl = document.getElementById('hud-timer-caption');
 const scoreEl = document.getElementById('score-display');
 const hiScoreEl = document.getElementById('hi-score-display');
 const livesEl = document.getElementById('lives-display');
@@ -28,17 +43,23 @@ const dirArrowEl = document.getElementById('dir-arrow');
 const towerBadgeEl = document.getElementById('tower-badge');
 const missionStatusPillEl = document.getElementById('mission-status-pill');
 
-const btnEraToggle = document.getElementById('btn-era-toggle');
 const btnCtrlMode = document.getElementById('btn-ctrl-mode');
 const btnMusic = document.getElementById('btn-music');
 const btnSound = document.getElementById('btn-sound');
 const btnPause = document.getElementById('btn-pause');
 
-// In-Stage Telemetry & Toasts
+// In-Stage Telemetry, Reactor Core Descent HUD & Toasts
 const altMeterEl = document.getElementById('altitude-meter');
 const altFillEl = document.getElementById('alt-fill');
 const altPipEl = document.getElementById('alt-pip');
 const altWaterEl = document.getElementById('alt-water');
+
+const coreDescentHudEl = document.getElementById('core-descent-hud');
+const coreHudTitleEl = document.getElementById('core-hud-title');
+const coreHudLocksEl = document.getElementById('core-hud-locks');
+const coreDepthFillEl = document.getElementById('core-depth-fill');
+const coreHudSubEl = document.getElementById('core-hud-sub');
+
 const actionPromptEl = document.getElementById('action-prompt');
 const puzzleHudEl = document.getElementById('puzzle-hud');
 const puzzleHudTitleEl = document.getElementById('puzzle-hud-title');
@@ -57,25 +78,30 @@ const trophyToastIconEl = trophyToastEl?.querySelector('.trophy-toast-icon');
 
 // Touch Controls
 const btnCalibrateTilt = document.getElementById('btn-calibrate-tilt');
+const btnWhip = document.getElementById('btn-whip');
 
 // Overlays
 const overlayTitle = document.getElementById('overlay-title');
+const overlayModes = document.getElementById('overlay-modes');
 const overlayWorlds = document.getElementById('overlay-worlds');
 const overlayWardrobe = document.getElementById('overlay-wardrobe');
 const overlayTrophies = document.getElementById('overlay-trophies');
 const overlayMinigames = document.getElementById('overlay-minigames');
+const overlayMutation = document.getElementById('overlay-mutation');
 const overlayPause = document.getElementById('overlay-pause');
 const overlayGameOver = document.getElementById('overlay-gameover');
 const gameoverCardEl = document.getElementById('gameover-card');
 
-// Diegetic Start Screen Controls
-const eraTabBtns = document.querySelectorAll('[data-era-select]');
-const titleSubEraEl = document.getElementById('title-sub-era');
-const titleTaglineEl = document.getElementById('title-tagline');
+// Title Screen Controls
 const startTowerSelect = document.getElementById('start-tower');
 const selectedTowerStarsEl = document.getElementById('selected-tower-stars');
 const toggleZenInput = document.getElementById('toggle-zen');
 const selectControlMode = document.getElementById('select-control-mode');
+
+const btnVistaCycle = document.getElementById('btn-vista-cycle');
+const vistaCycleLblEl = document.getElementById('vista-cycle-lbl');
+const btnWatershedQuick = document.getElementById('btn-watershed-quick');
+const titleWatershedPctEl = document.getElementById('title-watershed-pct');
 
 const btnTitleSettings = document.getElementById('btn-title-settings');
 const titleSettingsDrawer = document.getElementById('title-settings-drawer');
@@ -87,15 +113,23 @@ const btnTitleMusic = document.getElementById('btn-title-music');
 const btnTitleSound = document.getElementById('btn-title-sound');
 const titleCtrlPickBtns = document.querySelectorAll('[data-ctrl-pick]');
 
+// 3-Channel Audio Mixer Sliders (Title + Pause)
+const sliderMusicVol = document.getElementById('slider-music-vol');
+const valMusicVol = document.getElementById('val-music-vol');
+const sliderAmbienceVol = document.getElementById('slider-ambience-vol');
+const valAmbienceVol = document.getElementById('val-ambience-vol');
+const sliderSfxVol = document.getElementById('slider-sfx-vol');
+const valSfxVol = document.getElementById('val-sfx-vol');
+
+const pauseSliderMusic = document.getElementById('pause-slider-music');
+const pauseValMusic = document.getElementById('pause-val-music');
+const pauseSliderAmbience = document.getElementById('pause-slider-ambience');
+const pauseValAmbience = document.getElementById('pause-val-ambience');
+const pauseSliderSfx = document.getElementById('pause-slider-sfx');
+const pauseValSfx = document.getElementById('pause-val-sfx');
+
 const titleCrestStageEl = document.getElementById('title-crest-stage');
 const titleDioramaStageEl = document.getElementById('title-diorama-stage');
-
-const expeditionsDrawerEl = document.getElementById('expeditions-drawer');
-const btnExpeditions = document.getElementById('btn-expeditions');
-const btnCloseExpeditions = document.getElementById('btn-close-expeditions');
-const spireArtDailyEl = document.getElementById('spire-art-daily');
-const spireArtEndlessEl = document.getElementById('spire-art-endless');
-const spireArtCasualEl = document.getElementById('spire-art-casual');
 
 const btnHeroSector = document.getElementById('btn-hero-sector');
 const heroSectorNameEl = document.getElementById('hero-sector-name');
@@ -104,27 +138,32 @@ const heroPlayKickerEl = document.getElementById('hero-play-kicker');
 const heroPlayLabelEl = document.getElementById('hero-play-label');
 
 const btnStart = document.getElementById('btn-start');
+const btnModes = document.getElementById('btn-modes');
+const btnCloseModes = document.getElementById('btn-close-modes');
+const modeHubCards = document.querySelectorAll('[data-mode-pick]');
+const modeArtSlots = document.querySelectorAll('[data-mode-art]');
+const metaModeCampaignEl = document.getElementById('meta-mode-campaign');
+const metaModePuristEl = document.getElementById('meta-mode-purist');
+const metaModeFloodEl = document.getElementById('meta-mode-flood');
+const metaModeSanctumEl = document.getElementById('meta-mode-sanctum');
+const metaModeExpeditionEl = document.getElementById('meta-mode-expedition');
+const metaModeDailyEl = document.getElementById('meta-mode-daily');
+
 const btnWorlds = document.getElementById('btn-worlds');
-const btnDaily = document.getElementById('btn-daily');
-const btnEndless = document.getElementById('btn-endless');
-const btnCasualEndless = document.getElementById('btn-casual-endless');
 const btnMinigames = document.getElementById('btn-minigames');
-const dailyMetaEl = document.getElementById('daily-meta');
-const endlessMetaEl = document.getElementById('endless-meta');
-const casualMetaEl = document.getElementById('casual-meta');
 const btnWardrobe = document.getElementById('btn-wardrobe');
 const btnTrophies = document.getElementById('btn-trophies');
 const worldsDockBadgeEl = document.getElementById('worlds-dock-badge');
 const wardrobeBtnBadge = document.getElementById('wardrobe-btn-badge');
 const trophiesBtnBadge = document.getElementById('trophies-btn-badge');
 
-// World Map / Sea Chart Controls
+// Watershed Map Controls
 const worldsKickerEl = document.getElementById('worlds-kicker');
 const worldsStarsPillEl = document.getElementById('worlds-stars-pill');
 const worldsMapListEl = document.getElementById('worlds-map-list');
 const btnCloseWorlds = document.getElementById('btn-close-worlds');
 
-// Wardrobe & Blaster FX Controls
+// Sanctuary Wardrobe & Hydro-Pulse FX Controls
 const wardrobeGearsEl = document.getElementById('wardrobe-gears');
 const wardrobeGridEl = document.getElementById('wardrobe-grid');
 const blasterFxGridEl = document.getElementById('blaster-fx-grid');
@@ -133,7 +172,7 @@ const wardrobeSkinsTabLbl = document.getElementById('wardrobe-skins-tab-lbl');
 const wardrobeBlasterTabLbl = document.getElementById('wardrobe-blaster-tab-lbl');
 const btnCloseWardrobe = document.getElementById('btn-close-wardrobe');
 
-// Trophies (1,000 PTS) & Relic Codex Controls
+// Honors & Field Logs Controls
 const totalStarsDisplayEl = document.getElementById('total-stars-display');
 const trophyRankLblEl = document.getElementById('trophy-rank-lbl');
 const trophyPtsDisplayEl = document.getElementById('trophy-pts-display');
@@ -154,7 +193,11 @@ const minigameCards = document.querySelectorAll('[data-minigame]');
 const portalArtEls = document.querySelectorAll('[data-portal-art]');
 const btnCloseMinigames = document.getElementById('btn-close-minigames');
 
-// Pause Controls
+// Bio-Mutation Draft Controls
+const mutationActiveCountEl = document.getElementById('mutation-active-count');
+const mutationCardsGridEl = document.getElementById('mutation-cards-grid');
+
+// Pause & Game Over Controls
 const pauseTowerName = document.getElementById('pause-tower-name');
 const pauseControlMode = document.getElementById('pause-control-mode');
 const pauseCtrlPillBtns = document.querySelectorAll('[data-pause-ctrl]');
@@ -163,7 +206,6 @@ const btnResume = document.getElementById('btn-resume');
 const btnRestart = document.getElementById('btn-restart');
 const btnPauseTitle = document.getElementById('btn-pause-title');
 
-// Game Over Controls
 const goBadge = document.getElementById('go-badge');
 const goTitle = document.getElementById('go-title');
 const goScore = document.getElementById('go-score');
@@ -173,10 +215,14 @@ const goGears = document.getElementById('go-gears');
 const btnPlayAgain = document.getElementById('btn-play-again');
 const btnBackTitle = document.getElementById('btn-back-title');
 
-// Cinematic Cutscene Controls
+// Cutscene Theater Controls
 const overlayCutscene = document.getElementById('overlay-cutscene');
 const cutsceneActPillEl = document.getElementById('cutscene-act-pill');
 const cutsceneTitleEl = document.getElementById('cutscene-title');
+const cutsceneRestorationWrapEl = document.getElementById('cutscene-restoration-wrap');
+const cutsceneRestorationLblEl = document.getElementById('cutscene-restoration-lbl');
+const cutsceneRestorationPctEl = document.getElementById('cutscene-restoration-pct');
+const cutsceneRestorationFillEl = document.getElementById('cutscene-restoration-fill');
 const btnCutsceneSkip = document.getElementById('btn-cutscene-skip');
 const cutsceneTapStage = document.getElementById('cutscene-tap-stage');
 const cutsceneCommsBoxEl = document.getElementById('cutscene-comms-box');
@@ -189,203 +235,19 @@ const btnCutsceneNext = document.getElementById('btn-cutscene-next');
 // ================= BESPOKE VECTOR SVG LIBRARY (ZERO EMOJIS) =================
 const RING_CIRCUMFERENCE = 2 * Math.PI * 19;
 
-const FROG_LIFE_SVG = `
+const HARMONIC_SHIELD_SVG = `
   <svg viewBox="0 0 24 26" aria-hidden="true">
-    <path fill="currentColor" fill-rule="evenodd" d="M12 1.5C6.1 1.5 2 5.9 2 11.6C2 16.8 6.4 23.6 12 24.5C17.6 23.6 22 16.8 22 11.6C22 5.9 17.9 1.5 12 1.5ZM5.4 10.6C5.8 9.4 7.7 9.7 9.4 10.7C11.0 11.6 11.7 13.1 11.1 14.0C10.5 14.9 8.7 14.8 7.1 13.9C5.5 13.0 5.0 11.7 5.4 10.6ZM18.6 10.6C19.0 11.7 18.5 13.0 16.9 13.9C15.3 14.8 13.5 14.9 12.9 14.0C12.3 13.1 13.0 11.6 14.6 10.7C16.3 9.7 18.2 9.4 18.6 10.6Z"/>
+    <path fill="currentColor" d="M12 2C7.4 8.2 4.5 12.6 4.5 17a7.5 7.5 0 0 0 15 0c0-4.4-2.9-8.8-7.5-15Zm0 10.4a3.2 3.2 0 1 1 0 6.4 3.2 3.2 0 0 1 0-6.4Z"/>
   </svg>
 `;
 
 const SVG_GEAR = `<svg class="ico-svg ico-gear-gold" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-gear"/></svg>`;
 const SVG_STAR_ON = `<svg class="ico-svg ico-star-filled" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-star"/></svg>`;
 const SVG_STAR_OFF = `<svg class="ico-svg ico-star-hollow" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-star-empty"/></svg>`;
-const SVG_TROPHY = `<svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-trophy"/></svg>`;
-const SVG_DIAMOND = `<svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-diamond"/></svg>`;
 const SVG_RELIC = `<svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-relic"/></svg>`;
 const SVG_BLASTER = `<svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-blaster"/></svg>`;
 const SVG_CRAFT = `<svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-craft"/></svg>`;
-const SVG_KEY = `<svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-key"/></svg>`;
 const SVG_CURIO = `<svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-curio"/></svg>`;
-const SVG_FILM = `<svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-film"/></svg>`;
-
-// Bespoke Holographic Comms Portraits (Zero Emojis)
-const HOLO_PORTRAITS = {
-  mara: `
-    <svg viewBox="0 0 48 48" aria-hidden="true">
-      <circle cx="24" cy="24" r="21" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="5 3" opacity="0.55"/>
-      <path d="M11 41c1.5-7 6.2-10.5 13-10.5S35.5 34 37 41" fill="currentColor" fill-opacity="0.22" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-      <path d="M16.5 19c0-5 3.3-8.5 7.5-8.5s7.5 3.5 7.5 8.5c0 4.8-3.2 8.5-7.5 8.5s-7.5-3.7-7.5-8.5Z" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="1.6"/>
-      <path d="M15 18.2h18l-1.5 3.6H16.5L15 18.2Z" fill="currentColor"/>
-      <path d="M14 19.5h-2.5v4H14M34 19.5h2.5v4H34" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-    </svg>`,
-  pogo: `
-    <svg viewBox="0 0 48 48" aria-hidden="true">
-      <circle cx="24" cy="24" r="21" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="4 3" opacity="0.55"/>
-      <path d="M13 41c2-6 5.8-9 11-9s9 3 11 9" fill="currentColor" fill-opacity="0.2" stroke="currentColor" stroke-width="1.6"/>
-      <path d="M18 33l6 6 6-6" fill="none" stroke="#ffe44d" stroke-width="1.5" stroke-linejoin="round"/>
-      <path fill="currentColor" fill-opacity="0.28" stroke="currentColor" stroke-width="1.6" d="M24 9c-7.5 0-12.5 4.8-12.5 11.2 0 5.6 5.2 10.8 12.5 11.5 7.3-.7 12.5-5.9 12.5-11.5C36.5 13.8 31.5 9 24 9Z"/>
-      <path d="M24 6.5c1.5 2 1.8 4.2 0 6.2-1.8-2-1.5-4.2 0-6.2Z" fill="currentColor"/>
-      <ellipse cx="18.5" cy="19.8" rx="3.4" ry="2.5" transform="rotate(-14 18.5 19.8)" fill="#050b16" stroke="currentColor" stroke-width="1.3"/>
-      <circle cx="19.3" cy="19.1" r="1" fill="#ffffff"/>
-      <ellipse cx="29.5" cy="19.8" rx="3.4" ry="2.5" transform="rotate(14 29.5 19.8)" fill="#050b16" stroke="currentColor" stroke-width="1.3"/>
-      <circle cx="28.7" cy="19.1" r="1" fill="#ffffff"/>
-    </svg>`,
-  kroll: `
-    <svg viewBox="0 0 48 48" aria-hidden="true">
-      <polygon points="24,4 41,14 41,34 24,44 7,34 7,14" fill="currentColor" fill-opacity="0.15" stroke="currentColor" stroke-width="1.6"/>
-      <polygon points="24,10 35,17 35,31 24,38 13,31 13,17" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="4 2"/>
-      <circle cx="24" cy="24" r="6.2" fill="currentColor" fill-opacity="0.32" stroke="currentColor" stroke-width="1.8"/>
-      <circle cx="24" cy="24" r="2.6" fill="#ffffff"/>
-      <path d="M24 4v6M24 38v6M7 14l6 3M35 31l6 3M41 14l-6 3M13 31l-6 3" stroke="currentColor" stroke-width="1.3"/>
-    </svg>`,
-};
-
-const STORY_CUTSCENES = {
-  prologue: {
-    act: 'PROLOGUE • SECTOR I',
-    title: 'DROP INTO NEBULUS',
-    towerIdx: 0,
-    beats: [
-      {
-        speaker: 'mara',
-        name: 'COMMANDER MARA • ORBITAL HQ',
-        text: 'Orbital scan confirmed, Specialist Pogo. Eight dormant Abyssal Monoliths have ignited across the Nebulus trench—superheating the sea and dragging the crust under.',
-      },
-      {
-        speaker: 'kroll',
-        name: 'KROLL-9 • MONOLITH OVERMIND',
-        text: 'INTRUSION DETECTED IN SECTOR ONE. TERRAFORM SUBMERSION PROTOCOL AT 14%. AMPHIBIOUS ORGANISM WILL BE EXPUNGED.',
-      },
-      {
-        speaker: 'pogo',
-        name: 'SPECIALIST POGO • AMPHIBIOUS CORPS',
-        text: 'MK.7 drop-pod clear of the surf. Harness strapped, Cryo-Blaster charged. Point me at the Watchtower—we are toppling all eight back into the abyss.',
-      },
-    ],
-  },
-  sector2: {
-    act: 'ACT II • SECTOR II',
-    title: 'FIRES OF THE FOUNDRY',
-    towerIdx: 2,
-    beats: [
-      {
-        speaker: 'mara',
-        name: 'COMMANDER MARA • ORBITAL HQ',
-        text: 'Sector I is down! Your Sky-Wing glide puts you right at the Smelter Reach—an automated iron foundry venting pressurized steam straight into the polar jetstream.',
-      },
-      {
-        speaker: 'kroll',
-        name: 'KROLL-9 • MONOLITH OVERMIND',
-        text: 'CLOCKWORK SENTINELS ACTIVATED. BOREAL GALES ESCALATING TO LETHAL VELOCITY. YOUR CLIMB ENDS IN THE FURNACE.',
-      },
-      {
-        speaker: 'pogo',
-        name: 'SPECIALIST POGO • AMPHIBIOUS CORPS',
-        text: 'Pressurized steam vents just mean a faster boost up the boiler plates, Kroll. Time to flip your conveyors and ride the gale.',
-      },
-    ],
-  },
-  sector3: {
-    act: 'ACT III • SECTOR III',
-    title: 'SECRETS BENEATH THE TRENCH',
-    towerIdx: 4,
-    beats: [
-      {
-        speaker: 'mara',
-        name: 'COMMANDER MARA • ORBITAL HQ',
-        text: 'Halfway to the core! The Destructo Inc. tablets we decrypted show Sector III houses the Prism Labyrinth—its floating amethyst molecules guard phase-shifted bridges.',
-      },
-      {
-        speaker: 'pogo',
-        name: 'SPECIALIST POGO • AMPHIBIOUS CORPS',
-        text: 'I see the resonators inlaid into the obsidian walls, Command. Crack the rune sanctums, time the hydraulic pistons, and drop their offshore rig.',
-      },
-      {
-        speaker: 'kroll',
-        name: 'KROLL-9 • MONOLITH OVERMIND',
-        text: 'ALERT: PRISM MATRIX BREACHED. ENGAGING HIGH-OUTPUT LASER GATES AND TIDAL DERRICK OVERDRIVE.',
-      },
-    ],
-  },
-  sector4: {
-    act: 'ACT IV • SECTOR IV',
-    title: 'EYE OF THE MAELSTROM',
-    towerIdx: 6,
-    beats: [
-      {
-        speaker: 'mara',
-        name: 'COMMANDER MARA • ORBITAL HQ',
-        text: 'You have reached the Maelstrom Core. Watch your footing—crown Tesla arrays on Tower 7 drain ambient moonlight every nine seconds to plunge the spire into blackout!',
-      },
-      {
-        speaker: 'kroll',
-        name: 'KROLL-9 • MONOLITH OVERMIND',
-        text: 'DROWN IN SHADOW AND SURGING TIDE. THE ECLIPSED APEX REACTOR WILL CONSUME THIS OCEAN WORLD.',
-      },
-      {
-        speaker: 'pogo',
-        name: 'SPECIALIST POGO • AMPHIBIOUS CORPS',
-        text: 'Amber cage-lifts glow brighter in the dark. Two monoliths left—keep the extraction sub warm, Mara.',
-      },
-    ],
-  },
-  epilogue: {
-    act: 'EPILOGUE • OPERATION COMPLETE',
-    title: 'DAWN OVER NEBULUS',
-    towerIdx: 7,
-    beats: [
-      {
-        speaker: 'kroll',
-        name: 'KROLL-9 • MONOLITH OVERMIND',
-        text: 'CRITICAL CORE COLLAPSE... MAELSTROM SURGE SUBSIDING... ALL EIGHT MONOLITHS OFFLINE...',
-      },
-      {
-        speaker: 'mara',
-        name: 'COMMANDER MARA • ORBITAL HQ',
-        text: 'Direct hit on the Apex reactor! Seismic buoys confirm every monolith has crumbled into the trench—ocean levels across Planet Nebulus are stabilizing!',
-      },
-      {
-        speaker: 'pogo',
-        name: 'SPECIALIST POGO • AMPHIBIOUS CORPS',
-        text: 'Storm clouds are parting under the moon, Command. Mission accomplished—bring the MK.7 alongside and let us head home.',
-      },
-    ],
-  },
-};
-
-const FALLBACK_CURIO_CATALOG = [
-  { id: 'curio_beacon_dynamo', kind: 'blueprint', title: 'BEACON REPAIR DYNAMO', lore: 'Hand-wound copper coil, prism lens, and brass drive shaft assembled at a field Tinker Workbench.' },
-  { id: 'curio_tide_astrolabe', kind: 'curio', title: 'SUNKEN TIDE ASTROLABE', lore: 'Barnacle-encrusted brass sextant calibrated to Planet Nebulus dual-lunar tides.' },
-  { id: 'curio_amber_firefly', kind: 'curio', title: 'FOSSILIZED STORM FIREFLY', lore: 'Bioluminescent cyan-mint insect preserved inside translucent abyssal resin.' },
-  { id: 'curio_foundry_gear', kind: 'blueprint', title: 'MASTERWORK ESCAPEMENT', lore: 'Self-lubricating clockwork gear train salvaged from a dormant steam spire.' },
-  { id: 'curio_frost_prism', kind: 'curio', title: 'PERMAFROST CORONA SHARD', lore: 'Never-melting glacial crystal that hums softly during upper-atmosphere gales.' },
-  { id: 'curio_rune_tuning_fork', kind: 'blueprint', title: 'RESONANCE TUNING FORK', lore: 'Strikes the exact pentatonic pitch needed to wake ancient monolith bell sanctums.' },
-  { id: 'curio_kelp_lantern', kind: 'curio', title: 'ABYSSAL SPORE LANTERN', lore: 'Glass diver flask filled with glowing trench flora that guides MK.7 crews home.' },
-  { id: 'curio_skimmer_fin', kind: 'blueprint', title: 'HYDRO-FOIL VORTEX KEEL', lore: 'Titanium-brass wave-carving fin engineered for storm-swell slalom runs.' },
-  { id: 'curio_sky_compass', kind: 'curio', title: 'THERMAL GYRO COMPASS', lore: 'Gimbaled navigator sphere carried by summit Sky-Wing gliders between sectors.' },
-  { id: 'curio_obsidian_key', kind: 'curio', title: 'MONOLITH KEYSTONE SEAL', lore: 'Carved indigo-basalt emblem bearing the original builder crest of Nebulus.' },
-  { id: 'curio_tesla_filament', kind: 'blueprint', title: 'STORM CAPACITOR COIL', lore: 'Captures stray forked lightning arcs to illuminate blackout citadels.' },
-  { id: 'curio_star_heart', kind: 'curio', title: 'DORMANT REACTOR SEED', lore: 'Crystalline heart of a decommissioned tower, radiating calm emerald warmth.' },
-];
-
-const FALLBACK_BLASTER_FX = [
-  { id: 'standard_cryo', name: 'MK.4 Frostbite Cryo', description: 'Standard glacial ice-cyan bolts and frost mist.', pointsRequired: 0, gearCost: 0, previewColors: ['#7be8ff', '#e0f2fe', '#38bdf8'] },
-  { id: 'emerald_plasma', name: 'Bioluminescent Surge', description: 'Abyssal emerald-mint bolts charged with kelp spores.', pointsRequired: 100, gearCost: 60, previewColors: ['#34d399', '#a7f3d0', '#10b981'] },
-  { id: 'solar_ember', name: 'Smelter Forge Flare', description: 'Superheated molten-amber bolts from Sector II foundries.', pointsRequired: 250, gearCost: 110, previewColors: ['#fbbf24', '#fef08a', '#ea580c'] },
-  { id: 'amethyst_void', name: 'Prism Singularity', description: 'Crystalline violet-magenta bolts resonating with Molecule cores.', pointsRequired: 450, gearCost: 160, previewColors: ['#c084fc', '#f5d0fe', '#9333ea'] },
-  { id: 'retro_voxel', name: '1987 Arcade Pulse', description: 'Crisp neon-lime & electric-cyan classic 7800 energy spheres.', pointsRequired: 700, gearCost: 220, previewColors: ['#39ff14', '#ffffff', '#00f0ff'] },
-  { id: 'diamond_prism', name: 'Millennium Aurora', description: 'Prismatic diamond-white bolts with iridescent starlight trails.', pointsRequired: 900, gearCost: 320, previewColors: ['#a5f3fc', '#f5d0fe', '#fde047'] },
-];
-
-const FALLBACK_RELIC_CODEX = [
-  { id: 'relic_t1', towerId: 1, title: 'LOG 01 • DESTRUCTO SURVEY BEACON', lore: 'Eight self-sealing monoliths rose from the Nebulus shelf overnight. Their masonry predates our colonial charter—yet fresh iron conduits pump superheated brine straight into the trench.' },
-  { id: 'relic_t2', towerId: 2, title: 'LOG 02 • THE SINKING RELIQUARY', lore: 'Hydrostatic sensors confirm Tower 2 is intentionally ballasting downward. Whoever built these spires designed the brass sluice valves to test amphibious climbers.' },
-  { id: 'relic_t3', towerId: 3, title: 'LOG 03 • AUTOMATON FOUNDRY MANIFEST', lore: 'Clockwork sentinels continue stamping boiler plates with zero crew aboard. The runes etched behind the furnace arch match melodies sung by deep-trench bronze bells.' },
-  { id: 'relic_t4', towerId: 4, title: 'LOG 04 • BOREAL THERMAL VORTEX', lore: 'Upper-atmosphere cryo-spires are flash-freezing storm fronts to feed the central core. Only MK.7 thermal wings can ride the updrafts between sectors.' },
-  { id: 'relic_t5', towerId: 5, title: 'LOG 05 • AMETHYST MOLECULE SYNTHESIS', lore: 'The floating crystalline clusters are not wildlife—they are mobile phase-keys grown inside the Prism Labyrinth to guard the reactor harmonics.' },
-  { id: 'relic_t6', towerId: 6, title: 'LOG 06 • HYDRAULIC TIDE DERRICK', lore: 'Every piston stroke synchronizes with Nebulus lunar perigee. Crack the astrolabe vaults and the monolith surrenders its reserve Star Cores.' },
-  { id: 'relic_t7', towerId: 7, title: 'LOG 07 • TEMPEST BLACKOUT PROTOCOL', lore: 'Crown Tesla arrays drain ambient moonlight every nine seconds to blind orbital scans. Follow the amber cage-lift halos through the dark.' },
-  { id: 'relic_t8', towerId: 8, title: 'LOG 08 • OPERATION NEBULUS DIRECTIVE', lore: 'Final transmission to Specialist Pogo: plant the summit charges at the Apex crown. When the eighth monolith topples, Planet Nebulus breathes free again.' },
-];
 
 const SVG_LOCK = `
   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -425,24 +287,10 @@ const SVG_MUSIC_OFF = `
 `;
 
 const CTRL_SVGS = {
-  gesture: `
-    <svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 12h16M7 9l-3 3 3 3M17 9l3 3-3 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-    </svg>`,
-  joystick: `
-    <svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="12" cy="8.5" r="4" fill="currentColor"/>
-      <path d="M12 12.5v5M6 19h12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-    </svg>`,
-  dpad: `
-    <svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M9.5 4h5v5.5H20v5h-5.5V20h-5v-5.5H4v-5h5.5V4Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
-    </svg>`,
-  tilt: `
-    <svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="4" y="7" width="16" height="10" rx="2.2" transform="rotate(-14 12 12)" fill="none" stroke="currentColor" stroke-width="1.8"/>
-      <circle cx="12" cy="12" r="1.8" fill="currentColor"/>
-    </svg>`,
+  gesture: `<svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h16M7 9l-3 3 3 3M17 9l3 3-3 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  joystick: `<svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="4" fill="currentColor"/><path d="M12 12.5v5M6 19h12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+  dpad: `<svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 4h5v5.5H20v5h-5.5V20h-5v-5.5H4v-5h5.5V4Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>`,
+  tilt: `<svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="7" width="16" height="10" rx="2.2" transform="rotate(-14 12 12)" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/></svg>`,
 };
 
 const CTRL_SHORT_CODES = {
@@ -461,372 +309,312 @@ const DIR_CHEVRON_SVGS = {
 const PROMPT_ICONS = {
   up: `<svg class="ico-svg" viewBox="0 0 16 16"><path d="M3.5 10.5L8 5l4.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   updown: `<svg class="ico-svg" viewBox="0 0 16 16"><path d="M4.5 6.5L8 3l3.5 3.5M4.5 9.5L8 13l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-  cryo: `<svg class="ico-svg" viewBox="0 0 16 16"><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="8" y1="2" x2="8" y2="14"/><line x1="2.8" y1="5" x2="13.2" y2="11"/><line x1="13.2" y1="5" x2="2.8" y2="11"/></g></svg>`,
+  pulse: `<svg class="ico-svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="2.2" fill="currentColor"/></svg>`,
   bolt: `<svg class="ico-svg" viewBox="0 0 16 16"><path d="M9.2 1.5L3.5 9h4.2l-.9 5.5L12.5 7H8.3l.9-5.5Z" fill="currentColor"/></svg>`,
   rune: `<svg class="ico-svg" viewBox="0 0 16 16"><path d="M8 1.6 13.4 8 8 14.4 2.6 8 8 1.6Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="8" cy="8" r="1.8" fill="currentColor"/></svg>`,
-  wing: `<svg class="ico-svg" viewBox="0 0 16 16"><path d="M1.5 7.5 8 3.2l6.5 4.3-4.2 1L8 11.8 5.7 8.5l-4.2-1Z" fill="currentColor"/></svg>`,
   craft: `<svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-craft"/></svg>`,
   key: `<svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-key"/></svg>`,
   curio: `<svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-curio"/></svg>`,
 };
 
-const FALLBACK_SECTOR_WORLDS = [
-  {
-    id: 1,
-    code: 'SECTOR I',
-    name: 'THE DROWNED WATCH',
-    blurb: 'Moonlit storm approach and surging abyssal reliquary.',
-    towerIds: [1, 2],
-    intraRoute: { mode: 'submarine', label: 'SEA ROUTE • SUB-HUNTER' },
-    summitRoute: { mode: 'glide', label: 'SUMMIT SKY-WING • THE GLIDE' },
+// ================= MEANINGFUL STORY & SPIRE PURIFICATION CUTSCENES =================
+const STORY_CUTSCENES = {
+  prologue: {
+    act: 'PROLOGUE • REDWOOD CANYON RIVERS',
+    title: 'DESCENT FROM PELAGIA',
+    towerIdx: 0,
+    isPurification: false,
+    beats: [
+      {
+        speaker: 'naiad',
+        name: 'NAIAD • HYDRO-NAVIGATOR AI',
+        text: 'Atmospheric entry complete, Envoy Gateway. Below us lies Earth’s Redwood Canyon Gorge—colossal Siphon Spires have locked the river headwaters down to 12% flow.',
+      },
+      {
+        speaker: 'warden',
+        name: 'WARDEN VEX • SIPHON SYNDICATE',
+        text: 'UNREGISTERED PELAGIAN BIO-SIGNATURE DETECTED. GORGE TURBINES AT FULL EXTRACTION. EARTH’S HYDROSPHERE BELONGS TO THE SYNDICATE.',
+      },
+      {
+        speaker: 'gateway',
+        name: 'GATEWAY • PELAGIAN HYDRO-ENVOY',
+        text: 'Feel the dry stone cracking beneath my claws, Naiad. Charge the Harmonic Water Seeds—I will climb every spire, dive their reactor shafts, and give these rivers back their voice!',
+      },
+    ],
   },
-  {
-    id: 2,
-    code: 'SECTOR II',
-    name: 'SMELTER & BOREAL REACH',
-    blurb: 'Pressurized steam foundries into howling arctic crosswinds.',
-    towerIds: [3, 4],
-    intraRoute: { mode: 'skimmer', label: 'STORM SPRINT • HYDRO-SKIMMER' },
-    summitRoute: { mode: 'glide', label: 'SUMMIT SKY-WING • THE GLIDE' },
+  act2_intro: {
+    act: 'ACT II • CRYSTAL ALPINE LAKES',
+    title: 'SILENT MIRROR PEAKS',
+    towerIdx: 2,
+    isPurification: false,
+    beats: [
+      {
+        speaker: 'guardian',
+        name: 'ELDER TALON • ALPINE WATER KEEPER',
+        text: 'Traveler with the sea-glass frills—the canyon rapids sing again, yet our snow-fed Alpine Mirror Lakes are trapped behind high-altitude Siphon Viaducts!',
+      },
+      {
+        speaker: 'naiad',
+        name: 'NAIAD • HYDRO-NAVIGATOR AI',
+        text: 'Telemetry confirms brass rotary pipe-valves along the granite facade. Spin them with your Tail-Whip to pressurize the mechanical lifts and thaw the glacial basin.',
+      },
+      {
+        speaker: 'gateway',
+        name: 'GATEWAY • PELAGIAN HYDRO-ENVOY',
+        text: 'Crisp mountain air and wet crystal walls—perfect for a gecko-scamper. Hold fast, Elder; the snowmelt will shine like glass before dusk.',
+      },
+    ],
   },
-  {
-    id: 3,
-    code: 'SECTOR III',
-    name: 'ARCANE & HYDRAULIC TRENCH',
-    blurb: 'Resonator prism laser vaults and offshore hydraulic pistons.',
-    towerIds: [5, 6],
-    intraRoute: { mode: 'submarine', label: 'TRENCH ROUTE • SUB-HUNTER' },
-    summitRoute: { mode: 'glide', label: 'SUMMIT SKY-WING • THE GLIDE' },
+  act3_intro: {
+    act: 'ACT III • EMERALD MIST BAYOUS',
+    title: 'ROOTS OF THE DELTA',
+    towerIdx: 4,
+    isPurification: false,
+    beats: [
+      {
+        speaker: 'naiad',
+        name: 'NAIAD • HYDRO-NAVIGATOR AI',
+        text: 'Entering the Emerald Mist Bayou. Ancient cypress roots wrap around sunken temple spires while Syndicate dredgers pump toxic silt into the firefly channels.',
+      },
+      {
+        speaker: 'warden',
+        name: 'WARDEN MIRE • DELTA OVERSEER',
+        text: 'FLOODGATE LOCKS SEALED. VOLT-EELS AND BARNACLE MORTARS DEPLOYED TO ALL STAIRWAYS. NO DROP ESCAPES THE DELTA.',
+      },
+      {
+        speaker: 'gateway',
+        name: 'GATEWAY • PELAGIAN HYDRO-ENVOY',
+        text: 'Your mortar bubbles bounce right off my tail, Overseer. Let us open the floodgates and let the lotus lanterns bloom again!',
+      },
+    ],
   },
-  {
-    id: 4,
-    code: 'SECTOR IV',
-    name: 'MAELSTROM CORE',
-    blurb: 'Blackout thunder citadel leading to the eclipsed Apex reactor.',
-    towerIds: [7, 8],
-    intraRoute: { mode: 'skimmer', label: 'MAELSTROM SPRINT • HYDRO-SKIMMER' },
-    summitRoute: null,
+  act4_intro: {
+    act: 'ACT IV • SUNLIT CORAL SEAS',
+    title: 'GUARDIANS OF THE LAGOON',
+    towerIdx: 6,
+    isPurification: false,
+    beats: [
+      {
+        speaker: 'guardian',
+        name: 'KORU • CORAL REEF GUARDIAN',
+        text: 'Envoy Gateway! Two limestone mega-spires are draining our turquoise atoll—reef shelves are bleaching in the noon sun and our sea turtles are locked in Siphon cages!',
+      },
+      {
+        speaker: 'gateway',
+        name: 'GATEWAY • PELAGIAN HYDRO-ENVOY',
+        text: 'These warm coral currents remind me of Pelagia’s home lagoons. Point me to the Crown Valve, Koru—we free the reef wildlife and shatter their siphon core together.',
+      },
+    ],
   },
+  act5_intro: {
+    act: 'ACT V • POLAR & TEMPEST OCEANS',
+    title: 'EYE OF THE MOTHER SIPHON',
+    towerIdx: 8,
+    isPurification: false,
+    beats: [
+      {
+        speaker: 'warden',
+        name: 'HIGH OVERLORD KRAKEN-01 • MOTHER SIPHON',
+        text: 'FOUR WATERSHEDS LOST, YET THE POLAR MAELSTROM REMAINS IMPREGNABLE. ORBITAL EXTRACTION BEAM AT 94% CAPACITY!',
+      },
+      {
+        speaker: 'naiad',
+        name: 'NAIAD • HYDRO-NAVIGATOR AI',
+        text: 'Aurora winds are howling across the glacial icebergs, Gateway. One final harmonic seed planted at the Mother Siphon’s bedrock anchor will heal Earth’s entire ocean cycle!',
+      },
+      {
+        speaker: 'gateway',
+        name: 'GATEWAY • PELAGIAN HYDRO-ENVOY',
+        text: 'Frills flared, Hydro-Caster resonating at full tide. For Pelagia and for Earth—let’s finish this descent!',
+      },
+    ],
+  },
+  purify_canyon_river: {
+    act: 'WATERSHED PURIFIED • ACT I',
+    title: 'REDWOOD RIVERS REBORN',
+    biomeLabel: 'CANYON RIVERS RESTORATION',
+    towerIdx: 1,
+    isPurification: true,
+    startPct: 24,
+    endPct: 100,
+    beats: [
+      {
+        speaker: 'naiad',
+        name: 'NAIAD • HYDRO-NAVIGATOR AI',
+        text: 'Harmonic Water Seed anchored! The Siphon Spire’s copper conduits are fracturing—stolen mountain water is surging back into the Redwood Gorge!',
+      },
+      {
+        speaker: 'gateway',
+        name: 'GATEWAY • PELAGIAN HYDRO-ENVOY',
+        text: 'Look at the waterfalls roaring back over the red-rock cliffs and rainbow mist rising from the rapids! Act I watershed restored to 100%!',
+      },
+    ],
+  },
+  purify_alpine_lake: {
+    act: 'WATERSHED PURIFIED • ACT II',
+    title: 'MIRROR LAKES AWAKENED',
+    biomeLabel: 'ALPINE LAKES RESTORATION',
+    towerIdx: 3,
+    isPurification: true,
+    startPct: 20,
+    endPct: 100,
+    beats: [
+      {
+        speaker: 'guardian',
+        name: 'ELDER TALON • ALPINE WATER KEEPER',
+        text: 'The glacial locks have shattered! Pure turquoise snowmelt is cascading through the stone aqueducts and filling the mirror basin!',
+      },
+      {
+        speaker: 'gateway',
+        name: 'GATEWAY • PELAGIAN HYDRO-ENVOY',
+        text: 'Every granite peak reflects in crystal water once more. Onward down the mountain rivers toward the Emerald Bayou!',
+      },
+    ],
+  },
+  purify_mist_bayou: {
+    act: 'WATERSHED PURIFIED • ACT III',
+    title: 'LANTERNS OF THE BAYOU',
+    biomeLabel: 'MIST BAYOUS RESTORATION',
+    towerIdx: 5,
+    isPurification: true,
+    startPct: 22,
+    endPct: 100,
+    beats: [
+      {
+        speaker: 'naiad',
+        name: 'NAIAD • HYDRO-NAVIGATOR AI',
+        text: 'Silt toxicity dropping to zero! Fresh jade currents are sweeping beneath the cypress arches and thousands of golden fireflies are rising over the lotus pads!',
+      },
+      {
+        speaker: 'gateway',
+        name: 'GATEWAY • PELAGIAN HYDRO-ENVOY',
+        text: 'The delta breathes warm and clear again. Next horizon: the sunlit Coral Seas!',
+      },
+    ],
+  },
+  purify_coral_sea: {
+    act: 'WATERSHED PURIFIED • ACT IV',
+    title: 'TURQUOISE LAGOON BLOOM',
+    biomeLabel: 'CORAL SEAS RESTORATION',
+    towerIdx: 7,
+    isPurification: true,
+    startPct: 25,
+    endPct: 100,
+    beats: [
+      {
+        speaker: 'guardian',
+        name: 'KORU • CORAL REEF GUARDIAN',
+        text: 'Our reefs are glowing with living color! Manta rays and sea turtles are gliding freely beneath the sunlit atoll arches once again!',
+      },
+      {
+        speaker: 'gateway',
+        name: 'GATEWAY • PELAGIAN HYDRO-ENVOY',
+        text: 'Four Earth watersheds healed—only the Mother Siphon in the Polar Tempest Ocean stands between this planet and total restoration!',
+      },
+    ],
+  },
+  purify_storm_ocean: {
+    act: 'WATERSHED PURIFIED • ACT V',
+    title: 'MAELSTROM TAMED',
+    biomeLabel: 'DEEP OCEANS RESTORATION',
+    towerIdx: 9,
+    isPurification: true,
+    startPct: 30,
+    endPct: 100,
+    beats: [
+      {
+        speaker: 'naiad',
+        name: 'NAIAD • HYDRO-NAVIGATOR AI',
+        text: 'Mother Siphon core neutralized! The corrupted vortex is dissolving into calm sapphire swells under the Polar Aurora!',
+      },
+      {
+        speaker: 'gateway',
+        name: 'GATEWAY • PELAGIAN HYDRO-ENVOY',
+        text: 'From mountain headwaters to the deepest ocean trench—Earth’s waters flow free!',
+      },
+    ],
+  },
+  epilogue: {
+    act: 'EPILOGUE • GLOBAL HYDROSPHERE HEALED',
+    title: 'EARTH’S LIVING WATERS',
+    biomeLabel: 'GLOBAL EARTH HYDROSPHERE',
+    towerIdx: 9,
+    isPurification: true,
+    startPct: 80,
+    endPct: 100,
+    beats: [
+      {
+        speaker: 'warden',
+        name: 'MOTHER SIPHON TELEMETRY',
+        text: 'CRITICAL HARMONIC OVERLOAD... ALL TEN SIPHON SPIRES REPURPOSED INTO NATURAL AQUEDUCT SANCTUARIES... SYNDICATE FLEET WITHDRAWING...',
+      },
+      {
+        speaker: 'naiad',
+        name: 'NAIAD • HYDRO-NAVIGATOR AI',
+        text: 'Global orbital scan complete, Gateway! Redwood rivers, alpine mirror lakes, emerald bayous, coral lagoons, and polar oceans have all reached 100% harmonic balance!',
+      },
+      {
+        speaker: 'gateway',
+        name: 'GATEWAY • PELAGIAN HYDRO-ENVOY',
+        text: 'Listen to the waterfalls and surf singing together, Naiad. Earth’s waters are safe—and I think I’ll surf a few more canyon rapids before our star-pod heads home!',
+      },
+    ],
+  },
+};
+
+const FALLBACK_BIO_MUTATIONS = [
+  { id: 'triple_whip', name: 'Cyclone Tail-Whip', description: 'Widens Gateway’s 360° lizard Tail-Whip arc by 45%, flipping distant Snap-Crabs and spinning Pipe-Valves instantly.' },
+  { id: 'hydro_jet', name: 'Hydro-Jet Frill Boost', description: 'Flaring Gateway’s aquatic neck-frills mid-air triggers an upward water-jet double-leap across wide chasm gaps.' },
+  { id: 'gecko_sprint', name: 'Gecko Scale Sprint', description: '+22% faster stair running and effortless vertical scampering up wet crystal and mossy spire walls.' },
+  { id: 'bubble_aegis', name: 'Sea-Glass Bubble Aegis', description: 'Generates a regenerative bioluminescent water-shield that absorbs one enemy or hazard impact per spire.' },
+  { id: 'tidal_magnet', name: 'Harmonic Pearl Current', description: 'Draws nearby Water Pearls, Harmonic Seeds, and air bubbles smoothly toward Gateway.' },
 ];
 
-// ================= DIEGETIC ARTWORK BRIDGES (WITH SCULPTED FALLBACKS) =================
-function getArtTitleCrestSVG(era = 'reboot') {
-  if (uiArtMod && typeof uiArtMod.getTitleCrestSVG === 'function') {
-    return uiArtMod.getTitleCrestSVG(era);
-  }
-  const sub = era === 'original' ? "NEBULUS ARCHIVE · '87" : "OPERATION NEBULUS · '26";
-  const accent = era === 'original' ? '#00f0ff' : '#5ef2ff';
-  const brass = era === 'original' ? '#ffe600' : '#d99b38';
-  return `
-    <svg viewBox="0 0 560 195" class="title-crest-svg" aria-hidden="true">
-      <defs>
-        <linearGradient id="fbCrestMetal" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#ffffff"/>
-          <stop offset="48%" stop-color="#d6eeff"/>
-          <stop offset="100%" stop-color="${accent}"/>
-        </linearGradient>
-        <linearGradient id="fbRibbon" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stop-color="#0a1326" stop-opacity="0.92"/>
-          <stop offset="50%" stop-color="#142544" stop-opacity="0.96"/>
-          <stop offset="100%" stop-color="#0a1326" stop-opacity="0.92"/>
-        </linearGradient>
-      </defs>
-      <g class="crest-astrolabe-spin" opacity="0.72">
-        <circle cx="280" cy="88" r="76" fill="none" stroke="${brass}" stroke-width="1.6" stroke-dasharray="10 6"/>
-        <circle cx="280" cy="88" r="62" fill="none" stroke="${accent}" stroke-width="1.1" stroke-dasharray="4 5" opacity="0.75"/>
-      </g>
-      <path d="M74 96 L156 80 L144 108 Z M486 96 L404 80 L416 108 Z" fill="${brass}" fill-opacity="0.32" stroke="${brass}" stroke-width="1.2"/>
-      <path d="M266 20 L294 20 L300 66 L260 66 Z" fill="#0d1830" stroke="${brass}" stroke-width="1.4"/>
-      <polygon points="280,8 284,18 294,19 286,25 289,35 280,29 271,35 274,25 266,19 276,18" fill="${accent}"/>
-      <text x="280" y="102" text-anchor="middle" font-family="Orbitron, sans-serif" font-weight="900" font-size="44" letter-spacing="5" fill="#050b18" stroke="#050b18" stroke-width="8">TOWER TOPPLER</text>
-      <text x="280" y="98" text-anchor="middle" font-family="Orbitron, sans-serif" font-weight="900" font-size="44" letter-spacing="5" fill="url(#fbCrestMetal)" stroke="${brass}" stroke-width="1.1">TOWER TOPPLER</text>
-      <polygon points="132,126 428,126 444,145 428,164 132,164 116,145" fill="url(#fbRibbon)" stroke="${brass}" stroke-width="1.6"/>
-      <text x="280" y="150" text-anchor="middle" font-family="Orbitron, sans-serif" font-weight="800" font-size="13.5" letter-spacing="4.2" fill="#ffe082">${sub}</text>
-    </svg>
-  `;
-}
+const FALLBACK_HYDRO_FX = [
+  { id: 'sea_glass_pulse', name: 'Pelagian Sea-Glass', description: 'Crystalline turquoise hydro-pulses with sunlit foam rings.', pointsRequired: 0, gearCost: 0, previewColors: ['#5efce8', '#ffffff', '#0ea5e9'] },
+  { id: 'emerald_lotus', name: 'Bayou Biolume Surge', description: 'Emerald-jade water pulses infused with glowing lotus spores.', pointsRequired: 100, gearCost: 60, previewColors: ['#34d399', '#a7f3d0', '#059669'] },
+  { id: 'canyon_sunburst', name: 'Canyon Rapids Gold', description: 'Sun-warmed amber-turquoise spray arcs from Redwood waterfalls.', pointsRequired: 250, gearCost: 110, previewColors: ['#fbbf24', '#fef08a', '#0284c7'] },
+  { id: 'coral_prism', name: 'Coral Lagoon Prism', description: 'Iridescent rose-coral and aqua reef shockwaves.', pointsRequired: 450, gearCost: 160, previewColors: ['#fb7185', '#99f6e4', '#0891b2'] },
+  { id: 'alpine_glacier', name: 'Alpenglow Frost-Stream', description: 'High-altitude sapphire-silver snowmelt spiral bolts.', pointsRequired: 700, gearCost: 220, previewColors: ['#7dd3fc', '#ffffff', '#2563eb'] },
+  { id: 'aurora_sovereign', name: 'Polar Aurora Tide', description: 'Shimmering diamond-aqua and violet aurora harmonic waves.', pointsRequired: 900, gearCost: 320, previewColors: ['#5efce8', '#c084fc', '#fde047'] },
+];
 
-function getArtPlayMedallionSVG(era = 'reboot') {
-  if (uiArtMod && typeof uiArtMod.getPlayMedallionSVG === 'function') {
-    return uiArtMod.getPlayMedallionSVG(era);
-  }
-  const brass = era === 'original' ? '#ffe600' : '#d99b38';
-  const cyan = era === 'original' ? '#00f0ff' : '#5ef2ff';
-  return `
-    <svg viewBox="0 0 380 110" preserveAspectRatio="none" aria-hidden="true">
-      <polygon points="24,5 356,5 375,55 356,105 24,105 5,55" fill="rgba(8,18,38,0.88)" stroke="${brass}" stroke-width="2"/>
-      <polygon points="30,11 350,11 367,55 350,99 30,99 13,55" fill="none" stroke="${cyan}" stroke-width="1" stroke-opacity="0.45"/>
-      <circle cx="32" cy="55" r="8" fill="none" stroke="${brass}" stroke-width="1.4"/>
-      <circle cx="348" cy="55" r="8" fill="none" stroke="${brass}" stroke-width="1.4"/>
-    </svg>
-  `;
-}
+const FALLBACK_WATERSHED_LOGS = [
+  { id: 'log_s1', towerId: 1, title: 'LOG 01 • REDWOOD GORGE HEADWATERS', lore: 'When the Siphon Spire anchored into the canyon floor, three centuries-old waterfalls vanished in an hour. Re-aligning the copper river-valves restores immediate flow.' },
+  { id: 'log_s2', towerId: 2, title: 'LOG 02 • TIMBER DAM HYDRO-WHEELS', lore: 'Gateway’s harmonic seeds resonate with Earth’s minerals—cracking Siphon locks without harming native river trout or redwood roots.' },
+  { id: 'log_s3', towerId: 3, title: 'LOG 03 • ALPINE MIRROR BASIN', lore: 'At 3,200 meters, crystal snowmelt feeds three continental rivers. Keeping the granite aqueducts unfrozen is vital to every valley below.' },
+  { id: 'log_s4', towerId: 4, title: 'LOG 04 • ALPENGLOW VIADUCT', lore: 'Wet quartz veins along the spire face allow Pelagian geckos and hydro-lizards to scamper vertically past broken stair flights.' },
+  { id: 'log_s5', towerId: 5, title: 'LOG 05 • CYPRESS LANTERN CHANNELS', lore: 'Bayou fireflies gather wherever clean oxygen-rich water returns. Follow their golden glow to hidden floodgate switches.' },
+  { id: 'log_s6', towerId: 6, title: 'LOG 06 • DELTA ROOT SANCTUARY', lore: 'Ancient stone builders carved harmonic water-bells beneath the mangroves to celebrate seasonal rains.' },
+  { id: 'log_s7', towerId: 7, title: 'LOG 07 • ATOLL REEF SHELVES', lore: 'Healthy staghorn coral buffers island coastlines from storm swells while sheltering thousands of reef species.' },
+  { id: 'log_s8', towerId: 8, title: 'LOG 08 • SEA-GLASS CITADEL', lore: 'Snap-Claw Dredgers carry heavy top-shells—a swift lizard Tail-Whip flips them onto their backs into elastic hydro-trampolines.' },
+  { id: 'log_s9', towerId: 9, title: 'LOG 09 • GLACIAL AURORA TRENCH', lore: 'Polar thermohaline currents circulate nutrients across every ocean on Earth. Stopping the deep-water siphon saves the global climate.' },
+  { id: 'log_s10', towerId: 10, title: 'LOG 10 • PELAGIAN COVENANT', lore: 'Across the stars, living water binds every world together. Guard your rivers, lakes, and seas—and they will guard you.' },
+];
 
-function getArtExpeditionSVG(modeId, era = 'reboot') {
-  if (uiArtMod && typeof uiArtMod.getExpeditionArtSVG === 'function') {
-    return uiArtMod.getExpeditionArtSVG(modeId, era);
-  }
-  const tint = modeId === 'casual' ? '#42f5aa' : modeId === 'endless' ? '#c084fc' : '#ffe082';
-  return `
-    <svg viewBox="0 0 220 250" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-      <rect width="220" height="250" fill="#071124"/>
-      <circle cx="160" cy="56" r="26" fill="${tint}" fill-opacity="0.22"/>
-      <path d="M84 64 L136 64 L148 210 L72 210 Z" fill="#101f3c" stroke="${tint}" stroke-opacity="0.45" stroke-width="1.5"/>
-      <path d="M0 198 Q55 182 110 198 T220 198 L220 250 L0 250 Z" fill="#0b2847"/>
-    </svg>
-  `;
-}
+const FALLBACK_CURIO_CATALOG = [
+  { id: 'curio_river_otter_charm', kind: 'fauna', title: 'CARVED RIVER OTTER TOTEM', lore: 'Gifted by Canyon Gorge wildlife after the waterfalls returned.' },
+  { id: 'curio_redwood_amber', kind: 'curio', title: 'SUNLIT REDWOOD DEW-RESIN', lore: 'Golden canyon resin encapsulating a sparkling drop of morning mist.' },
+  { id: 'curio_alpine_quartz', kind: 'curio', title: 'ALPENGLOW ICE PRISM', lore: 'Refracts rose-gold mountain dawn across ancient aqueduct sanctuaries.' },
+  { id: 'curio_valve_blueprint', kind: 'blueprint', title: 'ROTARY SLUICE SCHEMATIC', lore: 'Precision bronze hydro-valve gear train engineered for zero-leak water routing.' },
+  { id: 'curio_bayou_lotus', kind: 'curio', title: 'BIOLUMINESCENT DELTA LOTUS', lore: 'Blooms at twilight whenever bayou currents run pure and clear.' },
+  { id: 'curio_firefly_lantern', kind: 'fauna', title: 'CYPRESS FIREFLY VESSEL', lore: 'Open-lattice sanctuary lantern where marsh fireflies rest safely.' },
+  { id: 'curio_sea_turtle_crest', kind: 'fauna', title: 'GREEN TURTLE SHELL MEDALLION', lore: 'Token of gratitude from coral lagoon sea turtles freed during Reef-Swim runs.' },
+  { id: 'curio_pearl_conch', kind: 'curio', title: 'HARMONIC MOTHER-OF-PEARL CONCH', lore: 'Echoes with the soothing pentatonic chord of sunlit tropical surf.' },
+  { id: 'curio_rapids_fin', kind: 'blueprint', title: 'HYDRO-WAKE SURF CREST', lore: 'Stabilizes high-speed whitewater canyon turns during Rapids Tail-Surf.' },
+  { id: 'curio_frill_ribbon', kind: 'curio', title: 'IRIDESCENT UPDRAFT RIBBON', lore: 'Woven sea-silk streamer that traces thermal currents through waterfall rainbows.' },
+  { id: 'curio_aurora_shard', kind: 'curio', title: 'POLAR AURORA SEA-GLASS', lore: 'Shimmers with emerald-violet sky curtains above glacial waters.' },
+  { id: 'curio_pelagia_seed', kind: 'curio', title: 'PRIME HARMONIC WATER SEED', lore: 'Living crystalline droplet carried by Gateway from oceanic Pelagia.' },
+];
 
-function getArtMinigamePortalSVG(gameId, era = 'reboot') {
-  if (uiArtMod && typeof uiArtMod.getMinigamePortalSVG === 'function') {
-    return uiArtMod.getMinigamePortalSVG(gameId, era);
-  }
-  const accentMap = {
-    submarine: '#38bdf8',
-    glide: '#7be8ff',
-    skimmer: '#42f5aa',
-    puzzle: '#c084fc',
-    vault: '#fbbf24',
-  };
-  const c = accentMap[gameId] || '#7be8ff';
-  return `
-    <svg viewBox="0 0 380 132" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-      <rect width="380" height="132" fill="#071126"/>
-      <circle cx="305" cy="44" r="34" fill="${c}" fill-opacity="0.20"/>
-      <circle cx="305" cy="44" r="20" fill="none" stroke="${c}" stroke-opacity="0.55" stroke-width="1.5" stroke-dasharray="6 4"/>
-      <path d="M0 96 Q95 76 190 96 T380 92 L380 132 L0 132 Z" fill="#0b1f3d"/>
-    </svg>
-  `;
-}
-
-function getArtTrophyShieldSVG(tier = 'aluminum', unlocked = true) {
-  if (uiArtMod && typeof uiArtMod.getTrophyShieldSVG === 'function') {
-    return uiArtMod.getTrophyShieldSVG(tier, unlocked);
-  }
-  const palette = {
-    aluminum: ['#cbd5e1', '#475569'],
-    copper: ['#fbbf24', '#9a3412'],
-    platinum: ['#e0f2fe', '#0284c7'],
-    diamond: ['#f5d0fe', '#7c3aed'],
-  };
-  const [hi, lo] = unlocked ? (palette[tier] || palette.aluminum) : ['#64748b', '#1e293b'];
-  return `
-    <svg viewBox="0 0 56 64" aria-hidden="true">
-      <polygon points="28,3 51,14 47,43 28,60 9,43 5,14" fill="${lo}" fill-opacity="0.55" stroke="${hi}" stroke-width="2"/>
-      <polygon points="28,10 44,18 41,40 28,52 15,40 12,18" fill="none" stroke="${hi}" stroke-opacity="0.45" stroke-width="1.2"/>
-      ${
-        unlocked
-          ? `<polygon points="28,18 32,27 41,28 34,34 36,43 28,38 20,43 22,34 15,28 24,27" fill="${hi}"/>`
-          : `<rect x="21" y="27" width="14" height="11" rx="2" fill="none" stroke="${hi}" stroke-width="1.8"/><path d="M24 27v-3.5a4 4 0 0 1 8 0V27" fill="none" stroke="${hi}" stroke-width="1.8"/>`
-      }
-    </svg>
-  `;
-}
-
-// ================= FORMATTING & HUD HELPERS =================
-function formatScore(n) {
-  return String(Math.max(0, Math.floor(n || 0))).padStart(8, '0');
-}
-
-function formatTimerInt(sec) {
-  return String(Math.max(0, Math.ceil(sec || 0))).padStart(3, '0');
-}
-
-function starsToSvgHtml(starsObj) {
-  const s1 = starsObj?.clear ? SVG_STAR_ON : SVG_STAR_OFF;
-  const s2 = starsObj?.vault ? SVG_STAR_ON : SVG_STAR_OFF;
-  const s3 = starsObj?.speed ? SVG_STAR_ON : SVG_STAR_OFF;
-  return `${s1}${s2}${s3}`;
-}
-
-function resolveActionPromptSpec(rawText, hudMode) {
-  const raw = String(rawText || '').trim();
-  if (!raw || hudMode === 'puzzle') {
-    return { html: '', interactKind: '', triggerAction: null, subtype: '' };
-  }
-  const upper = raw.toUpperCase();
-
-  // Informational / non-interactive status badges
-  if (
-    upper.includes('SOLVED') ||
-    upper.includes('UNLOCKED') ||
-    upper.includes('NEED PARTS') ||
-    upper.includes('NEED KEYS') ||
-    upper.includes('AT WORKBENCH') ||
-    upper.includes('SONAR ACTIVE') ||
-    upper.startsWith('BOOST ')
-  ) {
-    let icon = PROMPT_ICONS.up;
-    let label = upper
-      .replace(/->/g, '•')
-      .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}▲▼◀▶✓◎]/gu, '')
-      .trim();
-    if (upper.includes('BOOST')) icon = PROMPT_ICONS.bolt;
-    else if (upper.includes('RUNE')) icon = PROMPT_ICONS.rune;
-    else if (upper.includes('PART') || upper.includes('WORKBENCH')) {
-      icon = PROMPT_ICONS.craft;
-      if (upper.includes('AT WORKBENCH')) label = 'CRAFT DYNAMO FIRST';
-    } else if (upper.includes('KEY')) {
-      icon = PROMPT_ICONS.key;
-    } else if (upper.includes('SONAR')) {
-      icon = PROMPT_ICONS.cryo;
-      label = 'SONAR PING ACTIVE';
-    }
-    return {
-      html: `${icon}<span>${label}</span>`,
-      interactKind: '',
-      triggerAction: null,
-      subtype: 'info',
-    };
-  }
-
-  // 1. Casual Workbench & Treasure Chest ('fire' per #277 + 'up' bridge for game.js)
-  if (upper.includes('CRAFT') && (upper.includes('DYNAMO') || upper.includes('BEACON'))) {
-    return {
-      html: `${PROMPT_ICONS.craft}<span>TAP • CRAFT DYNAMO</span>`,
-      interactKind: 'fire',
-      triggerAction: 'fire',
-      subtype: 'station',
-    };
-  }
-  if (upper.includes('OPEN') && upper.includes('CHEST')) {
-    return {
-      html: `${PROMPT_ICONS.key}<span>TAP • OPEN CHEST</span>`,
-      interactKind: 'fire',
-      triggerAction: 'fire',
-      subtype: 'station',
-    };
-  }
-
-  // 2. Call Lift ('fire')
-  if (upper.includes('CALL') && upper.includes('LIFT')) {
-    return {
-      html: `${PROMPT_ICONS.cryo}<span>TAP • CALL LIFT</span>`,
-      interactKind: 'fire',
-      triggerAction: 'fire',
-      subtype: 'call_lift',
-    };
-  }
-
-  // 3. Boarded / Resting Lift ('lift' -> 'up')
-  if (raw.includes('▲▼') || (upper.includes('LIFT') && (upper.includes('CAGE') || upper.includes('RIDE')))) {
-    return {
-      html: `${PROMPT_ICONS.updown}<span>TAP / SWIPE ↑ • RIDE LIFT</span>`,
-      interactKind: 'lift',
-      triggerAction: 'up',
-      subtype: 'lift',
-    };
-  }
-
-  // 4. Tower Doorways, Rune Sanctums, Core Vaults & Summit Exits ('door' -> 'up', <= 26 chars)
-  if (hudMode === 'tower') {
-    if (upper.includes('RUNE')) {
-      return {
-        html: `${PROMPT_ICONS.rune}<span>TAP / SWIPE ↑ • RUNE DOOR</span>`,
-        interactKind: 'door',
-        triggerAction: 'up',
-        subtype: 'door',
-      };
-    }
-    if (upper.includes('VAULT')) {
-      return {
-        html: `${PROMPT_ICONS.up}<span>TAP / SWIPE ↑ • CORE VAULT</span>`,
-        interactKind: 'door',
-        triggerAction: 'up',
-        subtype: 'door',
-      };
-    }
-    if (upper.includes('INSTALL') && upper.includes('DYNAMO')) {
-      return {
-        html: `${PROMPT_ICONS.craft}<span>TAP / SWIPE ↑ • FIX BEACON</span>`,
-        interactKind: 'door',
-        triggerAction: 'up',
-        subtype: 'door',
-      };
-    }
-    if (upper.includes('DEPART')) {
-      return {
-        html: `${PROMPT_ICONS.up}<span>TAP / SWIPE ↑ • DEPART</span>`,
-        interactKind: 'door',
-        triggerAction: 'up',
-        subtype: 'door',
-      };
-    }
-    if (upper.includes('TOPPLE')) {
-      return {
-        html: `${PROMPT_ICONS.up}<span>TAP / SWIPE ↑ • TOPPLE!</span>`,
-        interactKind: 'door',
-        triggerAction: 'up',
-        subtype: 'door',
-      };
-    }
-    if (upper.includes('DOOR') || upper.includes('PORTAL') || upper.includes('PASSAGE')) {
-      return {
-        html: `${PROMPT_ICONS.up}<span>TAP OR SWIPE ↑ • ENTER DOOR</span>`,
-        interactKind: 'door',
-        triggerAction: 'up',
-        subtype: 'door',
-      };
-    }
-  }
-
-  // 5. Core Lock Vault Ring Lock ('fire')
-  if (hudMode === 'vault') {
-    return {
-      html: `${PROMPT_ICONS.bolt}<span>TAP • LOCK RING</span>`,
-      interactKind: '',
-      triggerAction: 'fire',
-      subtype: 'vault',
-    };
-  }
-
-  // 6. Submarine controls hint
-  if (hudMode === 'submarine') {
-    return {
-      html: `${PROMPT_ICONS.cryo}<span>TAP FIRE • JUMP SONAR</span>`,
-      interactKind: '',
-      triggerAction: 'fire',
-      subtype: 'sub',
-    };
-  }
-
-  const cleanLabel = upper
-    .replace(/->/g, '•')
-    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}▲▼◀▶]/gu, '')
-    .trim();
-  return {
-    html: `${PROMPT_ICONS.up}<span>${cleanLabel}</span>`,
-    interactKind: '',
-    triggerAction: null,
-    subtype: '',
-  };
-}
-
-function renderMissionStatusMarkup(rawStatus) {
-  const upper = String(rawStatus || '').toUpperCase();
-  let icon = PROMPT_ICONS.curio;
-  if (upper.includes('PART') || upper.includes('WORKBENCH') || upper.includes('DYNAMO') || upper.includes('CRAFT') || upper.includes('FIX') || upper.includes('REPAIR')) {
-    icon = PROMPT_ICONS.craft;
-  } else if (upper.includes('KEY') || upper.includes('CHEST') || upper.includes('TREASURE')) {
-    icon = PROMPT_ICONS.key;
-  } else if (upper.includes('RUNE') || upper.includes('PUZZLE') || upper.includes('SWITCH')) {
-    icon = PROMPT_ICONS.rune;
-  }
-  const clean = upper
-    .replace(/->/g, '•')
-    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}▲▼◀▶]/gu, '')
-    .trim();
-  return `${icon}<span>${clean}</span>`;
-}
-
-// Inject static control icons into diegetic popover & pause pills
+// Inject static control icons into popover & pause pills
 document.querySelectorAll('[data-ctrl-ico]').forEach((slot) => {
   const key = slot.dataset.ctrlIco || 'gesture';
   slot.innerHTML = CTRL_SVGS[key] || CTRL_SVGS.gesture;
 });
 
 // ================= INITIALIZE ENGINE INSTANCES =================
-const initSettings = progression.getSettings();
+const initSettings = progression.getSettings?.() || {};
 
 const input = new InputController({
   mode: initSettings.controlMode || 'gesture',
@@ -835,16 +623,22 @@ const input = new InputController({
 input.setTiltSensitivity?.(initSettings.tiltSensitivity ?? 1.0);
 
 const renderer = new GameRenderer(canvas);
-renderer.setEra?.(initSettings.era || 'reboot');
-renderer.setSkin?.(progression.getEquippedSkin());
-renderer.setBlasterFx?.(progression.getEquippedBlasterFx?.() || initSettings.blasterFxId || 'standard_cryo');
+renderer.setSkin?.(progression.getEquippedSkin?.());
+renderer.setBlasterFx?.(progression.getEquippedBlasterFx?.() || initSettings.blasterFxId || 'sea_glass_pulse');
 
-sound.setEra?.(initSettings.era || 'reboot');
+// Initialize 3-Channel Audio Volumes
+const savedMusicVol = Number.isFinite(initSettings.musicVolume) ? initSettings.musicVolume : 0.78;
+const savedAmbVol = Number.isFinite(initSettings.ambienceVolume) ? initSettings.ambienceVolume : 0.82;
+const savedSfxVol = Number.isFinite(initSettings.sfxVolume) ? initSettings.sfxVolume : 0.80;
+
 sound.setZenMode?.(Boolean(initSettings.zenMode));
 sound.setMuted?.(Boolean(initSettings.muted));
 sound.setMusicEnabled?.(initSettings.musicEnabled !== false);
+sound.setMusicVolume?.(savedMusicVol);
+sound.setAmbienceVolume?.(savedAmbVol);
+sound.setSfxVolume?.(savedSfxVol);
 
-// Banner & Trophy Toast Timers
+// ================= BANNER & HONOR TOAST QUEUE =================
 let bannerTimeout = null;
 function clearBanner() {
   clearTimeout(bannerTimeout);
@@ -870,18 +664,18 @@ function computeTrophyPoints() {
     return progression.getTrophyPoints();
   }
   return TROPHIES.reduce(
-    (sum, t) => sum + (progression.isTrophyUnlocked(t.id) ? (t.points || 5) : 0),
+    (sum, t) => sum + (progression.isTrophyUnlocked?.(t.id) ? (t.points || 5) : 0),
     0
   );
 }
 
 function getRankTitleForPoints(pts) {
-  if (pts >= 1000) return 'MILLENNIUM TOPPLER';
-  if (pts >= 700) return 'NEBULUS SOVEREIGN';
-  if (pts >= 450) return 'ABYSSAL VANGUARD';
-  if (pts >= 200) return 'STORM OPERATIVE';
-  if (pts >= 50) return 'MONOLITH SCOUT';
-  return 'AMPHIBIOUS CADET';
+  if (pts >= 1000) return 'SOVEREIGN OF LIVING WATERS';
+  if (pts >= 700) return 'PELAGIAN ARCH-GUARDIAN';
+  if (pts >= 450) return 'HYDROSPHERE KEEPER';
+  if (pts >= 200) return 'RAPIDS PATHFINDER';
+  if (pts >= 50) return 'CANYON WARDEN';
+  return 'STREAM SEEKER';
 }
 
 function pumpTrophyQueue() {
@@ -891,16 +685,13 @@ function pumpTrophyQueue() {
   const tier = trophy.tier || 'aluminum';
   const pts = trophy.points || (tier === 'diamond' ? 30 : tier === 'platinum' ? 20 : tier === 'copper' ? 10 : 5);
 
-  trophyToastEl.classList.remove('tier-aluminum', 'tier-copper', 'tier-platinum', 'tier-diamond');
-  trophyToastEl.classList.add(`tier-${tier}`);
-
-  if (trophyToastIconEl) {
-    trophyToastIconEl.innerHTML = getArtTrophyShieldSVG(tier, true);
+  if (trophyToastIconEl && typeof uiArtMod.getTrophyShieldSVG === 'function') {
+    trophyToastIconEl.innerHTML = uiArtMod.getTrophyShieldSVG(tier, true);
   }
   if (trophyToastKickerEl) {
-    trophyToastKickerEl.textContent = `${tier.toUpperCase()} TROPHY • +${pts} PTS`;
+    trophyToastKickerEl.textContent = `HONOR UNLOCKED • +${pts} PTS`;
   }
-  if (trophyToastTitleEl) trophyToastTitleEl.textContent = trophy.title || 'Trophy Unlocked';
+  if (trophyToastTitleEl) trophyToastTitleEl.textContent = trophy.title || 'Watershed Honor';
   trophyToastEl.classList.remove('hidden');
   sound.trophyUnlock?.();
   refreshTitleMeta();
@@ -920,28 +711,220 @@ function enqueueTrophyToast(trophy) {
   pumpTrophyQueue();
 }
 
-// Track life pips & arrow state to avoid DOM churn at 60fps
+// ================= HUD HELPERS =================
+function formatScore(n) {
+  return String(Math.max(0, Math.floor(n || 0))).padStart(8, '0');
+}
+
+function formatTimerInt(sec) {
+  return String(Math.max(0, Math.ceil(sec || 0))).padStart(3, '0');
+}
+
+function starsToSvgHtml(starsObj) {
+  const s1 = starsObj?.clear ? SVG_STAR_ON : SVG_STAR_OFF;
+  const s2 = starsObj?.vault ? SVG_STAR_ON : SVG_STAR_OFF;
+  const s3 = starsObj?.speed ? SVG_STAR_ON : SVG_STAR_OFF;
+  return `${s1}${s2}${s3}`;
+}
+
 let prevLivesRendered = -1;
-function renderLivesPips(lives) {
-  const count = Math.max(0, Math.floor(lives ?? 3));
-  if (count === prevLivesRendered) return;
-  const gained = prevLivesRendered >= 0 && count > prevLivesRendered;
-  prevLivesRendered = count;
+function renderLivesPips(lives, isPurist = false) {
+  const count = Math.max(0, Math.floor(lives ?? (isPurist ? 1 : 3)));
+  const key = count * 10 + (isPurist ? 1 : 0);
+  if (key === prevLivesRendered) return;
+  prevLivesRendered = key;
 
   if (!livesEl) return;
   livesEl.innerHTML = '';
-  const slots = Math.max(3, count);
+  const slots = isPurist ? Math.max(1, count) : Math.max(3, count);
   for (let i = 0; i < slots; i++) {
     const pip = document.createElement('span');
-    const active = i < count;
-    pip.className = active
-      ? (gained && i === count - 1 ? 'life-pip gain' : 'life-pip')
-      : 'life-pip depleted';
-    pip.innerHTML = FROG_LIFE_SVG;
+    pip.className = i < count ? 'life-pip' : 'life-pip depleted';
+    pip.innerHTML = HARMONIC_SHIELD_SVG;
     livesEl.appendChild(pip);
   }
 }
 
+function resolveActionPromptSpec(rawText, hudMode) {
+  const raw = String(rawText || '').trim();
+  if (!raw || hudMode === 'puzzle' || hudMode === 'aqueduct_sanctum') {
+    return { html: '', interactKind: '', triggerAction: null, subtype: '' };
+  }
+  const upper = raw.toUpperCase();
+
+  if (upper.includes('VALVE') || upper.includes('PIPE')) {
+    return {
+      html: `${PROMPT_ICONS.craft}<span>TAP WHIP / PULSE • SPIN VALVE</span>`,
+      interactKind: 'fire',
+      triggerAction: 'whip',
+      subtype: 'valve',
+    };
+  }
+  if (upper.includes('GRAPPLE') || upper.includes('SWING')) {
+    return {
+      html: `${PROMPT_ICONS.bolt}<span>TAP WHIP • TAIL-GRAPPLE</span>`,
+      interactKind: 'fire',
+      triggerAction: 'whip',
+      subtype: 'grapple',
+    };
+  }
+  if (upper.includes('CRAFT') || upper.includes('CHEST')) {
+    return {
+      html: `${PROMPT_ICONS.craft}<span>TAP • INTERACT</span>`,
+      interactKind: 'fire',
+      triggerAction: 'fire',
+      subtype: 'station',
+    };
+  }
+  if (upper.includes('CALL') && upper.includes('LIFT')) {
+    return {
+      html: `${PROMPT_ICONS.pulse}<span>TAP • CALL ELEVATOR</span>`,
+      interactKind: 'fire',
+      triggerAction: 'fire',
+      subtype: 'call_lift',
+    };
+  }
+  if (raw.includes('▲▼') || (upper.includes('LIFT') || upper.includes('ELEVATOR'))) {
+    return {
+      html: `${PROMPT_ICONS.updown}<span>TAP / SWIPE ↑ • RIDE ELEVATOR</span>`,
+      interactKind: 'lift',
+      triggerAction: 'up',
+      subtype: 'lift',
+    };
+  }
+  if (hudMode === 'tower') {
+    if (upper.includes('SANCTUM') || upper.includes('RUNE') || upper.includes('AQUEDUCT')) {
+      return {
+        html: `${PROMPT_ICONS.rune}<span>TAP / SWIPE ↑ • SANCTUM</span>`,
+        interactKind: 'door',
+        triggerAction: 'up',
+        subtype: 'door',
+      };
+    }
+    if (upper.includes('VAULT')) {
+      return {
+        html: `${PROMPT_ICONS.up}<span>TAP / SWIPE ↑ • HYDRO VAULT</span>`,
+        interactKind: 'door',
+        triggerAction: 'up',
+        subtype: 'door',
+      };
+    }
+    if (upper.includes('CROWN') || upper.includes('CORE') || upper.includes('PURIFY') || upper.includes('DESCEND') || upper.includes('SUMMIT')) {
+      return {
+        html: `${PROMPT_ICONS.up}<span>TAP / SWIPE ↑ • DIVE CORE!</span>`,
+        interactKind: 'door',
+        triggerAction: 'up',
+        subtype: 'door',
+      };
+    }
+    if (upper.includes('DOOR') || upper.includes('PORTAL') || upper.includes('PASSAGE')) {
+      return {
+        html: `${PROMPT_ICONS.up}<span>TAP OR SWIPE ↑ • ENTER DOOR</span>`,
+        interactKind: 'door',
+        triggerAction: 'up',
+        subtype: 'door',
+      };
+    }
+  }
+  if (hudMode === 'vault') {
+    return {
+      html: `${PROMPT_ICONS.bolt}<span>TAP • ALIGN RING</span>`,
+      interactKind: '',
+      triggerAction: 'fire',
+      subtype: 'vault',
+    };
+  }
+
+  const cleanLabel = upper
+    .replace(/->/g, '•')
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}▲▼◀▶✓◎]/gu, '')
+    .trim();
+  return {
+    html: `${PROMPT_ICONS.up}<span>${cleanLabel}</span>`,
+    interactKind: '',
+    triggerAction: null,
+    subtype: '',
+  };
+}
+
+function renderMissionStatusMarkup(rawStatus) {
+  const upper = String(rawStatus || '').toUpperCase();
+  let icon = PROMPT_ICONS.curio;
+  if (upper.includes('VALVE') || upper.includes('PIPE') || upper.includes('CRAFT')) icon = PROMPT_ICONS.craft;
+  else if (upper.includes('KEY') || upper.includes('CHEST')) icon = PROMPT_ICONS.key;
+  else if (upper.includes('SANCTUM') || upper.includes('PUZZLE')) icon = PROMPT_ICONS.rune;
+  const clean = upper
+    .replace(/->/g, '•')
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}▲▼◀▶]/gu, '')
+    .trim();
+  return `${icon}<span>${clean}</span>`;
+}
+
+// ================= BIO-MUTATION DRAFT MODAL =================
+let pendingMutationPickCb = null;
+
+function openMutationDraftModal(choices, onPickCallback) {
+  const pool =
+    Array.isArray(choices) && choices.length > 0
+      ? choices
+      : (Array.isArray(progMod.BIO_MUTATIONS) && progMod.BIO_MUTATIONS.length >= 3
+          ? progMod.BIO_MUTATIONS.slice(0, 3)
+          : FALLBACK_BIO_MUTATIONS.slice(0, 3));
+
+  pendingMutationPickCb = onPickCallback || null;
+  input.resetState?.();
+  input.setInteractContext?.(false, '');
+
+  const activeCount = Array.isArray(game?.gateway?.mutations)
+    ? game.gateway.mutations.length
+    : Array.isArray(game?.mutations)
+      ? game.mutations.length
+      : 0;
+  if (mutationActiveCountEl) {
+    mutationActiveCountEl.textContent = `${activeCount} ACTIVE`;
+  }
+
+  if (mutationCardsGridEl) {
+    mutationCardsGridEl.innerHTML = '';
+    pool.slice(0, 3).forEach((mut) => {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'mutation-card';
+      const ico = typeof uiArtMod.getMutationIconSVG === 'function'
+        ? uiArtMod.getMutationIconSVG(mut.id)
+        : SVG_CURIO;
+      card.innerHTML = `
+        <span class="mutation-icon">${ico}</span>
+        <span class="mutation-title">${mut.name || mut.title || 'Harmonic Evolution'}</span>
+        <span class="mutation-desc">${mut.description || mut.desc || 'Enhances Gateway’s hydro-athleticism.'}</span>
+        <span class="mutation-pick-tag">EVOLVE GATEWAY</span>
+      `;
+      card.addEventListener('click', () => {
+        sound.unlock?.();
+        sound.collectStar?.();
+        overlayMutation?.classList.add('hidden');
+        const cb = pendingMutationPickCb;
+        pendingMutationPickCb = null;
+        if (typeof cb === 'function') {
+          cb(mut.id, mut);
+        } else {
+          game.selectMutation?.(mut.id);
+        }
+        showBanner('BIO-MUTATION EVOLVED', String(mut.name || mut.title || '').toUpperCase());
+        syncTitleShowcaseState();
+      });
+      mutationCardsGridEl.appendChild(card);
+    });
+  }
+
+  overlayMutation?.classList.remove('hidden');
+  pushNavGuard();
+  syncTitleShowcaseState();
+}
+
+window.openMutationDraftModal = openMutationDraftModal;
+
+// ================= GAME INSTANCE & CALLBACKS =================
 let prevDirKey = '';
 let prevPromptKey = '';
 let prevMissionStatusRaw = '';
@@ -951,42 +934,62 @@ let prevPuzzleTitle = '';
 let prevPuzzleSub = '';
 
 let lastLaunch = {
-  type: 'campaign',
-  era: initSettings.era || 'reboot',
+  mode: 'campaign',
   towerIdx: 0,
   zenMode: Boolean(initSettings.zenMode),
-  miniGame: 'submarine',
+  miniGame: 'core_descent',
 };
 
-let gearsBeforeRun = progression.getGears();
+let gearsBeforeRun = progression.getGears?.() ?? 0;
 
-const game = new TowerTopplerGame(
+const game = new GameEngineClass(
   renderer,
   input,
   {
     onHud(hud) {
       if (scoreEl) scoreEl.textContent = formatScore(hud.score);
       if (hiScoreEl) hiScoreEl.textContent = formatScore(hud.hiScore);
-      if (gearsEl) gearsEl.textContent = String(hud.gears ?? progression.getGears());
+      if (gearsEl) gearsEl.textContent = String(hud.gears ?? progression.getGears?.() ?? 0);
 
-      renderLivesPips(hud.lives);
+      const rType = String(hud.runType || game.runType || lastLaunch.mode || 'campaign').toLowerCase();
+      const isPurist = rType.includes('purist');
+      renderLivesPips(hud.lives, isPurist);
 
-      const isZenTower = Boolean(hud.zenMode) && hud.mode === 'tower';
-      const isUrgent = !isZenTower && hud.timer <= 15 && (hud.mode === 'tower' || hud.mode === 'vault');
+      if (hudModeLabelEl) {
+        if (isPurist) {
+          const mult = hud.comboMult || hud.multiplier || 1;
+          hudModeLabelEl.textContent = mult > 1 ? `PURIST • ${mult}X` : 'PURIST ARCADE';
+        } else if (rType.includes('flood')) {
+          hudModeLabelEl.textContent = 'FLASH-FLOOD';
+        } else if (rType.includes('sanctum')) {
+          hudModeLabelEl.textContent = 'SANCTUM TRIAL';
+        } else if (rType.includes('expedition')) {
+          hudModeLabelEl.textContent = 'EXPEDITION';
+        } else if (rType.includes('daily')) {
+          hudModeLabelEl.textContent = 'DAILY TIDE';
+        } else {
+          hudModeLabelEl.textContent = 'GATEWAY';
+        }
+      }
 
+      const timerFree = Boolean(hud.zenMode || rType.includes('sanctum')) && hud.mode === 'tower';
+      const isUrgent = !timerFree && hud.timer <= 15 && (hud.mode === 'tower' || hud.mode === 'vault');
+
+      if (hudTimerCaptionEl) {
+        hudTimerCaptionEl.textContent = timerFree ? 'FLOW' : isPurist ? 'CLOCK' : rType.includes('flood') ? 'SURGE' : 'SIPHON';
+      }
       if (timerEl) {
-        timerEl.textContent = isZenTower ? 'ZEN' : formatTimerInt(hud.timer);
-        timerEl.classList.toggle('zen', isZenTower);
+        timerEl.textContent = timerFree ? 'CALM' : formatTimerInt(hud.timer);
+        timerEl.classList.toggle('zen', timerFree);
         timerEl.classList.toggle('urgent', isUrgent);
       }
 
       if (timerRingEl && timerRingArcEl) {
-        timerRingEl.classList.toggle('zen', isZenTower);
+        timerRingEl.classList.toggle('zen', timerFree);
         timerRingEl.classList.toggle('urgent', isUrgent);
-        const limit = Math.max(1, hud.timeLimit || 95);
-        const ratio = isZenTower ? 1 : Math.max(0, Math.min(1, (hud.timer || 0) / limit));
-        const dashOffset = RING_CIRCUMFERENCE * (1 - ratio);
-        timerRingArcEl.style.strokeDashoffset = dashOffset.toFixed(2);
+        const limit = Math.max(1, hud.timeLimit || 110);
+        const ratio = timerFree ? 1 : Math.max(0, Math.min(1, (hud.timer || 0) / limit));
+        timerRingArcEl.style.strokeDashoffset = (RING_CIRCUMFERENCE * (1 - ratio)).toFixed(2);
       }
 
       if (dirArrowEl) {
@@ -996,20 +999,21 @@ const game = new TowerTopplerGame(
           dirArrowEl.innerHTML = DIR_CHEVRON_SVGS[dirKey];
         }
       }
+
       if (towerBadgeEl) {
-        if (hud.mode === 'submarine') towerBadgeEl.textContent = 'SUB';
-        else if (hud.mode === 'skimmer') towerBadgeEl.textContent = 'SKIM';
-        else if (hud.mode === 'glide') towerBadgeEl.textContent = 'GLIDE';
-        else if (hud.mode === 'puzzle') towerBadgeEl.textContent = 'RUNE';
-        else if (hud.mode === 'vault') towerBadgeEl.textContent = 'VAULT';
-        else if (hud.runType === 'daily') towerBadgeEl.textContent = 'DAILY';
-        else if (hud.runType === 'endless_casual') towerBadgeEl.textContent = `EXP${hud.towerId || 1}`;
-        else if (hud.runType === 'endless') towerBadgeEl.textContent = `S${hud.towerId || 1}`;
-        else towerBadgeEl.textContent = `T${hud.towerId || 1}`;
+        const m = hud.mode;
+        if (m === 'core_descent') towerBadgeEl.textContent = 'CORE';
+        else if (m === 'reef_swim' || m === 'submarine') towerBadgeEl.textContent = 'REEF';
+        else if (m === 'rapids_surf' || m === 'skimmer') towerBadgeEl.textContent = 'SURF';
+        else if (m === 'frill_glide' || m === 'glide') towerBadgeEl.textContent = 'GLIDE';
+        else if (m === 'aqueduct_sanctum' || m === 'puzzle') towerBadgeEl.textContent = 'SANCTUM';
+        else if (m === 'vault') towerBadgeEl.textContent = 'VAULT';
+        else if (rType.includes('daily')) towerBadgeEl.textContent = 'DAILY';
+        else towerBadgeEl.textContent = `S${hud.towerId || 1}`;
       }
 
       if (missionStatusPillEl) {
-        const mRaw = (hud.mode === 'tower' || hud.mode === 'topple') && hud.missionStatus ? String(hud.missionStatus) : '';
+        const mRaw = hud.mode === 'tower' && hud.missionStatus ? String(hud.missionStatus) : '';
         if (mRaw) {
           if (mRaw !== prevMissionStatusRaw) {
             prevMissionStatusRaw = mRaw;
@@ -1022,7 +1026,8 @@ const game = new TowerTopplerGame(
         }
       }
 
-      const showAlt = (hud.mode === 'tower' || hud.mode === 'topple') && !isTitleScreenOpen();
+      // Altitude & Rising Surge Meter
+      const showAlt = hud.mode === 'tower' && !isTitleScreenOpen();
       if (altMeterEl) {
         altMeterEl.classList.toggle('hidden', !showAlt);
         const altPct = Math.max(0, Math.min(100, hud.altitudePct ?? 0));
@@ -1033,34 +1038,56 @@ const game = new TowerTopplerGame(
         altMeterEl.classList.toggle('sinking', waterPct > 1);
       }
 
+      // Reactor Core Descent Telemetry HUD
+      const showCoreHud = hud.mode === 'core_descent' && !isTitleScreenOpen() && !cutsceneState.active;
+      if (coreDescentHudEl) {
+        coreDescentHudEl.classList.toggle('hidden', !showCoreHud);
+        if (showCoreHud) {
+          const cd = game.coreDescent || game.descent || hud.coreDescent || {};
+          const locksHit = cd.crystalsSmashed ?? cd.coresSmashed ?? cd.locksBroken ?? hud.coresSmashed ?? 0;
+          const locksMax = cd.totalCrystals ?? cd.totalCores ?? cd.totalLocks ?? 3;
+          const progPct = Math.max(0, Math.min(100, (cd.progress ?? hud.coreProgress ?? hud.depthPct ?? 0) * 100));
+          if (coreHudTitleEl) coreHudTitleEl.textContent = 'REACTOR CORE DESCENT';
+          if (coreHudLocksEl) coreHudLocksEl.textContent = `SIPHON LOCKS • ${locksHit}/${locksMax}`;
+          if (coreDepthFillEl) coreDepthFillEl.style.width = `${progPct.toFixed(1)}%`;
+          if (coreHudSubEl) {
+            coreHudSubEl.textContent =
+              progPct >= 90
+                ? 'BEDROCK ANCHOR REACHED • PLANTING HARMONIC SEED!'
+                : 'STEER TURBINES • TAIL-WHIP CRYSTAL LOCKS';
+          }
+        }
+      }
+
       if (appEl && appEl.dataset.gameMode !== (hud.mode || 'tower')) {
         appEl.dataset.gameMode = hud.mode || 'tower';
       }
 
-      // Sync Puzzle Chamber HUD (#puzzle-hud + [PEEK CLUE] button) cleanly outside board
-      const showPuzzleHud = hud.mode === 'puzzle' && !isTitleScreenOpen() && Boolean(game.puzzleRoom);
+      // Aqueduct Sanctum Clue HUD
+      const isSanctumMode = hud.mode === 'puzzle' || hud.mode === 'aqueduct_sanctum';
+      const showPuzzleHud = isSanctumMode && !isTitleScreenOpen() && Boolean(game.puzzleRoom);
       if (puzzleHudEl) {
         if (showPuzzleHud) {
           const pr = game.puzzleRoom;
-          let pTitle = 'RUNE SANCTUM';
-          let pSub = 'SOLVE ANCIENT MECHANISM';
+          let pTitle = 'AQUEDUCT SANCTUM';
+          let pSub = 'ROUTE LIVING WATER';
           if (pr.solved) {
-            pTitle = 'SANCTUM UNLOCKED';
-            pSub = pr.parCleared ? 'PAR MASTERY • +5 GEARS' : 'STAR CORE UNLOCKED';
+            pTitle = 'SANCTUM HARMONIZED';
+            pSub = pr.parCleared ? 'PAR MASTERY • +5 PEARLS' : 'HARMONIC SEED UNLOCKED';
           } else if (pr.type === 'lights') {
-            pTitle = `RUNE FLOOR • ${pr.moves || 0}/${pr.parMoves || 3}`;
-            pSub = 'STOMP • MATCH TABLET';
+            pTitle = `WATER TILES • ${pr.moves || 0}/${pr.parMoves || 3}`;
+            pSub = 'STEP • MATCH TABLET';
           } else if (pr.type === 'bells') {
             const progCount = pr.bellStep ?? pr.seqIdx ?? pr.progress ?? 0;
             const totalBells = Array.isArray(pr.order) ? pr.order.length : 4;
-            pTitle = `BELL SANCTUM • ${progCount}/${totalBells}`;
-            pSub = 'RING • CREST ORDER';
+            pTitle = `HARMONIC BELLS • ${progCount}/${totalBells}`;
+            pSub = 'CHIME • CREST ORDER';
           } else if (pr.type === 'beam') {
-            pTitle = `PRISM BEAM • ${pr.moves || 0}/${pr.parMoves || 4}`;
-            pSub = 'TAP MIRROR • LIGHT CORE';
+            pTitle = `CRYSTAL PRISM • ${pr.moves || 0}/${pr.parMoves || 4}`;
+            pSub = 'ROTATE • LIGHT SEED';
           } else if (pr.type === 'blocks') {
-            pTitle = `STONE PLATES • ${pr.moves || 0}/${pr.parMoves || 6}`;
-            pSub = 'PUSH BLOCKS • TAP UNDO';
+            pTitle = `SLUICE BLOCKS • ${pr.moves || 0}/${pr.parMoves || 6}`;
+            pSub = 'SLIDE • CLEAR CHANNEL';
           }
 
           if (puzzleHudTitleEl && pTitle !== prevPuzzleTitle) {
@@ -1080,9 +1107,7 @@ const game = new TowerTopplerGame(
             const isPeeking = Boolean((pr.peekAlpha || 0) > 0.25 || pr.isPeekingClue);
             btnPeekClue.classList.toggle('peeking', isPeeking);
             btnPeekClue.classList.toggle('active', isPeeking);
-            if (peekClueLblEl) {
-              peekClueLblEl.textContent = isPeeking ? 'CLUE LIT' : 'PEEK CLUE';
-            }
+            if (peekClueLblEl) peekClueLblEl.textContent = isPeeking ? 'CLUE LIT' : 'PEEK CLUE';
           }
           puzzleHudEl.classList.remove('hidden');
         } else {
@@ -1090,18 +1115,13 @@ const game = new TowerTopplerGame(
         }
       }
 
+      // Action Prompt Pill
       if (actionPromptEl) {
-        let promptRaw = hud.mode === 'puzzle' ? '' : (hud.actionPrompt || '');
-        if (!promptRaw && hud.mode === 'skimmer' && (hud.boostMult || 1) > 1) {
-          promptRaw = `BOOST ${hud.boostMult}X`;
+        let promptRaw = isSanctumMode ? '' : (hud.actionPrompt || '');
+        if (!promptRaw && (hud.mode === 'skimmer' || hud.mode === 'rapids_surf') && (hud.boostMult || 1) > 1) {
+          promptRaw = `HYDRO-WAKE ${hud.boostMult}X`;
         }
-        const activeMode =
-          (hud.mode === 'tower' ||
-            hud.mode === 'submarine' ||
-            hud.mode === 'skimmer' ||
-            hud.mode === 'glide' ||
-            hud.mode === 'vault') &&
-          !isTitleScreenOpen();
+        const activeMode = !isSanctumMode && hud.mode !== 'title' && !isTitleScreenOpen() && !cutsceneState.active;
 
         if (promptRaw && activeMode) {
           const spec = resolveActionPromptSpec(promptRaw, hud.mode);
@@ -1116,11 +1136,7 @@ const game = new TowerTopplerGame(
           actionPromptEl.classList.toggle('hidden', !spec.html);
 
           if (hud.mode === 'tower') {
-            if (spec.interactKind) {
-              input.setInteractContext?.(true, spec.interactKind);
-            } else {
-              input.setInteractContext?.(false, '');
-            }
+            input.setInteractContext?.(Boolean(spec.interactKind), spec.interactKind || '');
           } else {
             input.setInteractContext?.(false, '');
           }
@@ -1132,12 +1148,10 @@ const game = new TowerTopplerGame(
           actionPromptEl.classList.add('hidden');
           if (hud.mode !== 'tower') {
             input.setInteractContext?.(false, '');
-          } else if (!promptRaw && !isPlayerInTowerInteractZone()) {
+          } else if (!promptRaw && !isHeroInInteractZone()) {
             input.setInteractContext?.(false, '');
           }
         }
-      } else if (hud.mode !== 'tower') {
-        input.setInteractContext?.(false, '');
       }
     },
 
@@ -1145,69 +1159,78 @@ const game = new TowerTopplerGame(
 
     onTrophy: enqueueTrophyToast,
 
+    onMutationDraft(choices, onPickCallback) {
+      openMutationDraftModal(choices, onPickCallback);
+    },
+
+    onSpirePurified(info = {}, onDone = null) {
+      const theme = String(info?.theme || info?.biome || game?.tower?.theme || 'canyon_river').toLowerCase();
+      const cutKey = STORY_CUTSCENES[`purify_${theme}`] ? `purify_${theme}` : 'purify_canyon_river';
+      playStoryCutscene(cutKey, {
+        previewMode: false,
+        startPct: info?.watershedBefore,
+        endPct: info?.watershedAfter,
+        onComplete: () => {
+          onDone?.();
+        },
+      });
+    },
+
     onGameOver(victory, score, hiScore, summary = {}) {
       sound.setMusicActive?.(false);
       input.resetState?.();
       input.setInteractContext?.(false, '');
       currentPromptAction = null;
-      if (actionPromptEl) actionPromptEl.classList.add('hidden');
-      if (puzzleHudEl) puzzleHudEl.classList.add('hidden');
-      if (missionStatusPillEl) missionStatusPillEl.classList.add('hidden');
-      if (altMeterEl) altMeterEl.classList.add('hidden');
+      actionPromptEl?.classList.add('hidden');
+      puzzleHudEl?.classList.add('hidden');
+      missionStatusPillEl?.classList.add('hidden');
+      altMeterEl?.classList.add('hidden');
+      coreDescentHudEl?.classList.add('hidden');
 
       if (gameoverCardEl) {
         gameoverCardEl.dataset.outcome = victory ? 'victory' : 'defeat';
       }
 
+      const rType = String(game.runType || lastLaunch.mode || 'campaign').toLowerCase();
       if (goBadge) {
         if (victory) {
-          goBadge.textContent =
-            game.runType === 'daily'
-              ? 'DAILY MONOLITH CONQUERED'
-              : game.runType === 'endless_casual'
-                ? 'EXPEDITION COMPLETE'
-                : game.runType === 'minigame'
-                  ? 'SIMULATION COMPLETE'
-                  : 'PLANET NEBULUS SAVED';
+          goBadge.textContent = rType.includes('daily')
+            ? 'DAILY TIDE PURIFIED'
+            : rType.includes('purist')
+              ? 'PURIST GAUNTLET CONQUERED'
+              : rType.includes('expedition')
+                ? 'WATERSHED EXPEDITION COMPLETE'
+                : rType.includes('minigame')
+                  ? 'CHALLENGE HARMONIZED'
+                  : 'EARTH HYDROSPHERE RESTORED';
         } else {
-          goBadge.textContent =
-            game.runType === 'endless_casual'
-              ? 'EXPEDITION CONCLUDED'
-              : game.runType === 'endless'
-                ? 'ABYSS RUN ENDED'
-                : 'MISSION ENDED';
+          goBadge.textContent = rType.includes('flood')
+            ? 'OVERTAKEN BY THE SURGE'
+            : rType.includes('purist')
+              ? 'PURIST RUN ENDED'
+              : 'DESCENT INTERRUPTED';
         }
       }
 
       if (goTitle) {
-        goTitle.textContent = victory
-          ? game.runType === 'minigame'
-            ? 'STAGE CLEAR'
-            : 'VICTORY'
-          : 'GAME OVER';
+        goTitle.textContent = victory ? 'WATERSHED HEALED' : 'RETURN TO SANCTUARY';
       }
-
       if (goScore) goScore.textContent = Number(score || 0).toLocaleString();
       if (goHi) goHi.textContent = Number(hiScore || 0).toLocaleString();
 
       if (goStars) {
-        if (summary && summary.stars) {
+        if (summary?.stars) {
           goStars.innerHTML = starsToSvgHtml(summary.stars);
-        } else if (game.runType === 'endless') {
-          const depth = summary?.towersCleared ?? Math.max(0, (game.tower?.id || 1) - 1);
-          goStars.textContent = `${depth} SECTORS`;
-        } else if (game.tower?.id && (game.runType === 'reboot_campaign' || game.runType === 'original_campaign')) {
-          goStars.innerHTML = starsToSvgHtml(progression.getTowerStars(game.era, game.tower.id));
+        } else if (game.tower?.id) {
+          goStars.innerHTML = starsToSvgHtml(getTowerStarsSafe(game.tower.id));
         } else {
           goStars.innerHTML = starsToSvgHtml({ clear: victory, vault: victory, speed: victory });
         }
       }
 
-      const totalGears = progression.getGears();
+      const totalGears = progression.getGears?.() ?? 0;
       const earnedGears =
-        summary?.gearsEarned != null
-          ? summary.gearsEarned
-          : Math.max(0, totalGears - gearsBeforeRun);
+        summary?.gearsEarned != null ? summary.gearsEarned : Math.max(0, totalGears - gearsBeforeRun);
       if (goGears) {
         goGears.innerHTML =
           earnedGears > 0
@@ -1218,17 +1241,19 @@ const game = new TowerTopplerGame(
 
       refreshTitleMeta();
 
-      if (victory && game.runType === 'reboot_campaign' && !hasSeenCutscene('epilogue')) {
+      if (victory && rType.includes('campaign') && !hasSeenCutscene('epilogue')) {
         markCutsceneSeen('epilogue');
         playStoryCutscene('epilogue', {
           previewMode: true,
           onComplete: () => {
             overlayGameOver?.classList.remove('hidden');
+            pushNavGuard();
             syncTitleShowcaseState();
           },
         });
       } else {
         overlayGameOver?.classList.remove('hidden');
+        pushNavGuard();
         syncTitleShowcaseState();
       }
     },
@@ -1236,7 +1261,42 @@ const game = new TowerTopplerGame(
   progression
 );
 
-game.applySettings?.(progression.getSettings());
+game.applySettings?.(progression.getSettings?.() || {});
+
+// ================= PROGRESSION SAFE HELPERS =================
+function getTowersSafe() {
+  const list = createTowers?.('reboot');
+  return Array.isArray(list) && list.length > 0 ? list : [];
+}
+
+function getTowerStarsSafe(towerId) {
+  if (typeof progression.getTowerStars === 'function') {
+    const res = progression.getTowerStars('reboot', towerId);
+    if (res && typeof res === 'object') return res;
+    const resDirect = progression.getTowerStars(towerId);
+    if (resDirect && typeof resDirect === 'object') return resDirect;
+  }
+  return { clear: false, vault: false, speed: false, count: 0 };
+}
+
+function isSpireUnlocked(towerId) {
+  if (!towerId || towerId <= 1) return true;
+  return Boolean(getTowerStarsSafe(towerId - 1)?.clear);
+}
+
+function computeGlobalWatershedPct() {
+  if (typeof progression.getWatershedHealth === 'function') {
+    const h = progression.getWatershedHealth();
+    if (typeof h === 'number') return Math.max(0, Math.min(100, Math.round(h <= 1 && h > 0 ? h * 100 : h)));
+    if (h && typeof h === 'object' && typeof h.global === 'number') {
+      return Math.max(0, Math.min(100, Math.round(h.global <= 1 && h.global > 0 ? h.global * 100 : h.global)));
+    }
+  }
+  const towers = getTowersSafe();
+  if (towers.length === 0) return 0;
+  const cleared = towers.filter((t) => getTowerStarsSafe(t.id)?.clear).length;
+  return Math.round((cleared / towers.length) * 100);
+}
 
 // ================= TITLE DIORAMA & CHROME VISIBILITY SYNC =================
 function isTitleScreenOpen() {
@@ -1247,21 +1307,23 @@ function closeTitleDrawers() {
   titleSettingsDrawer?.classList.add('hidden');
   btnTitleSettings?.setAttribute('aria-expanded', 'false');
   btnTitleSettings?.classList.remove('active');
-  expeditionsDrawerEl?.classList.add('hidden');
-  btnExpeditions?.setAttribute('aria-expanded', 'false');
-  btnExpeditions?.classList.remove('active');
+}
+
+function isAnyModalOpenOnTitle() {
+  return (
+    Boolean(overlayModes && !overlayModes.classList.contains('hidden')) ||
+    Boolean(overlayWorlds && !overlayWorlds.classList.contains('hidden')) ||
+    Boolean(overlayWardrobe && !overlayWardrobe.classList.contains('hidden')) ||
+    Boolean(overlayTrophies && !overlayTrophies.classList.contains('hidden')) ||
+    Boolean(overlayMinigames && !overlayMinigames.classList.contains('hidden')) ||
+    Boolean(overlayMutation && !overlayMutation.classList.contains('hidden'))
+  );
 }
 
 function syncTitleShowcaseState() {
   const titleOpen = isTitleScreenOpen();
   const wardrobeOpen = Boolean(overlayWardrobe && !overlayWardrobe.classList.contains('hidden'));
-  const menuAnyOpen =
-    titleOpen ||
-    wardrobeOpen ||
-    Boolean(overlayWorlds && !overlayWorlds.classList.contains('hidden')) ||
-    Boolean(overlayTrophies && !overlayTrophies.classList.contains('hidden')) ||
-    Boolean(overlayMinigames && !overlayMinigames.classList.contains('hidden')) ||
-    cutsceneState.active;
+  const modalOpen = isAnyModalOpenOnTitle();
 
   if (appEl) {
     appEl.dataset.titleOpen = titleOpen ? 'true' : 'false';
@@ -1270,42 +1332,79 @@ function syncTitleShowcaseState() {
   game.titleShowcase = titleOpen;
   game.wardrobeSpotlight = wardrobeOpen;
 
-  const hideGameplayChrome = menuAnyOpen && game.mode === 'title' || cutsceneState.active || wardrobeOpen || titleOpen;
+  const hideGameplayChrome =
+    titleOpen || wardrobeOpen || cutsceneState.active || (modalOpen && game.mode === 'title');
   hudEl?.classList.toggle('hidden', hideGameplayChrome);
   touchControlsEl?.classList.toggle('hidden', hideGameplayChrome);
 }
 
-// ================= UI STATE SYNC & DIEGETIC ARTWORK MOUNTING =================
-let prevArtEraMounted = '';
+// ================= MOUNT ARTWORK & 3-CHANNEL AUDIO MIXER =================
+let artworkMounted = false;
+function mountHydroArtwork(force = false) {
+  if (artworkMounted && !force) return;
+  artworkMounted = true;
 
-function mountDiegeticArtwork(force = false) {
-  const era = progression.getSettings().era || 'reboot';
-  if (!force && prevArtEraMounted === era && titleCrestStageEl?.innerHTML) return;
-  prevArtEraMounted = era;
-
-  if (titleCrestStageEl) {
-    titleCrestStageEl.innerHTML = getArtTitleCrestSVG(era);
+  if (titleCrestStageEl && typeof uiArtMod.getTitleCrestSVG === 'function') {
+    titleCrestStageEl.innerHTML = uiArtMod.getTitleCrestSVG('canyon_river');
   }
-  if (playMedallionSvgEl) {
-    playMedallionSvgEl.innerHTML = getArtPlayMedallionSVG(era);
+  if (playMedallionSvgEl && typeof uiArtMod.getPlayMedallionSVG === 'function') {
+    playMedallionSvgEl.innerHTML = uiArtMod.getPlayMedallionSVG('campaign');
   }
-  if (spireArtDailyEl) {
-    spireArtDailyEl.innerHTML = getArtExpeditionSVG('daily', era);
-  }
-  if (spireArtEndlessEl) {
-    spireArtEndlessEl.innerHTML = getArtExpeditionSVG('endless', era);
-  }
-  if (spireArtCasualEl) {
-    spireArtCasualEl.innerHTML = getArtExpeditionSVG('casual', era);
-  }
+  modeArtSlots.forEach((el) => {
+    const modeKey = el.dataset.modeArt || 'campaign';
+    if (typeof uiArtMod.getGameModeArtSVG === 'function') {
+      el.innerHTML = uiArtMod.getGameModeArtSVG(modeKey);
+    }
+  });
   portalArtEls.forEach((el) => {
-    const gid = el.dataset.portalArt || 'submarine';
-    el.innerHTML = getArtMinigamePortalSVG(gid, era);
+    const gid = el.dataset.portalArt || 'core_descent';
+    if (typeof uiArtMod.getMinigamePortalSVG === 'function') {
+      el.innerHTML = uiArtMod.getMinigamePortalSVG(gid);
+    }
   });
 }
 
+function syncAudioMixerUI() {
+  const s = progression.getSettings?.() || {};
+  const mPct = Math.round((Number.isFinite(s.musicVolume) ? s.musicVolume : 0.78) * 100);
+  const aPct = Math.round((Number.isFinite(s.ambienceVolume) ? s.ambienceVolume : 0.82) * 100);
+  const xPct = Math.round((Number.isFinite(s.sfxVolume) ? s.sfxVolume : 0.80) * 100);
+
+  if (sliderMusicVol) sliderMusicVol.value = String(mPct);
+  if (pauseSliderMusic) pauseSliderMusic.value = String(mPct);
+  if (valMusicVol) valMusicVol.textContent = `${mPct}%`;
+  if (pauseValMusic) pauseValMusic.textContent = `${mPct}%`;
+
+  if (sliderAmbienceVol) sliderAmbienceVol.value = String(aPct);
+  if (pauseSliderAmbience) pauseSliderAmbience.value = String(aPct);
+  if (valAmbienceVol) valAmbienceVol.textContent = `${aPct}%`;
+  if (pauseValAmbience) pauseValAmbience.textContent = `${aPct}%`;
+
+  if (sliderSfxVol) sliderSfxVol.value = String(xPct);
+  if (pauseSliderSfx) pauseSliderSfx.value = String(xPct);
+  if (valSfxVol) valSfxVol.textContent = `${xPct}%`;
+  if (pauseValSfx) pauseValSfx.textContent = `${xPct}%`;
+}
+
+function bindChannelSlider(pairSliders, settingKey, applyFn) {
+  pairSliders.forEach((inp) => {
+    if (!inp) return;
+    inp.addEventListener('input', () => {
+      sound.unlock?.();
+      const pct = Math.max(0, Math.min(100, Number(inp.value) || 0));
+      const norm = pct / 100;
+      applyFn(norm);
+      progression.updateSettings?.({ [settingKey]: norm });
+      syncAudioMixerUI();
+    });
+  });
+}
+
+bindChannelSlider([sliderMusicVol, pauseSliderMusic], 'musicVolume', (v) => sound.setMusicVolume?.(v));
+bindChannelSlider([sliderAmbienceVol, pauseSliderAmbience], 'ambienceVolume', (v) => sound.setAmbienceVolume?.(v));
+bindChannelSlider([sliderSfxVol, pauseSliderSfx], 'sfxVolume', (v) => sound.setSfxVolume?.(v));
+
 function syncAudioButtons() {
-  const s = progression.getSettings();
   const soundSvg = sound.muted ? SVG_SOUND_OFF : SVG_SOUND_ON;
   const musicSvg = sound.musicEnabled ? SVG_MUSIC_ON : SVG_MUSIC_OFF;
 
@@ -1314,7 +1413,7 @@ function syncAudioButtons() {
     btnSound.classList.toggle('is-off', Boolean(sound.muted));
   }
   if (btnTitleSound) {
-    btnTitleSound.innerHTML = `${soundSvg}<span>${sound.muted ? 'SFX OFF' : 'SFX ON'}</span>`;
+    btnTitleSound.innerHTML = `${soundSvg}<span>${sound.muted ? 'AUDIO OFF' : 'AUDIO ON'}</span>`;
     btnTitleSound.classList.toggle('active', !sound.muted);
   }
   if (btnMusic) {
@@ -1325,8 +1424,9 @@ function syncAudioButtons() {
     btnTitleMusic.innerHTML = `${musicSvg}<span>${sound.musicEnabled ? 'MUSIC ON' : 'MUSIC OFF'}</span>`;
     btnTitleMusic.classList.toggle('active', Boolean(sound.musicEnabled));
   }
-  if (gearsEl) gearsEl.textContent = String(progression.getGears());
-  if (hiScoreEl) hiScoreEl.textContent = formatScore(progression.getHighScore(s.era || 'reboot'));
+  if (gearsEl) gearsEl.textContent = String(progression.getGears?.() ?? 0);
+  if (hiScoreEl) hiScoreEl.textContent = formatScore(progression.getHighScore?.('reboot') ?? 0);
+  syncAudioMixerUI();
 }
 
 function syncZenUI(zenMode) {
@@ -1337,47 +1437,50 @@ function syncZenUI(zenMode) {
     btnZenPill.setAttribute('aria-pressed', String(isZen));
   }
   if (zenPillLabelEl) {
-    zenPillLabelEl.textContent = isZen ? 'CASUAL ZEN • ON' : 'CASUAL ZEN • OFF';
+    zenPillLabelEl.textContent = isZen ? 'RELAXED FLOW • ON' : 'RELAXED FLOW • OFF';
   }
 }
 
-function updateSelectedTowerRibbon(era) {
+// ================= LIVE 3D VISTA BIOME PREVIEWER =================
+const TITLE_VISTA_BIOMES = [
+  { theme: 'canyon_river', label: 'CANYON RIVER', spireIdx: 0 },
+  { theme: 'coral_sea', label: 'CORAL SEA', spireIdx: 6 },
+  { theme: 'alpine_lake', label: 'ALPINE LAKE', spireIdx: 2 },
+  { theme: 'mist_bayou', label: 'MIST BAYOU', spireIdx: 4 },
+  { theme: 'storm_ocean', label: 'TEMPEST OCEAN', spireIdx: 8 },
+];
+let currentVistaIdx = 0;
+
+function updateSelectedTowerRibbon() {
   if (!startTowerSelect) return;
-  const towers = createTowers(era);
+  const towers = getTowersSafe();
   const idx = Math.max(0, Math.min(towers.length - 1, Number(startTowerSelect.value) || 0));
   const tower = towers[idx];
-  const stars = tower ? progression.getTowerStars(era, tower.id) : null;
+  const stars = tower ? getTowerStarsSafe(tower.id) : null;
 
-  if (selectedTowerStarsEl) {
-    selectedTowerStarsEl.innerHTML = starsToSvgHtml(stars);
-  }
+  if (selectedTowerStarsEl) selectedTowerStarsEl.innerHTML = starsToSvgHtml(stars);
   if (heroSectorNameEl && tower) {
-    heroSectorNameEl.textContent = `T${tower.id} • ${String(tower.name || '').toUpperCase()}`;
+    heroSectorNameEl.textContent = `S${tower.id} • ${String(tower.name || '').toUpperCase()}`;
   }
 
-  const sectorNum = Math.floor(idx / 2) + 1;
-  const roman = ['I', 'II', 'III', 'IV'][sectorNum - 1] || String(sectorNum);
-  const isZen = Boolean(progression.getSettings().zenMode);
+  const actNum = Math.floor(idx / 2) + 1;
+  const roman = ['I', 'II', 'III', 'IV', 'V'][actNum - 1] || String(actNum);
+  const isZen = Boolean(progression.getSettings?.()?.zenMode);
 
   if (heroPlayKickerEl) {
-    heroPlayKickerEl.textContent =
-      era === 'original'
-        ? `1987 ARCHIVE • TOWER ${idx + 1}${isZen ? ' • ZEN' : ''}`
-        : `SECTOR ${roman} • ${isZen ? 'ZEN ASCENT' : 'OPERATION NEBULUS'}`;
+    heroPlayKickerEl.textContent = `ACT ${roman} • ${isZen ? 'RELAXED FLOW' : "GATEWAY'S DESCENT"}`;
   }
   if (heroPlayLabelEl) {
-    heroPlayLabelEl.textContent = era === 'original' ? 'LAUNCH TOWER' : 'ASCEND MONOLITH';
+    heroPlayLabelEl.textContent = 'BEGIN CAMPAIGN';
   }
 }
 
-// ================= SEQUENTIAL PROGRESSION & CUTSCENE ENGINE =================
-const CUTSCENE_STORAGE_KEY = 'tt26_cutscenes_v1';
+// ================= CUTSCENE & PURIFICATION THEATER ENGINE =================
+const CUTSCENE_STORAGE_KEY = 'towering_waters_cutscenes_v1';
 const seenCutscenesMem = new Set();
 try {
   const rawSeen = localStorage.getItem(CUTSCENE_STORAGE_KEY);
-  if (rawSeen) {
-    JSON.parse(rawSeen).forEach((k) => seenCutscenesMem.add(k));
-  }
+  if (rawSeen) JSON.parse(rawSeen).forEach((k) => seenCutscenesMem.add(k));
 } catch (_) {}
 
 function hasSeenCutscene(kind) {
@@ -1391,21 +1494,18 @@ function markCutsceneSeen(kind) {
   } catch (_) {}
 }
 
-function isTowerUnlockedForCampaign(era, towerId) {
-  if (!towerId || towerId <= 1) return true;
-  return Boolean(progression.getTowerStars(era, towerId - 1)?.clear);
-}
-
 const cutsceneState = {
   active: false,
   kind: 'prologue',
   beatIdx: 0,
   elapsed: 0,
-  cameraDuration: 9.0,
+  cameraDuration: 8.5,
   charIdx: 0,
   fullText: '',
   previewMode: false,
   prevMode: null,
+  startPct: null,
+  endPct: null,
   onComplete: null,
 };
 
@@ -1418,8 +1518,17 @@ function renderCutsceneBeat() {
   if (cutsceneActPillEl) cutsceneActPillEl.textContent = def.act;
   if (cutsceneTitleEl) cutsceneTitleEl.textContent = def.title;
   if (cutsceneCommsBoxEl) cutsceneCommsBoxEl.dataset.speaker = beat.speaker;
-  if (cutscenePortraitEl) cutscenePortraitEl.innerHTML = HOLO_PORTRAITS[beat.speaker] || HOLO_PORTRAITS.mara;
+  if (cutscenePortraitEl && typeof uiArtMod.getCutscenePortraitSVG === 'function') {
+    cutscenePortraitEl.innerHTML = uiArtMod.getCutscenePortraitSVG(beat.speaker);
+  }
   if (cutsceneSpeakerEl) cutsceneSpeakerEl.textContent = beat.name;
+
+  if (cutsceneRestorationWrapEl) {
+    cutsceneRestorationWrapEl.classList.toggle('hidden', !def.isPurification);
+    if (def.isPurification && cutsceneRestorationLblEl) {
+      cutsceneRestorationLblEl.textContent = def.biomeLabel || 'WATERSHED RESTORATION';
+    }
+  }
 
   if (cutsceneStepDotsEl) {
     cutsceneStepDotsEl.innerHTML = def.beats
@@ -1437,7 +1546,7 @@ function renderCutsceneBeat() {
   }
 }
 
-function playStoryCutscene(kind, { previewMode = false, onComplete = null } = {}) {
+function playStoryCutscene(kind, { previewMode = false, startPct = null, endPct = null, onComplete = null } = {}) {
   const def = STORY_CUTSCENES[kind];
   if (!def || !overlayCutscene) {
     onComplete?.();
@@ -1447,10 +1556,11 @@ function playStoryCutscene(kind, { previewMode = false, onComplete = null } = {}
   clearBanner();
   input.resetState?.();
   input.setInteractContext?.(false, '');
-  if (actionPromptEl) actionPromptEl.classList.add('hidden');
-  if (puzzleHudEl) puzzleHudEl.classList.add('hidden');
-  if (missionStatusPillEl) missionStatusPillEl.classList.add('hidden');
-  if (altMeterEl) altMeterEl.classList.add('hidden');
+  actionPromptEl?.classList.add('hidden');
+  puzzleHudEl?.classList.add('hidden');
+  missionStatusPillEl?.classList.add('hidden');
+  altMeterEl?.classList.add('hidden');
+  coreDescentHudEl?.classList.add('hidden');
 
   cutsceneState.active = true;
   cutsceneState.kind = kind;
@@ -1458,27 +1568,33 @@ function playStoryCutscene(kind, { previewMode = false, onComplete = null } = {}
   cutsceneState.elapsed = 0;
   cutsceneState.previewMode = previewMode;
   cutsceneState.prevMode = game.mode;
+  cutsceneState.startPct = Number.isFinite(startPct) ? startPct : null;
+  cutsceneState.endPct = Number.isFinite(endPct) ? endPct : null;
   cutsceneState.onComplete = onComplete;
 
   if (previewMode) {
-    const rebootTowers = createTowers('reboot');
-    const targetTower = rebootTowers[def.towerIdx] || rebootTowers[0];
-    renderer.setEra?.('reboot');
-    game.era = 'reboot';
-    game.loadTower(targetTower);
+    const towers = getTowersSafe();
+    const targetTower = towers[Math.min(towers.length - 1, def.towerIdx || 0)] || towers[0];
+    if (targetTower) game.loadTower?.(targetTower);
     clearBanner();
     game.mode = 'tower';
-    if (game.player) {
-      game.player.invuln = 0;
-      game.player.victory = kind === 'epilogue';
+    const hero = game.gateway || game.player;
+    if (hero) {
+      hero.invuln = 0;
+      hero.victory = Boolean(def.isPurification);
     }
-  } else if (game.player) {
-    game.player.invuln = 0;
   }
 
-  game.cutsceneCam = { active: true, phase: 0, kind };
+  game.purificationProgress = def.isPurification ? 0.1 : 0;
+  game.cutsceneCam = { active: true, phase: 0, kind, isPurification: Boolean(def.isPurification) };
+  if (def.isPurification) {
+    sound.spirePurify?.();
+  } else {
+    sound.playMenuMusic?.();
+  }
   renderCutsceneBeat();
   overlayCutscene.classList.remove('hidden');
+  pushNavGuard();
   syncTitleShowcaseState();
 }
 
@@ -1487,16 +1603,11 @@ function finishCutscene() {
   cutsceneState.active = false;
   game.cutsceneCam = null;
   renderer.setCutsceneCam?.(null);
-  if (game.player) {
-    game.player.victory = false;
-  }
+  const hero = game.gateway || game.player;
+  if (hero) hero.victory = false;
   overlayCutscene?.classList.add('hidden');
 
   if (cutsceneState.previewMode) {
-    const s = progression.getSettings();
-    const savedEra = s.era || 'reboot';
-    renderer.setEra?.(savedEra);
-    game.era = savedEra;
     game.mode = cutsceneState.prevMode || 'title';
   }
 
@@ -1508,7 +1619,7 @@ function finishCutscene() {
 
 function advanceCutsceneStep() {
   if (!cutsceneState.active) return;
-  sound.unlock();
+  sound.unlock?.();
   if (cutsceneState.charIdx < cutsceneState.fullText.length) {
     cutsceneState.charIdx = cutsceneState.fullText.length;
     if (cutsceneTextEl) cutsceneTextEl.textContent = cutsceneState.fullText;
@@ -1527,54 +1638,53 @@ function advanceCutsceneStep() {
   }
 }
 
-// ================= TOWER SELECTION & DIORAMA PREVIEW =================
-let selectedSeaChartIdx = 0;
+// ================= SPIRE SELECTOR & LIVE 3D TITLE SHOWCASE =================
+let selectedWatershedIdx = 0;
 
-function populateTowerSelect(era, keepIdx = null) {
+function populateTowerSelect(keepIdx = null) {
   if (!startTowerSelect) return;
   const prevIdx = keepIdx != null ? keepIdx : Number(startTowerSelect.value) || 0;
-  const towers = createTowers(era);
+  const towers = getTowersSafe();
   startTowerSelect.innerHTML = '';
   let highestUnlockedIdx = 0;
 
   towers.forEach((t, i) => {
-    const unlocked = isTowerUnlockedForCampaign(era, t.id);
+    const unlocked = isSpireUnlocked(t.id);
     if (unlocked) highestUnlockedIdx = i;
-    const stars = progression.getTowerStars(era, t.id);
+    const stars = getTowerStarsSafe(t.id);
     const count = stars?.count ?? ((stars?.clear ? 1 : 0) + (stars?.vault ? 1 : 0) + (stars?.speed ? 1 : 0));
     const opt = document.createElement('option');
     opt.value = String(i);
-    if (unlocked) {
-      opt.textContent = `${t.id}. ${t.name} [${count}/3]`;
-    } else {
-      opt.disabled = true;
-      opt.textContent = `${t.id}. ${t.name} [CLEAR T${t.id - 1} TO UNLOCK]`;
-    }
+    opt.disabled = !unlocked;
+    opt.textContent = unlocked ? `${t.id}. ${t.name} [${count}/3]` : `${t.id}. ${t.name} [LOCKED]`;
     startTowerSelect.appendChild(opt);
   });
 
-  const clampedPrev = Math.max(0, Math.min(towers.length - 1, prevIdx));
-  const chosenIdx = isTowerUnlockedForCampaign(era, towers[clampedPrev]?.id)
-    ? clampedPrev
-    : highestUnlockedIdx;
+  const clampedPrev = Math.max(0, Math.min(Math.max(0, towers.length - 1), prevIdx));
+  const chosenIdx = isSpireUnlocked(towers[clampedPrev]?.id) ? clampedPrev : highestUnlockedIdx;
   startTowerSelect.value = String(chosenIdx);
-  selectedSeaChartIdx = chosenIdx;
-  updateSelectedTowerRibbon(era);
+  selectedWatershedIdx = chosenIdx;
+  updateSelectedTowerRibbon();
 }
 
-function loadTitlePreviewTower() {
-  const s = progression.getSettings();
-  const era = s.era || 'reboot';
-  const towers = createTowers(era);
-  const idx = Math.max(0, Math.min(towers.length - 1, Number(startTowerSelect?.value) || 0));
-  updateSelectedTowerRibbon(era);
-  game.era = era;
-  game.loadTower(towers[idx] || 0);
-  if (game.player) {
-    game.player.invuln = 0;
-    game.player.blasterFxId = getEquippedBlasterFxSafe();
-    game.camCol = game.player.col ?? 0.5;
-    game.camFloor = (game.player.floor ?? 0) + 1.15;
+function loadTitlePreviewTower(overrideSpireIdx = null) {
+  const towers = getTowersSafe();
+  const idx =
+    overrideSpireIdx != null
+      ? Math.max(0, Math.min(Math.max(0, towers.length - 1), overrideSpireIdx))
+      : Math.max(0, Math.min(Math.max(0, towers.length - 1), Number(startTowerSelect?.value) || 0));
+  updateSelectedTowerRibbon();
+  if (towers[idx]) {
+    game.loadTower?.(towers[idx]);
+  } else {
+    game.loadTower?.(0);
+  }
+  const hero = game.gateway || game.player;
+  if (hero) {
+    hero.invuln = 0;
+    hero.blasterFxId = getEquippedHydroFxSafe();
+    game.camCol = hero.col ?? 0.5;
+    game.camFloor = (hero.floor ?? 0) + 1.05;
   }
   game.mode = 'title';
   clearBanner();
@@ -1586,66 +1696,50 @@ function refreshTitleMeta() {
   if (Array.isArray(pending) && pending.length > 0) {
     pending.forEach(enqueueTrophyToast);
   }
-  const s = progression.getSettings();
-  const era = s.era || 'reboot';
+  const s = progression.getSettings?.() || {};
 
-  eraTabBtns.forEach((btn) => {
-    const active = btn.dataset.eraSelect === era;
-    btn.classList.toggle('active', active);
-    btn.setAttribute('aria-selected', String(active));
-  });
-  if (btnEraToggle) btnEraToggle.textContent = era === 'original' ? "'87" : "'26";
-
-  if (titleSubEraEl) {
-    titleSubEraEl.textContent = era === 'original' ? "NEBULUS ARCHIVE '87" : "OPERATION NEBULUS '26";
-  }
-  if (titleTaglineEl) {
-    titleTaglineEl.textContent =
-      era === 'original'
-        ? 'Climb all 8 faithful 1987 Nebulus towers in glossy HD and pilot the classic MK.7 Mini-Submarine.'
-        : 'Scale 8 storm-lashed oceanic monoliths, crack ancient core vaults, and topple the Abyssal Reactors.';
-  }
-
-  mountDiegeticArtwork();
-  populateTowerSelect(era);
+  mountHydroArtwork();
+  populateTowerSelect();
   syncZenUI(s.zenMode);
 
-  // Daily Tower Spire Meta
-  const { dateKey } = getDailySeed(new Date());
-  const dailyRec = progression.getDailyRecord(dateKey);
-  if (dailyMetaEl) {
-    if (dailyRec && dailyRec.completed) {
-      dailyMetaEl.textContent = `CLEARED • ${dailyRec.bestScore.toLocaleString()}`;
-    } else if (dailyRec && dailyRec.played) {
-      dailyMetaEl.textContent = `${dateKey} • ${dailyRec.bestScore.toLocaleString()}`;
-    } else {
-      dailyMetaEl.textContent = `${dateKey} • 20F`;
-    }
-  }
+  const globalPct = computeGlobalWatershedPct();
+  if (titleWatershedPctEl) titleWatershedPctEl.textContent = `${globalPct}% HEALED`;
 
-  // Endless Abyss & Casual Spire Meta
-  const bestDepth = progression.getBestEndlessDepth();
-  if (endlessMetaEl) {
-    endlessMetaEl.textContent = bestDepth > 0 ? `BEST: ${bestDepth} SPIRES` : 'INFINITE CLIMB';
-  }
-  if (casualMetaEl) {
-    const curios = getCurioCatalog();
-    const foundCurios = typeof progression.getCollectedCurios === 'function'
-      ? progression.getCollectedCurios().length
-      : 0;
-    casualMetaEl.textContent = foundCurios > 0 ? `${foundCurios}/${curios.length} CURIOS` : 'CRAFT & CURIOS';
-  }
-
-  // 5-Crest Medallion Dock Badges (Compact, Zero-Overflow)
-  const towers = createTowers(era);
-  const unlockedTowers = towers.filter((t) => isTowerUnlockedForCampaign(era, t.id)).length;
+  const towers = getTowersSafe();
+  const unlockedCount = towers.filter((t) => isSpireUnlocked(t.id)).length;
   if (worldsDockBadgeEl) {
-    worldsDockBadgeEl.textContent = `${unlockedTowers}/${towers.length}`;
+    worldsDockBadgeEl.textContent = globalPct > 0 ? `${globalPct}%` : `${unlockedCount}/${towers.length || 10}`;
   }
 
-  const unlockedSkinsCount = SKIN_CATALOG.filter((sk) => progression.isSkinUnlocked(sk.id)).length;
+  // 6 Modes Hub Telemetry
+  if (metaModeCampaignEl) metaModeCampaignEl.textContent = `${globalPct}% WATERSHEDS HEALED`;
+  if (metaModePuristEl) {
+    const pHi = progression.getModeHighScore?.('purist') ?? progression.getHighScore?.('purist') ?? 0;
+    metaModePuristEl.textContent = pHi > 0 ? `BEST: ${pHi.toLocaleString()}` : '1-HIT • SIPHON CLOCK';
+  }
+  if (metaModeFloodEl) {
+    const fBest = progression.getBestFloodHeight?.() ?? progression.getBestEndlessDepth?.() ?? 0;
+    metaModeFloodEl.textContent = fBest > 0 ? `BEST SURGE: ${fBest}F` : 'ENDLESS RISING SURGE';
+  }
+  if (metaModeSanctumEl) {
+    metaModeSanctumEl.textContent = 'ZERO TIMER • VALVE LOGIC';
+  }
+  if (metaModeExpeditionEl) {
+    const eBest = progression.getBestEndlessDepth?.() ?? 0;
+    metaModeExpeditionEl.textContent = eBest > 0 ? `BEST: ${eBest} SPIRES` : '3-CARD BIO-MUTATIONS';
+  }
+  if (metaModeDailyEl && typeof getDailySeed === 'function') {
+    const { dateKey } = getDailySeed(new Date());
+    const dailyRec = progression.getDailyRecord?.(dateKey);
+    metaModeDailyEl.textContent =
+      dailyRec?.completed
+        ? `CLEARED • ${dailyRec.bestScore.toLocaleString()}`
+        : `${dateKey} • UTC SEED`;
+  }
+
+  const unlockedSkinsCount = SKIN_CATALOG.filter((sk) => progression.isSkinUnlocked?.(sk.id)).length;
   if (wardrobeBtnBadge) {
-    wardrobeBtnBadge.textContent = `${unlockedSkinsCount}/${SKIN_CATALOG.length}`;
+    wardrobeBtnBadge.textContent = `${Math.max(1, unlockedSkinsCount)}/${Math.max(8, SKIN_CATALOG.length)}`;
   }
 
   const trophyPts = computeTrophyPoints();
@@ -1656,6 +1750,7 @@ function refreshTitleMeta() {
   syncAudioButtons();
 }
 
+// ================= CONTROL SCHEME SWITCHING =================
 async function applyControlMode(mode, fromUserGesture = false) {
   const validMode = CONTROL_MODES.includes(mode) ? mode : 'gesture';
   if (validMode === 'tilt' && fromUserGesture) {
@@ -1666,9 +1761,9 @@ async function applyControlMode(mode, fromUserGesture = false) {
   }
 
   input.setControlMode(validMode);
-  appEl.dataset.controlMode = validMode;
-  progression.updateSettings({ controlMode: validMode });
-  game.applySettings?.(progression.getSettings());
+  if (appEl) appEl.dataset.controlMode = validMode;
+  progression.updateSettings?.({ controlMode: validMode });
+  game.applySettings?.(progression.getSettings?.() || {});
 
   if (selectControlMode) selectControlMode.value = validMode;
   if (pauseControlMode) pauseControlMode.value = validMode;
@@ -1679,49 +1774,29 @@ async function applyControlMode(mode, fromUserGesture = false) {
   titleCtrlPickBtns.forEach((btn) => {
     const active = btn.dataset.ctrlPick === validMode;
     btn.classList.toggle('active', active);
-    btn.setAttribute('aria-checked', String(active));
   });
 
   pauseCtrlPillBtns.forEach((btn) => {
     const active = btn.dataset.pauseCtrl === validMode;
     btn.classList.toggle('active', active);
-    btn.setAttribute('aria-checked', String(active));
   });
 
-  if (btnPauseCalibrate) {
-    btnPauseCalibrate.classList.toggle('hidden', validMode !== 'tilt');
-  }
+  btnPauseCalibrate?.classList.toggle('hidden', validMode !== 'tilt');
 }
 
-function applyEra(era) {
-  const nextEra = era === 'original' ? 'original' : 'reboot';
-  appEl.dataset.era = nextEra;
-  progression.updateSettings({ era: nextEra });
-  renderer.setEra?.(nextEra);
-  sound.setEra?.(nextEra);
-  game.applySettings?.(progression.getSettings());
-  refreshTitleMeta();
-
-  if (game.mode === 'title') {
-    loadTitlePreviewTower();
-  }
-}
-
-// ================= ARMORY, BLASTER FX, 100 TROPHIES & RELIQUARY =================
+// ================= GATEWAY SANCTUARY, HONORS & WATERSHED ARCHIVES =================
 let activeWardrobeTab = 'skins';
 let activeTrophyView = 'trophies';
 let activeTierFilter = 'all';
 
-function getBlasterCatalog() {
-  return Array.isArray(progMod.BLASTER_FX_CATALOG) && progMod.BLASTER_FX_CATALOG.length > 0
-    ? progMod.BLASTER_FX_CATALOG
-    : FALLBACK_BLASTER_FX;
+function getHydroFxCatalog() {
+  const cat = progMod.HYDRO_FX_CATALOG || progMod.BLASTER_FX_CATALOG;
+  return Array.isArray(cat) && cat.length > 0 ? cat : FALLBACK_HYDRO_FX;
 }
 
-function getRelicCatalog() {
-  return Array.isArray(progMod.RELIC_CODEX) && progMod.RELIC_CODEX.length > 0
-    ? progMod.RELIC_CODEX
-    : FALLBACK_RELIC_CODEX;
+function getWatershedLogsCatalog() {
+  const cat = progMod.WATERSHED_LOGS || progMod.RELIC_CODEX;
+  return Array.isArray(cat) && cat.length > 0 ? cat : FALLBACK_WATERSHED_LOGS;
 }
 
 function getCurioCatalog() {
@@ -1730,19 +1805,8 @@ function getCurioCatalog() {
     : FALLBACK_CURIO_CATALOG;
 }
 
-function isBlasterFxUnlockedSafe(fx, trophyPts) {
-  if (typeof progression.isBlasterFxUnlocked === 'function') {
-    return progression.isBlasterFxUnlocked(fx.id);
-  }
-  const reqPts = fx.pointsRequired ?? fx.minPoints ?? fx.trophyPoints ?? 0;
-  return fx.id === 'standard_cryo' || trophyPts >= reqPts;
-}
-
-function getEquippedBlasterFxSafe() {
-  if (typeof progression.getEquippedBlasterFx === 'function') {
-    return progression.getEquippedBlasterFx();
-  }
-  return progression.getSettings()?.blasterFxId || 'standard_cryo';
+function getEquippedHydroFxSafe() {
+  return progression.getEquippedBlasterFx?.() || progression.getSettings?.()?.blasterFxId || 'sea_glass_pulse';
 }
 
 function syncWardrobeTabsUI() {
@@ -1756,39 +1820,37 @@ function syncWardrobeTabsUI() {
 }
 
 function renderWardrobeModal() {
-  const gears = progression.getGears();
-  const equippedSkin = progression.getEquippedSkin();
-  const equippedFx = getEquippedBlasterFxSafe();
+  const gears = progression.getGears?.() ?? 0;
+  const equippedSkin = progression.getEquippedSkin?.();
+  const equippedFx = getEquippedHydroFxSafe();
   const trophyPts = computeTrophyPoints();
-  const fxCatalog = getBlasterCatalog();
+  const fxCatalog = getHydroFxCatalog();
 
   if (wardrobeGearsEl) wardrobeGearsEl.textContent = String(gears);
 
-  const unlockedSkins = SKIN_CATALOG.filter((s) => progression.isSkinUnlocked(s.id)).length;
-  const unlockedFx = fxCatalog.filter((f) => isBlasterFxUnlockedSafe(f, trophyPts)).length;
-  if (wardrobeSkinsTabLbl) wardrobeSkinsTabLbl.textContent = `POGO SKINS (${unlockedSkins}/${SKIN_CATALOG.length})`;
-  if (wardrobeBlasterTabLbl) wardrobeBlasterTabLbl.textContent = `BLASTER FX (${unlockedFx}/${fxCatalog.length})`;
+  const unlockedSkins = SKIN_CATALOG.filter((s) => progression.isSkinUnlocked?.(s.id)).length;
+  if (wardrobeSkinsTabLbl) wardrobeSkinsTabLbl.textContent = `GATEWAY SKINS (${unlockedSkins}/${SKIN_CATALOG.length})`;
+  if (wardrobeBlasterTabLbl) wardrobeBlasterTabLbl.textContent = `HYDRO-PULSE FX (${fxCatalog.length})`;
 
   syncWardrobeTabsUI();
 
   if (wardrobeGridEl) {
     wardrobeGridEl.innerHTML = '';
     SKIN_CATALOG.forEach((skin) => {
-      const unlocked = progression.isSkinUnlocked(skin.id);
+      const unlocked = Boolean(progression.isSkinUnlocked?.(skin.id));
       const isEquipped = equippedSkin === skin.id;
-      const [c1, c2, c3] = skin.previewColors || ['#56b847', '#d8e89b', '#7be8ff'];
+      const [c1, c2, c3] = skin.previewColors || ['#14b8a6', '#99f6e4', '#38bdf8'];
 
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = `skin-card armory-crest-card${isEquipped ? ' equipped' : ''}${!unlocked ? ' locked' : ''}`;
+      btn.className = `skin-card${isEquipped ? ' equipped' : ''}${!unlocked ? ' locked' : ''}`;
 
       let actionMarkup = '<span>EQUIP</span>';
-      if (isEquipped) {
-        actionMarkup = '<span>EQUIPPED</span>';
-      } else if (!unlocked) {
+      if (isEquipped) actionMarkup = '<span>EQUIPPED</span>';
+      else if (!unlocked) {
         actionMarkup =
           skin.gearCost > 0
-            ? `<span>FORGE</span>${SVG_GEAR}<span>${skin.gearCost}</span>`
+            ? `<span>UNLOCK</span>${SVG_GEAR}<span>${skin.gearCost}</span>`
             : `<span>${skin.milestoneText || 'MILESTONE'}</span>`;
       }
 
@@ -1802,25 +1864,22 @@ function renderWardrobeModal() {
       `;
 
       btn.addEventListener('click', () => {
-        sound.unlock();
+        sound.unlock?.();
         if (unlocked) {
-          progression.equipSkin(skin.id);
+          progression.equipSkin?.(skin.id);
           renderer.setSkin?.(skin.id);
-          game.applySettings?.(progression.getSettings());
-          if (game.player) game.player.skinId = skin.id;
+          const hero = game.gateway || game.player;
+          if (hero) hero.skinId = skin.id;
           sound.switchToggle?.();
           renderWardrobeModal();
           refreshTitleMeta();
         } else if (skin.gearCost > 0) {
-          const res = progression.unlockSkin(skin.id, true);
+          const res = progression.unlockSkin?.(skin.id, true);
           if (res && res.unlocked) {
-            if (Array.isArray(res.newlyUnlockedTrophies)) {
-              res.newlyUnlockedTrophies.forEach(enqueueTrophyToast);
-            }
-            progression.equipSkin(skin.id);
+            progression.equipSkin?.(skin.id);
             renderer.setSkin?.(skin.id);
-            game.applySettings?.(progression.getSettings());
-            if (game.player) game.player.skinId = skin.id;
+            const hero = game.gateway || game.player;
+            if (hero) hero.skinId = skin.id;
             sound.collectStar?.();
             renderWardrobeModal();
             refreshTitleMeta();
@@ -1829,7 +1888,6 @@ function renderWardrobeModal() {
           }
         }
       });
-
       wardrobeGridEl.appendChild(btn);
     });
   }
@@ -1837,78 +1895,60 @@ function renderWardrobeModal() {
   if (blasterFxGridEl) {
     blasterFxGridEl.innerHTML = '';
     fxCatalog.forEach((fx) => {
-      const unlocked = isBlasterFxUnlockedSafe(fx, trophyPts);
+      const reqPts = fx.pointsRequired ?? fx.minPoints ?? 0;
+      const unlocked = Boolean(progression.isBlasterFxUnlocked?.(fx.id) ?? (trophyPts >= reqPts || reqPts === 0));
       const isEquipped = equippedFx === fx.id;
-      const colors = fx.previewColors || [fx.color || '#7be8ff', fx.coreColor || '#ffffff', fx.trailColor || '#38bdf8'];
-      const [c1, c2, c3] = [colors[0] || '#7be8ff', colors[1] || '#ffffff', colors[2] || colors[0] || '#38bdf8'];
-      const reqPts = fx.pointsRequired ?? fx.minPoints ?? fx.trophyPoints ?? 0;
-      const gearCost = fx.gearCost ?? fx.cost ?? 0;
+      const colors = fx.previewColors || ['#5efce8', '#ffffff', '#38bdf8'];
+      const gearCost = fx.gearCost ?? 0;
 
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = `skin-card armory-crest-card${isEquipped ? ' equipped' : ''}${!unlocked ? ' locked' : ''}`;
+      btn.className = `skin-card${isEquipped ? ' equipped' : ''}${!unlocked ? ' locked' : ''}`;
 
       let actionMarkup = '<span>EQUIP FX</span>';
-      if (isEquipped) {
-        actionMarkup = '<span>EQUIPPED</span>';
-      } else if (!unlocked) {
-        actionMarkup =
-          gearCost > 0
-            ? `<span>${reqPts}P OR</span>${SVG_GEAR}<span>${gearCost}</span>`
-            : `<span>${reqPts} PTS</span>`;
+      if (isEquipped) actionMarkup = '<span>EQUIPPED</span>';
+      else if (!unlocked) {
+        actionMarkup = gearCost > 0 ? `<span>${reqPts}P OR</span>${SVG_GEAR}<span>${gearCost}</span>` : `<span>${reqPts} PTS</span>`;
       }
 
       btn.innerHTML = `
         <div class="skin-top-row">
-          <span class="skin-swatch blaster-swatch" style="background: linear-gradient(135deg, ${c1} 0%, ${c2} 50%, ${c3} 100%);">${SVG_BLASTER}</span>
+          <span class="skin-swatch" style="background: linear-gradient(135deg, ${colors[0]} 0%, ${colors[1]} 50%, ${colors[2] || colors[0]} 100%);">${SVG_BLASTER}</span>
           <span class="skin-name">${fx.name}</span>
         </div>
         <div class="skin-desc">${fx.description || ''}</div>
         <span class="skin-action-tag">${actionMarkup}</span>
       `;
 
-      const applyEquippedFxLive = (fxId) => {
+      const applyFx = (fxId) => {
         progression.equipBlasterFx?.(fxId);
-        progression.updateSettings({ blasterFxId: fxId });
+        progression.updateSettings?.({ blasterFxId: fxId });
         renderer.setBlasterFx?.(fxId);
-        game.applySettings?.({ ...progression.getSettings(), blasterFxId: fxId });
-        if (game.player) {
-          game.player.blasterFxId = fxId;
-          game.player.muzzleFlash = 0.26;
+        const hero = game.gateway || game.player;
+        if (hero) {
+          hero.blasterFxId = fxId;
+          hero.muzzleFlash = 0.25;
         }
       };
 
       btn.addEventListener('click', () => {
-        sound.unlock();
+        sound.unlock?.();
         if (unlocked) {
-          applyEquippedFxLive(fx.id);
-          sound.snowball?.();
+          applyFx(fx.id);
+          sound.switchToggle?.();
           renderWardrobeModal();
-          refreshTitleMeta();
         } else if (gearCost > 0) {
-          let didUnlock = false;
-          if (typeof progression.unlockBlasterFx === 'function') {
-            const res = progression.unlockBlasterFx(fx.id, true);
-            didUnlock = Boolean(res === true || res?.unlocked);
-            if (Array.isArray(res?.newlyUnlockedTrophies)) {
-              res.newlyUnlockedTrophies.forEach(enqueueTrophyToast);
-            }
-          } else if (progression.spendGears?.(gearCost)) {
-            didUnlock = true;
-          }
-          if (didUnlock) {
-            applyEquippedFxLive(fx.id);
+          const res = progression.unlockBlasterFx?.(fx.id, true);
+          if (res === true || res?.unlocked) {
+            applyFx(fx.id);
             sound.collectStar?.();
             renderWardrobeModal();
             refreshTitleMeta();
           } else {
             sound.vaultFail?.();
           }
-        } else {
-          sound.vaultFail?.();
         }
       });
-
       blasterFxGridEl.appendChild(btn);
     });
   }
@@ -1918,74 +1958,40 @@ function syncTrophyViewTabsUI() {
   trophyViewTabBtns.forEach((btn) => {
     const active = btn.dataset.trophyView === activeTrophyView;
     btn.classList.toggle('active', active);
-    btn.setAttribute('aria-selected', String(active));
   });
-  const showTrophies = activeTrophyView === 'trophies';
-  const showRelics = activeTrophyView === 'relics';
-  const showCurios = activeTrophyView === 'curios';
-  trophyTierFiltersEl?.classList.toggle('hidden', !showTrophies);
-  trophiesGridEl?.classList.toggle('hidden', !showTrophies);
-  relicCodexListEl?.classList.toggle('hidden', !showRelics);
-  curioCodexListEl?.classList.toggle('hidden', !showCurios);
+  trophyTierFiltersEl?.classList.toggle('hidden', activeTrophyView !== 'trophies');
+  trophiesGridEl?.classList.toggle('hidden', activeTrophyView !== 'trophies');
+  relicCodexListEl?.classList.toggle('hidden', activeTrophyView !== 'relics');
+  curioCodexListEl?.classList.toggle('hidden', activeTrophyView !== 'curios');
 }
 
 function renderTrophiesModal() {
-  const totalStars = progression.getTotalStars();
+  const towers = getTowersSafe();
+  const maxStars = Math.max(30, towers.length * 3);
+  const totalStars = progression.getTotalStars?.('reboot') ?? progression.getTotalStars?.() ?? 0;
   if (totalStarsDisplayEl) {
-    totalStarsDisplayEl.innerHTML = `${SVG_STAR_ON}<span>${totalStars} / 48</span>`;
+    totalStarsDisplayEl.innerHTML = `${SVG_STAR_ON}<span>${totalStars} / ${maxStars}</span>`;
   }
 
   const pts = computeTrophyPoints();
   const maxPts = TROPHIES.reduce((s, t) => s + (t.points || 5), 0) || 1000;
-  const unlockedTotal = TROPHIES.filter((t) => progression.isTrophyUnlocked(t.id)).length;
+  const unlockedTotal = TROPHIES.filter((t) => progression.isTrophyUnlocked?.(t.id)).length;
 
-  if (trophyRankLblEl) {
-    trophyRankLblEl.textContent = `RANK • ${getRankTitleForPoints(pts)}`;
-  }
-  if (trophyPtsDisplayEl) {
-    trophyPtsDisplayEl.textContent = `${pts.toLocaleString()} / ${maxPts.toLocaleString()} PTS (${unlockedTotal}/${TROPHIES.length})`;
-  }
-  if (trophyPtsFillEl) {
-    const pct = Math.max(0, Math.min(100, (pts / Math.max(1, maxPts)) * 100));
-    trophyPtsFillEl.style.width = `${pct.toFixed(1)}%`;
-  }
+  if (trophyRankLblEl) trophyRankLblEl.textContent = `RANK • ${getRankTitleForPoints(pts)}`;
+  if (trophyPtsDisplayEl) trophyPtsDisplayEl.textContent = `${pts.toLocaleString()} / ${maxPts.toLocaleString()} PTS (${unlockedTotal}/${TROPHIES.length})`;
+  if (trophyPtsFillEl) trophyPtsFillEl.style.width = `${Math.min(100, (pts / Math.max(1, maxPts)) * 100).toFixed(1)}%`;
 
-  const relics = getRelicCatalog();
-  const collectedIds = new Set(
-    typeof progression.getCollectedRelics === 'function' ? progression.getCollectedRelics() : []
-  );
-  const collectedCount = relics.filter(
-    (r) => collectedIds.has(r.id) || progression.isRelicCollected?.(r.id)
-  ).length;
+  const logs = getWatershedLogsCatalog();
+  const collectedLogs = new Set(progression.getCollectedRelics?.() || []);
+  const logsCount = logs.filter((r) => collectedLogs.has(r.id) || progression.isRelicCollected?.(r.id)).length;
 
   const curios = getCurioCatalog();
-  const collectedCurioIds = new Set(
-    typeof progression.getCollectedCurios === 'function' ? progression.getCollectedCurios() : []
-  );
-  const curioCount = curios.filter(
-    (c) => collectedCurioIds.has(c.id) || progression.isCurioCollected?.(c.id)
-  ).length;
+  const collectedCurios = new Set(progression.getCollectedCurios?.() || []);
+  const curioCount = curios.filter((c) => collectedCurios.has(c.id) || progression.isCurioCollected?.(c.id)).length;
 
-  if (trophiesViewTabLbl) trophiesViewTabLbl.textContent = `TROPHIES (${unlockedTotal}/${TROPHIES.length})`;
-  if (relicsViewTabLbl) relicsViewTabLbl.textContent = `RELICS (${collectedCount}/${relics.length})`;
+  if (trophiesViewTabLbl) trophiesViewTabLbl.textContent = `HONORS (${unlockedTotal}/${TROPHIES.length})`;
+  if (relicsViewTabLbl) relicsViewTabLbl.textContent = `LOGS (${logsCount}/${logs.length})`;
   if (curiosViewTabLbl) curiosViewTabLbl.textContent = `CURIOS (${curioCount}/${curios.length})`;
-
-  const tierTotals = { all: TROPHIES.length, aluminum: 0, copper: 0, platinum: 0, diamond: 0 };
-  const tierUnlocked = { all: unlockedTotal, aluminum: 0, copper: 0, platinum: 0, diamond: 0 };
-  TROPHIES.forEach((t) => {
-    const tr = t.tier || 'aluminum';
-    if (tierTotals[tr] != null) {
-      tierTotals[tr]++;
-      if (progression.isTrophyUnlocked(t.id)) tierUnlocked[tr]++;
-    }
-  });
-
-  const shortNames = { all: 'ALL', aluminum: 'ALUM', copper: 'COPPER', platinum: 'PLAT', diamond: 'DIAMOND' };
-  tierFilterBtns.forEach((btn) => {
-    const tr = btn.dataset.tierFilter || 'all';
-    btn.classList.toggle('active', tr === activeTierFilter);
-    btn.textContent = `${shortNames[tr] || tr.toUpperCase()} (${tierUnlocked[tr] ?? 0}/${tierTotals[tr] ?? 0})`;
-  });
 
   syncTrophyViewTabsUI();
 
@@ -1994,15 +2000,14 @@ function renderTrophiesModal() {
     TROPHIES.forEach((t) => {
       const tier = t.tier || 'aluminum';
       if (activeTierFilter !== 'all' && tier !== activeTierFilter) return;
-
-      const unlocked = progression.isTrophyUnlocked(t.id);
-      const tPts = t.points || (tier === 'diamond' ? 30 : tier === 'platinum' ? 20 : tier === 'copper' ? 10 : 5);
-      const shieldSvg = getArtTrophyShieldSVG(tier, unlocked);
+      const unlocked = Boolean(progression.isTrophyUnlocked?.(t.id));
+      const tPts = t.points || 5;
+      const shieldSvg = typeof uiArtMod.getTrophyShieldSVG === 'function' ? uiArtMod.getTrophyShieldSVG(tier, unlocked) : '';
 
       const card = document.createElement('div');
       card.className = `trophy-card tier-${tier} ${unlocked ? 'unlocked' : 'locked'}`;
       card.innerHTML = `
-        <span class="trophy-shield-wrap trophy-emblem">${shieldSvg}</span>
+        <span class="trophy-shield-wrap">${shieldSvg}</span>
         <div class="trophy-body">
           <div class="trophy-top-line">
             <span class="trophy-title">${t.title}</span>
@@ -2017,20 +2022,17 @@ function renderTrophiesModal() {
 
   if (relicCodexListEl) {
     relicCodexListEl.innerHTML = '';
-    relics.forEach((r, idx) => {
-      const found = collectedIds.has(r.id) || Boolean(progression.isRelicCollected?.(r.id));
-      const sectorNum = r.towerId || idx + 1;
-      const rTitle = r.title || r.name || `DATA LOG 0${sectorNum}`;
-      const rLore = r.lore || r.text || r.description || r.body || '';
-
+    logs.forEach((r, idx) => {
+      const found = collectedLogs.has(r.id) || Boolean(progression.isRelicCollected?.(r.id));
+      const spireNum = r.towerId || idx + 1;
       const card = document.createElement('div');
-      card.className = `relic-card stele-tablet-card ${found ? 'unlocked' : 'locked'}`;
+      card.className = `relic-card ${found ? 'unlocked' : 'locked'}`;
       card.innerHTML = `
         <span class="relic-icon-box">${found ? SVG_RELIC : SVG_LOCK}</span>
         <div>
-          <div class="relic-meta">${found ? `DECRYPTED STELE • MONOLITH T${sectorNum}` : `ENCRYPTED STELE • MONOLITH T${sectorNum}`}</div>
-          <div class="relic-title">${found ? rTitle : `CLASSIFIED DESTRUCTO INC. TABLET #0${sectorNum}`}</div>
-          <div class="relic-lore">${found ? rLore : `Recover the hidden holographic stone tablet on Reboot Sector Tower ${sectorNum} to decrypt this transmission.`}</div>
+          <div class="relic-meta">${found ? `WATERSHED RECORD • SPIRE ${spireNum}` : `SEALED RECORD • SPIRE ${spireNum}`}</div>
+          <div class="relic-title">${found ? (r.title || r.name) : `UNRECOVERED WATERSHED TABLET #${String(spireNum).padStart(2, '0')}`}</div>
+          <div class="relic-lore">${found ? (r.lore || r.description || '') : `Explore Spire ${spireNum} in Story Campaign to recover Naiad’s hydrological field tablet.`}</div>
         </div>
       `;
       relicCodexListEl.appendChild(card);
@@ -2040,23 +2042,15 @@ function renderTrophiesModal() {
   if (curioCodexListEl) {
     curioCodexListEl.innerHTML = '';
     curios.forEach((c, idx) => {
-      const found = collectedCurioIds.has(c.id) || Boolean(progression.isCurioCollected?.(c.id));
-      const isBlueprint = (c.kind || c.type || '').toLowerCase().includes('blueprint');
-      const cTitle = c.title || c.name || `EXPEDITION CURIO #${idx + 1}`;
-      const cLore = c.lore || c.description || c.text || '';
-      const iconSvg = !found ? SVG_LOCK : isBlueprint ? SVG_CRAFT : SVG_CURIO;
-      const metaTag = found
-        ? (isBlueprint ? 'CRAFTED BLUEPRINT • EXPEDITION LOG' : 'CATALOGED CURIO • EXPEDITION LOG')
-        : 'UNDISCOVERED EXPEDITION ARTIFACT';
-
+      const found = collectedCurios.has(c.id) || Boolean(progression.isCurioCollected?.(c.id));
       const card = document.createElement('div');
-      card.className = `relic-card stele-tablet-card ${found ? 'unlocked' : 'locked'}`;
+      card.className = `relic-card ${found ? 'unlocked' : 'locked'}`;
       card.innerHTML = `
-        <span class="relic-icon-box">${iconSvg}</span>
+        <span class="relic-icon-box">${found ? SVG_CURIO : SVG_LOCK}</span>
         <div>
-          <div class="relic-meta">${metaTag}</div>
-          <div class="relic-title">${found ? cTitle : `UNCHARTED CURIO #${String(idx + 1).padStart(2, '0')}`}</div>
-          <div class="relic-lore">${found ? cLore : 'Explore Endless Casual Expeditions—repair beacons at Tinker Workbenches, unlock sunken Treasure Chests, and survey puzzle spires to catalog this curio.'}</div>
+          <div class="relic-meta">${found ? 'SANCTUARY CURIO • CATALOGED' : 'UNDISCOVERED SANCTUARY CURIO'}</div>
+          <div class="relic-title">${found ? (c.title || c.name) : `HIDDEN CURIO #${String(idx + 1).padStart(2, '0')}`}</div>
+          <div class="relic-lore">${found ? (c.lore || c.description || '') : 'Rescue trapped reef & river fauna or solve Aqueduct Sanctum Trials to catalog this curio.'}</div>
         </div>
       `;
       curioCodexListEl.appendChild(card);
@@ -2064,228 +2058,64 @@ function renderTrophiesModal() {
   }
 }
 
-// ================= NAUTICAL ARCHIPELAGO SEA CHART =================
-function resolveTowerIdFromChartArgs(idxOrTower, maybeTower) {
-  if (typeof maybeTower === 'object' && maybeTower !== null && maybeTower.id != null) {
-    return Number(maybeTower.id);
-  }
-  if (typeof idxOrTower === 'object' && idxOrTower !== null && idxOrTower.id != null) {
-    return Number(idxOrTower.id);
-  }
-  const n = Number(idxOrTower);
-  return Number.isFinite(n) ? n + 1 : 1;
-}
-
-function resolveCutsceneKeyForArg(arg) {
-  if (typeof arg === 'string' && STORY_CUTSCENES[arg]) return arg;
-  const n = Number(arg);
-  if (n === 0 || n === 1) return 'prologue';
-  if (n === 2 || n === 3) return 'sector2';
-  if (n === 4 || n === 5) return 'sector3';
-  if (n === 6 || n === 7) return 'sector4';
-  if (n >= 8) return 'epilogue';
-  return 'prologue';
-}
-
-function renderFallbackSeaChart(container, opts) {
-  const {
-    era,
-    towers,
-    selectedIdx,
-    isTowerUnlocked,
-    getStars,
-    getMasteryCount,
-    isRelicFound,
-    onSelectTower,
-    onDeployTower,
-    onPlayCutscene,
-  } = opts;
-
-  const coords = [
-    [82, 492],
-    [296, 452],
-    [118, 376],
-    [324, 330],
-    [98, 250],
-    [314, 198],
-    [126, 122],
-    [292, 62],
-  ];
-
-  const routeLines = coords
-    .slice(0, -1)
-    .map(([x1, y1], i) => {
-      const [x2, y2] = coords[i + 1];
-      const cleared = Boolean(getStars(i, towers[i])?.clear);
-      return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${cleared ? '#5ef2ff' : '#475569'}" stroke-width="2.2" stroke-dasharray="6 5" opacity="${cleared ? '0.85' : '0.45'}"/>`;
-    })
-    .join('');
-
-  const nodesSvg = towers
-    .map((t, i) => {
-      const [cx, cy] = coords[i] || [210, 280];
-      const unlocked = isTowerUnlocked(i, t);
-      const st = getStars(i, t);
-      const sel = i === selectedIdx;
-      const stroke = sel ? '#ffe082' : unlocked ? '#5ef2ff' : '#64748b';
-      const fill = unlocked ? '#0c1c38' : '#090f1d';
-      return `
-        <g class="sea-spire-node${sel ? ' selected active' : ''}${st?.clear ? ' cleared' : ''}${!unlocked ? ' locked' : ''}" data-spire-idx="${i}" transform="translate(${cx},${cy})" style="cursor:pointer">
-          ${sel ? `<circle r="27" fill="none" stroke="#ffe082" stroke-width="1.6" stroke-dasharray="5 4"/>` : ''}
-          <polygon points="0,-21 19,-9 19,12 0,22 -19,12 -19,-9" fill="${fill}" stroke="${stroke}" stroke-width="${sel ? '2.4' : '1.6'}"/>
-          <text y="4" text-anchor="middle" font-family="Orbitron, sans-serif" font-size="10.5" font-weight="800" fill="${unlocked ? '#ffffff' : '#94a3b8'}">T${t.id}</text>
-        </g>
-      `;
-    })
-    .join('');
-
-  const selTower = towers[selectedIdx] || towers[0];
-  const selUnlocked = selTower ? isTowerUnlocked(selectedIdx, selTower) : true;
-  const selStars = selTower ? getStars(selectedIdx, selTower) : null;
-  const selMastery = selTower ? getMasteryCount(selectedIdx, selTower) : 0;
-  const selRelic = selTower ? isRelicFound(selectedIdx, selTower) : false;
-  const cutMap = { 1: 'prologue', 3: 'sector2', 5: 'sector3', 7: 'sector4', 8: 'epilogue' };
-  const cutKey = era === 'reboot' && selTower ? cutMap[selTower.id] : null;
-  const cutReady = cutKey && (selUnlocked || hasSeenCutscene(cutKey));
-
-  container.innerHTML = `
-    <div class="sea-chart-frame">
-      <svg viewBox="0 0 420 560" class="sea-chart-svg" role="img" aria-label="Nebulus Archipelago Sea Chart">
-        <rect width="420" height="560" rx="14" fill="#050d1d"/>
-        <circle cx="356" cy="496" r="36" fill="none" stroke="rgba(217,155,56,0.32)" stroke-width="1.2"/>
-        ${routeLines}
-        ${nodesSvg}
-      </svg>
-      <div class="spyglass-plaque">
-        <div class="wt-name-row">
-          <span class="wt-num">T${selTower?.id || 1}</span>
-          <span class="wt-name">${selTower?.name || 'Monolith'}</span>
-          <span class="wt-stars">${starsToSvgHtml(selStars)}</span>
-        </div>
-        <div class="wt-meta-row">
-          <span class="wt-secret-tag">MASTERY ${selMastery}/5</span>
-          ${era === 'reboot' ? `<span class="wt-relic-tag${selRelic ? ' found' : ''}">${SVG_RELIC}<span>${selRelic ? 'RELIC LOGGED' : 'RELIC UNFOUND'}</span></span>` : ''}
-        </div>
-        <div class="pause-btn-pair" style="margin-top:8px">
-          ${
-            cutReady
-              ? `<button type="button" class="btn-secondary spyglass-cinema-btn" data-play-cut="${cutKey}">${SVG_FILM}<span>CINEMA</span></button>`
-              : ''
-          }
-          <button type="button" class="btn-primary spyglass-deploy-btn"${selUnlocked ? '' : ' disabled'}>
-            ${selUnlocked ? `DEPLOY T${selTower?.id || 1}` : `CLEAR T${(selTower?.id || 2) - 1} FIRST`}
-          </button>
-        </div>
-      </div>
-    </div>
-  `;
-
-  container.querySelectorAll('[data-spire-idx]').forEach((node) => {
-    node.addEventListener('click', () => {
-      const nextIdx = Number(node.dataset.spireIdx) || 0;
-      onSelectTower(nextIdx);
-      renderFallbackSeaChart(container, { ...opts, selectedIdx: nextIdx });
-    });
-  });
-  container.querySelector('[data-play-cut]')?.addEventListener('click', (e) => {
-    onPlayCutscene(e.currentTarget.dataset.playCut);
-  });
-  container.querySelector('.spyglass-deploy-btn')?.addEventListener('click', () => {
-    onDeployTower(selectedIdx);
-  });
-}
-
+// ================= INTERACTIVE LIVING WORLD WATERSHED MAP =================
 function renderWorldsModal() {
   if (!worldsMapListEl) return;
-  const s = progression.getSettings();
-  const era = s.era || 'reboot';
-  const towers = createTowers(era);
-  const eraStars = progression.getTotalStars(era);
-  const collectedRelicSet = new Set(
-    typeof progression.getCollectedRelics === 'function' ? progression.getCollectedRelics() : []
-  );
+  const towers = getTowersSafe();
+  const maxStars = Math.max(24, towers.length * 3);
+  const totalStars = progression.getTotalStars?.('reboot') ?? progression.getTotalStars?.() ?? 0;
+  const collectedLogs = new Set(progression.getCollectedRelics?.() || []);
 
-  if (worldsKickerEl) {
-    worldsKickerEl.textContent =
-      era === 'original' ? 'CLASSIC 1987 • ARCHIPELAGO CHART' : 'OPERATION NEBULUS • SEA CHART';
-  }
   if (worldsStarsPillEl) {
-    worldsStarsPillEl.innerHTML = `${SVG_STAR_ON}<span>${eraStars} / 24</span>`;
+    worldsStarsPillEl.innerHTML = `${SVG_STAR_ON}<span>${totalStars} / ${maxStars}</span>`;
   }
 
-  selectedSeaChartIdx = Math.max(0, Math.min(towers.length - 1, selectedSeaChartIdx));
+  selectedWatershedIdx = Math.max(0, Math.min(Math.max(0, towers.length - 1), selectedWatershedIdx));
 
-  const chartOpts = {
-    era,
+  const mapOpts = {
     towers,
-    sectors:
-      era === 'reboot' && Array.isArray(levelsMod.SECTOR_WORLDS) && levelsMod.SECTOR_WORLDS.length === 4
-        ? levelsMod.SECTOR_WORLDS
-        : FALLBACK_SECTOR_WORLDS,
-    selectedIdx: selectedSeaChartIdx,
-    isTowerUnlocked: (idxOrTower, maybeTower) => {
-      const tid = resolveTowerIdFromChartArgs(idxOrTower, maybeTower);
-      return isTowerUnlockedForCampaign(era, tid);
-    },
-    getStars: (idxOrTower, maybeTower) => {
-      const tid = resolveTowerIdFromChartArgs(idxOrTower, maybeTower);
-      return progression.getTowerStars(era, tid);
-    },
-    getMasteryCount: (idxOrTower, maybeTower) => {
-      const tid = resolveTowerIdFromChartArgs(idxOrTower, maybeTower);
-      const st = progression.getTowerStars(era, tid);
-      return [st?.clear, st?.vault, st?.speed, st?.nohit, st?.combo].filter(Boolean).length;
-    },
-    isRelicFound: (idxOrTower, maybeTower) => {
-      if (era !== 'reboot') return false;
-      const tid = resolveTowerIdFromChartArgs(idxOrTower, maybeTower);
-      const tDef = towers[tid - 1];
-      const rc = Array.isArray(tDef?.collectibles) ? tDef.collectibles.find((c) => c.type === 'relic') : null;
-      const rid = rc?.relicId || rc?.id || `relic_t${tid}`;
-      return collectedRelicSet.has(rid) || Boolean(progression.isRelicCollected?.(rid));
-    },
-    isCutsceneUnlocked: (cutKey, idx = 0) => {
-      if (era !== 'reboot' || !cutKey) return false;
-      if (cutKey === 'epilogue') {
-        return Boolean(progression.getTowerStars('reboot', 8)?.clear) || hasSeenCutscene('epilogue');
+    selectedIdx: selectedWatershedIdx,
+    isTowerUnlocked: (idx, t) => isSpireUnlocked(t?.id ?? idx + 1),
+    getStars: (idx, t) => getTowerStarsSafe(t?.id ?? idx + 1),
+    getActRestoration: (actIdx) => {
+      if (typeof progression.getWatershedHealth === 'function') {
+        const h = progression.getWatershedHealth(actIdx);
+        if (typeof h === 'number') return h <= 1 && h > 0 ? h * 100 : h;
       }
-      const reqTid = (STORY_CUTSCENES[cutKey]?.towerIdx ?? idx) + 1;
-      return isTowerUnlockedForCampaign('reboot', reqTid) || hasSeenCutscene(cutKey);
+      const sA = getTowerStarsSafe(actIdx * 2 + 1)?.clear ? 50 : 0;
+      const sB = getTowerStarsSafe(actIdx * 2 + 2)?.clear ? 50 : 0;
+      return sA + sB;
+    },
+    isRelicFound: (idx, t) => {
+      const tid = t?.id ?? idx + 1;
+      return collectedLogs.has(`log_s${tid}`) || collectedLogs.has(`relic_t${tid}`) || Boolean(progression.isRelicCollected?.(`log_s${tid}`));
+    },
+    isCutsceneUnlocked: (cutKey, idx) => {
+      if (!cutKey) return false;
+      if (cutKey === 'epilogue') return Boolean(getTowerStarsSafe(towers.length || 10)?.clear) || hasSeenCutscene('epilogue');
+      return isSpireUnlocked(idx + 1) || hasSeenCutscene(cutKey);
     },
     onSelectTower: (idx) => {
-      sound.unlock();
+      sound.unlock?.();
       sound.switchToggle?.();
-      const clamped = Math.max(0, Math.min(towers.length - 1, Number(idx) || 0));
-      selectedSeaChartIdx = clamped;
-      if (startTowerSelect && isTowerUnlockedForCampaign(era, towers[clamped]?.id)) {
-        startTowerSelect.value = String(clamped);
+      selectedWatershedIdx = idx;
+      if (startTowerSelect && isSpireUnlocked(towers[idx]?.id)) {
+        startTowerSelect.value = String(idx);
         loadTitlePreviewTower();
       }
     },
     onDeployTower: (idx) => {
-      sound.unlock();
-      const targetIdx = Math.max(0, Math.min(towers.length - 1, Number(idx ?? selectedSeaChartIdx) || 0));
-      if (!isTowerUnlockedForCampaign(era, towers[targetIdx]?.id)) {
+      sound.unlock?.();
+      if (!isSpireUnlocked(towers[idx]?.id)) {
         sound.vaultFail?.();
         return;
       }
-      if (startTowerSelect) startTowerSelect.value = String(targetIdx);
-      launchSelectedCampaign();
+      if (startTowerSelect) startTowerSelect.value = String(idx);
+      launchGameMode('campaign', { startTowerIdx: idx });
     },
-    onPlayCutscene: (cutArg) => {
-      sound.unlock();
-      const cutKey = resolveCutsceneKeyForArg(cutArg);
-      const def = STORY_CUTSCENES[cutKey];
-      const reqTowerId = (def?.towerIdx ?? 0) + 1;
-      const canPlay =
-        era === 'reboot' &&
-        (cutKey === 'epilogue'
-          ? Boolean(progression.getTowerStars('reboot', 8)?.clear) || hasSeenCutscene('epilogue')
-          : isTowerUnlockedForCampaign('reboot', reqTowerId) || hasSeenCutscene(cutKey));
-      if (!canPlay) {
-        sound.vaultFail?.();
-        return;
-      }
+    onPlayCutscene: (cutKey) => {
+      sound.unlock?.();
+      if (!STORY_CUTSCENES[cutKey]) return;
       overlayWorlds?.classList.add('hidden');
       markCutsceneSeen(cutKey);
       playStoryCutscene(cutKey, {
@@ -2301,27 +2131,22 @@ function renderWorldsModal() {
     onPlayRoute: (routeMode) => {
       if (routeMode) launchMiniGameRun(routeMode);
     },
-    onLaunchRoute: (routeMode) => {
-      if (routeMode) launchMiniGameRun(routeMode);
-    },
   };
 
   worldsMapListEl.innerHTML = '';
-  if (uiArtMod && typeof uiArtMod.renderArchipelagoSeaChart === 'function') {
-    uiArtMod.renderArchipelagoSeaChart(worldsMapListEl, chartOpts);
-  } else {
-    renderFallbackSeaChart(worldsMapListEl, chartOpts);
-  }
+  uiArtMod.renderWatershedWorldMap?.(worldsMapListEl, mapOpts);
 }
 
-// ================= GAME LAUNCH & NAVIGATION FLOWS =================
+// ================= 6 GAME MODES & 5 MINI-GAMES LAUNCHERS =================
 function hideAllOverlays() {
   closeTitleDrawers();
   overlayTitle?.classList.add('hidden');
+  overlayModes?.classList.add('hidden');
   overlayWorlds?.classList.add('hidden');
   overlayWardrobe?.classList.add('hidden');
   overlayTrophies?.classList.add('hidden');
   overlayMinigames?.classList.add('hidden');
+  overlayMutation?.classList.add('hidden');
   overlayPause?.classList.add('hidden');
   overlayGameOver?.classList.add('hidden');
   overlayCutscene?.classList.add('hidden');
@@ -2329,44 +2154,64 @@ function hideAllOverlays() {
 }
 
 function beginRunCommon() {
-  sound.unlock();
+  sound.unlock?.();
   if (cutsceneState.active) {
     cutsceneState.active = false;
     game.cutsceneCam = null;
     renderer.setCutsceneCam?.(null);
   }
   hideAllOverlays();
-  if (puzzleHudEl) puzzleHudEl.classList.add('hidden');
+  puzzleHudEl?.classList.add('hidden');
+  coreDescentHudEl?.classList.add('hidden');
   input.resetState?.();
   input.setInteractContext?.(false, '');
-  game.applySettings?.({ ...progression.getSettings(), blasterFxId: getEquippedBlasterFxSafe() });
-  gearsBeforeRun = progression.getGears();
+  game.applySettings?.({ ...(progression.getSettings?.() || {}), blasterFxId: getEquippedHydroFxSafe() });
+  gearsBeforeRun = progression.getGears?.() ?? 0;
+  pushNavGuard();
 }
 
-function launchSelectedCampaign() {
-  const s = progression.getSettings();
-  const era = s.era || 'reboot';
+function launchGameMode(modeId = 'campaign', extraOpts = {}) {
+  const mode = String(modeId || 'campaign').toLowerCase();
+  const s = progression.getSettings?.() || {};
   const zenMode = Boolean(toggleZenInput ? toggleZenInput.checked : s.zenMode);
-  const towers = createTowers(era);
-  let towerIdx = Math.max(0, Math.min(towers.length - 1, Number(startTowerSelect?.value) || 0));
+  const towers = getTowersSafe();
+  let towerIdx =
+    extraOpts.startTowerIdx != null
+      ? extraOpts.startTowerIdx
+      : Math.max(0, Math.min(Math.max(0, towers.length - 1), Number(startTowerSelect?.value) || 0));
 
-  while (towerIdx > 0 && !isTowerUnlockedForCampaign(era, towers[towerIdx]?.id)) {
-    towerIdx--;
+  if (mode === 'campaign') {
+    while (towerIdx > 0 && !isSpireUnlocked(towers[towerIdx]?.id)) {
+      towerIdx--;
+    }
   }
-
-  progression.updateSettings({ zenMode });
-  sound.setZenMode?.(zenMode);
 
   const startActual = () => {
     beginRunCommon();
-    game.applySettings?.({ ...progression.getSettings(), blasterFxId: getEquippedBlasterFxSafe() });
-    lastLaunch = { type: 'campaign', era, towerIdx, zenMode, miniGame: 'submarine' };
-    game.startCampaign({ era, startTowerIdx: towerIdx, zenMode });
+    lastLaunch = { mode, towerIdx, zenMode, miniGame: 'core_descent' };
+
+    if (typeof game.startGame === 'function') {
+      game.startGame(mode, {
+        startTowerIdx: towerIdx,
+        zenMode: mode === 'campaign' ? zenMode : mode === 'sanctum_trials',
+        seed: Date.now(),
+        date: new Date(),
+        ...extraOpts,
+      });
+    } else if (mode === 'daily_tide') {
+      game.startDailyChallenge?.(new Date());
+    } else if (mode === 'sanctum_trials') {
+      game.startCasualEndlessMode?.({ seed: Date.now(), sanctumTrials: true });
+    } else if (mode === 'flood_rush' || mode === 'expedition') {
+      game.startEndlessMode?.({ seed: Date.now(), mode });
+    } else {
+      game.startCampaign?.({ startTowerIdx: towerIdx, zenMode: mode === 'purist' ? false : zenMode, purist: mode === 'purist' });
+    }
     syncTitleShowcaseState();
   };
 
-  if (era === 'reboot' && towerIdx === 0 && !hasSeenCutscene('prologue')) {
-    sound.unlock();
+  if (mode === 'campaign' && towerIdx === 0 && !hasSeenCutscene('prologue')) {
+    sound.unlock?.();
     hideAllOverlays();
     markCutsceneSeen('prologue');
     playStoryCutscene('prologue', {
@@ -2379,56 +2224,18 @@ function launchSelectedCampaign() {
   startActual();
 }
 
-function launchDailyRun() {
+function launchMiniGameRun(miniType = 'core_descent') {
   beginRunCommon();
-  lastLaunch = { type: 'daily', era: 'reboot', towerIdx: 0, zenMode: false, miniGame: 'submarine' };
-  game.startDailyChallenge(new Date());
-  syncTitleShowcaseState();
-}
-
-function launchEndlessRun() {
-  beginRunCommon();
-  const era = progression.getSettings().era || 'reboot';
-  lastLaunch = { type: 'endless', era, towerIdx: 0, zenMode: false, miniGame: 'submarine' };
-  game.startEndlessMode({ era, seed: Date.now() });
-  syncTitleShowcaseState();
-}
-
-function launchCasualEndlessRun() {
-  beginRunCommon();
-  lastLaunch = { type: 'endless_casual', era: 'reboot', towerIdx: 0, zenMode: true, miniGame: 'submarine' };
-  if (typeof game.startCasualEndlessMode === 'function') {
-    game.startCasualEndlessMode({ seed: Date.now() });
-  } else {
-    game.startEndlessMode({ era: 'reboot', seed: Date.now(), casual: true });
-  }
-  syncTitleShowcaseState();
-}
-
-function launchMiniGameRun(miniType) {
-  beginRunCommon();
-  lastLaunch = { type: 'minigame', era: 'reboot', towerIdx: 0, zenMode: false, miniGame: miniType };
-  game.startMiniGame(miniType, true);
+  lastLaunch = { mode: 'minigame', towerIdx: 0, zenMode: false, miniGame: miniType };
+  game.startMiniGame?.(miniType, true);
   syncTitleShowcaseState();
 }
 
 function relaunchLastMode() {
-  if (lastLaunch.type === 'daily') {
-    launchDailyRun();
-  } else if (lastLaunch.type === 'endless_casual') {
-    launchCasualEndlessRun();
-  } else if (lastLaunch.type === 'endless') {
-    launchEndlessRun();
-  } else if (lastLaunch.type === 'minigame') {
+  if (lastLaunch.mode === 'minigame') {
     launchMiniGameRun(lastLaunch.miniGame);
   } else {
-    beginRunCommon();
-    game.startCampaign({
-      era: lastLaunch.era,
-      startTowerIdx: lastLaunch.towerIdx,
-      zenMode: lastLaunch.zenMode,
-    });
-    syncTitleShowcaseState();
+    launchGameMode(lastLaunch.mode, { startTowerIdx: lastLaunch.towerIdx });
   }
 }
 
@@ -2438,12 +2245,13 @@ function returnToTitle() {
   input.resetState?.();
   input.setInteractContext?.(false, '');
   currentPromptAction = null;
-  sound.setMusicActive?.(false);
   sound.setMiniGameMode?.(null);
-  if (actionPromptEl) actionPromptEl.classList.add('hidden');
-  if (puzzleHudEl) puzzleHudEl.classList.add('hidden');
-  if (missionStatusPillEl) missionStatusPillEl.classList.add('hidden');
-  if (altMeterEl) altMeterEl.classList.add('hidden');
+  sound.playMenuMusic?.();
+  actionPromptEl?.classList.add('hidden');
+  puzzleHudEl?.classList.add('hidden');
+  missionStatusPillEl?.classList.add('hidden');
+  altMeterEl?.classList.add('hidden');
+  coreDescentHudEl?.classList.add('hidden');
 
   refreshTitleMeta();
   loadTitlePreviewTower();
@@ -2451,229 +2259,215 @@ function returnToTitle() {
   syncTitleShowcaseState();
 }
 
-function isPlayerInTowerInteractZone() {
-  if (game.mode !== 'tower' || !game.tower || !game.player) return false;
-  const p = game.player;
-  if (p.hidden || p.tumbling) return false;
-  if (p.onElevator) return true;
+// ================= INTERACTION ZONE & TAIL-WHIP TOUCH BRIDGE =================
+function isHeroInInteractZone() {
+  const hero = game.gateway || game.player;
+  if (game.mode !== 'tower' || !game.tower || !hero) return false;
+  if (hero.hidden || hero.tumbling) return false;
+  if (hero.onElevator) return true;
+  const cols = getWorldCols();
+  const halfCols = cols * 0.5;
   const distCol = (a, b) => {
-    let d = (((b - a) % 16) + 16) % 16;
-    if (d > 8) d -= 16;
+    let d = (((b - a) % cols) + cols) % cols;
+    if (d > halfCols) d -= cols;
     return Math.abs(d);
   };
-  if (p.onGround || (p.coyoteTimer || 0) > 0) {
-    if (game.tower.doors?.some((d) => Math.abs(d.floor - p.floor) < 0.58 && distCol(p.col, d.col + 0.5) < 0.80)) {
+  if (hero.onGround || (hero.coyoteTimer || 0) > 0) {
+    if (game.tower.doors?.some((d) => Math.abs(d.floor - hero.floor) < 0.6 && distCol(hero.col, d.col + 0.5) < 0.85)) {
       return true;
     }
-    if (game.elevators?.some((el) => Math.abs(el.floor - p.floor) < 0.55 && distCol(p.col, el.col + 0.5) < 0.80)) {
+    if (game.elevators?.some((el) => Math.abs(el.floor - hero.floor) < 0.58 && distCol(hero.col, el.col + 0.5) < 0.85)) {
       return true;
     }
   }
   return false;
 }
 
+function triggerTailWhipPulse() {
+  sound.unlock?.();
+  input.haptic?.(14);
+  if (typeof input.triggerWhip === 'function') {
+    input.triggerWhip();
+  } else if (typeof input.triggerInteract === 'function') {
+    input.triggerInteract('whip');
+  } else if (input.state) {
+    input.state.whip = true;
+    if (input.justPressed) input.justPressed.whip = true;
+    setTimeout(() => {
+      if (input.state) input.state.whip = false;
+    }, 140);
+  }
+}
+
+btnWhip?.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  btnWhip.classList.add('active');
+  triggerTailWhipPulse();
+});
+btnWhip?.addEventListener('pointerup', () => btnWhip.classList.remove('active'));
+btnWhip?.addEventListener('pointercancel', () => btnWhip.classList.remove('active'));
+
 let lastActionPromptPointerTs = -1000;
 function triggerCurrentPromptInteract() {
   const act = currentPromptAction;
   if (!act) return;
-  sound.unlock();
+  if (act === 'whip') {
+    triggerTailWhipPulse();
+    return;
+  }
+  sound.unlock?.();
   input.haptic?.(14);
   if (typeof input.triggerInteract === 'function') {
     input.triggerInteract(act);
-  } else {
+  } else if (input.state) {
     input.state[act] = true;
-    if (input.justPressed && act in input.justPressed) {
-      input.justPressed[act] = true;
-    }
+    if (input.justPressed) input.justPressed[act] = true;
     setTimeout(() => {
       if (input.state) input.state[act] = false;
-    }, act === 'up' ? 165 : 115);
+    }, 150);
   }
-  // Ensure Workbench & Chest stations respond whether game.js checks 'fire' or 'up'
   if (currentPromptSubtype === 'station' && input.justPressed) {
     input.justPressed.up = true;
   }
 }
 
-let lastPeekPointerTs = -1000;
 function triggerPuzzlePeekClue() {
   const pr = game.puzzleRoom;
   if (!pr || pr.solved) return;
-  sound.unlock();
+  sound.unlock?.();
   sound.switchToggle?.();
-  input.haptic?.(12);
-  if (typeof pr.peekClue === 'function') {
-    pr.peekClue();
-  } else if (typeof pr.triggerPeek === 'function') {
-    pr.triggerPeek();
-  } else {
+  if (typeof pr.peekClue === 'function') pr.peekClue();
+  else if (typeof pr.triggerPeek === 'function') pr.triggerPeek();
+  else {
     pr.peekAlpha = 1.0;
     pr.peekTimer = 2.8;
     pr.isPeekingClue = true;
   }
-  if (btnPeekClue) {
-    btnPeekClue.classList.add('peeking', 'active');
-  }
 }
 
-function openWorldsOverlay() {
-  sound.unlock();
+// ================= ANDROID HARDWARE BACK-BUTTON & POPSTATE CONTROLLER =================
+function pushNavGuard() {
+  try {
+    if (!history.state || !history.state.twGuard) {
+      history.pushState({ twGuard: true }, '');
+    }
+  } catch (_) {}
+}
+
+try {
+  history.replaceState({ twBase: true }, '');
+  history.pushState({ twGuard: true }, '');
+} catch (_) {}
+
+function handleHardwareBack() {
+  pushNavGuard();
+
+  if (cutsceneState.active) {
+    finishCutscene();
+    return true;
+  }
+
+  const subModals = [overlayModes, overlayWorlds, overlayWardrobe, overlayTrophies, overlayMinigames];
+  for (const modal of subModals) {
+    if (modal && !modal.classList.contains('hidden')) {
+      modal.classList.add('hidden');
+      overlayTitle?.classList.remove('hidden');
+      syncTitleShowcaseState();
+      return true;
+    }
+  }
+
+  if (overlayGameOver && !overlayGameOver.classList.contains('hidden')) {
+    returnToTitle();
+    return true;
+  }
+
+  if (overlayMutation && !overlayMutation.classList.contains('hidden')) {
+    // Keep roguelite draft safe from accidental dismissal; allow pausing only outside draft
+    return true;
+  }
+
+  if (isTitleScreenOpen()) {
+    if (titleSettingsDrawer && !titleSettingsDrawer.classList.contains('hidden')) {
+      closeTitleDrawers();
+      return true;
+    }
+    return false;
+  }
+
+  // Active gameplay or Pause overlay -> toggle Pause cleanly!
+  triggerPauseToggle();
+  return true;
+}
+
+window.__handleAndroidBack = handleHardwareBack;
+
+window.addEventListener('popstate', () => {
+  handleHardwareBack();
+});
+
+document.addEventListener('backbutton', (e) => {
+  e.preventDefault?.();
+  handleHardwareBack();
+});
+
+if (window.Capacitor?.Plugins?.App?.addListener) {
+  try {
+    window.Capacitor.Plugins.App.addListener('backButton', () => {
+      handleHardwareBack();
+    });
+  } catch (_) {}
+}
+
+// ================= WIRE UI EVENT LISTENERS =================
+btnVistaCycle?.addEventListener('click', () => {
+  sound.unlock?.();
+  sound.switchToggle?.();
+  currentVistaIdx = (currentVistaIdx + 1) % TITLE_VISTA_BIOMES.length;
+  const v = TITLE_VISTA_BIOMES[currentVistaIdx];
+  if (vistaCycleLblEl) vistaCycleLblEl.textContent = `VISTA • ${v.label}`;
+  loadTitlePreviewTower(v.spireIdx);
+});
+
+const openModesOverlay = () => {
+  sound.unlock?.();
+  sound.switchToggle?.();
   closeTitleDrawers();
-  selectedSeaChartIdx = Math.max(0, Number(startTowerSelect?.value) || 0);
+  refreshTitleMeta();
+  overlayTitle?.classList.add('hidden');
+  overlayModes?.classList.remove('hidden');
+  pushNavGuard();
+  syncTitleShowcaseState();
+};
+
+const openWorldsOverlay = () => {
+  sound.unlock?.();
+  sound.switchToggle?.();
+  closeTitleDrawers();
+  selectedWatershedIdx = Math.max(0, Number(startTowerSelect?.value) || 0);
   overlayTitle?.classList.add('hidden');
   renderWorldsModal();
   overlayWorlds?.classList.remove('hidden');
+  pushNavGuard();
   syncTitleShowcaseState();
-}
-
-// ================= WIRE EVENT LISTENERS =================
-eraTabBtns.forEach((btn) => {
-  btn.addEventListener('click', () => {
-    sound.unlock();
-    sound.switchToggle?.();
-    applyEra(btn.dataset.eraSelect);
-  });
-});
-
-btnEraToggle?.addEventListener('click', () => {
-  sound.unlock();
-  sound.switchToggle?.();
-  const cur = progression.getSettings().era || 'reboot';
-  applyEra(cur === 'reboot' ? 'original' : 'reboot');
-});
-
-startTowerSelect?.addEventListener('change', () => {
-  const era = progression.getSettings().era || 'reboot';
-  selectedSeaChartIdx = Number(startTowerSelect.value) || 0;
-  updateSelectedTowerRibbon(era);
-  if (game.mode === 'title') {
-    loadTitlePreviewTower();
-  }
-});
-
-function setZenModeValue(nextZen) {
-  const zenMode = Boolean(nextZen);
-  syncZenUI(zenMode);
-  progression.updateSettings({ zenMode });
-  sound.setZenMode?.(zenMode);
-  game.applySettings?.(progression.getSettings());
-  updateSelectedTowerRibbon(progression.getSettings().era || 'reboot');
-}
-
-toggleZenInput?.addEventListener('change', () => {
-  setZenModeValue(toggleZenInput.checked);
-});
-
-btnZenPill?.addEventListener('click', () => {
-  sound.unlock();
-  sound.switchToggle?.();
-  setZenModeValue(!progression.getSettings().zenMode);
-});
-
-btnTitleSettings?.addEventListener('click', (e) => {
-  e.stopPropagation();
-  sound.unlock();
-  sound.switchToggle?.();
-  const willOpen = Boolean(titleSettingsDrawer?.classList.contains('hidden'));
-  expeditionsDrawerEl?.classList.add('hidden');
-  btnExpeditions?.setAttribute('aria-expanded', 'false');
-  btnExpeditions?.classList.remove('active');
-  titleSettingsDrawer?.classList.toggle('hidden', !willOpen);
-  btnTitleSettings.setAttribute('aria-expanded', String(willOpen));
-  btnTitleSettings.classList.toggle('active', willOpen);
-});
-
-btnExpeditions?.addEventListener('click', (e) => {
-  e.stopPropagation();
-  sound.unlock();
-  sound.switchToggle?.();
-  const willOpen = Boolean(expeditionsDrawerEl?.classList.contains('hidden'));
-  titleSettingsDrawer?.classList.add('hidden');
-  btnTitleSettings?.setAttribute('aria-expanded', 'false');
-  btnTitleSettings?.classList.remove('active');
-  expeditionsDrawerEl?.classList.toggle('hidden', !willOpen);
-  btnExpeditions.setAttribute('aria-expanded', String(willOpen));
-  btnExpeditions.classList.toggle('active', willOpen);
-});
-
-btnCloseExpeditions?.addEventListener('click', () => {
-  sound.unlock();
-  expeditionsDrawerEl?.classList.add('hidden');
-  btnExpeditions?.setAttribute('aria-expanded', 'false');
-  btnExpeditions?.classList.remove('active');
-});
-
-const handleDioramaOrCrestActivate = () => {
-  const anyDrawerOpen =
-    (titleSettingsDrawer && !titleSettingsDrawer.classList.contains('hidden')) ||
-    (expeditionsDrawerEl && !expeditionsDrawerEl.classList.contains('hidden'));
-  if (anyDrawerOpen) {
-    sound.unlock();
-    closeTitleDrawers();
-    return;
-  }
-  launchSelectedCampaign();
 };
 
-titleDioramaStageEl?.addEventListener('click', handleDioramaOrCrestActivate);
-titleDioramaStageEl?.addEventListener('keydown', (e) => {
-  if (e.code === 'Enter' || e.code === 'Space') {
-    e.preventDefault();
-    handleDioramaOrCrestActivate();
-  }
-});
-titleCrestStageEl?.addEventListener('click', handleDioramaOrCrestActivate);
-
-selectControlMode?.addEventListener('change', () => {
-  applyControlMode(selectControlMode.value, true);
+btnModes?.addEventListener('click', openModesOverlay);
+btnCloseModes?.addEventListener('click', () => {
+  overlayModes?.classList.add('hidden');
+  overlayTitle?.classList.remove('hidden');
+  syncTitleShowcaseState();
 });
 
-pauseControlMode?.addEventListener('change', () => {
-  applyControlMode(pauseControlMode.value, true);
-});
-
-titleCtrlPickBtns.forEach((btn) => {
-  btn.addEventListener('click', () => {
-    sound.unlock();
-    sound.switchToggle?.();
-    applyControlMode(btn.dataset.ctrlPick || 'gesture', true);
+modeHubCards.forEach((card) => {
+  card.addEventListener('click', () => {
+    const picked = card.dataset.modePick || 'campaign';
+    launchGameMode(picked);
   });
 });
 
-pauseCtrlPillBtns.forEach((btn) => {
-  btn.addEventListener('click', () => {
-    sound.unlock();
-    sound.switchToggle?.();
-    applyControlMode(btn.dataset.pauseCtrl || 'gesture', true);
-  });
-});
-
-btnCtrlMode?.addEventListener('click', () => {
-  sound.unlock();
-  const cur = input.controlMode || progression.getSettings().controlMode || 'gesture';
-  const idx = CONTROL_MODES.indexOf(cur);
-  const next = CONTROL_MODES[(idx + 1) % CONTROL_MODES.length];
-  applyControlMode(next, true);
-  showBanner('CONTROLS', `${next.toUpperCase()} MODE`);
-});
-
-const handleCalibrate = () => {
-  sound.unlock();
-  const neutral = input.calibrateTilt?.() ?? 0;
-  sound.switchToggle?.();
-  showBanner('TILT CALIBRATED', `NEUTRAL ${Number(neutral).toFixed(1)} DEG`);
-};
-btnCalibrateTilt?.addEventListener('click', handleCalibrate);
-btnPauseCalibrate?.addEventListener('click', handleCalibrate);
-
-// Title Mode Launchers
-btnStart?.addEventListener('click', launchSelectedCampaign);
+btnWatershedQuick?.addEventListener('click', openWorldsOverlay);
 btnHeroSector?.addEventListener('click', openWorldsOverlay);
-btnDaily?.addEventListener('click', launchDailyRun);
-btnEndless?.addEventListener('click', launchEndlessRun);
-btnCasualEndless?.addEventListener('click', launchCasualEndlessRun);
-
-// Sub-Modals (Sea Chart, Armory, Reliquary, Simulation Portals)
 btnWorlds?.addEventListener('click', openWorldsOverlay);
 
 btnCloseWorlds?.addEventListener('click', () => {
@@ -2682,22 +2476,107 @@ btnCloseWorlds?.addEventListener('click', () => {
   syncTitleShowcaseState();
 });
 
+btnStart?.addEventListener('click', () => launchGameMode('campaign'));
+
+const handleTitleStageActivate = () => {
+  if (titleSettingsDrawer && !titleSettingsDrawer.classList.contains('hidden')) {
+    closeTitleDrawers();
+    return;
+  }
+  launchGameMode('campaign');
+};
+titleDioramaStageEl?.addEventListener('click', handleTitleStageActivate);
+titleDioramaStageEl?.addEventListener('keydown', (e) => {
+  if (e.code === 'Enter' || e.code === 'Space') {
+    e.preventDefault();
+    handleTitleStageActivate();
+  }
+});
+
+startTowerSelect?.addEventListener('change', () => {
+  selectedWatershedIdx = Number(startTowerSelect.value) || 0;
+  updateSelectedTowerRibbon();
+  if (game.mode === 'title') loadTitlePreviewTower();
+});
+
+function setZenModeValue(nextZen) {
+  const zenMode = Boolean(nextZen);
+  syncZenUI(zenMode);
+  progression.updateSettings?.({ zenMode });
+  sound.setZenMode?.(zenMode);
+  game.applySettings?.(progression.getSettings?.() || {});
+  updateSelectedTowerRibbon();
+}
+
+toggleZenInput?.addEventListener('change', () => setZenModeValue(toggleZenInput.checked));
+btnZenPill?.addEventListener('click', () => {
+  sound.unlock?.();
+  sound.switchToggle?.();
+  setZenModeValue(!progression.getSettings?.()?.zenMode);
+});
+
+btnTitleSettings?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  sound.unlock?.();
+  sound.switchToggle?.();
+  const willOpen = Boolean(titleSettingsDrawer?.classList.contains('hidden'));
+  titleSettingsDrawer?.classList.toggle('hidden', !willOpen);
+  btnTitleSettings.setAttribute('aria-expanded', String(willOpen));
+  btnTitleSettings.classList.toggle('active', willOpen);
+  if (willOpen) pushNavGuard();
+});
+
+selectControlMode?.addEventListener('change', () => applyControlMode(selectControlMode.value, true));
+pauseControlMode?.addEventListener('change', () => applyControlMode(pauseControlMode.value, true));
+
+titleCtrlPickBtns.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    sound.unlock?.();
+    sound.switchToggle?.();
+    applyControlMode(btn.dataset.ctrlPick || 'gesture', true);
+  });
+});
+
+pauseCtrlPillBtns.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    sound.unlock?.();
+    sound.switchToggle?.();
+    applyControlMode(btn.dataset.pauseCtrl || 'gesture', true);
+  });
+});
+
+btnCtrlMode?.addEventListener('click', () => {
+  sound.unlock?.();
+  const cur = input.controlMode || 'gesture';
+  const idx = CONTROL_MODES.indexOf(cur);
+  const next = CONTROL_MODES[(idx + 1) % CONTROL_MODES.length];
+  applyControlMode(next, true);
+  showBanner('CONTROLS', `${next.toUpperCase()} MODE`);
+});
+
+const handleCalibrate = () => {
+  sound.unlock?.();
+  const neutral = input.calibrateTilt?.() ?? 0;
+  sound.switchToggle?.();
+  showBanner('TILT CALIBRATED', `NEUTRAL ${Number(neutral).toFixed(1)} DEG`);
+};
+btnCalibrateTilt?.addEventListener('click', handleCalibrate);
+btnPauseCalibrate?.addEventListener('click', handleCalibrate);
+
 btnWardrobe?.addEventListener('click', () => {
-  sound.unlock();
+  sound.unlock?.();
   clearBanner();
   closeTitleDrawers();
   overlayTitle?.classList.add('hidden');
-  if (game.player) {
-    game.camCol = game.player.col ?? 0.5;
-    game.camFloor = game.player.floor ?? 0;
+  const hero = game.gateway || game.player;
+  if (hero) {
+    game.camCol = hero.col ?? 0.5;
+    game.camFloor = hero.floor ?? 0;
   }
   renderWardrobeModal();
   overlayWardrobe?.classList.remove('hidden');
+  pushNavGuard();
   syncTitleShowcaseState();
-  requestAnimationFrame(() => {
-    const activeCarousel = activeWardrobeTab === 'blaster' ? blasterFxGridEl : wardrobeGridEl;
-    activeCarousel?.querySelector('.equipped')?.scrollIntoView?.({ block: 'nearest', inline: 'center' });
-  });
 });
 
 btnCloseWardrobe?.addEventListener('click', () => {
@@ -2708,7 +2587,7 @@ btnCloseWardrobe?.addEventListener('click', () => {
 
 wardrobeTabBtns.forEach((btn) => {
   btn.addEventListener('click', () => {
-    sound.unlock();
+    sound.unlock?.();
     sound.switchToggle?.();
     activeWardrobeTab = btn.dataset.wardrobeTab || 'skins';
     syncWardrobeTabsUI();
@@ -2717,7 +2596,7 @@ wardrobeTabBtns.forEach((btn) => {
 
 trophyViewTabBtns.forEach((btn) => {
   btn.addEventListener('click', () => {
-    sound.unlock();
+    sound.unlock?.();
     sound.switchToggle?.();
     activeTrophyView = btn.dataset.trophyView || 'trophies';
     syncTrophyViewTabsUI();
@@ -2726,19 +2605,21 @@ trophyViewTabBtns.forEach((btn) => {
 
 tierFilterBtns.forEach((btn) => {
   btn.addEventListener('click', () => {
-    sound.unlock();
+    sound.unlock?.();
     sound.switchToggle?.();
     activeTierFilter = btn.dataset.tierFilter || 'all';
+    tierFilterBtns.forEach((b) => b.classList.toggle('active', b === btn));
     renderTrophiesModal();
   });
 });
 
 btnTrophies?.addEventListener('click', () => {
-  sound.unlock();
+  sound.unlock?.();
   closeTitleDrawers();
   overlayTitle?.classList.add('hidden');
   renderTrophiesModal();
   overlayTrophies?.classList.remove('hidden');
+  pushNavGuard();
   syncTitleShowcaseState();
 });
 
@@ -2749,11 +2630,12 @@ btnCloseTrophies?.addEventListener('click', () => {
 });
 
 btnMinigames?.addEventListener('click', () => {
-  sound.unlock();
+  sound.unlock?.();
   closeTitleDrawers();
-  mountDiegeticArtwork();
+  mountHydroArtwork();
   overlayTitle?.classList.add('hidden');
   overlayMinigames?.classList.remove('hidden');
+  pushNavGuard();
   syncTitleShowcaseState();
 });
 
@@ -2765,12 +2647,10 @@ btnCloseMinigames?.addEventListener('click', () => {
 
 minigameCards.forEach((card) => {
   card.addEventListener('click', () => {
-    const mgType = card.dataset.minigame || 'submarine';
-    launchMiniGameRun(mgType);
+    launchMiniGameRun(card.dataset.minigame || 'core_descent');
   });
 });
 
-// Tappable Contextual Action Prompt & Puzzle Chamber [PEEK CLUE] Handlers (#277)
 actionPromptEl?.addEventListener('pointerdown', (e) => {
   if (!currentPromptAction) return;
   e.preventDefault();
@@ -2788,40 +2668,23 @@ actionPromptEl?.addEventListener('click', (e) => {
   }
 });
 
-actionPromptEl?.addEventListener('keydown', (e) => {
-  if ((e.code === 'Enter' || e.code === 'Space') && currentPromptAction) {
-    e.preventDefault();
-    e.stopPropagation();
-    triggerCurrentPromptInteract();
-  }
-});
-
-btnPeekClue?.addEventListener('pointerdown', (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  lastPeekPointerTs = performance.now();
-  triggerPuzzlePeekClue();
-});
-
 btnPeekClue?.addEventListener('click', (e) => {
   e.preventDefault();
   e.stopPropagation();
-  if (performance.now() - lastPeekPointerTs > 320) {
-    triggerPuzzlePeekClue();
-  }
+  triggerPuzzlePeekClue();
 });
 
-// Audio & Pause HUD Buttons
+// Audio Mute & Pause Controls
 const handleToggleMute = () => {
-  sound.unlock();
-  const muted = sound.toggleMute();
-  progression.updateSettings({ muted });
+  sound.unlock?.();
+  const muted = sound.toggleMute?.();
+  progression.updateSettings?.({ muted });
   syncAudioButtons();
 };
 const handleToggleMusic = () => {
-  sound.unlock();
-  const musicEnabled = sound.toggleMusic();
-  progression.updateSettings({ musicEnabled });
+  sound.unlock?.();
+  const musicEnabled = sound.toggleMusic?.();
+  progression.updateSettings?.({ musicEnabled });
   syncAudioButtons();
 };
 
@@ -2832,58 +2695,53 @@ btnTitleMusic?.addEventListener('click', handleToggleMusic);
 
 function triggerPauseToggle() {
   if (game.mode === 'title' || game.mode === 'gameover' || game.mode === 'victory') return;
-  sound.unlock();
-  const paused = game.togglePause();
+  sound.unlock?.();
+  const paused = game.togglePause?.();
   input.resetState?.();
   input.setInteractContext?.(false, '');
   if (paused) {
-    if (actionPromptEl) actionPromptEl.classList.add('hidden');
-    if (puzzleHudEl) puzzleHudEl.classList.add('hidden');
+    actionPromptEl?.classList.add('hidden');
+    puzzleHudEl?.classList.add('hidden');
+    syncAudioMixerUI();
     if (pauseTowerName) {
-      if (game.pausedFrom === 'submarine') pauseTowerName.textContent = 'MK.7 Sub-Hunter';
-      else if (game.pausedFrom === 'skimmer') pauseTowerName.textContent = 'Hydro-Skimmer Run';
-      else if (game.pausedFrom === 'glide') pauseTowerName.textContent = 'The Glide (Sky-Wing)';
-      else if (game.pausedFrom === 'puzzle') pauseTowerName.textContent = 'Secret Rune Chamber';
-      else if (game.pausedFrom === 'vault') pauseTowerName.textContent = 'Core Lock Vault';
-      else if (game.tower) pauseTowerName.textContent = `Sector ${game.tower.id}: ${game.tower.name}`;
+      const pf = game.pausedFrom;
+      if (pf === 'core_descent') pauseTowerName.textContent = 'Reactor Core Descent';
+      else if (pf === 'reef_swim' || pf === 'submarine') pauseTowerName.textContent = 'Coral Reef Free-Swim';
+      else if (pf === 'rapids_surf' || pf === 'skimmer') pauseTowerName.textContent = 'Whitewater Rapids Tail-Surf';
+      else if (pf === 'frill_glide' || pf === 'glide') pauseTowerName.textContent = 'Canyon Updraft Frill-Glide';
+      else if (pf === 'aqueduct_sanctum' || pf === 'puzzle') pauseTowerName.textContent = 'Aqueduct Sanctum';
+      else if (game.tower) pauseTowerName.textContent = `Spire ${game.tower.id}: ${game.tower.name}`;
     }
     overlayPause?.classList.remove('hidden');
+    pushNavGuard();
   } else {
     overlayPause?.classList.add('hidden');
   }
 }
 
 btnPause?.addEventListener('click', triggerPauseToggle);
-
 btnResume?.addEventListener('click', () => {
-  if (game.mode === 'paused') {
-    triggerPauseToggle();
-  } else {
-    overlayPause?.classList.add('hidden');
-  }
+  if (game.mode === 'paused') triggerPauseToggle();
+  else overlayPause?.classList.add('hidden');
 });
-
 btnRestart?.addEventListener('click', relaunchLastMode);
 btnPauseTitle?.addEventListener('click', returnToTitle);
 btnPlayAgain?.addEventListener('click', relaunchLastMode);
 btnBackTitle?.addEventListener('click', returnToTitle);
 
-// Cutscene Controls
 btnCutsceneNext?.addEventListener('click', advanceCutsceneStep);
 cutsceneTapStage?.addEventListener('click', advanceCutsceneStep);
 btnCutsceneSkip?.addEventListener('click', () => {
-  sound.unlock();
+  sound.unlock?.();
   sound.switchToggle?.();
   finishCutscene();
 });
 
-// Keyboard Shortcuts (M = Music, Space/Enter = Cutscene Next, Escape/P = Pause/Close)
 window.addEventListener('keydown', (e) => {
   if (e.repeat) return;
   if (cutsceneState.active) {
     if (e.code === 'Escape') {
       e.preventDefault();
-      sound.unlock();
       finishCutscene();
     } else if (e.code === 'Space' || e.code === 'Enter') {
       e.preventDefault();
@@ -2894,34 +2752,15 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyM') {
     handleToggleMusic();
   } else if (e.code === 'Escape' || e.code === 'KeyP') {
-    if (!overlayWorlds?.classList.contains('hidden')) {
-      overlayWorlds.classList.add('hidden');
-      overlayTitle?.classList.remove('hidden');
-      syncTitleShowcaseState();
-    } else if (!overlayWardrobe?.classList.contains('hidden')) {
-      overlayWardrobe.classList.add('hidden');
-      overlayTitle?.classList.remove('hidden');
-      syncTitleShowcaseState();
-    } else if (!overlayTrophies?.classList.contains('hidden')) {
-      overlayTrophies.classList.add('hidden');
-      overlayTitle?.classList.remove('hidden');
-      syncTitleShowcaseState();
-    } else if (!overlayMinigames?.classList.contains('hidden')) {
-      overlayMinigames.classList.add('hidden');
-      overlayTitle?.classList.remove('hidden');
-      syncTitleShowcaseState();
-    } else if (isTitleScreenOpen()) {
-      closeTitleDrawers();
-    } else {
-      triggerPauseToggle();
-    }
+    e.preventDefault();
+    handleHardwareBack();
   }
 });
 
 // ================= VIEWPORT RESIZE & BOOT =================
 function handleResize() {
-  const w = window.innerWidth || stageWrap.clientWidth || 390;
-  const h = window.innerHeight || stageWrap.clientHeight || 844;
+  const w = window.innerWidth || stageWrap?.clientWidth || 412;
+  const h = window.innerHeight || stageWrap?.clientHeight || 915;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   renderer.resize(w, h, dpr);
 }
@@ -2929,12 +2768,10 @@ function handleResize() {
 window.addEventListener('resize', handleResize);
 window.visualViewport?.addEventListener('resize', handleResize);
 
-// Initial State Sync & Live 3D Start-Screen Watchtower Diorama
 applyControlMode(initSettings.controlMode || 'gesture', false);
-appEl.dataset.era = initSettings.era || 'reboot';
 refreshTitleMeta();
-renderLivesPips(3);
-loadTitlePreviewTower();
+renderLivesPips(3, false);
+loadTitlePreviewTower(0);
 syncTitleShowcaseState();
 handleResize();
 
@@ -2946,14 +2783,15 @@ function loop(ts) {
   lastTs = ts;
   const dt = Math.max(0, Math.min(0.05, rawDt));
 
+  // Trigger Act Intro Cutscenes during Story Campaign
   if (
     !cutsceneState.active &&
-    game.runType === 'reboot_campaign' &&
+    String(game.runType || '').toLowerCase().includes('campaign') &&
     game.mode === 'tower' &&
     game.tower
   ) {
     const tid = game.tower.id;
-    const actMap = { 3: 'sector2', 5: 'sector3', 7: 'sector4' };
+    const actMap = { 3: 'act2_intro', 5: 'act3_intro', 7: 'act4_intro', 9: 'act5_intro' };
     const actKey = actMap[tid];
     if (actKey && !hasSeenCutscene(actKey)) {
       markCutsceneSeen(actKey);
@@ -2967,17 +2805,30 @@ function loop(ts) {
     cutsceneState.elapsed += dt;
 
     const def = STORY_CUTSCENES[cutsceneState.kind];
-    const totalBeats = Math.max(1, def?.beats?.length || 3);
+    const totalBeats = Math.max(1, def?.beats?.length || 2);
     const beatFrac = totalBeats > 1 ? cutsceneState.beatIdx / (totalBeats - 1) : 1;
-    const timeSweep = Math.min(0.32, (cutsceneState.elapsed / cutsceneState.cameraDuration) * 0.32);
-    const phase = Math.max(0, Math.min(1, beatFrac * 0.68 + timeSweep));
-    game.cutsceneCam = { active: true, phase, kind: cutsceneState.kind };
+    const timeSweep = Math.min(0.35, (cutsceneState.elapsed / cutsceneState.cameraDuration) * 0.35);
+    const phase = Math.max(0, Math.min(1, beatFrac * 0.65 + timeSweep));
+
+    if (def?.isPurification) {
+      const sPct = cutsceneState.startPct ?? def.startPct ?? 20;
+      const ePct = cutsceneState.endPct ?? def.endPct ?? 100;
+      const curPct = Math.round(sPct + (ePct - sPct) * phase);
+      game.purificationProgress = phase;
+      renderer.setPurificationProgress?.(phase);
+      if (cutsceneRestorationPctEl) cutsceneRestorationPctEl.textContent = `${curPct}%`;
+      if (cutsceneRestorationFillEl) cutsceneRestorationFillEl.style.width = `${curPct}%`;
+    }
+
+    game.cutsceneCam = {
+      active: true,
+      phase,
+      kind: cutsceneState.kind,
+      isPurification: Boolean(def?.isPurification),
+    };
 
     if (cutsceneState.charIdx < cutsceneState.fullText.length) {
-      cutsceneState.charIdx = Math.min(
-        cutsceneState.fullText.length,
-        cutsceneState.charIdx + dt * 62
-      );
+      cutsceneState.charIdx = Math.min(cutsceneState.fullText.length, cutsceneState.charIdx + dt * 65);
       if (cutsceneTextEl) {
         cutsceneTextEl.textContent = cutsceneState.fullText.slice(0, Math.floor(cutsceneState.charIdx));
       }
@@ -2986,8 +2837,11 @@ function loop(ts) {
     input.setInteractContext?.(false, '');
     game.time = (game.time || 0) + dt;
     game._syncDynamicLedges?.(dt, true);
-    if (game.player && game.player.muzzleFlash > 0) {
-      game.player.muzzleFlash = Math.max(0, game.player.muzzleFlash - dt);
+    const hero = game.gateway || game.player;
+    const cols = getWorldCols();
+    const halfCols = cols * 0.5;
+    if (hero && hero.muzzleFlash > 0) {
+      hero.muzzleFlash = Math.max(0, hero.muzzleFlash - dt);
     }
 
     const titleOpen = isTitleScreenOpen();
@@ -2995,25 +2849,24 @@ function loop(ts) {
     game.titleShowcase = titleOpen;
     game.wardrobeSpotlight = wardrobeOpen;
 
-    if (wardrobeOpen && game.player) {
-      const targetCol = game.player.col ?? 0.5;
-      const diff = (((targetCol - game.camCol + 8) % 16) + 16) % 16 - 8;
-      game.camCol = (((game.camCol + diff * Math.min(1, dt * 8)) % 16) + 16) % 16;
-      const targetFloor = game.player.floor ?? 0;
+    if (wardrobeOpen && hero) {
+      const targetCol = hero.col ?? 0.5;
+      const diff = (((targetCol - (game.camCol ?? targetCol) + halfCols) % cols) + cols) % cols - halfCols;
+      game.camCol = ((((game.camCol ?? targetCol) + diff * Math.min(1, dt * 8)) % cols) + cols) % cols;
+      const targetFloor = hero.floor ?? 0;
       game.camFloor = (game.camFloor ?? 0) + (targetFloor - (game.camFloor ?? 0)) * Math.min(1, dt * 8);
-    } else if (titleOpen && game.player) {
-      // Heroic Live 3D Start-Screen Diorama framing Pogo on wet base ledge with gentle breathing orbit
-      const baseCol = game.player.col ?? 0.5;
-      const gentleOrbit = Math.sin((game.time || 0) * 0.42) * 0.44;
-      const targetCol = (((baseCol + gentleOrbit) % 16) + 16) % 16;
-      const diff = (((targetCol - (game.camCol ?? baseCol) + 8) % 16) + 16) % 16 - 8;
-      game.camCol = ((((game.camCol ?? baseCol) + diff * Math.min(1, dt * 5)) % 16) + 16) % 16;
-      const targetFloor = (game.player.floor ?? 0) + 1.15;
+    } else if (titleOpen && hero) {
+      const baseCol = hero.col ?? 0.5;
+      const gentleOrbit = Math.sin((game.time || 0) * 0.40) * 0.55;
+      const targetCol = (((baseCol + gentleOrbit) % cols) + cols) % cols;
+      const diff = (((targetCol - (game.camCol ?? baseCol) + halfCols) % cols) + cols) % cols - halfCols;
+      game.camCol = ((((game.camCol ?? baseCol) + diff * Math.min(1, dt * 5)) % cols) + cols) % cols;
+      const targetFloor = (hero.floor ?? 0) + 1.05;
       game.camFloor = (game.camFloor ?? targetFloor) + (targetFloor - (game.camFloor ?? targetFloor)) * Math.min(1, dt * 4);
     } else {
-      game.camCol = ((game.camCol || 0) + dt * 0.38) % 16;
-      const targetFloor = 1.6;
-      game.camFloor = (game.camFloor ?? 1.6) + (targetFloor - (game.camFloor ?? 1.6)) * Math.min(1, dt * 3);
+      game.camCol = ((game.camCol || 0) + dt * 0.42) % cols;
+      const targetFloor = 1.5;
+      game.camFloor = (game.camFloor ?? 1.5) + (targetFloor - (game.camFloor ?? 1.5)) * Math.min(1, dt * 3);
     }
   } else {
     game.titleShowcase = false;
@@ -3025,5 +2878,18 @@ function loop(ts) {
   game.render();
   requestAnimationFrame(loop);
 }
+
+// Unlock soothing Pelagian Sanctuary Menu Score on first user interaction
+let menuAudioBooted = false;
+const bootSanctuaryAudioOnce = () => {
+  if (menuAudioBooted) return;
+  menuAudioBooted = true;
+  sound.unlock?.();
+  if (game.mode === 'title' || cutsceneState.active) {
+    sound.playMenuMusic?.();
+  }
+};
+window.addEventListener('pointerdown', bootSanctuaryAudioOnce, { once: true, passive: true });
+window.addEventListener('keydown', bootSanctuaryAudioOnce, { once: true });
 
 requestAnimationFrame(loop);

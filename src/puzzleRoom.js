@@ -1,27 +1,27 @@
-// TOWER TOPPLER '26 — RUNE-DOOR SECRET PUZZLE CHAMBERS
+// TOWERING WATERS: GATEWAY'S DESCENT — ANCIENT AQUEDUCT SANCTUM CHAMBERS
 // Pure gameplay logic & verified solvable puzzle generator leaf module (zero imports).
 //
-// Hidden torch-lit interior stone chambers behind glowing carved Rune Doors (`door.isRune = true`).
+// Sunlit temple interior aqueduct sanctums behind glowing carved Sanctum Doors (`door.isRune = true`).
 // Grid: x = 0..cols-1 (west to east), y = 0..rows-1 (north back wall to south entrance).
 // Entrance tile is (doorX, rows-1); exit doorway threshold is (doorX, rows).
 // World coordinates used by `PuzzleRenderer` (src/puzzleRenderer.js):
 //   1 unit per tile, floor at y = 0, X = x - (cols-1)/2, Z = y - (rows-1)/2.
 //
 // Puzzle types (all deterministically generated from `seed` and verified solvable):
-//  - 'lights': stomp rune tiles to toggle self + 4 orthogonal neighbours to match the mural/clue
-//  - 'bells':  ring coloured bronze bells in the exact order shown on exterior tower banners
-//  - 'beam':   rotate brass prism mirrors so the light beam ignites the target crystal
-//  - 'blocks': push carved rune blocks onto pressure plates (tap/fire = undo last push)
+//  - 'lights': stomp hydro-glyph tiles to toggle self + 4 orthogonal neighbours to match the mural/clue
+//  - 'bells':  chime coloured bronze water-bells in the exact order shown on exterior spire banners
+//  - 'beam':   rotate brass sea-glass mirrors so the hydro-light beam ignites the target crystal
+//  - 'blocks': slide carved sluice blocks onto pressure basins (tap/fire/whip = undo last push)
 
 const TAU = Math.PI * 2;
 const MOVE_T = 0.145; // crisp single-tile step duration
-const PUSH_T = 0.205; // step that slides a rune block
+const PUSH_T = 0.205; // step that slides a sluice block
 const REPEAT_DELAY = 0.34; // touch-tuned repeat threshold: 1 swipe = 1 exact tile step, hold = steady march
 const REPEAT_STEP_GAP = 0.035; // brief settle gap between held repeat steps so thumb stops never overshoot
 const HOP_T = 0.3; // stomp / hop duration
 const HOP_LAND = 0.2; // stomp impact moment inside hop
 const INTRO_T = 1.05;
-const SOLVED_T = 2.1; // celebration before Pogo exits automatically
+const SOLVED_T = 2.1; // celebration before Gateway exits automatically
 const LEAVE_T = 0.95;
 const MIRROR_TURN_SPEED = 9; // rad/s
 const BEAM_MAX_PTS = 48;
@@ -30,14 +30,14 @@ const MAX_VFX = 48;
 export const PUZZLE_TYPES = ['lights', 'bells', 'beam', 'blocks'];
 
 export const BELL_COLORS = ['#ff4f64', '#ffb02e', '#3fe07e', '#3ab0ff', '#c77dff'];
-export const BELL_COLOR_NAMES = ['RED', 'GOLD', 'GREEN', 'BLUE', 'VIOLET'];
+export const BELL_COLOR_NAMES = ['CORAL', 'GOLD', 'EMERALD', 'AZURE', 'VIOLET'];
 export const BELL_NOTES = [0, 2, 4, 7, 9];
 
 const TITLES = {
-  lights: ['RUNE FLOOR', 'Match the glowing Rune Tablet above the outer doorway • Step to doorway to peek'],
-  bells: ['BELL CHAMBER', 'Ring bells in left-to-right order from the doorway crest • Step to doorway to peek'],
-  beam: ['PRISM BEAM', 'Tap by a mirror to rotate it • ignite the prism crystal'],
-  blocks: ['STONE PLATES', 'Push the rune blocks onto the plates • tap to undo'],
+  lights: ['AQUEDUCT MOSAIC', 'Match the glowing Hydro-Glyph Tablet above the outer archway • Step to doorway to peek'],
+  bells: ['HARMONIC BELLS', 'Chime water-bells in left-to-right order from the archway crest • Step to doorway to peek'],
+  beam: ['SEA-GLASS PRISM', 'Tap or Whip beside a mirror to rotate it • ignite the harmonic crystal'],
+  blocks: ['SLUICE BASINS', 'Slide the carved sluice stones onto the basins • tap or whip to undo'],
 };
 
 // Directions: 0 east (+x), 1 south (+y, toward doorway), 2 west (-x), 3 north (-y, back wall)
@@ -676,7 +676,8 @@ export class PuzzleRoom {
     this.peekAlpha = 1;
     this.isPeekingClue = false;
     this._peekHoldT = 0;
-    this.pogo = this._makePogo();
+    this.gateway = this._makeHero();
+    this.pogo = this.gateway; // compatibility alias for PuzzleRenderer
     this.hud = { title: '', line: '', status: '', rev: 0 };
     this.beam = {
       pts: new Float32Array(BEAM_MAX_PTS * 2),
@@ -691,6 +692,7 @@ export class PuzzleRoom {
     this._dirs = [false, false, false, false];
     this._wasJump = false;
     this._wasFire = false;
+    this._wasWhip = false;
 
     if (
       opts &&
@@ -701,7 +703,7 @@ export class PuzzleRoom {
     }
   }
 
-  _makePogo() {
+  _makeHero() {
     return {
       x: 0,
       y: 0,
@@ -821,6 +823,7 @@ export class PuzzleRoom {
     this._was.fill(true); // ignore entry slide-up until released or redirected
     this._wasJump = true;
     this._wasFire = true;
+    this._wasWhip = true;
     this.tileCount = this.cols * this.rows;
     this.solid = new Uint8Array(this.tileCount);
     for (const c of p.solid || []) this.solid[c] = 1;
@@ -871,8 +874,9 @@ export class PuzzleRoom {
     }
     if (this.wasSolved) this._applySolution();
 
-    const po = this.pogo;
-    Object.assign(po, this._makePogo());
+    const po = this.gateway;
+    Object.assign(po, this._makeHero());
+    this.pogo = this.gateway;
     po.x = this.doorX;
     po.y = this.rows - 1;
     po.fromX = this.doorX;
@@ -887,13 +891,13 @@ export class PuzzleRoom {
     const [title, line] = TITLES[p.type];
     this._setHud(
       title,
-      this.wasSolved ? 'Sanctum Vault open • step down through the archway' : line,
+      this.wasSolved ? 'Aqueduct Sanctum open • step down through the archway' : line,
       this.wasSolved ? 'OPEN' : `PAR ${this.parMoves}`
     );
     if (p.type === 'lights' && p.showTarget && !this.wasSolved) {
-      this._setHud(title, 'Tap or Jump on a rune to stomp it • match the glowing stele', `PAR ${this.parMoves}`);
+      this._setHud(title, 'Tap, Whip, or Jump on a glyph to stomp it • match the glowing stele', `PAR ${this.parMoves}`);
     } else if (p.type === 'bells' && p.showTarget && !this.wasSolved) {
-      this._setHud(title, 'Tap by a bell to ring it • match the stele sequence', `PAR ${this.parMoves}`);
+      this._setHud(title, 'Tap or Whip beside a water-bell to chime it • match the stele sequence', `PAR ${this.parMoves}`);
     }
     this._layout();
     this._traceBeam();
@@ -915,7 +919,7 @@ export class PuzzleRoom {
   }
 
   isAtDoorwayThreshold() {
-    const po = this.pogo;
+    const po = this.gateway;
     if (!po) return false;
     if (this.phase === 'intro' || this.t <= 1.4) return true;
     return po.y >= this.rows - 1 && Math.abs(po.x - this.doorX) <= 1;
@@ -1083,7 +1087,7 @@ export class PuzzleRoom {
     const W = this.width;
     const H = this.height;
     const tz = 0.08;
-    const az = -0.175; // subtle 3/4 isometric azimuth so 2 stone faces & Pogo's 3/4 profile read crisply
+    const az = -0.175; // subtle 3/4 isometric azimuth so 2 stone faces & Gateway's 3/4 profile read crisply
     const sinAz = Math.sin(az);
     const cosAz = Math.cos(az);
     let lo = 2.5;
@@ -1149,7 +1153,7 @@ export class PuzzleRoom {
   _updateViewFollow(dt) {
     const v = this.view;
     if (!v.baseEye || !v.baseTarget) return;
-    const po = this.pogo;
+    const po = this.gateway;
     const wide = this.width / this.height > 1.15;
     const wx = clamp(this.worldX(po.px ?? po.x), -2.2, 2.2);
     const wz = clamp(this.worldZ(po.py ?? po.y), -2.2, 2.4);
@@ -1266,21 +1270,24 @@ export class PuzzleRoom {
     const jumpEdge = (jump && !this._wasJump) || Boolean(jp?.jump);
     const fireNow = !!src.fire;
     const fireEdge = (fireNow && !this._wasFire) || Boolean(jp?.fire);
+    const whipNow = !!src.whip;
+    const whipEdge = (whipNow && !this._wasWhip) || Boolean(jp?.whip);
     this._wasJump = jump;
     this._wasFire = fireNow;
+    this._wasWhip = whipNow;
 
     const fire =
-      Boolean(firePressed) || (this.jumpIsUp === true ? fireEdge : fireEdge || jumpEdge);
+      Boolean(firePressed) || whipEdge || (this.jumpIsUp === true ? fireEdge : fireEdge || jumpEdge);
 
-    const po = this.pogo;
+    const po = this.gateway;
     if (this.phase === 'intro') {
       this.fade = Math.max(0, 1 - this.phaseT / 0.55);
       if (this.phaseT >= INTRO_T * 0.35 && !this._introBanner) {
         this._introBanner = true;
-        fx.banner?.(this.wasSolved ? 'SOLVED' : 'HIDDEN CHAMBER', this.puzzle.title);
+        fx.banner?.(this.wasSolved ? 'SOLVED' : 'AQUEDUCT SANCTUM', this.puzzle.title);
         sound?.puzzleEnter ? sound.puzzleEnter() : sound?.door?.();
       }
-      this._stepPogo(dt, sound);
+      this._stepHero(dt, sound);
       if (this.phaseT >= INTRO_T) {
         this.phase = 'play';
         this.phaseT = 0;
@@ -1293,7 +1300,7 @@ export class PuzzleRoom {
         this.playT += dt;
         this.timeSec = this.playT;
       }
-      this._stepPogo(dt, sound);
+      this._stepHero(dt, sound);
       if (this._repeatGapT > 0) this._repeatGapT = Math.max(0, this._repeatGapT - dt);
       if (fire) this._fireBuf = true;
       // Zero-lag action response: allow buffered tap to trigger immediately once hop impact (`HOP_LAND`) has landed
@@ -1313,8 +1320,8 @@ export class PuzzleRoom {
           this.collectT = this.t;
           this._vfx('collect', po.px, po.py, { life: 0.8 });
           (sound?.collectStar || sound?.collect)?.call(sound, 4);
-          sound?.pogoCheer?.();
-          this._popupAt(fx, po.px, po.py, 1.6, 'STAR CORE +10 GEARS', '#fde047');
+          (sound?.gatewayCheer || sound?.victory)?.call(sound);
+          this._popupAt(fx, po.px, po.py, 1.6, 'HARMONIC SEED +10 GEARS', '#fde047');
           fx.particles?.(
             this.tileScreen(po.px, po.py, 1.1).x,
             this._sp.y,
@@ -1409,9 +1416,9 @@ export class PuzzleRoom {
     if (dir >= 0) this._tryMove(dir, fresh, fx, sound);
   }
 
-  // ------------------------------------------------------------------ Pogo stepping
-  _stepPogo(dt, sound) {
-    const po = this.pogo;
+  // ------------------------------------------------------------------ Gateway stepping
+  _stepHero(dt, sound) {
+    const po = this.gateway;
     if (po.moving) {
       po.moveT = Math.min(1, po.moveT + dt / po.moveDur);
       const k = this.phase === 'intro' ? smooth(po.moveT) : po.moveT;
@@ -1465,7 +1472,7 @@ export class PuzzleRoom {
   }
 
   _tryMove(dir, fresh, fx, sound) {
-    const po = this.pogo;
+    const po = this.gateway;
     po.facing = dir;
     if (po.x === this.doorX && po.y === this.rows - 1 && dir === 1) {
       if (fresh) this._beginLeaving('door', sound);
@@ -1513,7 +1520,7 @@ export class PuzzleRoom {
   }
 
   _bump(fresh, sound) {
-    const po = this.pogo;
+    const po = this.gateway;
     if (!fresh) return;
     po.bumpT = 0;
     this._vfx('bump', po.x + DX[po.facing] * 0.5, po.y + DY[po.facing] * 0.5, {
@@ -1524,13 +1531,13 @@ export class PuzzleRoom {
   }
 
   _hop() {
-    const po = this.pogo;
+    const po = this.gateway;
     po.hopT = 0;
     po.hop = 0;
   }
 
   _land(sound) {
-    const po = this.pogo;
+    const po = this.gateway;
     const fx = this._fx || {};
     if (this._pendingStomp && this.type === 'lights') {
       this._pendingStomp = false;
@@ -1562,7 +1569,7 @@ export class PuzzleRoom {
   }
 
   _interact(fx, sound) {
-    const po = this.pogo;
+    const po = this.gateway;
     const type = this.type;
     if (this.phase === 'solved' && type !== 'lights') {
       this._hop();
@@ -1628,7 +1635,7 @@ export class PuzzleRoom {
     this.phase = 'leaving';
     this.phaseT = 0;
     this._leaveBy = by;
-    const po = this.pogo;
+    const po = this.gateway;
     po.facing = 1;
     po.fromX = po.x;
     po.fromY = po.y;
@@ -1642,7 +1649,7 @@ export class PuzzleRoom {
   }
 
   _beginAutoExit(sound) {
-    const po = this.pogo;
+    const po = this.gateway;
     const path = this._pathTo(po.x, po.y, this.doorX, this.rows - 1);
     if (path === null) {
       this._beginLeaving('auto', sound);
@@ -1685,9 +1692,9 @@ export class PuzzleRoom {
   }
 
   _stepLeaving(dt, sound) {
-    const po = this.pogo;
+    const po = this.gateway;
     if (this._autoWalking) {
-      this._stepPogo(dt * 1.25, sound);
+      this._stepHero(dt * 1.25, sound);
       if (!po.moving) {
         if (this._autoPath.length) {
           const c = this._autoPath.shift();
@@ -1709,7 +1716,7 @@ export class PuzzleRoom {
       }
       return;
     }
-    this._stepPogo(dt, sound);
+    this._stepHero(dt, sound);
     const k = clamp(this.phaseT / LEAVE_T, 0, 1);
     po.outside = clamp((po.py - (this.rows - 1)) / 1.9, 0, 1);
     po.alpha = 1 - smooth(clamp((k - 0.55) / 0.4, 0, 1));
@@ -1783,7 +1790,7 @@ export class PuzzleRoom {
   }
 
   _undo(fx, sound) {
-    const po = this.pogo;
+    const po = this.gateway;
     const h = this.history.pop();
     if (!h) {
       this._hop();
@@ -1973,7 +1980,7 @@ export class PuzzleRoom {
     this.hintBell = -1;
     const withinPar = !this.wasSolved && this.moves <= this.parMoves;
     this.parCleared = withinPar;
-    const po = this.pogo;
+    const po = this.gateway;
     po.celebrate = true;
     po.emote = 'joy';
     po.emoteT = 1.6;
@@ -1982,8 +1989,8 @@ export class PuzzleRoom {
     if (withinPar) {
       fx.addGears?.(5);
       fx.addScore?.(500);
-      this._setHud(null, 'Par Mastery • Sanctum Vault Open • +5 Bonus Gears!', 'PAR +5G');
-      fx.banner?.('SANCTUM VAULT OPEN', 'STAR CORE • PAR BONUS +5 GEARS');
+      this._setHud(null, 'Par Mastery • Aqueduct Sanctum Open • +5 Bonus Gears!', 'PAR +5G');
+      fx.banner?.('AQUEDUCT SANCTUM OPEN', 'HARMONIC SEED • PAR BONUS +5 GEARS');
       this._popupAt(
         fx,
         (this.cols - 1) / 2,
@@ -1993,8 +2000,8 @@ export class PuzzleRoom {
         '#5efce8'
       );
     } else {
-      this._setHud(null, 'Sanctum Vault Open • Explorer Star Core & Gears unlocked', 'SOLVED');
-      fx.banner?.('SANCTUM VAULT OPEN', 'STAR CORE UNLOCKED');
+      this._setHud(null, 'Aqueduct Sanctum Open • Harmonic Seed & Gears unlocked', 'SOLVED');
+      fx.banner?.('AQUEDUCT SANCTUM OPEN', 'HARMONIC SEED UNLOCKED');
     }
     fx.shake?.(5.5);
     fx.haptic?.(30);

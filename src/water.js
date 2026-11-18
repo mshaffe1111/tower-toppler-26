@@ -1,230 +1,226 @@
-// Real-time Planar-Reflection Ocean (`src/water.js`)
-// Ported from `origin/main` (`e42c3da`) and upgraded for Dual-Era 2026 Reboot ("Moonlit Storm")
-// & 2008 XBLA HD Original Mode:
-//  - Real-time planar reflection (`WebGLRenderTarget` + oblique near clip plane)
-//  - 4 scrolling layers of a procedurally generated tileable 28-wave normal map over sharpened
-//    directional 3D vertex swells
-//  - Schlick Fresnel, dual-lobe moon/sun glitter path + wet storm-wave facet sheen, subsurface
-//    crest scattering, expanding splash/rain ring ripples, and crashing frothy tower-base foam collar
-//  - Clean preset/palette/moonlight hooks + strict WebGL state save/restore & 0 per-frame allocations
+// ============================================================================
+// Towering Waters: Gateway's Descent — Multi-Biome Living Water Shader (`src/water.js`)
+//
+// Supports all 5 Earth Water Biomes + Ecosystem Purification Healing (`0..1`):
+//   1. `'canyon_river'` : Directional rushing emerald-teal river rapids, standing
+//                         hydraulic wave crests, boulder V-wakes & golden morning sun!
+//   2. `'alpine_lake'`  : Ultra-clear glassy turquoise-cobalt alpine mirror lake with
+//                         crisp reflections of snow-capped granite peaks & gentle ripples!
+//   3. `'mist_bayou'`   : Calm reflective jade-amber bayou delta channels with lazy
+//                         rotational current swirls, sunset mirror sheen & mist veins!
+//   4. `'coral_sea'`    : Crystal-clear translucent turquoise noon lagoon (`uClarity`)
+//                         revealing 3D underwater coral reef shelves & gliding manta rays
+//                         beneath sparkling tropical sun-glitter & reef whitewater!
+//   5. `'storm_ocean'`  : Polar & tempest deep ocean with a colossal 3D swirling
+//                         maelstrom whirlpool funnel around the spire base & aurora glints!
+//
+// Strict 60fps Mobile Guarantees:
+//   - Real-time oblique-clipped planar reflection (`WebGLRenderTarget`)
+//   - Zero per-frame heap/GC allocations & strict WebGLRenderer state save/restore
+// ============================================================================
 
 import * as THREE from 'three';
 
-export const OCEAN_PRESETS = {
-  moonlit_storm: {
-    deepColor: '#091926',
-    shallowColor: '#163852',
-    skyColor: '#0c1c30',
-    sunColor: '#d8ecff',
-    sunDir: [0.42, 0.34, -0.84],
-    glowColor: '#5efce8',
-    foamColor: '#f0f8ff',
-    swell: 1.22,
-    chopStrength: 1.32,
-    sunStrength: 1.36,
-    moonGlitter: 0.44,
-    foamStrength: 1.42,
-    collarWidth: 1.38,
-  },
-  storm: {
-    deepColor: '#071522',
-    shallowColor: '#13314a',
-    skyColor: '#0a1829',
-    sunColor: '#cfe4ff',
-    sunDir: [0.42, 0.34, -0.84],
-    glowColor: '#38bdf8',
-    foamColor: '#eff8ff',
-    swell: 1.28,
-    chopStrength: 1.38,
-    sunStrength: 1.32,
-    moonGlitter: 0.46,
-    foamStrength: 1.48,
-    collarWidth: 1.44,
-  },
-  mist: {
-    deepColor: '#091926',
-    shallowColor: '#163852',
-    skyColor: '#0c1c30',
-    sunColor: '#d8ecff',
-    sunDir: [0.42, 0.34, -0.84],
-    glowColor: '#5efce8',
-    foamColor: '#f0f8ff',
-    swell: 1.22,
-    chopStrength: 1.32,
-    sunStrength: 1.36,
-    moonGlitter: 0.44,
-    foamStrength: 1.42,
-    collarWidth: 1.38,
-  },
-  sinking: {
-    deepColor: '#06202e',
-    shallowColor: '#0e5b6e',
-    skyColor: '#0b2236',
-    sunColor: '#bae6fd',
-    sunDir: [0.36, 0.38, -0.85],
-    glowColor: '#22d3ee',
-    foamColor: '#e6f9ff',
-    swell: 1.26,
-    chopStrength: 1.28,
-    sunStrength: 1.25,
-    moonGlitter: 0.38,
-    foamStrength: 1.36,
-    collarWidth: 1.35,
-  },
-  foundry: {
-    deepColor: '#0c131c',
-    shallowColor: '#22303f',
-    skyColor: '#181824',
-    sunColor: '#ffd29d',
-    sunDir: [-0.38, 0.28, -0.88],
-    glowColor: '#fb923c',
-    foamColor: '#e2e8f0',
-    swell: 1.05,
-    chopStrength: 1.18,
-    sunStrength: 1.18,
-    moonGlitter: 0.34,
-    foamStrength: 1.12,
-    collarWidth: 1.18,
-  },
-  blizzard: {
-    deepColor: '#071a2c',
-    shallowColor: '#1e4e6e',
-    skyColor: '#10263e',
-    sunColor: '#e0f2fe',
-    sunDir: [0.32, 0.42, -0.85],
-    glowColor: '#7dd3fc',
-    foamColor: '#f8fafc',
-    swell: 1.16,
-    chopStrength: 1.26,
-    sunStrength: 1.35,
-    moonGlitter: 0.48,
-    foamStrength: 1.46,
-    collarWidth: 1.4,
-  },
-  prism: {
-    deepColor: '#0b1026',
-    shallowColor: '#23285c',
-    skyColor: '#121638',
-    sunColor: '#e9d5ff',
-    sunDir: [0.4, 0.36, -0.84],
-    glowColor: '#c084fc',
-    foamColor: '#f3e8ff',
-    swell: 1.04,
-    chopStrength: 1.16,
-    sunStrength: 1.3,
-    moonGlitter: 0.42,
-    foamStrength: 1.18,
-    collarWidth: 1.22,
-  },
-  piston: {
-    deepColor: '#081824',
-    shallowColor: '#153b4f',
-    skyColor: '#0d2030',
-    sunColor: '#cbd5e1',
-    sunDir: [-0.4, 0.32, -0.86],
-    glowColor: '#38bdf8',
-    foamColor: '#e8f4fa',
-    swell: 1.18,
-    chopStrength: 1.3,
-    sunStrength: 1.22,
-    moonGlitter: 0.38,
-    foamStrength: 1.32,
-    collarWidth: 1.3,
-  },
-  blackout: {
-    deepColor: '#050d17',
-    shallowColor: '#10283d',
-    skyColor: '#071120',
-    sunColor: '#dbeafe',
-    sunDir: [0.44, 0.35, -0.83],
-    glowColor: '#5efce8',
-    foamColor: '#eff8ff',
-    swell: 1.34,
-    chopStrength: 1.44,
-    sunStrength: 1.42,
-    moonGlitter: 0.5,
+export const WATER_BIOMES = Object.freeze([
+  'canyon_river',
+  'alpine_lake',
+  'mist_bayou',
+  'coral_sea',
+  'storm_ocean',
+]);
+
+const BIOME_ALIAS_MAP = Object.freeze({
+  canyon_river: 'canyon_river',
+  canyon: 'canyon_river',
+  river: 'canyon_river',
+  redwood: 'canyon_river',
+  rapids: 'canyon_river',
+  foundry: 'canyon_river',
+  piston: 'canyon_river',
+
+  alpine_lake: 'alpine_lake',
+  alpine: 'alpine_lake',
+  lake: 'alpine_lake',
+  glacier: 'alpine_lake',
+  blizzard: 'alpine_lake',
+
+  mist_bayou: 'mist_bayou',
+  bayou: 'mist_bayou',
+  delta: 'mist_bayou',
+  swamp: 'mist_bayou',
+  mist: 'mist_bayou',
+  dusk: 'mist_bayou',
+
+  coral_sea: 'coral_sea',
+  coral: 'coral_sea',
+  reef: 'coral_sea',
+  lagoon: 'coral_sea',
+  sea: 'coral_sea',
+  sinking: 'coral_sea',
+  prism: 'coral_sea',
+  day: 'coral_sea',
+
+  storm_ocean: 'storm_ocean',
+  ocean: 'storm_ocean',
+  polar: 'storm_ocean',
+  tempest: 'storm_ocean',
+  maelstrom: 'storm_ocean',
+  blackout: 'storm_ocean',
+  apex: 'storm_ocean',
+  moonlit_storm: 'storm_ocean',
+  storm: 'storm_ocean',
+});
+
+export function resolveWaterBiome(raw, towerId = 1) {
+  if (typeof raw === 'string') {
+    const key = raw.trim().toLowerCase();
+    if (BIOME_ALIAS_MAP[key]) return BIOME_ALIAS_MAP[key];
+  }
+  const idx = Math.floor((Math.max(1, Number(towerId) || 1) - 1) / 2) % WATER_BIOMES.length;
+  return WATER_BIOMES[idx];
+}
+
+const CANONICAL_WATER_PRESETS = {
+  canyon_river: Object.freeze({
+    biomeMode: 0,
+    deepColor: '#074848',
+    shallowColor: '#1ad4b4',
+    skyColor: '#66b8f0',
+    horizonMistColor: '#f5cf92',
+    sunColor: '#fff1c2',
+    sunDir: [0.46, 0.36, -0.81],
+    glowColor: '#34f5c8',
+    foamColor: '#f8fcff',
+    siltColor: '#6e644e',
+    swell: 0.76,
+    chopStrength: 1.22,
+    sunStrength: 1.46,
+    moonGlitter: 0.56,
     foamStrength: 1.52,
-    collarWidth: 1.46,
-  },
-  apex: {
-    deepColor: '#080d1c',
-    shallowColor: '#163547',
-    skyColor: '#0e162b',
-    sunColor: '#fde68a',
-    sunDir: [0.38, 0.32, -0.87],
-    glowColor: '#34d399',
-    foamColor: '#ecfeff',
-    swell: 1.24,
-    chopStrength: 1.34,
-    sunStrength: 1.34,
-    moonGlitter: 0.42,
-    foamStrength: 1.38,
-    collarWidth: 1.34,
-  },
-  day: {
-    deepColor: '#012a40',
-    shallowColor: '#0aa5b8',
-    skyColor: '#1a4c7a',
-    sunColor: '#fff1d6',
-    sunDir: [-0.45, 0.38, -0.81],
-    glowColor: '#38bdf8',
-    foamColor: '#f0faff',
-    swell: 1.0,
-    chopStrength: 1.0,
-    sunStrength: 1.05,
-    moonGlitter: 0.2,
-    foamStrength: 1.0,
-    collarWidth: 1.0,
-  },
-  dusk: {
-    deepColor: '#071b30',
-    shallowColor: '#145870',
-    skyColor: '#241e42',
-    sunColor: '#ffb27c',
-    sunDir: [-0.48, 0.16, -0.86],
-    glowColor: '#fb923c',
-    foamColor: '#ffeede',
-    swell: 1.05,
-    chopStrength: 1.08,
-    sunStrength: 1.2,
-    moonGlitter: 0.28,
-    foamStrength: 1.05,
-    collarWidth: 1.08,
-  },
-  original: {
-    deepColor: '#041d3d',
-    shallowColor: '#0ea5e9',
-    skyColor: '#091836',
-    sunColor: '#ffe8b8',
-    sunDir: [-0.45, 0.28, -0.85],
-    glowColor: '#38bdf8',
-    foamColor: '#e8f7ff',
-    swell: 0.85,
-    chopStrength: 0.96,
-    sunStrength: 1.15,
-    moonGlitter: 0.24,
-    foamStrength: 0.88,
-    collarWidth: 0.96,
-  },
-  original_hd: {
-    deepColor: '#041d3d',
-    shallowColor: '#0ea5e9',
-    skyColor: '#091836',
-    sunColor: '#ffe8b8',
-    sunDir: [-0.45, 0.28, -0.85],
-    glowColor: '#38bdf8',
-    foamColor: '#e8f7ff',
-    swell: 0.85,
-    chopStrength: 0.96,
-    sunStrength: 1.15,
-    moonGlitter: 0.24,
-    foamStrength: 0.88,
-    collarWidth: 0.96,
-  },
+    collarWidth: 1.45,
+    flowVel: [1.48, 0.36],
+    clarity: 0.26,
+    reflStrength: 0.68,
+    vortexAmt: 0.0,
+    causticStrength: 0.38,
+  }),
+
+  alpine_lake: Object.freeze({
+    biomeMode: 1,
+    deepColor: '#0b3b72',
+    shallowColor: '#24cbe8',
+    skyColor: '#5eaaf4',
+    horizonMistColor: '#dcebf8',
+    sunColor: '#fff4eb',
+    sunDir: [0.38, 0.44, -0.81],
+    glowColor: '#67e8f9',
+    foamColor: '#f4faff',
+    siltColor: '#5c6d7e',
+    swell: 0.18,
+    chopStrength: 0.36,
+    sunStrength: 1.32,
+    moonGlitter: 0.48,
+    foamStrength: 0.58,
+    collarWidth: 0.92,
+    flowVel: [0.12, 0.05],
+    clarity: 0.34,
+    reflStrength: 0.94,
+    vortexAmt: 0.0,
+    causticStrength: 0.32,
+  }),
+
+  mist_bayou: Object.freeze({
+    biomeMode: 2,
+    deepColor: '#0d3025',
+    shallowColor: '#318f6a',
+    skyColor: '#d87a4a',
+    horizonMistColor: '#c88862',
+    sunColor: '#ffbe76',
+    sunDir: [-0.42, 0.24, -0.87],
+    glowColor: '#fbbf24',
+    foamColor: '#fef3c7',
+    siltColor: '#4c4635',
+    swell: 0.26,
+    chopStrength: 0.54,
+    sunStrength: 1.38,
+    moonGlitter: 0.52,
+    foamStrength: 0.56,
+    collarWidth: 1.04,
+    flowVel: [0.30, -0.18],
+    clarity: 0.20,
+    reflStrength: 0.84,
+    vortexAmt: 0.0,
+    causticStrength: 0.20,
+  }),
+
+  coral_sea: Object.freeze({
+    biomeMode: 3,
+    deepColor: '#055587',
+    shallowColor: '#0fe0d6',
+    skyColor: '#48c4f8',
+    horizonMistColor: '#b4f0fc',
+    sunColor: '#fffbe6',
+    sunDir: [0.32, 0.58, -0.75],
+    glowColor: '#22f5e8',
+    foamColor: '#ffffff',
+    siltColor: '#667a7e',
+    swell: 0.52,
+    chopStrength: 0.78,
+    sunStrength: 1.62,
+    moonGlitter: 0.68,
+    foamStrength: 1.16,
+    collarWidth: 1.26,
+    flowVel: [0.26, 0.20],
+    clarity: 0.62,
+    reflStrength: 0.56,
+    vortexAmt: 0.0,
+    causticStrength: 0.72,
+  }),
+
+  storm_ocean: Object.freeze({
+    biomeMode: 4,
+    deepColor: '#07243e',
+    shallowColor: '#167ea2',
+    skyColor: '#1c5074',
+    horizonMistColor: '#307288',
+    sunColor: '#c4f8ff',
+    sunDir: [0.40, 0.34, -0.85],
+    glowColor: '#00f5c4',
+    foamColor: '#eefbff',
+    siltColor: '#2c3c4c',
+    swell: 1.32,
+    chopStrength: 1.36,
+    sunStrength: 1.38,
+    moonGlitter: 0.52,
+    foamStrength: 1.58,
+    collarWidth: 1.68,
+    flowVel: [0.52, 0.40],
+    clarity: 0.08,
+    reflStrength: 0.68,
+    vortexAmt: 1.0,
+    causticStrength: 0.22,
+  }),
 };
 
-// Tileable organic ocean normal map: multi-octave periodic value-noise + domain-warped FBM
-// wrapped seamlessly on the [0, size)^2 torus (zero regular plane-wave plaid/lattice!).
+export const OCEAN_PRESETS = Object.freeze({
+  ...CANONICAL_WATER_PRESETS,
+  // Legacy theme aliases mapped cleanly onto the 5 Earth Watershed Biomes
+  foundry: CANONICAL_WATER_PRESETS.canyon_river,
+  piston: CANONICAL_WATER_PRESETS.canyon_river,
+  blizzard: CANONICAL_WATER_PRESETS.alpine_lake,
+  mist: CANONICAL_WATER_PRESETS.mist_bayou,
+  dusk: CANONICAL_WATER_PRESETS.mist_bayou,
+  sinking: CANONICAL_WATER_PRESETS.coral_sea,
+  prism: CANONICAL_WATER_PRESETS.coral_sea,
+  day: CANONICAL_WATER_PRESETS.coral_sea,
+  blackout: CANONICAL_WATER_PRESETS.storm_ocean,
+  apex: CANONICAL_WATER_PRESETS.storm_ocean,
+  moonlit_storm: CANONICAL_WATER_PRESETS.storm_ocean,
+  storm: CANONICAL_WATER_PRESETS.storm_ocean,
+});
+
+// Tileable organic water normal map: multi-octave periodic value-noise + domain-warped FBM
+// wrapped seamlessly on the [0, size)^2 torus with capillary ridge sharpening.
 export function createWaterNormalTexture(size = 256) {
   const data = new Uint8Array(size * size * 4);
   const hashGrid = (ix, iy, per, salt) => {
@@ -255,16 +251,14 @@ export function createWaterNormalTexture(size = 256) {
     const v = y / size;
     for (let x = 0; x < size; x++) {
       const u = x / size;
-      // Domain warp so crests bend organically like wind-driven sea chop
       const wx = (pNoise(u, v, 4, 11) - 0.5) * 0.16 + (pNoise(u, v, 8, 23) - 0.5) * 0.07;
       const wy = (pNoise(u, v, 4, 37) - 0.5) * 0.16 + (pNoise(u, v, 8, 53) - 0.5) * 0.07;
       const uw = u + wx;
       const vw = v + wy;
       const o1 = pNoise(uw, vw, 5, 101) * 0.52;
-      const o2 = pNoise(uw, vw, 11, 211) * 0.3;
+      const o2 = pNoise(uw, vw, 11, 211) * 0.30;
       const o3 = pNoise(uw, vw, 23, 307) * 0.16;
       const o4 = pNoise(uw, vw, 46, 409) * 0.08;
-      //Sharpen wave ridges slightly (1 - |2n - 1|) for authentic capillary crests
       const r1 = 1 - Math.abs(pNoise(uw, vw, 9, 503) * 2 - 1);
       const r2 = 1 - Math.abs(pNoise(uw, vw, 19, 607) * 2 - 1);
       hf[y * size + x] = o1 + o2 + o3 + o4 + r1 * r1 * 0.22 + r2 * r2 * 0.11;
@@ -306,26 +300,27 @@ export class Ocean {
   constructor(
     webgl,
     {
-      towerRadius = 2.55,
-      preset = 'moonlit_storm',
-      era = 'reboot',
-      size = 480,
-      segments = 72,
-      waterY = -0.58,
+      towerRadius = 3.75,
+      preset = 'canyon_river',
+      size = 280,
+      segments = 80,
+      waterY = -0.82,
     } = {}
   ) {
     this.webgl = webgl;
     this.reflectionEnabled = true;
-    this.resScale = 0.45;
-    this.era = era === 'original' ? 'original' : 'reboot';
-    this.currentPreset = preset;
+    this.resScale = 0.5;
+    this.era = 'reboot';
+    this.currentPreset = resolveWaterBiome(preset);
+    this._purification = 0;
+    this._purificationTarget = 0;
     this.normalTex = createWaterNormalTexture(256);
 
-    const outerRadius = Math.max(220, size * 0.5);
+    const outerRadius = Math.max(180, size * 0.62);
     const geo = new THREE.PlaneGeometry(2, 2, segments, segments);
     geo.rotateX(-Math.PI / 2);
-    // Concentric square-to-disk mapping: 360° circular horizon (zero square corners) with ultra-dense
-    // ~0.4m rings hugging the tower collar and smooth expansion out to `outerRadius` (~240m)!
+    // Concentric square-to-disk mapping: 360-deg circular horizon with dense rings
+    // hugging the 3.75m spire base / maelstrom funnel and smooth expansion to outerRadius.
     {
       const pos = geo.attributes.position;
       for (let i = 0; i < pos.count; i++) {
@@ -344,7 +339,7 @@ export class Ocean {
             phi = Math.PI * 0.5 - (Math.PI * 0.25) * (u / v) + (v < 0 ? Math.PI : 0);
           }
         }
-        const worldR = outerRadius * (0.135 * rGrid + 0.865 * Math.pow(rGrid, 3.1));
+        const worldR = outerRadius * (0.145 * rGrid + 0.855 * Math.pow(rGrid, 3.0));
         pos.setX(i, Math.cos(phi) * worldR);
         pos.setZ(i, Math.sin(phi) * worldR);
       }
@@ -370,23 +365,31 @@ export class Ocean {
         reflectionMap: { value: null },
         textureMatrix: { value: new THREE.Matrix4() },
         useReflection: { value: 1 },
-        deepColor: { value: new THREE.Color('#091926') },
-        shallowColor: { value: new THREE.Color('#163852') },
-        skyColor: { value: new THREE.Color('#0c1c30') },
-        sunColor: { value: new THREE.Color('#d8ecff') },
-        sunDir: { value: new THREE.Vector3(0.42, 0.34, -0.84).normalize() },
-        glowColor: { value: new THREE.Color('#5efce8') },
-        foamColor: { value: new THREE.Color('#f0f8ff') },
+        uBiomeMode: { value: 0 },
+        deepColor: { value: new THREE.Color('#074848') },
+        shallowColor: { value: new THREE.Color('#1ad4b4') },
+        skyColor: { value: new THREE.Color('#66b8f0') },
+        uHorizonMistColor: { value: new THREE.Color('#f5cf92') },
+        sunColor: { value: new THREE.Color('#fff1c2') },
+        sunDir: { value: new THREE.Vector3(0.46, 0.36, -0.81).normalize() },
+        glowColor: { value: new THREE.Color('#34f5c8') },
+        foamColor: { value: new THREE.Color('#f8fcff') },
+        uSiltColor: { value: new THREE.Color('#6e644e') },
         towerRadius: { value: towerRadius },
-        swell: { value: 1.22 },
-        chopStrength: { value: 1.32 },
-        sunStrength: { value: 1.36 },
-        moonGlitter: { value: 0.44 },
-        foamStrength: { value: 1.42 },
-        collarWidth: { value: 1.38 },
+        swell: { value: 0.76 },
+        chopStrength: { value: 1.22 },
+        sunStrength: { value: 1.46 },
+        moonGlitter: { value: 0.56 },
+        foamStrength: { value: 1.52 },
+        collarWidth: { value: 1.45 },
         lightningBoost: { value: 0 },
-        uIsOrig: { value: era === 'original' ? 1 : 0 },
         uOuterRadius: { value: outerRadius },
+        uFlowVel: { value: new THREE.Vector2(1.48, 0.36) },
+        uClarity: { value: 0.26 },
+        uReflStrength: { value: 0.68 },
+        uVortexAmt: { value: 0.0 },
+        uCausticStrength: { value: 0.38 },
+        uPurification: { value: 0.0 },
         ripples: { value: Array.from({ length: 12 }, () => new THREE.Vector4(0, 0, -100, 0)) },
       },
     ]);
@@ -404,38 +407,60 @@ export class Ocean {
         uniform float swell;
         uniform float towerRadius;
         uniform float uOuterRadius;
+        uniform float uBiomeMode;
+        uniform vec2 uFlowVel;
+        uniform float uVortexAmt;
         uniform mat4 textureMatrix;
+
         varying vec3 vWorld;
         varying vec3 vSwellN;
         varying float vHeight;
+        varying float vVortexFunnel;
         varying vec4 vReflCoord;
         #include <fog_pars_vertex>
 
-        // Sharpened 5-component directional Gerstner/trochoidal storm swells (peaked storm crests, deep carved troughs)
         vec3 waves(vec2 p) {
           float h = 0.0;
           float dx = 0.0;
           float dz = 0.0;
+          vec2 flowDir = length(uFlowVel) > 0.01 ? normalize(uFlowVel) : vec2(1.0, 0.25);
+          vec2 flowPerp = vec2(-flowDir.y, flowDir.x);
+          float flowSpd = length(uFlowVel);
+
           vec2 dirs[5];
-          dirs[0] = normalize(vec2(1.0, 0.32));
-          dirs[1] = normalize(vec2(-0.54, 1.0));
-          dirs[2] = normalize(vec2(0.34, -1.0));
-          dirs[3] = normalize(vec2(-1.0, -0.58));
-          dirs[4] = normalize(vec2(0.76, -0.65));
+          if (uBiomeMode < 0.5) {
+            // Mode 0 ('canyon_river'): Directional rushing river rapids & hydraulic standing waves
+            dirs[0] = flowDir;
+            dirs[1] = normalize(flowDir * 0.84 + flowPerp * 0.54);
+            dirs[2] = normalize(flowDir * 0.84 - flowPerp * 0.54);
+            dirs[3] = normalize(flowDir * 0.45 + flowPerp * 0.89);
+            dirs[4] = normalize(-flowDir * 0.35 + flowPerp * 0.94);
+          } else {
+            dirs[0] = normalize(vec2(1.0, 0.32));
+            dirs[1] = normalize(vec2(-0.54, 1.0));
+            dirs[2] = normalize(vec2(0.34, -1.0));
+            dirs[3] = normalize(vec2(-1.0, -0.58));
+            dirs[4] = normalize(vec2(0.76, -0.65));
+          }
+
           float amps[5];
-          amps[0] = 0.215; amps[1] = 0.132; amps[2] = 0.078; amps[3] = 0.046; amps[4] = 0.026;
+          amps[0] = 0.205; amps[1] = 0.128; amps[2] = 0.078; amps[3] = 0.045; amps[4] = 0.026;
           float freqs[5];
-          freqs[0] = 0.36; freqs[1] = 0.66; freqs[2] = 1.15; freqs[3] = 1.92; freqs[4] = 2.82;
+          freqs[0] = 0.38; freqs[1] = 0.68; freqs[2] = 1.18; freqs[3] = 1.95; freqs[4] = 2.85;
           float speeds[5];
-          speeds[0] = 1.18; speeds[1] = 1.58; speeds[2] = 2.18; speeds[3] = 2.88; speeds[4] = 3.48;
+          float spdMul = uBiomeMode < 0.5 ? (1.35 + flowSpd * 0.45) : 1.0;
+          speeds[0] = -1.25 * spdMul;
+          speeds[1] = -1.68 * spdMul;
+          speeds[2] = -2.24 * spdMul;
+          speeds[3] = 2.65;
+          speeds[4] = -3.15 * spdMul;
 
           for (int i = 0; i < 5; i++) {
             float ph = dot(dirs[i], p) * freqs[i] + time * speeds[i];
             float s = sin(ph);
             float c = cos(ph);
-            // Pronounced trochoidal steepening so storm swells form sharp ridges & deep carved valleys
-            float sharp = s + 0.34 * (s * s - 0.5);
-            float dSharp = c * (1.0 + 0.68 * s);
+            float sharp = s + 0.32 * (s * s - 0.5);
+            float dSharp = c * (1.0 + 0.64 * s);
             h += sharp * amps[i];
             float deriv = dSharp * amps[i] * freqs[i];
             dx += deriv * dirs[i].x;
@@ -447,15 +472,30 @@ export class Ocean {
         void main() {
           vec4 wp = modelMatrix * vec4(position, 1.0);
           float r = length(wp.xz);
-          float horCalm = 1.0 - smoothstep(0.42, 0.86, r / max(uOuterRadius, 1.0));
-          // Surge builds right outside the masonry wall and calms smoothly into the distant horizon mist
-          float calm = smoothstep(towerRadius * 0.84, towerRadius + 1.55, r) * swell * horCalm;
+          float horCalm = 1.0 - smoothstep(0.42, 0.88, r / max(uOuterRadius, 1.0));
+          float calm = smoothstep(towerRadius * 0.82, towerRadius + 1.85, r) * swell * horCalm;
           vec3 w = waves(wp.xz) * calm;
-          // Horizontal Gerstner crest pinch sharpens storm wave ridges in 3D silhouette
-          wp.xz -= vec2(w.y, w.z) * 0.24 * clamp(calm, 0.0, 1.4);
+
+          // Colossal 3D Swirling Maelstrom Whirlpool Funnel around spire base ('storm_ocean')
+          float vortexFunnel = 0.0;
+          vec2 vortexSlope = vec2(0.0);
+          if (uVortexAmt > 0.01) {
+            float dOut = max(0.0, r - towerRadius + 0.15);
+            float innerWall = smoothstep(towerRadius - 0.25, towerRadius + 0.95, r);
+            float funnelEnv = exp(-dOut * 0.155) * innerWall * uVortexAmt;
+            float ang = atan(wp.x, wp.z);
+            float spiralArm = sin(ang * 5.0 + r * 1.15 - time * 3.85) * 0.18 * funnelEnv;
+            vortexFunnel = funnelEnv;
+            w.x += (-1.28 * funnelEnv + spiralArm);
+            vec2 radDir = wp.xz / max(r, 1e-3);
+            vortexSlope = radDir * (0.20 * funnelEnv);
+          }
+          vVortexFunnel = vortexFunnel;
+
+          wp.xz -= vec2(w.y, w.z) * 0.22 * clamp(calm, 0.0, 1.4);
           wp.y += w.x;
           vHeight = w.x;
-          vSwellN = normalize(vec3(-w.y * 1.18, 1.0, -w.z * 1.18));
+          vSwellN = normalize(vec3(-(w.y + vortexSlope.x) * 1.15, 1.0, -(w.z + vortexSlope.y) * 1.15));
           vWorld = wp.xyz;
           vReflCoord = textureMatrix * vec4(position, 1.0);
           vec4 mvPosition = viewMatrix * wp;
@@ -468,13 +508,16 @@ export class Ocean {
         uniform sampler2D normalMap;
         uniform sampler2D reflectionMap;
         uniform float useReflection;
+        uniform float uBiomeMode;
         uniform vec3 deepColor;
         uniform vec3 shallowColor;
         uniform vec3 skyColor;
+        uniform vec3 uHorizonMistColor;
         uniform vec3 sunColor;
         uniform vec3 sunDir;
         uniform vec3 glowColor;
         uniform vec3 foamColor;
+        uniform vec3 uSiltColor;
         uniform float towerRadius;
         uniform float chopStrength;
         uniform float sunStrength;
@@ -482,12 +525,19 @@ export class Ocean {
         uniform float foamStrength;
         uniform float collarWidth;
         uniform float lightningBoost;
-        uniform float uIsOrig;
         uniform float uOuterRadius;
-        uniform vec4 ripples[12]; // x, z, start time, strength
+        uniform vec2 uFlowVel;
+        uniform float uClarity;
+        uniform float uReflStrength;
+        uniform float uVortexAmt;
+        uniform float uCausticStrength;
+        uniform float uPurification;
+        uniform vec4 ripples[12];
+
         varying vec3 vWorld;
         varying vec3 vSwellN;
         varying float vHeight;
+        varying float vVortexFunnel;
         varying vec4 vReflCoord;
         #include <fog_pars_fragment>
 
@@ -514,33 +564,57 @@ export class Ocean {
 
         void main() {
           vec2 p = vWorld.xz;
-          // Four scrolling tileable ripple layers at complementary scales and directions
+          float rr = length(p);
+          float ang = atan(vWorld.x, vWorld.z);
+
           mat2 rotA = mat2(0.80, -0.60, 0.60, 0.80);
           mat2 rotB = mat2(-0.55, 0.835, -0.835, -0.55);
           mat2 rotC = mat2(0.31, 0.95, -0.95, 0.31);
+
+          // Biome-specific directional river advection, bayou eddies, or artifact-free maelstrom spiral!
+          vec2 advect = -uFlowVel * (time * 0.11);
+          vec2 swirlP = p;
+          vec2 vortexNormalAdd = vec2(0.0);
+          if (uVortexAmt > 0.01) {
+            // Fixed-angle spiral twist (never grows unbounded with time -> ZERO concentric ring stretching!)
+            float twistEnv = exp(-max(0.0, rr - towerRadius) * 0.11) * uVortexAmt;
+            float fixedTwist = 1.35 * twistEnv;
+            float cs = cos(fixedTwist);
+            float sn = sin(fixedTwist);
+            swirlP = vec2(p.x * cs - p.y * sn, p.x * sn + p.y * cs);
+            // Analytic rotating spiral groove normals for silky roaring whirlpool motion at any timestamp!
+            float groovePh = ang * 6.0 + log(max(1.0, rr)) * 8.2 - time * 4.1;
+            vec2 tangDir = vec2(-vWorld.z, vWorld.x) / max(rr, 1e-3);
+            vec2 radDir = p / max(rr, 1e-3);
+            vortexNormalAdd = (tangDir * 0.55 + radDir * 0.85) * cos(groovePh) * twistEnv * 1.45;
+          } else if (abs(uBiomeMode - 2.0) < 0.4) {
+            // Lazy bayou current eddies
+            float eddy = sin(p.x * 0.12 + time * 0.18) * cos(p.y * 0.12 - time * 0.15) * 1.8;
+            swirlP += vec2(eddy, -eddy * 0.7);
+          }
+
           vec2 warp = vec2(
-            fbm(p * 0.085 + vec2(time * 0.04, -time * 0.03)) - 0.5,
-            fbm(p * 0.085 + vec2(-time * 0.03, time * 0.05) + 4.7) - 0.5
-          ) * 1.45;
-          vec2 pw = p + warp;
-          vec3 n1 = sampleN(pw * 0.095 + vec2(time * 0.022, time * 0.014));
-          vec3 n2 = sampleN((rotA * pw) * 0.21 + vec2(-time * 0.019, time * 0.027));
-          vec3 n3 = sampleN((rotB * pw) * 0.43 + vec2(time * 0.034, -time * 0.029));
-          vec3 n4 = sampleN((rotC * pw) * 0.86 + vec2(-time * 0.049, -time * 0.038));
-          vec3 rip = (n1 + n2 * 0.82 + n3 * 0.58 + n4 * 0.34) * chopStrength;
+            fbm(swirlP * 0.085 + advect * 0.4 + vec2(time * 0.04, -time * 0.03)) - 0.5,
+            fbm(swirlP * 0.085 + advect * 0.4 + vec2(-time * 0.03, time * 0.05) + 4.7) - 0.5
+          ) * 1.35;
+          vec2 pw = swirlP + warp;
+
+          vec3 n1 = sampleN(pw * 0.085 + advect + vec2(time * 0.020, time * 0.012));
+          vec3 n2 = sampleN((rotA * pw) * 0.19 + advect * 1.35 + vec2(-time * 0.017, time * 0.025));
+          vec3 n3 = sampleN((rotB * pw) * 0.40 + advect * 1.85 + vec2(time * 0.031, -time * 0.026));
+          vec3 n4 = sampleN((rotC * pw) * 0.82 + advect * 2.40 + vec2(-time * 0.045, -time * 0.035));
+          vec3 rip = (n1 + n2 * 0.82 + n3 * 0.56 + n4 * 0.32) * chopStrength + vec3(vortexNormalAdd, 0.0);
 
           vec3 viewVec = cameraPosition - vWorld;
           float dist = length(viewVec);
           vec3 v = viewVec / max(dist, 1e-4);
-          // Ripples attenuate smoothly toward the horizon to prevent aliasing shimmer
-          float detail = mix(1.0, 0.24, smoothstep(14.0, 68.0, dist));
+          float detail = mix(1.0, 0.22, smoothstep(16.0, 78.0, dist));
 
-          // Cellular foam lace mask so ripples & surf collars break into frothy sea-spume webs (never solid bands!)
-          float foamCellA = fbm(pw * 2.4 + vec2(time * 0.18, -time * 0.14));
-          float foamCellB = noise((rotA * pw) * 7.2 - vec2(time * 0.32, time * 0.21));
-          float laceMask = smoothstep(0.34, 0.78, foamCellA * 0.65 + foamCellB * 0.35);
+          float foamCellA = fbm(pw * 2.3 + advect * 2.6 + vec2(time * 0.18, -time * 0.14));
+          float foamCellB = noise((rotA * pw) * 6.8 + advect * 4.2 - vec2(time * 0.30, time * 0.20));
+          float laceMask = smoothstep(0.32, 0.78, foamCellA * 0.65 + foamCellB * 0.35);
 
-          // Expanding ring ripples (splashes, rain, landings) + constant surge train around tower base
+          // Expanding ring ripples + spire shoreline lap
           vec2 rn = vec2(0.0);
           float ringFoam = 0.0;
           for (int i = 0; i < 12; i++) {
@@ -549,129 +623,172 @@ export class Ocean {
             if (age < 0.0 || age > 4.0) continue;
             vec2 dv = p - R.xy;
             float d = length(dv) + 1e-4;
-            float c = age * 1.75;
-            float env = R.w * exp(-age * 0.92) * exp(-pow((d - c) / (0.32 + age * 0.24), 2.0));
-            float ph = (d - c) * 11.5;
-            rn += (dv / d) * cos(ph) * env * 0.92;
-            ringFoam += max(0.0, sin(ph)) * env * (0.22 + 0.62 * laceMask);
+            float c = age * 1.85;
+            float env = R.w * exp(-age * 0.92) * exp(-pow((d - c) / (0.34 + age * 0.25), 2.0));
+            float ph = (d - c) * 11.0;
+            rn += (dv / d) * cos(ph) * env * 0.90;
+            ringFoam += max(0.0, sin(ph)) * env * (0.24 + 0.62 * laceMask);
           }
 
-          float rr = length(p);
-          float baseEnv = exp(-max(0.0, rr - towerRadius - 0.35) * 0.26)
-                        * smoothstep(towerRadius - 0.05, towerRadius + 0.72, rr);
-          float bph = rr * 4.4 - time * 2.75 + foamCellA * 2.2;
-          rn += (p / max(rr, 1e-3)) * cos(bph) * baseEnv * 0.38;
-          ringFoam += smoothstep(0.76, 1.0, sin(bph)) * baseEnv * 0.36 * laceMask;
+          float baseEnv = exp(-max(0.0, rr - towerRadius - 0.38) * 0.24)
+                        * smoothstep(towerRadius - 0.08, towerRadius + 0.82, rr);
+          float bph = rr * 4.1 - time * 2.55 + foamCellA * 2.0;
+          rn += (p / max(rr, 1e-3)) * cos(bph) * baseEnv * 0.36;
+          ringFoam += smoothstep(0.74, 1.0, sin(bph)) * baseEnv * 0.34 * laceMask;
 
           vec3 n = normalize(
             vSwellN
-            + vec3(rip.x + rn.x, 0.0, rip.y + rn.y) * 0.165 * detail
-            + vec3(rn.x, 0.0, rn.y) * 0.12
+            + vec3(rip.x + rn.x, 0.0, rip.y + rn.y) * 0.155 * detail
+            + vec3(rn.x, 0.0, rn.y) * 0.11
           );
 
-          // Schlick Fresnel (water F0 = 0.024), smoothly damped near the distant horizon to prevent bright horizon banding
-          float farAtten = 1.0 - smoothstep(34.0, 92.0, dist);
+          // Schlick Fresnel (water F0 = 0.024)
+          float farAtten = 1.0 - smoothstep(42.0, 110.0, dist);
           float cosT = clamp(dot(n, v), 0.0, 1.0);
           float fres = 0.024 + 0.976 * pow(1.0 - cosT, 5.0);
-          fres = clamp(fres, 0.0, 0.93) * mix(0.32, 1.0, farAtten);
+          fres = clamp(fres, 0.0, 0.94) * mix(0.38, 1.0, farAtten);
 
-          // Planar reflection distorted by wave normals (soft-compressed in Reboot linear HDR so bright moon/cloud
-          // reflections never blow out the bottom-right sea above UnrealBloomPass's ~0.82 threshold)
-          vec3 refl = skyColor * (uIsOrig > 0.5 ? (1.12 + lightningBoost * 0.65) : (0.55 + lightningBoost * 0.35));
+          // Planar reflection: crisp mirror in Alpine Lake & Mist Bayou, dynamic wave-broken in Rapids & Ocean
+          vec3 refl = skyColor * (0.82 + lightningBoost * 0.42);
           if (useReflection > 0.5 && vReflCoord.w > 0.001) {
             vec2 rc = vReflCoord.xy / vReflCoord.w;
-            rc += n.xz * 0.048 * detail;
+            float distortAmt = mix(0.013, 0.052, clamp(chopStrength * 0.72, 0.0, 1.0));
+            rc += n.xz * distortAmt * detail;
             rc = clamp(rc, vec2(0.002), vec2(0.998));
-            refl = texture2D(reflectionMap, rc).rgb;
-            if (uIsOrig < 0.5) {
-              refl = (refl / (vec3(1.0) + refl * 0.85)) * (0.42 + lightningBoost * 0.14);
-            }
+            vec3 rawRefl = texture2D(reflectionMap, rc).rgb;
+            // Gentle HDR highlight knee preserves sunlit snow-peaks, red-rock cliffs & clouds vividly without bloom washout
+            refl = (rawRefl / (vec3(1.0) + rawRefl * 0.36)) * (uReflStrength + lightningBoost * 0.22);
           }
 
-          // Deep storm body colour + dramatic abyssal trough darkening + translucent crest lift
-          float crest = clamp(vHeight * 2.6 + 0.5, 0.0, 1.0);
-          float troughAO = uIsOrig > 0.5 ? 1.0 : mix(0.32, 1.16, smoothstep(-0.22, 0.18, vHeight));
-          vec3 body = mix(deepColor * (uIsOrig > 0.5 ? 1.0 : 0.68), shallowColor, pow(crest, 1.35) * (uIsOrig > 0.5 ? 0.62 : 0.54)) * troughAO;
+          // Vibrant Biome Water Body + Ecosystem Purification Bloom (0..1)
+          float purify = clamp(uPurification, 0.0, 1.0);
+          vec3 effDeep = mix(deepColor, deepColor * vec3(0.88, 1.12, 1.18), purify * 0.45);
+          vec3 effShallow = mix(shallowColor, shallowColor * vec3(0.92, 1.16, 1.14) + vec3(0.0, 0.06, 0.07), purify * 0.52);
 
-          // Subsurface scattering: moonlight/sunlight glowing through thin wave backs + subtle tower bounce
+          // Subtle unpurified siphon silt collar right at spire intakes that clears away to crystal water as purify -> 1!
+          float siltRing = exp(-max(0.0, rr - towerRadius) * 0.28) * (1.0 - purify) * 0.24;
+
+          float crest = clamp(vHeight * 2.4 + 0.52, 0.0, 1.0);
+          float shallowZone = exp(-max(0.0, rr - towerRadius) * 0.055) * 0.48
+                            + (uBiomeMode > 2.5 && uBiomeMode < 3.5 ? (1.0 - smoothstep(10.0, 44.0, rr)) * 0.56 : 0.0);
+          float shallowMix = clamp(pow(crest, 1.25) * 0.58 + shallowZone, 0.0, 0.94);
+          float troughShade = mix(0.68, 1.12, smoothstep(-0.24, 0.20, vHeight));
+          vec3 body = mix(effDeep, effShallow, shallowMix) * troughShade;
+          body = mix(body, uSiltColor, siltRing);
+
+          // Sunlit underwater caustic web shimmer in shallow clear water ('coral_sea', 'canyon_river', 'alpine_lake')
+          if (uCausticStrength > 0.02 && dist < 52.0) {
+            float c1 = 1.0 - abs(noise(pw * 1.85 + vec2(time * 0.34, -time * 0.26)) * 2.0 - 1.0);
+            float c2 = 1.0 - abs(noise((rotB * pw) * 2.65 - vec2(time * 0.28, time * 0.31)) * 2.0 - 1.0);
+            float caust = pow(clamp(c1 * 0.55 + c2 * 0.45, 0.0, 1.0), 3.4);
+            float caustFade = (1.0 - smoothstep(18.0, 50.0, dist)) * (0.45 + 0.55 * shallowMix);
+            body += effShallow * caust * uCausticStrength * (0.62 + 0.45 * purify) * caustFade;
+          }
+
+          // Subsurface sun/aurora scattering through wave crests + spire bioluminescent bounce
           vec3 L = normalize(sunDir);
-          float sss = pow(clamp(dot(v, -L) * 0.5 + 0.5, 0.0, 1.0), 2.8) * smoothstep(0.42, 0.96, crest) * farAtten;
-          body += shallowColor * sss * (uIsOrig > 0.5 ? 0.68 : 0.48);
-          float nearGlow = exp(-max(0.0, rr - towerRadius) * 0.55) * (uIsOrig > 0.5 ? 0.12 : 0.07);
+          float sss = pow(clamp(dot(v, -L) * 0.5 + 0.5, 0.0, 1.0), 2.5) * smoothstep(0.35, 0.95, crest) * farAtten;
+          body += effShallow * sss * 0.58;
+          float nearGlow = exp(-max(0.0, rr - towerRadius) * 0.42) * (0.10 + purify * 0.14);
           body += glowColor * nearGlow * (0.5 + 0.5 * crest);
 
-          // Attenuate reflection inside deep wave troughs in Reboot so valleys read as dark abyssal shadows
-          float reflWeight = uIsOrig > 0.5 ? fres : fres * mix(0.34, 0.90, smoothstep(-0.18, 0.16, vHeight));
-          vec3 col = mix(body, refl, reflWeight);
-
-          // Dual-lobe Moon / Sun Glitter Path:
-          // 1) Razor-crisp mirror glints on steep wave facets
-          // 2) Restrained storm-wave sheen in Reboot so dark midnight swells stay deep slate-indigo (#0a1526..#1e334d)
-          vec3 hVec = normalize(L + v);
-          float ndh = max(dot(n, hVec), 0.0);
-          if (uIsOrig > 0.5) {
-            float tightGlint = pow(ndh, 390.0) * 2.35;
-            float midGlitter = pow(ndh, 58.0) * (0.16 + moonGlitter * 0.34);
-            float stormFacetSheen = pow(ndh, 14.0) * moonGlitter * 0.14 * (0.35 + 0.65 * crest);
-            col += sunColor * (tightGlint + midGlitter + stormFacetSheen) * (sunStrength + lightningBoost * 0.8) * farAtten;
-          } else {
-            float tightGlint = pow(ndh, 440.0) * 1.55;
-            float midGlitter = pow(ndh, 72.0) * (0.052 + moonGlitter * 0.11);
-            float stormFacetSheen = pow(ndh, 16.0) * moonGlitter * 0.042 * (0.35 + 0.65 * crest);
-            vec3 specAdd = sunColor * (tightGlint + midGlitter + stormFacetSheen) * (sunStrength * 0.78 + lightningBoost * 0.45) * farAtten;
-            col += min(specAdd, vec3(0.66, 0.72, 0.78));
+          // Expanding Ecosystem Purification Harmonic Pulse Wave when purify > 0.01
+          if (purify > 0.01 && purify < 0.995) {
+            float waveR = towerRadius + purify * 46.0;
+            float pBand = exp(-pow((rr - waveR) / 2.2, 2.0));
+            body += mix(glowColor, vec3(0.98, 0.92, 0.55), 0.38) * pBand * 0.85;
           }
 
-          // Crashing Sea-Foam Collar around the stone tower base + lacy spume + open-sea whitecaps
-          float ang = atan(vWorld.x, vWorld.z);
+          float reflMix = clamp(fres * mix(0.62, 1.05, uReflStrength), 0.0, 0.94);
+          vec3 col = mix(body, refl, reflMix);
+
+          // Sun / Sunset / Aurora Diamond Glitter Path (capped smoothly below postfx white-bloom washout)
+          vec3 hVec = normalize(L + v);
+          float ndh = max(dot(n, hVec), 0.0);
+          float tightGlint = pow(ndh, 420.0) * 1.85;
+          float midGlitter = pow(ndh, 64.0) * (0.10 + moonGlitter * 0.24);
+          float facetSheen = pow(ndh, 16.0) * moonGlitter * 0.085 * (0.35 + 0.65 * crest);
+          vec3 specAdd = sunColor * (tightGlint + midGlitter + facetSheen) * (sunStrength * 0.85 + lightningBoost * 0.55) * farAtten;
+          col += min(specAdd, vec3(0.95, 0.94, 0.90));
+
+          // Biome-Specific Whitewater Foam:
+          // - Spire collar & lacy surf
+          // - Mode 0 ('canyon_river'): Standing whitewater rapid hydraulic crests & downstream wake streaks!
+          // - Mode 2 ('mist_bayou'): Delicate curling delta current pollen/mist ribbons!
+          // - Mode 4 ('storm_ocean'): Colossal spiraling maelstrom whirlpool spume bands!
           float cw = max(0.5, collarWidth);
-          float fn = fbm(vec2(ang * 8.0 + sin(time * 0.45), rr * 3.6 - time * 1.25));
-          float fnFine = noise(vec2(ang * 26.0, rr * 9.5 + time * 0.85));
+          float fn = fbm(vec2(ang * 9.0 + sin(time * 0.45), rr * 3.1 - time * 1.35));
+          float fnFine = noise(vec2(ang * 28.0, rr * 8.5 + time * 0.90));
           float turb = fn * 0.66 + fnFine * 0.34;
 
-          // Frothy lacy whitewater hugging basal stonework (modulated by cellular lace so it never forms a flat paint band!)
-          float innerProx = smoothstep(towerRadius + 0.85 * cw, towerRadius + 0.04, rr + (turb - 0.5) * 0.72 * cw);
+          float innerProx = smoothstep(towerRadius + 0.92 * cw, towerRadius + 0.05, rr + (turb - 0.5) * 0.75 * cw);
           float innerCollar = innerProx * smoothstep(0.26, 0.72, turb * 0.65 + laceMask * 0.55);
           float outerLace = smoothstep(0.50, 0.78, turb)
-                          * smoothstep(towerRadius + 2.65 * cw, towerRadius + 0.35, rr)
+                          * smoothstep(towerRadius + 2.75 * cw, towerRadius + 0.35, rr)
                           * laceMask;
-          float spumeStreaks = smoothstep(0.64, 0.88, noise(vec2(ang * 17.0 + sin(rr * 2.0 - time), rr * 2.6 - time * 1.6)))
-                             * smoothstep(towerRadius + 2.0 * cw, towerRadius + 0.25, rr);
 
-          // Wind-whipped whitecaps + netted sea-spume veins along open-ocean storm crests (matching high-res storm photo)
-          float crestTurb = fbm(pw * 1.65 + vec2(time * 0.28, -time * 0.19));
-          float veinA = 1.0 - abs(noise(pw * 2.85 + vec2(time * 0.21, -time * 0.16)) * 2.0 - 1.0);
-          float veinB = 1.0 - abs(noise((rotB * pw) * 5.6 - vec2(time * 0.29, time * 0.18)) * 2.0 - 1.0);
+          float crestTurb = fbm(pw * 1.55 + advect * 2.2 + vec2(time * 0.26, -time * 0.18));
+          float veinA = 1.0 - abs(noise(pw * 2.75 + advect * 2.5 + vec2(time * 0.20, -time * 0.15)) * 2.0 - 1.0);
+          float veinB = 1.0 - abs(noise((rotB * pw) * 5.4 - vec2(time * 0.28, time * 0.17)) * 2.0 - 1.0);
           float foamWeb = smoothstep(0.56, 0.90, veinA * 0.64 + veinB * 0.36);
           float slopePinch = clamp(1.0 - vSwellN.y, 0.0, 1.0);
-          float crestBand = smoothstep(0.038, 0.165, vHeight + slopePinch * 0.08);
-          float crestFoam = (crestBand * (smoothstep(0.46, 0.78, crestTurb) * 0.62 + foamWeb * 0.68)
-                          + smoothstep(-0.02, 0.11, vHeight) * foamWeb * laceMask * 0.26)
-                          * (1.0 - smoothstep(28.0, 74.0, dist));
+          float crestBand = smoothstep(0.032, 0.155, vHeight + slopePinch * 0.08);
+          float crestFoam = (crestBand * (smoothstep(0.44, 0.78, crestTurb) * 0.62 + foamWeb * 0.68)
+                          + smoothstep(-0.02, 0.10, vHeight) * foamWeb * laceMask * 0.24)
+                          * (1.0 - smoothstep(32.0, 84.0, dist));
 
-          float rawFoam = innerCollar * 0.88
-                        + outerLace * 0.50
-                        + spumeStreaks * 0.36
-                        + crestFoam * (uIsOrig > 0.5 ? 0.48 : 0.52)
+          float biomeSpecialFoam = 0.0;
+          if (uBiomeMode < 0.5) {
+            // Canyon River standing rapids & downstream spire wake V-plume
+            vec2 fDir = normalize(uFlowVel + vec2(1e-4));
+            float downProj = dot(p, fDir);
+            float crossDist = abs(dot(p, vec2(-fDir.y, fDir.x)));
+            float spireWake = smoothstep(0.0, 2.5, downProj)
+                            * exp(-max(0.0, downProj - towerRadius) * 0.065)
+                            * smoothstep(towerRadius + 2.4 + downProj * 0.24, towerRadius * 0.55, crossDist);
+            float standingRibs = smoothstep(0.54, 0.86, sin(dot(pw, fDir) * 1.55 - time * 3.4) * 0.5 + 0.5)
+                               * smoothstep(0.38, 0.76, foamCellA);
+            biomeSpecialFoam = (spireWake * (0.45 + 0.55 * laceMask) + standingRibs * 0.44)
+                             * (1.0 - smoothstep(34.0, 82.0, dist));
+          } else if (uVortexAmt > 0.01) {
+            // Polar Maelstrom logarithmic spiral spume arms churning around the spire!
+            float logR = log(max(1.0, rr));
+            float spiralPhase = ang * 5.0 + logR * 7.8 - time * 3.8 + foamCellA * 1.8;
+            float spiralBands = smoothstep(0.42, 0.92, sin(spiralPhase) * 0.5 + 0.5);
+            float maelstromZone = exp(-max(0.0, rr - towerRadius - 0.4) * 0.095)
+                                * smoothstep(towerRadius - 0.1, towerRadius + 0.9, rr);
+            biomeSpecialFoam = spiralBands * maelstromZone * (0.48 + 0.52 * laceMask) * uVortexAmt * 1.15;
+          }
+
+          float rawFoam = innerCollar * 0.86
+                        + outerLace * 0.48
+                        + crestFoam * 0.50
+                        + biomeSpecialFoam
                         + ringFoam;
           float foam = clamp(rawFoam * foamStrength, 0.0, 1.0);
-          vec3 frothyWhite = uIsOrig > 0.5
-            ? mix(foamColor * 0.86, vec3(0.96, 0.99, 1.0), smoothstep(0.48, 0.96, foam))
-            : mix(min(foamColor, vec3(0.52, 0.59, 0.67)) * 0.74, vec3(0.50, 0.58, 0.66), smoothstep(0.42, 0.92, foam));
-          col = mix(col, frothyWhite, foam * (uIsOrig > 0.5 ? 0.82 : 0.80));
+          vec3 crispFoamCol = min(foamColor * (0.86 + 0.14 * smoothstep(0.4, 0.95, foam)), vec3(0.96, 0.98, 1.0));
+          col = mix(col, crispFoamCol, foam * 0.84);
 
-          // Seamless distant horizon mist blend + circular radial alpha feathering (zero polygon horizon edge!)
+          // Seamless distant horizon mist blend + circular radial alpha feathering
           float radNorm = rr / max(uOuterRadius, 1.0);
-          float horMist = max(smoothstep(44.0, 108.0, dist), smoothstep(0.34, 0.78, radNorm));
-          vec3 mistTarget = skyColor * (uIsOrig > 0.5 ? 0.88 : 0.44);
+          float horMist = max(smoothstep(54.0, 128.0, dist), smoothstep(0.38, 0.82, radNorm));
+          vec3 mistTarget = uHorizonMistColor * 0.88;
           #ifdef USE_FOG
-            mistTarget = mix(fogColor, mistTarget, 0.24);
+            mistTarget = mix(fogColor, mistTarget, 0.42);
           #endif
-          col = mix(col, mistTarget, horMist * 0.88);
-          float horizonAlpha = (1.0 - smoothstep(58.0, 152.0, dist)) * (1.0 - smoothstep(0.42, 0.92, radNorm));
+          col = mix(col, mistTarget, horMist * 0.90);
+
+          float horizonAlpha = (1.0 - smoothstep(72.0, 168.0, dist)) * (1.0 - smoothstep(0.46, 0.94, radNorm));
           if (horizonAlpha < 0.002) discard;
 
-          gl_FragColor = vec4(col, horizonAlpha);
+          // Crystal-Clear Lagoon / Shallows Transmission ('coral_sea', 'alpine_lake', 'canyon_river'):
+          // Allows opaque 3D Underwater Coral Reef Shelves & Gliding Manta Rays below waterY to shine right through!
+          float clarityZone = (1.0 - smoothstep(22.0, 54.0, dist)) * (1.0 - horMist);
+          float effClarity = clamp(uClarity + purify * 0.14, 0.0, 0.78) * clarityZone;
+          float surfaceOpacity = clamp(1.0 - effClarity * (1.0 - fres * 0.84), 0.34, 1.0);
+          surfaceOpacity = mix(surfaceOpacity, 1.0, clamp(foam * 1.15, 0.0, 1.0));
+
+          gl_FragColor = vec4(col, surfaceOpacity * horizonAlpha);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
           #include <fog_fragment>
@@ -698,23 +815,20 @@ export class Ocean {
     this._q = new THREE.Vector4();
     this._ri = 0;
 
-    this.applyPreset(era === 'original' ? 'original_hd' : preset);
+    this.applyPreset(this.currentPreset);
   }
 
   /**
-   * Applies a named preset from `OCEAN_PRESETS` (or a custom config object) with optional overrides.
+   * Applies one of the 5 Earth Water Biomes (or legacy alias / custom config object).
    */
-  applyPreset(presetOrObj = 'moonlit_storm', overrides = null) {
-    const base =
-      typeof presetOrObj === 'string'
-        ? OCEAN_PRESETS[presetOrObj] || OCEAN_PRESETS.moonlit_storm
-        : presetOrObj || OCEAN_PRESETS.moonlit_storm;
+  applyPreset(presetOrObj = 'canyon_river', overrides = null) {
+    let base;
     if (typeof presetOrObj === 'string') {
-      this.currentPreset = presetOrObj;
-      if (this.material?.uniforms?.uIsOrig) {
-        this.material.uniforms.uIsOrig.value =
-          presetOrObj === 'original' || presetOrObj === 'original_hd' || this.era === 'original' ? 1 : 0;
-      }
+      const resolved = resolveWaterBiome(presetOrObj);
+      this.currentPreset = resolved;
+      base = OCEAN_PRESETS[presetOrObj] || CANONICAL_WATER_PRESETS[resolved] || CANONICAL_WATER_PRESETS.canyon_river;
+    } else {
+      base = presetOrObj || CANONICAL_WATER_PRESETS.canyon_river;
     }
     this._writeUniformConfig(base);
     if (overrides && typeof overrides === 'object') {
@@ -724,18 +838,21 @@ export class Ocean {
   }
 
   /**
-   * Switches between `'reboot'` (Moonlit Storm / biome theme) and `'original'` (2008 XBLA HD).
+   * Direct biome setter (`'canyon_river'`, `'alpine_lake'`, `'mist_bayou'`, `'coral_sea'`, `'storm_ocean'`).
    */
-  setEra(era = 'reboot', theme = null) {
-    this.era = era === 'original' ? 'original' : 'reboot';
-    if (this.material?.uniforms?.uIsOrig) {
-      this.material.uniforms.uIsOrig.value = this.era === 'original' ? 1 : 0;
-    }
-    if (this.era === 'original') {
-      this.applyPreset('original_hd');
-    } else {
-      const key = theme && OCEAN_PRESETS[theme] ? theme : 'moonlit_storm';
-      this.applyPreset(key);
+  setTheme(theme = 'canyon_river', overrides = null) {
+    return this.applyPreset(theme, overrides);
+  }
+
+  /**
+   * Preserves legacy `setEra(era, theme)` caller compatibility while always rendering AAA biome water.
+   */
+  setEra(_era = 'reboot', theme = null) {
+    this.era = 'reboot';
+    if (theme) {
+      this.applyPreset(theme);
+    } else if (this.currentPreset) {
+      this.applyPreset(this.currentPreset);
     }
     return this;
   }
@@ -745,16 +862,8 @@ export class Ocean {
    */
   setPalette(opts = {}) {
     if (!opts || typeof opts !== 'object') return this;
-    if (opts.era === 'original') {
-      this.era = 'original';
-      this.applyPreset(opts.preset || 'original_hd', opts);
-      return this;
-    }
-    if (opts.era === 'reboot') {
-      this.era = 'reboot';
-    }
     const presetKey = opts.preset || opts.theme;
-    if (presetKey && OCEAN_PRESETS[presetKey]) {
+    if (presetKey) {
       this.applyPreset(presetKey, opts);
     } else {
       this._writeUniformConfig(opts);
@@ -763,7 +872,22 @@ export class Ocean {
   }
 
   /**
-   * Updates key moon/sun directional glitter parameters without allocating.
+   * Sets Ecosystem Healing / Spire Purification progress (`0..1`).
+   */
+  setPurification(progress = 0) {
+    const p = Math.max(0, Math.min(1, Number(progress) || 0));
+    this._purificationTarget = p;
+    this._purification = p;
+    this.material.uniforms.uPurification.value = p;
+    return this;
+  }
+
+  setRestored(restored = true) {
+    return this.setPurification(restored ? 1 : 0);
+  }
+
+  /**
+   * Updates key sun / aurora directional glitter parameters without allocating.
    */
   setMoonlight({ color, direction, dir, strength, glitter, sheen } = {}) {
     const u = this.material.uniforms;
@@ -782,6 +906,10 @@ export class Ocean {
     return this;
   }
 
+  setSunlight(opts = {}) {
+    return this.setMoonlight(opts);
+  }
+
   setWaterLevel(y) {
     if (Number.isFinite(y)) {
       this.mesh.position.y = y;
@@ -791,17 +919,27 @@ export class Ocean {
 
   _writeUniformConfig(cfg) {
     const u = this.material.uniforms;
+    if (cfg.biomeMode !== undefined) u.uBiomeMode.value = Number(cfg.biomeMode);
     if (cfg.deepColor !== undefined) u.deepColor.value.set(cfg.deepColor);
     if (cfg.shallowColor !== undefined) u.shallowColor.value.set(cfg.shallowColor);
     if (cfg.skyColor !== undefined) u.skyColor.value.set(cfg.skyColor);
+    if (cfg.horizonMistColor !== undefined) u.uHorizonMistColor.value.set(cfg.horizonMistColor);
     if (cfg.sunColor !== undefined) u.sunColor.value.set(cfg.sunColor);
     if (cfg.glowColor !== undefined) u.glowColor.value.set(cfg.glowColor);
     if (cfg.foamColor !== undefined) u.foamColor.value.set(cfg.foamColor);
+    if (cfg.siltColor !== undefined) u.uSiltColor.value.set(cfg.siltColor);
     if (cfg.sunDir) {
       if (Array.isArray(cfg.sunDir)) {
         u.sunDir.value.set(cfg.sunDir[0], cfg.sunDir[1], cfg.sunDir[2]).normalize();
       } else if (typeof cfg.sunDir.x === 'number') {
         u.sunDir.value.set(cfg.sunDir.x, cfg.sunDir.y, cfg.sunDir.z || 0).normalize();
+      }
+    }
+    if (cfg.flowVel) {
+      if (Array.isArray(cfg.flowVel)) {
+        u.uFlowVel.value.set(cfg.flowVel[0], cfg.flowVel[1]);
+      } else if (typeof cfg.flowVel.x === 'number') {
+        u.uFlowVel.value.set(cfg.flowVel.x, cfg.flowVel.y);
       }
     }
     if (cfg.towerRadius !== undefined) u.towerRadius.value = Number(cfg.towerRadius);
@@ -812,6 +950,14 @@ export class Ocean {
     if (cfg.foamStrength !== undefined) u.foamStrength.value = Number(cfg.foamStrength);
     if (cfg.collarWidth !== undefined) u.collarWidth.value = Number(cfg.collarWidth);
     if (cfg.lightningBoost !== undefined) u.lightningBoost.value = Number(cfg.lightningBoost);
+    if (cfg.clarity !== undefined) u.uClarity.value = Number(cfg.clarity);
+    if (cfg.reflStrength !== undefined) u.uReflStrength.value = Number(cfg.reflStrength);
+    if (cfg.vortexAmt !== undefined) u.uVortexAmt.value = Number(cfg.vortexAmt);
+    if (cfg.causticStrength !== undefined) u.uCausticStrength.value = Number(cfg.causticStrength);
+    if (cfg.purificationProgress !== undefined || cfg.restored !== undefined) {
+      const p = cfg.purificationProgress !== undefined ? Number(cfg.purificationProgress) : (cfg.restored ? 1 : 0);
+      this.setPurification(p);
+    }
   }
 
   /**
@@ -819,11 +965,29 @@ export class Ocean {
    */
   update(time, opts = null) {
     const u = this.material.uniforms;
-    u.time.value = Number(time) || 0;
+    const t = Number(time) || 0;
+    const prevT = u.time.value || t;
+    const dt = Math.min(0.05, Math.max(0.0, t - prevT));
+    u.time.value = t;
+
     if (opts) {
+      if (opts.theme && resolveWaterBiome(opts.theme) !== this.currentPreset) {
+        this.applyPreset(opts.theme);
+      }
       if (opts.waterY !== undefined) this.mesh.position.y = opts.waterY;
       if (opts.lightningFlash !== undefined) u.lightningBoost.value = opts.lightningFlash;
       if (opts.towerRadius !== undefined) u.towerRadius.value = opts.towerRadius;
+      if (opts.purificationProgress !== undefined) {
+        this._purificationTarget = Math.max(0, Math.min(1, Number(opts.purificationProgress) || 0));
+      } else if (opts.restored !== undefined) {
+        this._purificationTarget = opts.restored ? 1 : 0;
+      }
+    }
+
+    if (Math.abs(this._purificationTarget - this._purification) > 1e-4) {
+      const rate = dt > 0 ? Math.min(1, dt * 2.4) : 1;
+      this._purification += (this._purificationTarget - this._purification) * rate;
+      u.uPurification.value = this._purification;
     }
   }
 
@@ -837,7 +1001,7 @@ export class Ocean {
   }
 
   setSize(w, h, dpr = 1) {
-    const scale = this.resScale || 0.45;
+    const scale = this.resScale || 0.5;
     const rw = Math.max(64, Math.floor((w || 360) * (dpr || 1) * scale));
     const rh = Math.max(64, Math.floor((h || 640) * (dpr || 1) * scale));
     if (this.rt.width !== rw || this.rt.height !== rh) {
@@ -862,7 +1026,7 @@ export class Ocean {
     this._rot.extractRotation(mesh.matrixWorld);
     this._normal.set(0, 1, 0);
     this._view.subVectors(this._reflectorWorld, this._camWorld);
-    if (this._view.dot(this._normal) > 0) return; // Camera is below the water plane
+    if (this._view.dot(this._normal) > 0) return;
 
     this._view.reflect(this._normal).negate();
     this._view.add(this._reflectorWorld);

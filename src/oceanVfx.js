@@ -1,45 +1,39 @@
 // ============================================================================
-// Tower Toppler '26 — AAA Next-Gen Ocean Surf, Volumetric Mist & Spark VFX
-// Module: src/oceanVfx.js
+// Towering Waters: Gateway's Descent — Multi-Biome Waterline Rapids, Maelstrom
+// Surf, Volumetric Sanctum Mist, Geyser Vents & Conduit Sparks (`src/oceanVfx.js`)
 //
 // Exports `TowerFluidAndSparkVFX`:
-//   - constructor(scene)
-//   - setEra(era)
+//   - constructor(scene, opts)
+//   - setTheme(theme)
+//   - setEra(_era)
+//   - setPurification(progress) / setRestored(restored)
 //   - rebuildForTower(tower, fh, towerRadius)
 //   - update(state, camCol, time, dt)
+//   - setVisible(visible)
 //   - dispose()
 //
-// Reference-Photo ("North Star") Spectacle & Mobile-60fps GPU Guarantees:
-//   - Explosive 2.2x whitewater surf crests, lacy Voronoi-FBM surf plumes &
-//     520 ballistic moonlit sea-spray droplet clusters erupting up both flanks
-//     and spiral base stairs around `(TOWER_RADIUS, state.waterFloor * fh)`
-//   - Luminous cyan-silver doorway mist (`alpha <= 0.22` hardware-clamped)
-//     rim-lighting Pogo from inside dark stone portals & drifting off wet ledges
-//   - 3x dense (720-spark) white-gold-amber ballistic furnace spark showers
-//     shooting out of `sparkArch` mouths, physically bouncing & skipping across
-//     wet flagstones with warm flickering PointLight + specular floor wash
-//   - Pressurized `steamVent` plumes (`idle` / `steamWarn` / `steamActive`)
-//   - ZERO per-frame heap/GC allocations, ZERO shader recompiles, ZERO leaks!
+// Scaled for V3 AAA World (`COLS = 20`, `TOWER_RADIUS = 3.75`, `FLOOR_HEIGHT = 1.50`)
+// across all 5 Earth Water Biomes (`canyon_river`, `alpine_lake`, `mist_bayou`,
+// `coral_sea`, `storm_ocean`) with ZERO per-frame heap/GC allocations!
 // ============================================================================
 
 import * as THREE from 'three';
 
-const COLS = 16;
+const DEFAULT_COLS = 20;
+const MAX_COLS = 32;
 const TWO_PI = Math.PI * 2;
-const COL_ANGLE = TWO_PI / COLS;
-const DEFAULT_TOWER_RADIUS = 2.55;
-const DEFAULT_FH = 1.0;
-const STEP_ORIGINAL = 0.43;
+const DEFAULT_TOWER_RADIUS = 3.75;
+const DEFAULT_FH = 1.50;
 
 // Pre-allocated GPU pool capacities (7-8 draw calls total, < 5.6k tris total!)
 const SURF_CREST_COUNT = 64;
-const MAX_SURF_PLUMES = 96;     // Billowing frothy whitewater surf plumes on base & flanks
-const MAX_SEA_DROPLETS = 520;   // Ballistic airborne moonlit water beads & spume shreds
-const MAX_MIST_WISPS = 256;     // 64 flank/basal mist banks + 192 doorway rim & ledge wisps
+const MAX_SURF_PLUMES = 96;
+const MAX_SEA_DROPLETS = 520;
+const MAX_MIST_WISPS = 256;
 const SEA_MIST_SLOTS = 64;
 const MAX_STEAM_PUFFS = 128;
-const MAX_SPARKS = 720;         // 3x dense white-gold-amber bouncing welding sparks & embers
-const MAX_SPARK_GLOWS = 36;     // 3 layered glow quads per sparkArch (up to 12 arches/tower)
+const MAX_SPARKS = 720;
+const MAX_SPARK_GLOWS = 36;
 const SPARK_LIGHT_POOL = 2;
 
 const MAX_DOOR_EMITTERS = 32;
@@ -47,6 +41,58 @@ const MAX_LEDGE_MIST_EMITTERS = 28;
 const MAX_SPARK_ARCH_EMITTERS = 12;
 const MAX_STEAM_VENT_EMITTERS = 16;
 const MAX_GRID_FLOORS = 128;
+
+const VFX_BIOME_MAP = Object.freeze({
+  canyon_river: 'canyon_river',
+  canyon: 'canyon_river',
+  river: 'canyon_river',
+  redwood: 'canyon_river',
+  foundry: 'canyon_river',
+  piston: 'canyon_river',
+
+  alpine_lake: 'alpine_lake',
+  alpine: 'alpine_lake',
+  lake: 'alpine_lake',
+  glacier: 'alpine_lake',
+  blizzard: 'alpine_lake',
+
+  mist_bayou: 'mist_bayou',
+  bayou: 'mist_bayou',
+  delta: 'mist_bayou',
+  swamp: 'mist_bayou',
+  mist: 'mist_bayou',
+  dusk: 'mist_bayou',
+
+  coral_sea: 'coral_sea',
+  coral: 'coral_sea',
+  reef: 'coral_sea',
+  lagoon: 'coral_sea',
+  sea: 'coral_sea',
+  sinking: 'coral_sea',
+  prism: 'coral_sea',
+  day: 'coral_sea',
+
+  storm_ocean: 'storm_ocean',
+  ocean: 'storm_ocean',
+  polar: 'storm_ocean',
+  tempest: 'storm_ocean',
+  maelstrom: 'storm_ocean',
+  blackout: 'storm_ocean',
+  apex: 'storm_ocean',
+  moonlit_storm: 'storm_ocean',
+  storm: 'storm_ocean',
+});
+
+const CANONICAL_BIOMES = ['canyon_river', 'alpine_lake', 'mist_bayou', 'coral_sea', 'storm_ocean'];
+
+export function resolveVfxBiome(raw, towerId = 1) {
+  if (typeof raw === 'string') {
+    const k = raw.trim().toLowerCase();
+    if (VFX_BIOME_MAP[k]) return VFX_BIOME_MAP[k];
+  }
+  const idx = Math.floor((Math.max(1, Number(towerId) || 1) - 1) / 2) % CANONICAL_BIOMES.length;
+  return CANONICAL_BIOMES[idx];
+}
 
 function wrapAngle(a) {
   let r = a % TWO_PI;
@@ -61,8 +107,8 @@ function wrapPositiveAngle(a) {
   return r;
 }
 
-function wrapColIndex(c) {
-  return ((c % COLS) + COLS) % COLS;
+function wrapColIndex(c, cols) {
+  return ((c % cols) + cols) % cols;
 }
 
 function mulberry32(seed) {
@@ -128,7 +174,7 @@ function createPeriodicNoise2D(seed) {
   return { noise, fbm };
 }
 
-// 1. Seamless Tileable Cellular Voronoi Lacy Seafoam + FBM Billow Texture (256x256)
+// 1. Seamless Tileable Cellular Voronoi Lacy Whitewater Foam + FBM Billow Texture (256x256)
 function createLacyFoamTexture(size = 256) {
   const canvas = document.createElement('canvas');
   canvas.width = size;
@@ -229,7 +275,7 @@ function createLacyFoamTexture(size = 256) {
   return tex;
 }
 
-// 2. 2x2 Quadrant Domain-Warped FBM Volumetric Wisp Atlas (256x256)
+// 2. 2x2 Quadrant Domain-Warped FBM Volumetric Mist Wisp Atlas (256x256)
 function createVolumetricWispAtlas(size = 256) {
   const canvas = document.createElement('canvas');
   canvas.width = size;
@@ -295,7 +341,6 @@ function createVolumetricWispAtlas(size = 256) {
           const wispy = Math.max(0.0, Math.min(1.0, (n1 * 0.68 + n2 * 0.32 - 0.16) * 1.68));
           const alpha = Math.min(1.0, falloff * (0.34 + 0.66 * wispy) * wispy * 1.42);
 
-          // Upper-right moonlit scattering gradient baked into RGB
           const rimLift = Math.max(0.72, Math.min(1.0, 0.88 - dy * 0.14 + dx * 0.06 + n2 * 0.14));
           const lum = Math.round(rimLift * 255);
 
@@ -318,7 +363,7 @@ function createVolumetricWispAtlas(size = 256) {
   return tex;
 }
 
-// 3. 2x2 Quadrant Asymmetric Sea-Spray Droplet & Spume Shred Atlas (256x256)
+// 3. 2x2 Quadrant Water-Spray Droplet & Spume Shred Atlas (256x256)
 function createSpumeDropletAtlas(size = 256) {
   const canvas = document.createElement('canvas');
   canvas.width = size;
@@ -340,7 +385,6 @@ function createSpumeDropletAtlas(size = 256) {
       ctx.rect(qx * half + 10, qy * half + 10, half - 20, half - 20);
       ctx.clip();
 
-      // Asymmetric wind-sheared sea-mist wisp veil
       for (let m = 0; m < 3; m++) {
         const ox = (rng() - 0.5) * 18;
         const oy = (rng() - 0.5) * 16;
@@ -350,9 +394,9 @@ function createSpumeDropletAtlas(size = 256) {
         ctx.rotate(-0.45 + rng() * 0.9);
         ctx.scale(1.45, 0.72);
         const mg = ctx.createRadialGradient(0, 0, 0, 0, 0, mr);
-        mg.addColorStop(0.0, 'rgba(222, 244, 255, 0.28)');
-        mg.addColorStop(0.55, 'rgba(182, 228, 252, 0.11)');
-        mg.addColorStop(1.0, 'rgba(148, 208, 248, 0.0)');
+        mg.addColorStop(0.0, 'rgba(235, 250, 255, 0.28)');
+        mg.addColorStop(0.55, 'rgba(195, 238, 255, 0.11)');
+        mg.addColorStop(1.0, 'rgba(160, 220, 252, 0.0)');
         ctx.fillStyle = mg;
         ctx.beginPath();
         ctx.arc(0, 0, mr, 0, TWO_PI);
@@ -360,7 +404,6 @@ function createSpumeDropletAtlas(size = 256) {
         ctx.restore();
       }
 
-      // Sheared upward splash streaks & torn sea-spume shreds
       ctx.lineCap = 'round';
       const shredCount = 3 + (qIdx % 2);
       for (let f = 0; f < shredCount; f++) {
@@ -368,15 +411,10 @@ function createSpumeDropletAtlas(size = 256) {
         const sy = cy + 6 + (rng() - 0.5) * 18;
         const dirAng = -Math.PI * 0.5 + (rng() - 0.5) * 0.85;
         const len = 11 + rng() * 19;
-        const lg = ctx.createLinearGradient(
-          sx,
-          sy,
-          sx + Math.cos(dirAng) * len,
-          sy + Math.sin(dirAng) * len
-        );
+        const lg = ctx.createLinearGradient(sx, sy, sx + Math.cos(dirAng) * len, sy + Math.sin(dirAng) * len);
         const aPeak = 0.34 + rng() * 0.32;
         lg.addColorStop(0.0, 'rgba(186, 230, 253, 0.0)');
-        lg.addColorStop(0.45, `rgba(240, 251, 255, ${aPeak.toFixed(3)})`);
+        lg.addColorStop(0.45, `rgba(245, 253, 255, ${aPeak.toFixed(3)})`);
         lg.addColorStop(1.0, 'rgba(255, 255, 255, 0.0)');
         ctx.strokeStyle = lg;
         ctx.lineWidth = 1.8 + rng() * 2.4;
@@ -391,7 +429,6 @@ function createSpumeDropletAtlas(size = 256) {
         ctx.stroke();
       }
 
-      // Crisp irregular water beads & splash teardrops (varied sizes, non-ring placement)
       const dropCount = 5 + qIdx;
       for (let d = 0; d < dropCount; d++) {
         const dx = cx + (rng() - 0.5) * 38 * Math.sqrt(rng());
@@ -408,9 +445,9 @@ function createSpumeDropletAtlas(size = 256) {
         const dg = ctx.createRadialGradient(dr * 0.2, 0, 0, 0, 0, dr);
         const peakA = d === 0 ? 0.94 : 0.58 + rng() * 0.38;
         dg.addColorStop(0.0, `rgba(255, 255, 255, ${peakA.toFixed(3)})`);
-        dg.addColorStop(0.45, `rgba(230, 248, 255, ${(peakA * 0.72).toFixed(3)})`);
-        dg.addColorStop(0.80, `rgba(176, 226, 252, ${(peakA * 0.22).toFixed(3)})`);
-        dg.addColorStop(1.0, 'rgba(148, 210, 250, 0.0)');
+        dg.addColorStop(0.45, `rgba(235, 250, 255, ${(peakA * 0.72).toFixed(3)})`);
+        dg.addColorStop(0.80, `rgba(182, 232, 255, ${(peakA * 0.22).toFixed(3)})`);
+        dg.addColorStop(1.0, 'rgba(155, 218, 252, 0.0)');
         ctx.fillStyle = dg;
         ctx.beginPath();
         ctx.arc(0, 0, dr, 0, TWO_PI);
@@ -431,7 +468,7 @@ function createSpumeDropletAtlas(size = 256) {
   return tex;
 }
 
-function buildSurfApronGeometry(angSegs = 64, radSegs = 4) {
+function buildSurfApronGeometry(angSegs = 72, radSegs = 4) {
   const vertCount = (angSegs + 1) * (radSegs + 1);
   const positions = new Float32Array(vertCount * 3);
   const uvs = new Float32Array(vertCount * 2);
@@ -448,7 +485,7 @@ function buildSurfApronGeometry(angSegs = 64, radSegs = 4) {
       positions[vPtr++] = rt;
       positions[vPtr++] = Math.cos(phi);
 
-      uvs[uPtr++] = at * 6.0;
+      uvs[uPtr++] = at * 7.0;
       uvs[uPtr++] = rt;
     }
   }
@@ -470,7 +507,6 @@ function buildSurfApronGeometry(angSegs = 64, radSegs = 4) {
   return geo;
 }
 
-// Sculpted 3D outward-flaring wave-splash fan geometry
 function buildSurfCrestTongueGeometry(uSegs = 5, vSegs = 4) {
   const vertCount = (uSegs + 1) * (vSegs + 1);
   const positions = new Float32Array(vertCount * 3);
@@ -481,16 +517,14 @@ function buildSurfCrestTongueGeometry(uSegs = 5, vSegs = 4) {
   let uvPtr = 0;
   for (let iv = 0; iv <= vSegs; iv++) {
     const v = iv / vSegs;
-    // Curves inward at base, then flares dynamically outward into an explosive spray fan!
-    const radialOut = (1.0 - v) * 0.30 + Math.sin(v * Math.PI) * 0.14 + v * v * 0.58;
-    const heightY = -0.06 + v * 1.06;
+    const radialOut = (1.0 - v) * 0.30 + Math.sin(v * Math.PI) * 0.15 + v * v * 0.62;
+    const heightY = -0.06 + v * 1.08;
 
     for (let iu = 0; iu <= uSegs; iu++) {
       const u = iu / uSegs;
       const centeredU = (u - 0.5) * 2.0;
       const crown = Math.max(0.18, 1.0 - centeredU * centeredU * 0.54);
-      // Fan widens as it shoots upward
-      const fanSpread = 0.5 + v * 0.36;
+      const fanSpread = 0.52 + v * 0.38;
       positions[pPtr++] = centeredU * fanSpread;
       positions[pPtr++] = heightY * crown;
       positions[pPtr++] = radialOut + Math.abs(centeredU) * 0.12 * v;
@@ -518,26 +552,35 @@ function buildSurfCrestTongueGeometry(uSegs = 5, vSegs = 4) {
 }
 
 export class TowerFluidAndSparkVFX {
-  constructor(scene = null) {
+  constructor(scene = null, opts = {}) {
     this.scene = scene;
     this.era = 'reboot';
-    this.fh = DEFAULT_FH;
-    this.towerRadius = DEFAULT_TOWER_RADIUS;
+    this.cols = opts.cols || DEFAULT_COLS;
+    this.colAngle = TWO_PI / this.cols;
+    this.fh = opts.fh || opts.floorHeight || DEFAULT_FH;
+    this.towerRadius = opts.towerRadius || DEFAULT_TOWER_RADIUS;
     this._tower = null;
     this._towerFloors = 18;
-    this._theme = 'mist';
+    this._theme = resolveVfxBiome(opts.theme || 'canyon_river');
+    this._forcedTheme = null;
+    this._purification = 0;
+    this._purificationTarget = 0;
     this._disposed = false;
+
+    // Biome kinetics tuned per watershed
+    this._biomeSurgeScale = 1.15;
+    this._biomeMistRateScale = 1.0;
+    this._biomeFlowDrift = 1.25;
+    this._biomeVortexSpin = 0.0;
 
     this.group = new THREE.Group();
     this.group.name = 'TowerFluidAndSparkVFX';
 
-    // Waterline-locked group (tracks `waterY` vertically and `-camCol * COL_ANGLE` yaw)
     this.waterlineGroup = new THREE.Group();
-    this.waterlineGroup.name = 'OceanSurfAndSprayGroup';
+    this.waterlineGroup.name = 'WatershedSurfAndSprayGroup';
 
-    // Tower-locked group (tracks `-camCol * COL_ANGLE` yaw AND `state.topple` sink/shake/tilt)
     this.towerVfxGroup = new THREE.Group();
-    this.towerVfxGroup.name = 'TowerMistSparkSteamGroup';
+    this.towerVfxGroup.name = 'SpireMistSparkSteamGroup';
 
     this.group.add(this.waterlineGroup, this.towerVfxGroup);
     if (this.scene && typeof this.scene.add === 'function') {
@@ -556,27 +599,22 @@ export class TowerFluidAndSparkVFX {
     this._rngState = 0x51f15e26;
     this._prevToppleDropY = 0;
 
-    this._basalStepBoost = new Float32Array(COLS);
+    this._basalStepBoost = new Float32Array(MAX_COLS);
 
-    // Doorway mist emitters: [phi, baseY, doorH, tintType, widthScale]
     this._doorEmitterCount = 0;
     this._doorEmitterData = new Float32Array(MAX_DOOR_EMITTERS * 5);
 
-    // Corbel-ledge & flank rolling mist emitters: [phiCenter, spanRad, surfaceY, kindFlag]
     this._ledgeMistCount = 0;
     this._ledgeMistData = new Float32Array(MAX_LEDGE_MIST_EMITTERS * 4);
 
-    // sparkArch furnace emitters: [phi, floorY, doorH, tangDir, phaseSeed, wasSubmerged, accum]
     this._sparkArchCount = 0;
     this._sparkArchData = new Float32Array(MAX_SPARK_ARCH_EMITTERS * 7);
 
-    // steamVent emitters: [phi, surfaceY, period, offset, ledgeArrayIdx, accum]
     this._steamVentCount = 0;
     this._steamVentData = new Float32Array(MAX_STEAM_VENT_EMITTERS * 6);
 
-    // Fast O(1) walkable stone floor lookup for physical spark bouncing: COLS * MAX_GRID_FLOORS
-    this._ledgeSurfaceGrid = new Float32Array(COLS * MAX_GRID_FLOORS);
-    this._ledgeIndexGrid = new Int16Array(COLS * MAX_GRID_FLOORS);
+    this._ledgeSurfaceGrid = new Float32Array(MAX_COLS * MAX_GRID_FLOORS);
+    this._ledgeIndexGrid = new Int16Array(MAX_COLS * MAX_GRID_FLOORS);
     this._ledgeSurfaceGrid.fill(-1e6);
     this._ledgeIndexGrid.fill(-1);
 
@@ -588,7 +626,7 @@ export class TowerFluidAndSparkVFX {
     this._initSteamPlumes();
     this._initSparkStreaksAndGlows();
 
-    this._applyEraVisuals();
+    this._applyThemePalette(this._theme);
   }
 
   _rand() {
@@ -597,25 +635,22 @@ export class TowerFluidAndSparkVFX {
     x ^= x >>> 17;
     x ^= x << 5;
     this._rngState = x;
-    return ((x >>> 0) / 4294967296);
+    return (x >>> 0) / 4294967296;
   }
 
-  // --------------------------------------------------------------------------
-  // 1A. Organic 2-Layer Lacy Seafoam Apron Skirt
-  // --------------------------------------------------------------------------
   _initSurfApron() {
-    const geo = buildSurfApronGeometry(64, 4);
+    const geo = buildSurfApronGeometry(72, 4);
     this._geometries.push(geo);
 
     this.surfApronUniforms = {
       uTime: { value: 0 },
       uTowerRadius: { value: this.towerRadius },
       uSurge: { value: 1.0 },
-      uIsOrig: { value: 0.0 },
+      uSpinSpeed: { value: 0.0 },
       uFoamMap: { value: this.lacyFoamTex },
-      uBrightColor: { value: new THREE.Color('#e2f2fe') },
-      uMidColor: { value: new THREE.Color('#8ec5f6') },
-      uDeepTint: { value: new THREE.Color('#38bdf8') },
+      uBrightColor: { value: new THREE.Color('#f4fcff') },
+      uMidColor: { value: new THREE.Color('#6ee7d8') },
+      uDeepTint: { value: new THREE.Color('#14b8a6') },
     };
 
     const mat = new THREE.ShaderMaterial({
@@ -632,7 +667,6 @@ export class TowerFluidAndSparkVFX {
         uniform float uTime;
         uniform float uTowerRadius;
         uniform float uSurge;
-        uniform float uIsOrig;
         varying vec2 vUv;
         varying float vRadial;
         varying float vWaveRunup;
@@ -647,16 +681,16 @@ export class TowerFluidAndSparkVFX {
             cos(phi * 5.0 - uTime * 2.05) * 0.34 +
             sin(phi * 9.0 + uTime * 3.8) * 0.18;
 
-          float span = mix(2.35, 1.15, uIsOrig) * (0.94 + 0.22 * uSurge);
-          float r = (uTowerRadius - 0.10) + rt * span + max(0.0, runup) * 0.24 * (1.0 - rt * 0.45);
+          float span = 2.65 * (0.78 + 0.38 * uSurge);
+          float r = (uTowerRadius - 0.12) + rt * span + max(0.0, runup) * 0.28 * (1.0 - rt * 0.45);
 
-          float innerClimb = (1.0 - smoothstep(0.0, 0.36, rt)) * (0.08 + max(0.0, runup + 0.38) * 0.28 * uSurge * (1.0 - uIsOrig * 0.55));
+          float innerClimb = (1.0 - smoothstep(0.0, 0.36, rt)) * (0.08 + max(0.0, runup + 0.38) * 0.30 * uSurge);
           float outerChop = smoothstep(0.14, 0.9, rt) * (
-            sin(dir.x * r * 0.62 + uTime * 3.2) * 0.14 +
-            cos(dir.y * r * 0.74 + uTime * 2.6) * 0.09
-          ) * (1.0 - uIsOrig * 0.45);
+            sin(dir.x * r * 0.55 + uTime * 3.1) * 0.14 +
+            cos(dir.y * r * 0.68 + uTime * 2.5) * 0.09
+          ) * clamp(uSurge, 0.35, 1.5);
 
-          vec3 localPos = vec3(dir.x * r, 0.036 + innerClimb + outerChop, dir.y * r);
+          vec3 localPos = vec3(dir.x * r, 0.04 + innerClimb + outerChop, dir.y * r);
           vUv = uv;
           vRadial = rt;
           vWaveRunup = runup;
@@ -667,7 +701,7 @@ export class TowerFluidAndSparkVFX {
       fragmentShader: /* glsl */ `
         uniform float uTime;
         uniform float uSurge;
-        uniform float uIsOrig;
+        uniform float uSpinSpeed;
         uniform sampler2D uFoamMap;
         uniform vec3 uBrightColor;
         uniform vec3 uMidColor;
@@ -677,8 +711,9 @@ export class TowerFluidAndSparkVFX {
         varying float vWaveRunup;
 
         void main() {
-          vec2 uvA = vec2(vUv.x + uTime * 0.032, vRadial * 1.45 - uTime * 0.15);
-          vec2 uvB = vec2(vUv.x * 1.33 - uTime * 0.024 + 0.37, vRadial * 1.95 + uTime * 0.095);
+          float spinOff = uTime * (0.032 + uSpinSpeed * 0.14);
+          vec2 uvA = vec2(vUv.x + spinOff, vRadial * 1.45 - uTime * 0.15);
+          vec2 uvB = vec2(vUv.x * 1.33 - spinOff * 0.75 + 0.37, vRadial * 1.95 + uTime * 0.095);
 
           vec3 texA = texture2D(uFoamMap, uvA).rgb;
           vec3 texB = texture2D(uFoamMap, uvB).rgb;
@@ -688,21 +723,21 @@ export class TowerFluidAndSparkVFX {
           float glint = texA.b * texB.b;
 
           float waveLobe = pow(clamp(0.52 + 0.48 * vWaveRunup, 0.0, 1.0), 1.35);
-          float outerLimit = clamp(0.28 + waveLobe * 0.66 + (body - 0.5) * 0.38, 0.22, 0.96);
+          float outerLimit = clamp(0.26 + waveLobe * 0.66 + (body - 0.5) * 0.38, 0.20, 0.96);
           float radialMask = 1.0 - smoothstep(outerLimit * 0.34, outerLimit, vRadial);
 
           float wallCollar = (1.0 - smoothstep(0.0, 0.28, vRadial)) * (0.64 + 0.36 * body);
           float lacyWeb = smoothstep(0.22 + vRadial * 0.42, 0.90, lace * 0.88 + body * 0.50) * (1.0 - vRadial * 0.38);
 
-          float rawAlpha = (wallCollar * 0.86 + lacyWeb * 0.66) * radialMask;
-          rawAlpha *= mix(0.92, 0.68, uIsOrig) * clamp(uSurge, 0.80, 1.75);
+          float rawAlpha = (wallCollar * 0.84 + lacyWeb * 0.66) * radialMask;
+          rawAlpha *= clamp(uSurge * 0.88, 0.36, 1.45);
 
           if (rawAlpha < 0.008) discard;
 
           vec3 col = mix(uDeepTint, uMidColor, clamp(body * 1.18, 0.0, 1.0));
           col = mix(col, uBrightColor, clamp(wallCollar * 0.88 + lace * 0.68 + glint * 1.45, 0.0, 1.0));
 
-          gl_FragColor = vec4(col, clamp(rawAlpha, 0.0, 0.88));
+          gl_FragColor = vec4(col, clamp(rawAlpha, 0.0, 0.86));
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
         }
@@ -716,9 +751,6 @@ export class TowerFluidAndSparkVFX {
     this.waterlineGroup.add(this.surfApronMesh);
   }
 
-  // --------------------------------------------------------------------------
-  // 1B. 3D Outward-Flaring Whitewater Surf Crest Fans (`SURF_CREST_COUNT` = 64)
-  // --------------------------------------------------------------------------
   _initSurfCrests() {
     const baseGeo = buildSurfCrestTongueGeometry(5, 4);
     const instGeo = new THREE.InstancedBufferGeometry();
@@ -731,7 +763,6 @@ export class TowerFluidAndSparkVFX {
     this._crestXformBuf = new Float32Array(SURF_CREST_COUNT * 4);
     this._crestStateBuf = new Float32Array(SURF_CREST_COUNT * 4);
 
-    // Simulation state per crest: [basePhi, speed, phase, seed, prevLife]
     this._crestSim = new Float32Array(SURF_CREST_COUNT * 5);
     for (let i = 0; i < SURF_CREST_COUNT; i++) {
       const idx5 = i * 5;
@@ -756,8 +787,8 @@ export class TowerFluidAndSparkVFX {
       uTime: { value: 0 },
       uTowerRadius: { value: this.towerRadius },
       uFoamMap: { value: this.lacyFoamTex },
-      uCrestBright: { value: new THREE.Color('#e8f5ff') },
-      uCrestShadow: { value: new THREE.Color('#64a8dc') },
+      uCrestBright: { value: new THREE.Color('#f4fcff') },
+      uCrestShadow: { value: new THREE.Color('#4fd8c8') },
     };
 
     const mat = new THREE.ShaderMaterial({
@@ -784,7 +815,7 @@ export class TowerFluidAndSparkVFX {
           float radialFlare = aCrestXform.w;
 
           float phi = phiCenter + position.x * widthArc;
-          float r = uTowerRadius + 0.02 + position.z * radialFlare;
+          float r = uTowerRadius + 0.03 + position.z * radialFlare;
           float y = position.y * heightScale;
 
           vec3 cylPos = vec3(sin(phi) * r, y, cos(phi) * r);
@@ -821,7 +852,6 @@ export class TowerFluidAndSparkVFX {
           vec3 f2 = texture2D(uFoamMap, uv2).rgb;
 
           float foamDensity = f1.r * 0.58 + f2.r * 0.36 + f1.g * 0.44;
-
           float flankFade = sin(clamp(vUv.x, 0.0, 1.0) * 3.14159265);
           float baseFade = smoothstep(0.0, 0.14, vUv.y);
           float topFeather = 1.0 - smoothstep(0.40, 0.98, vUv.y) * 0.84;
@@ -836,7 +866,7 @@ export class TowerFluidAndSparkVFX {
           float tipWhiteness = clamp(vUv.y * 0.78 + f1.r * 0.48 + f2.b * 0.36, 0.0, 1.0);
           vec3 col = mix(uCrestShadow, uCrestBright, tipWhiteness);
 
-          gl_FragColor = vec4(col, clamp(a, 0.0, 0.90));
+          gl_FragColor = vec4(col, clamp(a, 0.0, 0.88));
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
         }
@@ -850,10 +880,6 @@ export class TowerFluidAndSparkVFX {
     this.waterlineGroup.add(this.surfCrestMesh);
   }
 
-  // --------------------------------------------------------------------------
-  // 1C. Explosive Frothy Whitewater Surf Plumes (`MAX_SURF_PLUMES` = 96)
-  //     Camera-facing FBM x Voronoi-Lace billows smashing 2.2x up both flanks!
-  // --------------------------------------------------------------------------
   _initSurfPlumes() {
     const baseQuad = new THREE.PlaneGeometry(1, 1);
     const instGeo = new THREE.InstancedBufferGeometry();
@@ -863,13 +889,9 @@ export class TowerFluidAndSparkVFX {
     instGeo.instanceCount = MAX_SURF_PLUMES;
     baseQuad.dispose();
 
-    // aPlumePosScale: vec4(x, y, z, size)
-    // aPlumeMeta:     vec4(rot, alpha, atlasIdx, seed)
     this._plumePosBuf = new Float32Array(MAX_SURF_PLUMES * 4);
     this._plumeMetaBuf = new Float32Array(MAX_SURF_PLUMES * 4);
 
-    // Simulation state per surf plume:
-    //   [phi, y, r, vTang, vy, vRad, age, maxAge, startSize, endSize, peakAlpha, rot, rotVel, atlasIdx, seed] = 15 floats
     this._plumeSim = new Float32Array(MAX_SURF_PLUMES * 15);
     for (let i = 0; i < MAX_SURF_PLUMES; i++) {
       this._plumeSim[i * 15 + 6] = 999;
@@ -890,8 +912,8 @@ export class TowerFluidAndSparkVFX {
     this.surfPlumeUniforms = {
       uWispMap: { value: this.wispAtlasTex },
       uFoamMap: { value: this.lacyFoamTex },
-      uTopFoam: { value: new THREE.Color('#eaf6ff') },
-      uShadowFoam: { value: new THREE.Color('#4778a8') },
+      uTopFoam: { value: new THREE.Color('#f4fcff') },
+      uShadowFoam: { value: new THREE.Color('#38b2ac') },
     };
 
     const mat = new THREE.ShaderMaterial({
@@ -948,18 +970,14 @@ export class TowerFluidAndSparkVFX {
           float idx = floor(vAtlas + 0.5);
           vec2 cellOffset = vec2(mod(idx, 2.0), floor(idx * 0.5)) * 0.5;
           vec4 wisp = texture2D(uWispMap, cellOffset + vUv * 0.5);
-
-          // Modulate volumetric FBM cloud with lacy Voronoi seafoam filaments so every plume
-          // reads as frothy crashing ocean whitewater instead of smooth smoke!
           vec3 foam = texture2D(uFoamMap, vUv * 1.55 + vec2(vSeed * 2.3, vSeed * 1.7)).rgb;
           float froth = wisp.a * (0.52 + 0.68 * foam.r + 0.25 * foam.b);
 
-          float a = clamp(froth * vAlpha, 0.0, 0.76);
+          float a = clamp(froth * vAlpha, 0.0, 0.74);
           if (a < 0.005) discard;
 
-          // Directional upper-right moonlit shading across each billowing surf cloud
-          float moonLit = clamp(0.56 + vLocal.y * 0.55 + vLocal.x * 0.28 + foam.r * 0.34, 0.0, 1.0);
-          vec3 col = mix(uShadowFoam, uTopFoam, moonLit);
+          float sunLit = clamp(0.58 + vLocal.y * 0.55 + vLocal.x * 0.28 + foam.r * 0.34, 0.0, 1.0);
+          vec3 col = mix(uShadowFoam, uTopFoam, sunLit);
 
           gl_FragColor = vec4(col, a);
           #include <tonemapping_fragment>
@@ -975,16 +993,12 @@ export class TowerFluidAndSparkVFX {
     this.waterlineGroup.add(this.surfPlumeMesh);
   }
 
-  // --------------------------------------------------------------------------
-  // 1D. Ballistic Airborne Sea-Spray Micro-Droplets (`MAX_SEA_DROPLETS` = 520)
-  // --------------------------------------------------------------------------
   _initSeaDroplets() {
     const geo = new THREE.BufferGeometry();
 
     this._dropPosBuf = new Float32Array(MAX_SEA_DROPLETS * 3);
     this._dropMetaBuf = new Float32Array(MAX_SEA_DROPLETS * 4);
 
-    // [phi, y, r, vTang, vy, vRad, age, maxAge, size, rot, rotVel, atlasIdx] = 12 floats
     this._dropSim = new Float32Array(MAX_SEA_DROPLETS * 12);
     for (let i = 0; i < MAX_SEA_DROPLETS; i++) {
       this._dropSim[i * 12 + 6] = 999;
@@ -1004,8 +1018,8 @@ export class TowerFluidAndSparkVFX {
 
     this.seaDropletUniforms = {
       uSpumeMap: { value: this.spumeDropTex },
-      uBeadColor: { value: new THREE.Color('#f2faff') },
-      uHaloColor: { value: new THREE.Color('#90cdf4') },
+      uBeadColor: { value: new THREE.Color('#f8fdff') },
+      uHaloColor: { value: new THREE.Color('#7dd3fc') },
     };
 
     const mat = new THREE.ShaderMaterial({
@@ -1032,7 +1046,7 @@ export class TowerFluidAndSparkVFX {
           }
 
           vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          float projScale = projectionMatrix[1][1] * 195.0;
+          float projScale = projectionMatrix[1][1] * 210.0;
           gl_PointSize = clamp(aDropMeta.x * projScale / max(0.85, -mvPosition.z), 2.2, 78.0);
           gl_Position = projectionMatrix * mvPosition;
         }
@@ -1063,7 +1077,7 @@ export class TowerFluidAndSparkVFX {
           if (a < 0.006) discard;
 
           vec3 col = mix(uHaloColor, uBeadColor, clamp(texel.a * 1.45, 0.0, 1.0));
-          gl_FragColor = vec4(col, clamp(a, 0.0, 0.92));
+          gl_FragColor = vec4(col, clamp(a, 0.0, 0.90));
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
         }
@@ -1077,9 +1091,6 @@ export class TowerFluidAndSparkVFX {
     this.waterlineGroup.add(this.seaSprayPoints);
   }
 
-  // --------------------------------------------------------------------------
-  // 2. Luminous Cyan-Silver Doorway Rim-Mist & Flank/Ledge Mist (`alpha <= 0.22`)
-  // --------------------------------------------------------------------------
   _initVolumetricMist() {
     const baseQuad = new THREE.PlaneGeometry(1, 1);
     const instGeo = new THREE.InstancedBufferGeometry();
@@ -1092,7 +1103,6 @@ export class TowerFluidAndSparkVFX {
     this._mistPosBuf = new Float32Array(MAX_MIST_WISPS * 4);
     this._mistMetaBuf = new Float32Array(MAX_MIST_WISPS * 4);
 
-    // [phi, y, r, vTang, vy, vRad, age, maxAge, baseSize, peakAlpha, rot, rotVel, atlasIdx, tintId, floorY, kind] = 16 floats
     this._mistSim = new Float32Array(MAX_MIST_WISPS * 16);
     for (let i = 0; i < MAX_MIST_WISPS; i++) {
       this._mistSim[i * 16 + 6] = 999;
@@ -1113,14 +1123,12 @@ export class TowerFluidAndSparkVFX {
     instGeo.setAttribute('aWispMeta', this._mistMetaAttr);
     this._geometries.push(instGeo);
 
-    // Luminous cyan-silver moonlit scatter colors so `alpha <= 0.22` mist glows eerily
-    // inside dark doorways (rim-lighting Pogo!) and off wet right/left flanks!
     this.mistUniforms = {
       uWispMap: { value: this.wispAtlasTex },
-      uStoneMistColor: { value: new THREE.Color('#c6e8ff') },
-      uRuneMistColor: { value: new THREE.Color('#7ef9ec') },
-      uWarmMistColor: { value: new THREE.Color('#dbeafe') },
-      uSeaMistColor: { value: new THREE.Color('#d8f0ff') },
+      uStoneMistColor: { value: new THREE.Color('#fef3c7') },
+      uRuneMistColor: { value: new THREE.Color('#5efce8') },
+      uWarmMistColor: { value: new THREE.Color('#fde68a') },
+      uSeaMistColor: { value: new THREE.Color('#e0f7fa') },
     };
 
     const mat = new THREE.ShaderMaterial({
@@ -1180,7 +1188,6 @@ export class TowerFluidAndSparkVFX {
           vec2 cellOffset = vec2(mod(idx, 2.0), floor(idx * 0.5)) * 0.5;
           vec4 wisp = texture2D(uWispMap, cellOffset + vUv * 0.5);
 
-          // STRICT hardware clamp: volumetric doorway & ledge mist NEVER exceeds alpha 0.22!
           float a = min(0.22, wisp.a * vAlpha);
           if (a < 0.003) discard;
 
@@ -1193,8 +1200,7 @@ export class TowerFluidAndSparkVFX {
             baseCol = uRuneMistColor;
           }
 
-          // Subtle moonlit forward-scattering lift (1.22x) so dark doorways glow with eerie silver-cyan mist
-          vec3 col = baseCol * (0.96 + 0.34 * wisp.r);
+          vec3 col = baseCol * (0.94 + 0.30 * wisp.r);
           gl_FragColor = vec4(col, a);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
@@ -1209,9 +1215,6 @@ export class TowerFluidAndSparkVFX {
     this.towerVfxGroup.add(this.mistWispsMesh);
   }
 
-  // --------------------------------------------------------------------------
-  // 3A. Pressurized `steamVent` Plumes & Submerged Furnace Quench Steam
-  // --------------------------------------------------------------------------
   _initSteamPlumes() {
     const baseQuad = new THREE.PlaneGeometry(1, 1);
     const instGeo = new THREE.InstancedBufferGeometry();
@@ -1242,8 +1245,8 @@ export class TowerFluidAndSparkVFX {
 
     this.steamUniforms = {
       uWispMap: { value: this.wispAtlasTex },
-      uCoolSteam: { value: new THREE.Color('#dceaf7') },
-      uWarmSteam: { value: new THREE.Color('#fed7aa') },
+      uCoolSteam: { value: new THREE.Color('#e0f7fa') },
+      uWarmSteam: { value: new THREE.Color('#fde68a') },
     };
 
     const mat = new THREE.ShaderMaterial({
@@ -1315,10 +1318,6 @@ export class TowerFluidAndSparkVFX {
     this.towerVfxGroup.add(this.steamPlumeMesh);
   }
 
-  // --------------------------------------------------------------------------
-  // 3B. 3x Dense White-Gold-Amber Bouncing Welding Sparks (`MAX_SPARKS` = 720)
-  //     + Wet-Stone Specular Floor Wash + Flickering PointLights
-  // --------------------------------------------------------------------------
   _initSparkStreaksAndGlows() {
     const sparkQuad = new THREE.PlaneGeometry(1, 1);
     const sparkGeo = new THREE.InstancedBufferGeometry();
@@ -1331,7 +1330,6 @@ export class TowerFluidAndSparkVFX {
     this._sparkPosBuf = new Float32Array(MAX_SPARKS * 4);
     this._sparkVelBuf = new Float32Array(MAX_SPARKS * 4);
 
-    // [phi, y, r, vTang, vy, vRad, age, maxAge, size, heatBoost, bounces, seed] = 12 floats
     this._sparkSim = new Float32Array(MAX_SPARKS * 12);
     for (let i = 0; i < MAX_SPARKS; i++) {
       this._sparkSim[i * 12 + 6] = 999;
@@ -1374,7 +1372,6 @@ export class TowerFluidAndSparkVFX {
           vec2 dir = speed2D > 0.002 ? (mvVel.xy / speed2D) : vec2(1.0, 0.0);
           vec2 perp = vec2(-dir.y, dir.x);
 
-          // Crisp incandescent shutter streak + hot round ember head
           float size = aSparkPosSize.w;
           float streakLen = size * (1.05 + clamp(speed2D * 0.86, 0.0, 3.85));
           float thickness = size * 0.92;
@@ -1406,18 +1403,15 @@ export class TowerFluidAndSparkVFX {
 
           if (intensity < 0.012) discard;
 
-          // Hot HDR white-gold-amber welding spark ramp (triggers selective bloom on cores!)
-          vec3 emberRed = vec3(0.88, 0.12, 0.01);
-          vec3 furnaceOrange = vec3(1.00, 0.34, 0.03);
-          vec3 weldGold = vec3(1.00, 0.68, 0.14);
-          vec3 whiteGoldCore = vec3(1.00, 0.95, 0.66);
+          vec3 emberAqua = vec3(0.12, 0.72, 0.88);
+          vec3 sparkGold = vec3(1.00, 0.68, 0.16);
+          vec3 whiteGoldCore = vec3(1.00, 0.96, 0.72);
 
           float h = clamp(vHeat, 0.0, 1.0);
-          vec3 bodyCol = mix(emberRed, furnaceOrange, smoothstep(0.0, 0.36, h));
-          bodyCol = mix(bodyCol, weldGold, smoothstep(0.28, 0.78, h));
+          vec3 bodyCol = mix(emberAqua, sparkGold, smoothstep(0.15, 0.75, h));
           vec3 finalCol = mix(bodyCol, whiteGoldCore, clamp(headCore * h * 1.25, 0.0, 1.0));
 
-          float lumScale = (0.58 + 1.42 * h) * intensity;
+          float lumScale = (0.58 + 1.38 * h) * intensity;
           gl_FragColor = vec4(finalCol * lumScale, clamp(intensity * h, 0.0, 1.0));
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
@@ -1431,7 +1425,6 @@ export class TowerFluidAndSparkVFX {
     this.sparkStreaksMesh.renderOrder = 12;
     this.towerVfxGroup.add(this.sparkStreaksMesh);
 
-    // --- B. Wet-Stone Specular Floor Glow Wash & Recessed Hearth Glow (`MAX_SPARK_GLOWS`) ---
     const glowQuad = new THREE.PlaneGeometry(1, 1);
     const glowGeo = new THREE.InstancedBufferGeometry();
     glowGeo.index = glowQuad.index;
@@ -1504,11 +1497,11 @@ export class TowerFluidAndSparkVFX {
           if (d2 >= 1.0) discard;
 
           float falloff = exp(-d2 * 3.1) * pow(1.0 - d2, 1.5);
-          vec3 outerAmber = vec3(1.0, 0.36, 0.04);
-          vec3 innerGold = vec3(1.0, 0.76, 0.28);
+          vec3 outerAmber = vec3(0.20, 0.75, 0.90);
+          vec3 innerGold = vec3(1.0, 0.82, 0.35);
           vec3 col = mix(outerAmber, innerGold, falloff);
 
-          float gain = falloff * vIntensity * (vMode > 0.5 ? 0.52 : 0.74);
+          float gain = falloff * vIntensity * (vMode > 0.5 ? 0.50 : 0.70);
           if (gain < 0.003) discard;
 
           gl_FragColor = vec4(col * gain, gain);
@@ -1524,10 +1517,9 @@ export class TowerFluidAndSparkVFX {
     this.sparkGlowMesh.renderOrder = 11;
     this.towerVfxGroup.add(this.sparkGlowMesh);
 
-    // --- C. Fixed 2-PointLight Pool (boosted warm furnace wash, ZERO shader recompiles!) ---
     this.sparkLights = [];
     for (let i = 0; i < SPARK_LIGHT_POOL; i++) {
-      const light = new THREE.PointLight('#ff7c1f', 0, 3.85, 1.85);
+      const light = new THREE.PointLight('#ff9f38', 0, 5.2, 1.85);
       light.castShadow = false;
       light.position.set(0, -100, 0);
       this.towerVfxGroup.add(light);
@@ -1535,129 +1527,159 @@ export class TowerFluidAndSparkVFX {
     }
   }
 
-  // --------------------------------------------------------------------------
-  // Era & Theme Styling (`'reboot'` vs `'original'`)
-  // --------------------------------------------------------------------------
-  setEra(era) {
-    const nextEra = era === 'original' ? 'original' : 'reboot';
-    if (this.era === nextEra) return;
-    this.era = nextEra;
-    this._applyEraVisuals();
-    if (this._tower) {
-      const targetFh =
-        nextEra === 'original' && this._tower.real ? STEP_ORIGINAL : this.fh || DEFAULT_FH;
-      this.rebuildForTower(this._tower, targetFh, this.towerRadius);
-    }
+  setEra(_era) {
+    this.era = 'reboot';
+    return this;
   }
 
-  _applyEraVisuals() {
-    const isOrig = this.era === 'original';
-
-    this.surfApronUniforms.uIsOrig.value = isOrig ? 1.0 : 0.0;
-    if (isOrig) {
-      this.surfApronUniforms.uBrightColor.value.set('#f0f9ff');
-      this.surfApronUniforms.uMidColor.value.set('#38bdf8');
-      this.surfApronUniforms.uDeepTint.value.set('#0284c7');
-      this.surfCrestUniforms.uCrestBright.value.set('#e0f2fe');
-      this.surfCrestUniforms.uCrestShadow.value.set('#38bdf8');
-    } else {
-      this._applyThemePalette(this._theme);
+  setTheme(theme = null) {
+    if (!theme) {
+      this._forcedTheme = null;
+      return this;
     }
-
-    this.surfPlumeMesh.visible = !isOrig;
-    this.mistWispsMesh.visible = !isOrig;
-    this.sparkStreaksMesh.visible = !isOrig;
-    this.sparkGlowMesh.visible = !isOrig;
-    if (isOrig) {
-      this.steamPlumeMesh.visible = false;
-      for (let i = 0; i < this.sparkLights.length; i++) {
-        this.sparkLights[i].intensity = 0;
-      }
-    }
+    const resolved = resolveVfxBiome(theme);
+    this._forcedTheme = resolved;
+    this._theme = resolved;
+    this._applyThemePalette(resolved);
+    return this;
   }
 
-  _applyThemePalette(theme) {
-    if (this.era === 'original') return;
+  setPurification(progress = 0) {
+    const p = Math.max(0, Math.min(1, Number(progress) || 0));
+    this._purificationTarget = p;
+    this._purification = p;
+    return this;
+  }
+
+  setRestored(restored = true) {
+    return this.setPurification(restored ? 1 : 0);
+  }
+
+  _applyThemePalette(rawTheme) {
+    const theme = resolveVfxBiome(rawTheme, this._tower?.id);
+    this._theme = theme;
+
     switch (theme) {
-      case 'foundry':
-        this.surfApronUniforms.uBrightColor.value.set('#e2e8f0');
-        this.surfApronUniforms.uMidColor.value.set('#64748b');
-        this.surfApronUniforms.uDeepTint.value.set('#334155');
-        this.surfCrestUniforms.uCrestBright.value.set('#f1f5f9');
-        this.surfCrestUniforms.uCrestShadow.value.set('#94a3b8');
-        this.surfPlumeUniforms.uTopFoam.value.set('#e2e8f0');
-        this.surfPlumeUniforms.uShadowFoam.value.set('#475569');
-        this.mistUniforms.uStoneMistColor.value.set('#cbd5e1');
+      case 'canyon_river':
+        // Sunlit Emerald-Teal Whitewater Rapids & Warm Golden Morning Mist
+        this._biomeSurgeScale = 1.22;
+        this._biomeMistRateScale = 1.05;
+        this._biomeFlowDrift = 1.45;
+        this._biomeVortexSpin = 0.0;
+        this.surfApronUniforms.uSpinSpeed.value = 0.12;
+        this.surfApronUniforms.uBrightColor.value.set('#f8fdff');
+        this.surfApronUniforms.uMidColor.value.set('#5eead4');
+        this.surfApronUniforms.uDeepTint.value.set('#0d9488');
+        this.surfCrestUniforms.uCrestBright.value.set('#ffffff');
+        this.surfCrestUniforms.uCrestShadow.value.set('#34d399');
+        this.surfPlumeUniforms.uTopFoam.value.set('#fffbeb');
+        this.surfPlumeUniforms.uShadowFoam.value.set('#2dd4bf');
+        this.seaDropletUniforms.uBeadColor.value.set('#fffdf5');
+        this.seaDropletUniforms.uHaloColor.value.set('#5eead4');
+        this.mistUniforms.uStoneMistColor.value.set('#fef3c7');
+        this.mistUniforms.uSeaMistColor.value.set('#ecfdf5');
         break;
-      case 'blizzard':
-        this.surfApronUniforms.uBrightColor.value.set('#eaf6ff');
-        this.surfApronUniforms.uMidColor.value.set('#bae6fd');
-        this.surfApronUniforms.uDeepTint.value.set('#38bdf8');
-        this.surfCrestUniforms.uCrestBright.value.set('#f0f9ff');
-        this.surfCrestUniforms.uCrestShadow.value.set('#7dd3fc');
-        this.surfPlumeUniforms.uTopFoam.value.set('#f0f9ff');
-        this.surfPlumeUniforms.uShadowFoam.value.set('#60a5fa');
-        this.mistUniforms.uStoneMistColor.value.set('#dcf2ff');
-        break;
-      case 'sinking':
-        this.surfApronUniforms.uBrightColor.value.set('#e0fafc');
-        this.surfApronUniforms.uMidColor.value.set('#67e8f9');
-        this.surfApronUniforms.uDeepTint.value.set('#0891b2');
-        this.surfCrestUniforms.uCrestBright.value.set('#e6fcf9');
-        this.surfCrestUniforms.uCrestShadow.value.set('#2dd4bf');
-        this.surfPlumeUniforms.uTopFoam.value.set('#e6fcf9');
-        this.surfPlumeUniforms.uShadowFoam.value.set('#0d9488');
-        this.mistUniforms.uStoneMistColor.value.set('#b2f5ea');
-        break;
-      case 'prism':
-      case 'apex':
-        this.surfApronUniforms.uBrightColor.value.set('#e2f0fd');
+
+      case 'alpine_lake':
+        // Tranquil Glassy Turquoise-Cobalt Mirror Lake & Crisp Mountain Mist
+        this._biomeSurgeScale = 0.46;
+        this._biomeMistRateScale = 0.85;
+        this._biomeFlowDrift = 0.15;
+        this._biomeVortexSpin = 0.0;
+        this.surfApronUniforms.uSpinSpeed.value = 0.0;
+        this.surfApronUniforms.uBrightColor.value.set('#f4faff');
         this.surfApronUniforms.uMidColor.value.set('#93c5fd');
         this.surfApronUniforms.uDeepTint.value.set('#38bdf8');
-        this.surfCrestUniforms.uCrestBright.value.set('#eceaff');
-        this.surfCrestUniforms.uCrestShadow.value.set('#818cf8');
-        this.surfPlumeUniforms.uTopFoam.value.set('#eef2ff');
-        this.surfPlumeUniforms.uShadowFoam.value.set('#6366f1');
-        this.mistUniforms.uStoneMistColor.value.set('#c7d2fe');
+        this.surfCrestUniforms.uCrestBright.value.set('#f8fcff');
+        this.surfCrestUniforms.uCrestShadow.value.set('#7dd3fc');
+        this.surfPlumeUniforms.uTopFoam.value.set('#f8fafc');
+        this.surfPlumeUniforms.uShadowFoam.value.set('#60a5fa');
+        this.seaDropletUniforms.uBeadColor.value.set('#ffffff');
+        this.seaDropletUniforms.uHaloColor.value.set('#93c5fd');
+        this.mistUniforms.uStoneMistColor.value.set('#e0f2fe');
+        this.mistUniforms.uSeaMistColor.value.set('#fce7f3');
         break;
+
+      case 'mist_bayou':
+        // Calm Jade-Amber Bayou Eddies & Lush Glowing Twilight Mist Ribbons
+        this._biomeSurgeScale = 0.40;
+        this._biomeMistRateScale = 1.68;
+        this._biomeFlowDrift = 0.28;
+        this._biomeVortexSpin = 0.0;
+        this.surfApronUniforms.uSpinSpeed.value = 0.04;
+        this.surfApronUniforms.uBrightColor.value.set('#fef3c7');
+        this.surfApronUniforms.uMidColor.value.set('#6ee7b7');
+        this.surfApronUniforms.uDeepTint.value.set('#10b981');
+        this.surfCrestUniforms.uCrestBright.value.set('#fef9c3');
+        this.surfCrestUniforms.uCrestShadow.value.set('#34d399');
+        this.surfPlumeUniforms.uTopFoam.value.set('#fef3c7');
+        this.surfPlumeUniforms.uShadowFoam.value.set('#2f855a');
+        this.seaDropletUniforms.uBeadColor.value.set('#fef08a');
+        this.seaDropletUniforms.uHaloColor.value.set('#6ee7b7');
+        this.mistUniforms.uStoneMistColor.value.set('#fde68a');
+        this.mistUniforms.uSeaMistColor.value.set('#d1fae5');
+        break;
+
+      case 'coral_sea':
+        // Sparkling Tropical Turquoise Lagoon Surf & Pure White Coral Foam
+        this._biomeSurgeScale = 0.90;
+        this._biomeMistRateScale = 0.78;
+        this._biomeFlowDrift = 0.35;
+        this._biomeVortexSpin = 0.0;
+        this.surfApronUniforms.uSpinSpeed.value = 0.05;
+        this.surfApronUniforms.uBrightColor.value.set('#ffffff');
+        this.surfApronUniforms.uMidColor.value.set('#22f5e8');
+        this.surfApronUniforms.uDeepTint.value.set('#06b6d4');
+        this.surfCrestUniforms.uCrestBright.value.set('#ffffff');
+        this.surfCrestUniforms.uCrestShadow.value.set('#2dd4bf');
+        this.surfPlumeUniforms.uTopFoam.value.set('#ffffff');
+        this.surfPlumeUniforms.uShadowFoam.value.set('#14b8a6');
+        this.seaDropletUniforms.uBeadColor.value.set('#ffffff');
+        this.seaDropletUniforms.uHaloColor.value.set('#67e8f9');
+        this.mistUniforms.uStoneMistColor.value.set('#cffafe');
+        this.mistUniforms.uSeaMistColor.value.set('#ecfeff');
+        break;
+
       default:
-        // North-Star Reference Photo ('mist', 'piston', 'blackout'): Moonlit Storm silver-white & cyan-slate
-        this.surfApronUniforms.uBrightColor.value.set('#e2f2fe');
-        this.surfApronUniforms.uMidColor.value.set('#8ec5f6');
-        this.surfApronUniforms.uDeepTint.value.set('#38bdf8');
-        this.surfCrestUniforms.uCrestBright.value.set('#e8f5ff');
-        this.surfCrestUniforms.uCrestShadow.value.set('#64a8dc');
-        this.surfPlumeUniforms.uTopFoam.value.set('#eaf6ff');
-        this.surfPlumeUniforms.uShadowFoam.value.set('#4778a8');
-        this.mistUniforms.uStoneMistColor.value.set('#c6e8ff');
+        // 'storm_ocean': Polar Tempest & Colossal Swirling Maelstrom Vortex!
+        this._biomeSurgeScale = 1.45;
+        this._biomeMistRateScale = 1.25;
+        this._biomeFlowDrift = 0.55;
+        this._biomeVortexSpin = 2.85;
+        this.surfApronUniforms.uSpinSpeed.value = 1.0;
+        this.surfApronUniforms.uBrightColor.value.set('#f0fdff');
+        this.surfApronUniforms.uMidColor.value.set('#67e8f9');
+        this.surfApronUniforms.uDeepTint.value.set('#0284c7');
+        this.surfCrestUniforms.uCrestBright.value.set('#f0fdfa');
+        this.surfCrestUniforms.uCrestShadow.value.set('#38bdf8');
+        this.surfPlumeUniforms.uTopFoam.value.set('#ecfeff');
+        this.surfPlumeUniforms.uShadowFoam.value.set('#0ea5e9');
+        this.seaDropletUniforms.uBeadColor.value.set('#f0fdff');
+        this.seaDropletUniforms.uHaloColor.value.set('#5eead4');
+        this.mistUniforms.uStoneMistColor.value.set('#bae6fd');
+        this.mistUniforms.uSeaMistColor.value.set('#ccfbf1');
         break;
     }
   }
 
-  // --------------------------------------------------------------------------
-  // Tower Rebuild (`rebuildForTower(tower, fh, towerRadius)`)
-  // --------------------------------------------------------------------------
   rebuildForTower(tower, fh = DEFAULT_FH, towerRadius = DEFAULT_TOWER_RADIUS) {
     if (!tower || this._disposed) return;
 
-    const resolvedFh =
-      Number.isFinite(fh) && fh > 0
-        ? fh
-        : this.era === 'original' && tower.real
-        ? STEP_ORIGINAL
-        : DEFAULT_FH;
-    const resolvedRadius =
-      Number.isFinite(towerRadius) && towerRadius > 0.5 ? towerRadius : DEFAULT_TOWER_RADIUS;
+    const resolvedFh = Number.isFinite(fh) && fh > 0 ? fh : DEFAULT_FH;
+    const resolvedRadius = Number.isFinite(towerRadius) && towerRadius > 0.5 ? towerRadius : DEFAULT_TOWER_RADIUS;
+    const resolvedCols = Math.min(MAX_COLS, Math.max(8, Number(tower.cols) || DEFAULT_COLS));
 
     this._tower = tower;
+    this.cols = resolvedCols;
+    this.colAngle = TWO_PI / resolvedCols;
     this.fh = resolvedFh;
     this.towerRadius = resolvedRadius;
     this._towerFloors = Math.max(8, Number(tower.floors) || 18);
-    this._theme = tower.theme || 'mist';
 
+    const nextTheme = this._forcedTheme || resolveVfxBiome(tower.theme, tower.id);
     this.surfApronUniforms.uTowerRadius.value = resolvedRadius;
     this.surfCrestUniforms.uTowerRadius.value = resolvedRadius;
-    this._applyThemePalette(this._theme);
+    this._applyThemePalette(nextTheme);
 
     this._basalStepBoost.fill(0);
     this._doorEmitterCount = 0;
@@ -1677,25 +1699,22 @@ export class TowerFluidAndSparkVFX {
     const towerSeed = ((Number(tower.id) || 1) * 2654435761) ^ 0x3c6ef372;
     this._rngState = towerSeed || 0x51f15e26;
 
-    const isOrig = this.era === 'original';
     const baseWaterFloor = tower.mechanics?.waterBaseFloor ?? -0.55;
-    const doorWorldH = resolvedFh < 0.55 ? resolvedFh * 2.78 : 0.86 * resolvedFh;
+    const doorWorldH = 0.92 * resolvedFh;
 
-    // 1. Scan `tower.ledges` for stone bounce slabs, basal stair surf boosts & steamVents
     const ledges = tower.ledges || [];
     for (let i = 0; i < ledges.length; i++) {
       const l = ledges[i];
       if (!l) continue;
-      const col = wrapColIndex(Math.round(l.col));
+      const col = wrapColIndex(Math.round(l.col), resolvedCols);
       const fl = Math.round(l.floor);
       const lType = l.type || 'solid';
 
-      const isWalkableSlab =
-        lType !== 'box' && lType !== 'pillar' && lType !== 'laserGate';
+      const isWalkableSlab = lType !== 'box' && lType !== 'pillar' && lType !== 'laserGate';
 
       if (isWalkableSlab && fl >= 0 && fl < MAX_GRID_FLOORS) {
-        const cell = fl * COLS + col;
-        this._ledgeSurfaceGrid[cell] = l.floor * resolvedFh + 0.016;
+        const cell = fl * resolvedCols + col;
+        this._ledgeSurfaceGrid[cell] = l.floor * resolvedFh + 0.02;
         this._ledgeIndexGrid[cell] = i;
 
         const distFromWater = l.floor - baseWaterFloor;
@@ -1704,17 +1723,17 @@ export class TowerFluidAndSparkVFX {
           if (boost > this._basalStepBoost[col]) {
             this._basalStepBoost[col] = boost;
           }
-          const leftC = wrapColIndex(col - 1);
-          const rightC = wrapColIndex(col + 1);
+          const leftC = wrapColIndex(col - 1, resolvedCols);
+          const rightC = wrapColIndex(col + 1, resolvedCols);
           if (boost * 0.65 > this._basalStepBoost[leftC]) this._basalStepBoost[leftC] = boost * 0.65;
           if (boost * 0.65 > this._basalStepBoost[rightC]) this._basalStepBoost[rightC] = boost * 0.65;
         }
       }
 
-      if (!isOrig && lType === 'steamVent' && this._steamVentCount < MAX_STEAM_VENT_EMITTERS) {
+      if ((lType === 'steamVent' || lType === 'geyser') && this._steamVentCount < MAX_STEAM_VENT_EMITTERS) {
         const base = this._steamVentCount * 6;
-        this._steamVentData[base] = (col + 0.5) * COL_ANGLE;
-        this._steamVentData[base + 1] = l.floor * resolvedFh + 0.13;
+        this._steamVentData[base] = (col + 0.5) * this.colAngle;
+        this._steamVentData[base + 1] = l.floor * resolvedFh + 0.14;
         this._steamVentData[base + 2] = Math.max(1.5, Number(l.phasePeriod) || 3.4);
         this._steamVentData[base + 3] = Number(l.phaseOffset) || 0;
         this._steamVentData[base + 4] = i;
@@ -1723,170 +1742,164 @@ export class TowerFluidAndSparkVFX {
       }
     }
 
-    if (!isOrig) {
-      // 2. Scan `tower.doors` for `sparkArch` furnace tunnels & luminous rim-mist doorways
-      const doors = tower.doors || [];
-      for (let i = 0; i < doors.length; i++) {
-        const d = doors[i];
-        if (!d) continue;
-        const col = wrapColIndex(Math.round(d.col));
-        const fl = Math.round(d.floor);
-        const phi = (d.col + 0.5) * COL_ANGLE;
-        const floorY = d.floor * resolvedFh;
-        const isRune = Boolean(d.isRune || d.rune);
-        const isSparkArch =
-          (d.tunnelStyle === 'sparkArch' || d.sparkArch === true) &&
-          !d.isExit &&
-          !d.isVault &&
-          !isRune;
+    const doors = tower.doors || [];
+    for (let i = 0; i < doors.length; i++) {
+      const d = doors[i];
+      if (!d) continue;
+      const col = wrapColIndex(Math.round(d.col), resolvedCols);
+      const fl = Math.round(d.floor);
+      const phi = (d.col + 0.5) * this.colAngle;
+      const floorY = d.floor * resolvedFh;
+      const isRune = Boolean(d.isRune || d.rune || d.isSanctum);
+      const isSparkArch =
+        (d.tunnelStyle === 'sparkArch' || d.sparkArch === true) &&
+        !d.isExit &&
+        !d.isVault &&
+        !isRune;
 
-        if (isSparkArch && this._sparkArchCount < MAX_SPARK_ARCH_EMITTERS) {
-          let plusScore = 0;
-          let minusScore = 0;
-          if (fl >= 0 && fl < MAX_GRID_FLOORS) {
-            for (let step = 1; step <= 3; step++) {
-              const weight = 4 - step;
-              if (this._ledgeSurfaceGrid[fl * COLS + wrapColIndex(col + step)] > -1e5) {
-                plusScore += weight;
-              }
-              if (this._ledgeSurfaceGrid[fl * COLS + wrapColIndex(col - step)] > -1e5) {
-                minusScore += weight;
-              }
+      if (isSparkArch && this._sparkArchCount < MAX_SPARK_ARCH_EMITTERS) {
+        let plusScore = 0;
+        let minusScore = 0;
+        if (fl >= 0 && fl < MAX_GRID_FLOORS) {
+          for (let step = 1; step <= 3; step++) {
+            const weight = 4 - step;
+            if (this._ledgeSurfaceGrid[fl * resolvedCols + wrapColIndex(col + step, resolvedCols)] > -1e5) {
+              plusScore += weight;
+            }
+            if (this._ledgeSurfaceGrid[fl * resolvedCols + wrapColIndex(col - step, resolvedCols)] > -1e5) {
+              minusScore += weight;
             }
           }
-          const tangDir =
-            plusScore > minusScore ? 1.0 : minusScore > plusScore ? -1.0 : 0.0;
+        }
+        const tangDir = plusScore > minusScore ? 1.0 : minusScore > plusScore ? -1.0 : 0.0;
 
-          const sBase = this._sparkArchCount * 7;
-          this._sparkArchData[sBase] = phi;
-          this._sparkArchData[sBase + 1] = floorY;
-          this._sparkArchData[sBase + 2] = doorWorldH;
-          this._sparkArchData[sBase + 3] = tangDir;
-          this._sparkArchData[sBase + 4] = (i + 1) * 1.73 + col * 0.41;
-          this._sparkArchData[sBase + 5] = floorY <= baseWaterFloor * resolvedFh ? 1 : 0;
-          this._sparkArchData[sBase + 6] = 0;
-          this._sparkArchCount++;
+        const sBase = this._sparkArchCount * 7;
+        this._sparkArchData[sBase] = phi;
+        this._sparkArchData[sBase + 1] = floorY;
+        this._sparkArchData[sBase + 2] = doorWorldH;
+        this._sparkArchData[sBase + 3] = tangDir;
+        this._sparkArchData[sBase + 4] = (i + 1) * 1.73 + col * 0.41;
+        this._sparkArchData[sBase + 5] = floorY <= baseWaterFloor * resolvedFh ? 1 : 0;
+        this._sparkArchData[sBase + 6] = 0;
+        this._sparkArchCount++;
 
-          // Cool-grey hearth smoke wisp at the lower-inner sill of the dark iron tunnel (like the North-Star photo!)
-          if (this._doorEmitterCount < MAX_DOOR_EMITTERS) {
-            const mBase = this._doorEmitterCount * 5;
-            this._doorEmitterData[mBase] = phi;
-            this._doorEmitterData[mBase + 1] = floorY;
-            this._doorEmitterData[mBase + 2] = doorWorldH;
-            this._doorEmitterData[mBase + 3] = 2;
-            this._doorEmitterData[mBase + 4] = 0.72;
-            this._doorEmitterCount++;
-          }
-        } else if (this._doorEmitterCount < MAX_DOOR_EMITTERS) {
+        if (this._doorEmitterCount < MAX_DOOR_EMITTERS) {
           const mBase = this._doorEmitterCount * 5;
           this._doorEmitterData[mBase] = phi;
           this._doorEmitterData[mBase + 1] = floorY;
           this._doorEmitterData[mBase + 2] = doorWorldH;
-          this._doorEmitterData[mBase + 3] = isRune ? 1 : d.isVault ? 2 : 0;
-          this._doorEmitterData[mBase + 4] = 1.0;
+          this._doorEmitterData[mBase + 3] = 2;
+          this._doorEmitterData[mBase + 4] = 0.72;
           this._doorEmitterCount++;
         }
-      }
-
-      // 3. Build wet corbel-ledge & elevator-shaft mist emitters across the tower
-      const elevators = tower.elevators || [];
-      for (let e = 0; e < elevators.length && this._ledgeMistCount < MAX_LEDGE_MIST_EMITTERS; e++) {
-        const el = elevators[e];
-        if (!el) continue;
-        const lBase = this._ledgeMistCount * 4;
-        this._ledgeMistData[lBase] = (el.col + 0.5) * COL_ANGLE;
-        this._ledgeMistData[lBase + 1] = COL_ANGLE * 1.65;
-        this._ledgeMistData[lBase + 2] = el.minFloor * resolvedFh + 0.06;
-        this._ledgeMistData[lBase + 3] = 1.35; // big atmospheric flank bank around elevator landings!
-        this._ledgeMistCount++;
-      }
-
-      const maxCheckFloors = Math.min(MAX_GRID_FLOORS, this._towerFloors + 1);
-      const floorStride = Math.max(1, Math.floor(maxCheckFloors / 14));
-      for (
-        let fl = 1;
-        fl < maxCheckFloors && this._ledgeMistCount < MAX_LEDGE_MIST_EMITTERS;
-        fl += floorStride
-      ) {
-        let bestStart = -1;
-        let bestLen = 0;
-        let runStart = -1;
-        let runLen = 0;
-        for (let c = 0; c < COLS; c++) {
-          if (this._ledgeSurfaceGrid[fl * COLS + c] > -1e5) {
-            if (runLen === 0) runStart = c;
-            runLen++;
-            if (runLen > bestLen) {
-              bestLen = runLen;
-              bestStart = runStart;
-            }
-          } else {
-            runLen = 0;
-          }
-        }
-        if (bestLen >= 2) {
-          const midCol = bestStart + bestLen * 0.5;
-          const lBase = this._ledgeMistCount * 4;
-          this._ledgeMistData[lBase] = midCol * COL_ANGLE;
-          this._ledgeMistData[lBase + 1] = Math.min(4, bestLen) * COL_ANGLE * 0.92;
-          this._ledgeMistData[lBase + 2] = fl * resolvedFh + 0.05;
-          this._ledgeMistData[lBase + 3] = 1.0;
-          this._ledgeMistCount++;
-        }
+      } else if (this._doorEmitterCount < MAX_DOOR_EMITTERS) {
+        const mBase = this._doorEmitterCount * 5;
+        this._doorEmitterData[mBase] = phi;
+        this._doorEmitterData[mBase + 1] = floorY;
+        this._doorEmitterData[mBase + 2] = doorWorldH;
+        this._doorEmitterData[mBase + 3] = isRune ? 1 : d.isVault ? 2 : 0;
+        this._doorEmitterData[mBase + 4] = 1.0;
+        this._doorEmitterCount++;
       }
     }
 
-    this.surfPlumeMesh.visible = !isOrig;
-    this.steamPlumeMesh.visible = !isOrig && this._steamVentCount > 0;
-    this.sparkStreaksMesh.visible = !isOrig && this._sparkArchCount > 0;
-    this.sparkGlowMesh.visible = !isOrig && this._sparkArchCount > 0;
-    if (isOrig || this._sparkArchCount === 0) {
+    const elevators = tower.elevators || [];
+    for (let e = 0; e < elevators.length && this._ledgeMistCount < MAX_LEDGE_MIST_EMITTERS; e++) {
+      const el = elevators[e];
+      if (!el) continue;
+      const lBase = this._ledgeMistCount * 4;
+      this._ledgeMistData[lBase] = (el.col + 0.5) * this.colAngle;
+      this._ledgeMistData[lBase + 1] = this.colAngle * 1.65;
+      this._ledgeMistData[lBase + 2] = el.minFloor * resolvedFh + 0.08;
+      this._ledgeMistData[lBase + 3] = 1.35;
+      this._ledgeMistCount++;
+    }
+
+    const maxCheckFloors = Math.min(MAX_GRID_FLOORS, this._towerFloors + 1);
+    const floorStride = Math.max(1, Math.floor(maxCheckFloors / 14));
+    for (let fl = 1; fl < maxCheckFloors && this._ledgeMistCount < MAX_LEDGE_MIST_EMITTERS; fl += floorStride) {
+      let bestStart = -1;
+      let bestLen = 0;
+      let runStart = -1;
+      let runLen = 0;
+      for (let c = 0; c < resolvedCols; c++) {
+        if (this._ledgeSurfaceGrid[fl * resolvedCols + c] > -1e5) {
+          if (runLen === 0) runStart = c;
+          runLen++;
+          if (runLen > bestLen) {
+            bestLen = runLen;
+            bestStart = runStart;
+          }
+        } else {
+          runLen = 0;
+        }
+      }
+      if (bestLen >= 2) {
+        const midCol = bestStart + bestLen * 0.5;
+        const lBase = this._ledgeMistCount * 4;
+        this._ledgeMistData[lBase] = midCol * this.colAngle;
+        this._ledgeMistData[lBase + 1] = Math.min(4, bestLen) * this.colAngle * 0.92;
+        this._ledgeMistData[lBase + 2] = fl * resolvedFh + 0.06;
+        this._ledgeMistData[lBase + 3] = 1.0;
+        this._ledgeMistCount++;
+      }
+    }
+
+    this.surfPlumeMesh.visible = true;
+    this.mistWispsMesh.visible = true;
+    this.steamPlumeMesh.visible = this._steamVentCount > 0;
+    this.sparkStreaksMesh.visible = this._sparkArchCount > 0;
+    this.sparkGlowMesh.visible = this._sparkArchCount > 0;
+    if (this._sparkArchCount === 0) {
       for (let i = 0; i < this.sparkLights.length; i++) {
         this.sparkLights[i].intensity = 0;
       }
     }
 
-    // Pre-warm 2.0s (40 steps x 0.05s) at spawn camera `camCol = spawn.col` so Frame 0 is explosive!
+    // Pre-warm 2.0s (40 steps x 0.05s) so Frame 0 already has active rapids, mist & sparks!
     const initCamCol = Number(tower.spawn?.col) || 0;
     const preWaterY = baseWaterFloor * resolvedFh;
     for (let step = 0; step < 40; step++) {
       const simT = step * 0.05;
-      this._stepSurfAndSpray(preWaterY, initCamCol, 0, simT, 0.05, 1.0, null);
-      if (!isOrig) {
-        this._stepDoorAndLedgeMist(preWaterY, initCamCol, 0, simT, 0.05, 0);
-        this._stepSparksAndGlows(preWaterY, initCamCol, 0, simT, 0.05, null);
-        if (this._steamVentCount > 0) {
-          this._stepSteamVents(preWaterY, 0, simT, 0.05, null);
-        }
+      this._stepSurfAndSpray(preWaterY, initCamCol, 0, simT, 0.05, this._biomeSurgeScale, null);
+      this._stepDoorAndLedgeMist(preWaterY, initCamCol, 0, simT, 0.05, 0);
+      this._stepSparksAndGlows(preWaterY, initCamCol, 0, simT, 0.05, null);
+      if (this._steamVentCount > 0) {
+        this._stepSteamVents(preWaterY, 0, simT, 0.05, null);
       }
     }
-    this._uploadBuffers(isOrig);
+    this._uploadBuffers();
   }
 
-  // --------------------------------------------------------------------------
-  // Per-Frame Update (`update(state, camCol, time, dt)`) — ZERO ALLOCATIONS!
-  // --------------------------------------------------------------------------
   update(state, camCol = 0, time = 0, dt = 1 / 60) {
     if (this._disposed || !state) return;
 
-    if (state.era && state.era !== this.era) {
-      this.setEra(state.era);
-    }
-
-    const isOrig = this.era === 'original';
-    const inferredFh =
-      isOrig && state.tower?.real ? STEP_ORIGINAL : this.fh || DEFAULT_FH;
-    if (state.tower && (state.tower !== this._tower || Math.abs(inferredFh - this.fh) > 1e-4)) {
+    const inferredFh = this.fh || DEFAULT_FH;
+    if (state.tower && state.tower !== this._tower) {
       this.rebuildForTower(state.tower, inferredFh, this.towerRadius);
+    } else if (state.tower && !this._forcedTheme) {
+      const wantBiome = resolveVfxBiome(state.tower.theme, state.tower.id);
+      if (wantBiome !== this._theme) {
+        this._applyThemePalette(wantBiome);
+      }
     }
 
-    const effCamCol =
-      camCol !== undefined && camCol !== null ? Number(camCol) || 0 : Number(state.camCol) || 0;
+    const effCamCol = camCol !== undefined && camCol !== null ? Number(camCol) || 0 : Number(state.camCol) || 0;
     const t = Number(time) || 0;
     const rawDt = Number(dt);
-    const stepDt = Number.isFinite(rawDt)
-      ? Math.min(0.05, Math.max(0.0, rawDt))
-      : 1 / 60;
+    const stepDt = Number.isFinite(rawDt) ? Math.min(0.05, Math.max(0.0, rawDt)) : 1 / 60;
+
+    // Ecosystem Purification progress (`0..1`)
+    let targetPurify = this._purificationTarget;
+    if (state.purificationProgress !== undefined) {
+      targetPurify = Number(state.purificationProgress) || 0;
+    } else if (state.tower?.purificationProgress !== undefined) {
+      targetPurify = Number(state.tower.purificationProgress) || 0;
+    } else if (state.restored || state.tower?.restored || state.mode === 'victory') {
+      targetPurify = 1.0;
+    }
+    targetPurify = Math.max(0, Math.min(1, targetPurify));
+    this._purification += (targetPurify - this._purification) * Math.min(1, stepDt * 2.5);
 
     const fh = this.fh;
     const waterFloor = state.waterFloor != null ? Number(state.waterFloor) : -0.55;
@@ -1894,27 +1907,27 @@ export class TowerFluidAndSparkVFX {
     const wind = Number(state.windCurrent) || 0;
     const liveLedges = state.ledges || null;
 
-    const yaw = -effCamCol * COL_ANGLE;
+    const yaw = -effCamCol * this.colAngle;
     const topple = state.topple;
     const toppleActive = Boolean(topple && topple.active);
     let toppleDropY = 0;
-    let surgeFactor = state.titleShowcase ? 1.18 : 1.0;
+    let surgeFactor = this._biomeSurgeScale * (state.titleShowcase ? 1.12 : 1.0) * (1.0 + this._purification * 0.15);
 
     if (toppleActive) {
       const p = Math.max(0, Math.min(1, Number(topple.progress) || 0));
       toppleDropY = -p * this._towerFloors * fh * 1.05;
-      const shakeX = Math.sin(t * 48) * 0.16 * (1 - p);
+      const shakeX = Math.sin(t * 48) * 0.18 * (1 - p);
       const tiltZ = Math.sin(t * 38) * 0.045 * (1 - p) + p * 0.14;
       this.towerVfxGroup.position.set(shakeX, toppleDropY, 0);
       this.towerVfxGroup.rotation.set(0, yaw, tiltZ);
       this.waterlineGroup.position.set(shakeX * 0.35, waterY, 0);
-      surgeFactor = 1.25 + Math.sin(p * Math.PI) * 1.45;
+      surgeFactor = 1.35 + Math.sin(p * Math.PI) * 1.55;
     } else {
       this.towerVfxGroup.position.set(0, 0, 0);
       this.towerVfxGroup.rotation.set(0, yaw, 0);
       this.waterlineGroup.position.set(0, waterY, 0);
-      if (this._theme === 'sinking' || waterFloor > -0.35) {
-        surgeFactor = Math.max(surgeFactor, 1.28);
+      if (waterFloor > -0.25) {
+        surgeFactor = Math.max(surgeFactor, 1.25);
       }
     }
     this.waterlineGroup.rotation.set(0, yaw, 0);
@@ -1927,57 +1940,51 @@ export class TowerFluidAndSparkVFX {
     this.surfApronUniforms.uSurge.value = surgeFactor;
     this.surfCrestUniforms.uTime.value = t;
 
-    this._stepSurfAndSpray(localWaterY, effCamCol, wind, t, stepDt, surgeFactor, state.player || null);
-
-    if (!isOrig) {
-      this._stepDoorAndLedgeMist(localWaterY, effCamCol, wind, t, stepDt, toppleDeltaY);
-      this._stepSparksAndGlows(localWaterY, effCamCol, wind, t, stepDt, liveLedges);
-      if (this._steamVentCount > 0 || this.steamPlumeMesh.visible) {
-        this._stepSteamVents(localWaterY, wind, t, stepDt, liveLedges);
-      }
+    const hero = state.gateway || state.player || null;
+    this._stepSurfAndSpray(localWaterY, effCamCol, wind, t, stepDt, surgeFactor, hero);
+    this._stepDoorAndLedgeMist(localWaterY, effCamCol, wind, t, stepDt, toppleDeltaY);
+    this._stepSparksAndGlows(localWaterY, effCamCol, wind, t, stepDt, liveLedges);
+    if (this._steamVentCount > 0 || this.steamPlumeMesh.visible) {
+      this._stepSteamVents(localWaterY, wind, t, stepDt, liveLedges);
     }
 
-    this._uploadBuffers(isOrig);
+    this._uploadBuffers();
   }
 
-  _uploadBuffers(isOrig) {
+  _uploadBuffers() {
     this._crestXformAttr.needsUpdate = true;
     this._crestStateAttr.needsUpdate = true;
     this._dropPosAttr.needsUpdate = true;
     this._dropMetaAttr.needsUpdate = true;
+    this._plumePosAttr.needsUpdate = true;
+    this._plumeMetaAttr.needsUpdate = true;
+    this._mistPosAttr.needsUpdate = true;
+    this._mistMetaAttr.needsUpdate = true;
 
-    if (!isOrig) {
-      this._plumePosAttr.needsUpdate = true;
-      this._plumeMetaAttr.needsUpdate = true;
-      this._mistPosAttr.needsUpdate = true;
-      this._mistMetaAttr.needsUpdate = true;
-      if (this.sparkStreaksMesh.visible) {
-        this._sparkPosAttr.needsUpdate = true;
-        this._sparkVelAttr.needsUpdate = true;
-      }
-      if (this.sparkGlowMesh.visible) {
-        this._glowPosAttr.needsUpdate = true;
-        this._glowScaleAttr.needsUpdate = true;
-      }
-      if (this.steamPlumeMesh.visible) {
-        this._steamPosAttr.needsUpdate = true;
-        this._steamMetaAttr.needsUpdate = true;
-      }
+    if (this.sparkStreaksMesh.visible) {
+      this._sparkPosAttr.needsUpdate = true;
+      this._sparkVelAttr.needsUpdate = true;
+    }
+    if (this.sparkGlowMesh.visible) {
+      this._glowPosAttr.needsUpdate = true;
+      this._glowScaleAttr.needsUpdate = true;
+    }
+    if (this.steamPlumeMesh.visible) {
+      this._steamPosAttr.needsUpdate = true;
+      this._steamMetaAttr.needsUpdate = true;
     }
   }
 
-  // --------------------------------------------------------------------------
-  // Physics Step 1: 2.2x Explosive Flank Surf Crests, Surf Plumes & Spray!
-  // --------------------------------------------------------------------------
-  _stepSurfAndSpray(localWaterY, camCol, wind, time, dt, surgeFactor, player) {
-    const isOrig = this.era === 'original';
+  _stepSurfAndSpray(localWaterY, camCol, wind, time, dt, surgeFactor, hero) {
     const R = this.towerRadius;
-    const camPhi = camCol * COL_ANGLE;
+    const camPhi = camCol * this.colAngle;
+    const cols = this.cols;
+    const vortexSpin = this._biomeVortexSpin;
+    const flowDrift = this._biomeFlowDrift;
 
-    // 1. Update 64 3D outward-flaring whitewater surf crest fans around `(R, waterY)`
     for (let i = 0; i < SURF_CREST_COUNT; i++) {
       const s5 = i * 5;
-      const basePhi = this._crestSim[s5];
+      const basePhi = wrapPositiveAngle(this._crestSim[s5] + time * vortexSpin * 0.14);
       const speed = this._crestSim[s5 + 1];
       const phase = this._crestSim[s5 + 2];
       const seed = this._crestSim[s5 + 3];
@@ -1987,24 +1994,18 @@ export class TowerFluidAndSparkVFX {
       const life = rawCycle < 0 ? rawCycle + 1.0 : rawCycle;
       this._crestSim[s5 + 4] = life;
 
-      const col = wrapColIndex(Math.floor(basePhi / COL_ANGLE));
-      const stairBoost = isOrig ? 0.0 : this._basalStepBoost[col];
+      const col = wrapColIndex(Math.floor(basePhi / this.colAngle), cols);
+      const stairBoost = this._basalStepBoost[col];
 
-      // Flank-breaker emphasis: left & right visible tower silhouettes (`|theta| ~ 0.55..1.40`)
-      // erupt 2.2x taller & wider just like `reference_north_star.jpg`!
       const relAng = Math.abs(wrapAngle(basePhi - camPhi));
       const flankSine = Math.sin(Math.min(Math.PI, relAng));
-      const flankBoost = isOrig ? 0.0 : flankSine * flankSine * 0.95;
+      const flankBoost = flankSine * flankSine * 0.85;
 
       const swellMod =
         0.78 +
-        0.36 * Math.sin(basePhi * 2.0 + time * 1.45) +
-        0.24 * Math.cos(basePhi * 3.0 - time * 1.05);
-      const amp =
-        swellMod *
-        surgeFactor *
-        (1.0 + stairBoost * 0.48 + flankBoost * 0.68) *
-        (isOrig ? 0.38 : 1.0);
+        0.34 * Math.sin(basePhi * 2.0 + time * 1.45) +
+        0.22 * Math.cos(basePhi * 3.0 - time * 1.05);
+      const amp = swellMod * surgeFactor * (1.0 + stairBoost * 0.42 + flankBoost * 0.58);
 
       let heightCurve;
       if (life < 0.26) {
@@ -2016,17 +2017,14 @@ export class TowerFluidAndSparkVFX {
       }
 
       const curPhi = basePhi + Math.sin(time * 0.65 + seed * TWO_PI) * 0.045;
-      const arcWidth = (0.28 + seed * 0.14) * (0.95 + 0.35 * heightCurve);
-      // 2.2x taller whitewater surf crests (`1.1m .. 2.45m` on flanks & stairs!)
-      const crestH = (0.78 + seed * 0.88) * amp * (0.24 + 0.96 * heightCurve);
-      const radialFlare = (0.55 + flankBoost * 0.85 + seed * 0.35) * (0.35 + 0.75 * heightCurve);
+      const arcWidth = (0.24 + seed * 0.12) * (0.95 + 0.35 * heightCurve);
+      const crestH = (0.72 + seed * 0.82) * amp * (0.24 + 0.92 * heightCurve);
+      const radialFlare = (0.52 + flankBoost * 0.78 + seed * 0.32) * (0.35 + 0.72 * heightCurve);
 
-      const erode = isOrig
-        ? 0.34 + life * 0.42
-        : 0.12 + Math.pow(life, 1.25) * 0.54;
+      const erode = 0.14 + Math.pow(life, 1.25) * 0.54;
       const alpha =
         Math.sin(Math.min(1.0, life * 1.05) * Math.PI) *
-        (isOrig ? 0.56 : Math.min(0.92, 0.68 + stairBoost * 0.18 + flankBoost * 0.16));
+        Math.min(0.90, (0.48 + stairBoost * 0.16 + flankBoost * 0.14) * Math.min(1.2, surgeFactor));
 
       const x4 = i * 4;
       this._crestXformBuf[x4] = curPhi;
@@ -2039,150 +2037,139 @@ export class TowerFluidAndSparkVFX {
       this._crestStateBuf[x4 + 2] = alpha;
       this._crestStateBuf[x4 + 3] = seed;
 
-      // Launch frothy surf plumes & dense spray bursts when wave crests smash against base stone!
-      if (dt > 0 && prevLife < 0.16 && life >= 0.16) {
-        const burstCount = isOrig
-          ? (seed > 0.68 ? 1 : 0)
-          : (amp > 1.35 ? 5 : amp > 0.95 ? 3 : 2);
+      if (dt > 0 && prevLife < 0.16 && life >= 0.16 && surgeFactor > 0.35) {
+        const burstCount = amp > 1.35 ? 4 : amp > 0.85 ? 2 : 1;
         for (let b = 0; b < burstCount; b++) {
           this._spawnSeaDroplet(
             curPhi,
             crestH * 0.45,
-            R + 0.14 + this._rand() * 0.38,
-            amp * 1.15,
-            wind
+            R + 0.16 + this._rand() * 0.42,
+            amp * 1.08,
+            wind + flowDrift * 0.35 + vortexSpin * 0.4
           );
         }
-        if (!isOrig && (flankBoost > 0.25 || stairBoost > 0.25 || seed > 0.42)) {
-          this._spawnSurfPlume(curPhi, R + 0.18 + flankBoost * 0.22, amp, wind);
+        if (flankBoost > 0.25 || stairBoost > 0.25 || seed > 0.48) {
+          this._spawnSurfPlume(curPhi, R + 0.20 + flankBoost * 0.24, amp, wind + flowDrift * 0.3 + vortexSpin * 0.5);
         }
       }
     }
 
-    // 2. Continuous flank-weighted frothy surf plumes & spray droplets so both flanks roar non-stop!
     if (dt > 0) {
-      if (!isOrig) {
-        this._plumeAccum += 42.0 * surgeFactor * dt;
-        while (this._plumeAccum >= 1.0) {
-          this._plumeAccum -= 1.0;
-          // 72% bias onto the dramatic left & right flanks (`camPhi ± 0.65..1.35`) like North-Star photo!
-          let pPhi;
-          if (this._rand() < 0.72) {
-            const side = this._rand() < 0.56 ? -1.0 : 1.0; // slight hero emphasis on left sparkArch flank!
-            pPhi = wrapPositiveAngle(camPhi + side * (0.52 + this._rand() * 0.88));
-          } else {
-            pPhi = this._rand() * TWO_PI;
-          }
-          const col = wrapColIndex(Math.floor(pPhi / COL_ANGLE));
-          const energy = (0.95 + this._basalStepBoost[col] * 0.55) * surgeFactor;
-          this._spawnSurfPlume(pPhi, R + 0.16 + this._rand() * 0.45, energy, wind);
+      this._plumeAccum += 36.0 * surgeFactor * dt;
+      while (this._plumeAccum >= 1.0) {
+        this._plumeAccum -= 1.0;
+        let pPhi;
+        if (this._rand() < 0.70) {
+          const side = this._rand() < 0.5 ? -1.0 : 1.0;
+          pPhi = wrapPositiveAngle(camPhi + side * (0.50 + this._rand() * 0.90));
+        } else {
+          pPhi = this._rand() * TWO_PI;
         }
+        const col = wrapColIndex(Math.floor(pPhi / this.colAngle), cols);
+        const energy = (0.85 + this._basalStepBoost[col] * 0.50) * surgeFactor;
+        this._spawnSurfPlume(pPhi, R + 0.18 + this._rand() * 0.50, energy, wind + flowDrift * 0.3 + vortexSpin * 0.5);
       }
 
-      const dropRate = (isOrig ? 18 : 165) * surgeFactor;
+      const dropRate = 140 * surgeFactor;
       this._dropSpawnAccum += dropRate * dt;
       while (this._dropSpawnAccum >= 1.0) {
         this._dropSpawnAccum -= 1.0;
         let rPhi;
-        if (!isOrig && this._rand() < 0.68) {
-          const side = this._rand() < 0.55 ? -1.0 : 1.0;
+        if (this._rand() < 0.68) {
+          const side = this._rand() < 0.5 ? -1.0 : 1.0;
           rPhi = wrapPositiveAngle(camPhi + side * (0.42 + this._rand() * 0.98));
         } else {
           rPhi = this._rand() * TWO_PI;
         }
-        const col = wrapColIndex(Math.floor(rPhi / COL_ANGLE));
-        const boost = 1.0 + (isOrig ? 0 : this._basalStepBoost[col] * 0.55);
+        const col = wrapColIndex(Math.floor(rPhi / this.colAngle), cols);
+        const boost = 1.0 + this._basalStepBoost[col] * 0.50;
         this._spawnSeaDroplet(
           rPhi,
-          0.10 + this._rand() * 0.35,
-          R + 0.10 + this._rand() * 0.68,
-          1.05 * surgeFactor * boost,
-          wind
+          0.12 + this._rand() * 0.38,
+          R + 0.12 + this._rand() * 0.72,
+          surgeFactor * boost,
+          wind + flowDrift * 0.35 + vortexSpin * 0.4
         );
       }
     }
 
-    // Player waterline splash interaction
-    if (dt > 0 && player && !player.hidden) {
-      const pY = (Number(player.floor) || 0) * this.fh;
-      if (Math.abs(pY - localWaterY) < 0.36 && Math.abs(Number(player.vy) || 0) > 1.6) {
-        const pPhi = wrapPositiveAngle((Number(player.col) || 0) * COL_ANGLE);
-        this._spawnSeaDroplet(pPhi, 0.22, R + 0.38, 1.55, wind);
-        if (!isOrig) this._spawnSurfPlume(pPhi, R + 0.36, 1.45, wind);
+    // Gateway waterline splash & Tail-Whip spray interaction!
+    if (dt > 0 && hero && !hero.hidden) {
+      const pY = (Number(hero.floor) || 0) * this.fh;
+      const whipActive = (Number(hero.tailWhipTimer) || Number(hero.whipTimer) || 0) > 0.01;
+      if (Math.abs(pY - localWaterY) < 0.55 && (Math.abs(Number(hero.vy) || 0) > 1.5 || whipActive)) {
+        const pPhi = wrapPositiveAngle((Number(hero.col) || 0) * this.colAngle);
+        this._spawnSeaDroplet(pPhi, 0.26, R + 0.45, 1.6, wind);
+        this._spawnSurfPlume(pPhi, R + 0.42, 1.5, wind);
       }
     }
 
-    // 3. Step 96 frothy whitewater surf plumes (in waterlineGroup space: y = 0 is waterY)
-    if (!isOrig) {
-      for (let i = 0; i < MAX_SURF_PLUMES; i++) {
-        const b15 = i * 15;
-        let age = this._plumeSim[b15 + 6];
-        const maxAge = this._plumeSim[b15 + 7];
+    for (let i = 0; i < MAX_SURF_PLUMES; i++) {
+      const b15 = i * 15;
+      let age = this._plumeSim[b15 + 6];
+      const maxAge = this._plumeSim[b15 + 7];
 
+      if (age >= maxAge) {
+        this._plumeMetaBuf[i * 4 + 1] = 0;
+        continue;
+      }
+
+      if (dt > 0) {
+        age += dt;
+        this._plumeSim[b15 + 6] = age;
         if (age >= maxAge) {
           this._plumeMetaBuf[i * 4 + 1] = 0;
           continue;
         }
 
-        if (dt > 0) {
-          age += dt;
-          this._plumeSim[b15 + 6] = age;
-          if (age >= maxAge) {
-            this._plumeMetaBuf[i * 4 + 1] = 0;
-            continue;
-          }
+        let phi = this._plumeSim[b15];
+        let y = this._plumeSim[b15 + 1];
+        let r = this._plumeSim[b15 + 2];
+        let vTang = this._plumeSim[b15 + 3];
+        let vy = this._plumeSim[b15 + 4];
+        let vRad = this._plumeSim[b15 + 5];
 
-          let phi = this._plumeSim[b15];
-          let y = this._plumeSim[b15 + 1];
-          let r = this._plumeSim[b15 + 2];
-          let vTang = this._plumeSim[b15 + 3];
-          let vy = this._plumeSim[b15 + 4];
-          let vRad = this._plumeSim[b15 + 5];
+        const drag = Math.max(0.0, 1.0 - 1.45 * dt);
+        vy = vy * drag - 2.65 * dt;
+        vRad *= Math.max(0.0, 1.0 - 1.15 * dt);
+        vTang = (vTang + (wind * 0.42 + vortexSpin * 0.65) * dt) * drag;
 
-          // Explosive upward splash burst that decelerates & billows outward before settling
-          const drag = Math.max(0.0, 1.0 - 1.45 * dt);
-          vy = vy * drag - 2.65 * dt;
-          vRad *= Math.max(0.0, 1.0 - 1.15 * dt);
-          vTang = (vTang + wind * 0.42 * dt) * drag;
+        y = Math.max(-0.08, y + vy * dt);
+        r = Math.max(R + 0.08, r + vRad * dt);
+        phi = wrapPositiveAngle(phi + (vTang / Math.max(2.0, r)) * dt);
 
-          y = Math.max(-0.08, y + vy * dt);
-          r = Math.max(R + 0.08, r + vRad * dt);
-          phi = wrapPositiveAngle(phi + (vTang / Math.max(1.5, r)) * dt);
-
-          this._plumeSim[b15] = phi;
-          this._plumeSim[b15 + 1] = y;
-          this._plumeSim[b15 + 2] = r;
-          this._plumeSim[b15 + 3] = vTang;
-          this._plumeSim[b15 + 4] = vy;
-          this._plumeSim[b15 + 5] = vRad;
-          this._plumeSim[b15 + 11] += this._plumeSim[b15 + 12] * dt;
-        }
-
-        const life = age / maxAge;
-        const curPhi = this._plumeSim[b15];
-        const curY = this._plumeSim[b15 + 1];
-        const curR = this._plumeSim[b15 + 2];
-        const s0 = this._plumeSim[b15 + 8];
-        const s1 = this._plumeSim[b15 + 9];
-        const peakA = this._plumeSim[b15 + 10];
-
-        const fadeIn = Math.sin(Math.min(1.0, life / 0.20) * Math.PI * 0.5);
-        const fadeOut = Math.pow(Math.max(0.0, 1.0 - life), 1.25);
-
-        const p4 = i * 4;
-        this._plumePosBuf[p4] = Math.sin(curPhi) * curR;
-        this._plumePosBuf[p4 + 1] = curY;
-        this._plumePosBuf[p4 + 2] = Math.cos(curPhi) * curR;
-        this._plumePosBuf[p4 + 3] = s0 + (s1 - s0) * Math.sqrt(life);
-
-        this._plumeMetaBuf[p4] = this._plumeSim[b15 + 11];
-        this._plumeMetaBuf[p4 + 1] = peakA * fadeIn * fadeOut;
-        this._plumeMetaBuf[p4 + 2] = this._plumeSim[b15 + 13];
-        this._plumeMetaBuf[p4 + 3] = this._plumeSim[b15 + 14];
+        this._plumeSim[b15] = phi;
+        this._plumeSim[b15 + 1] = y;
+        this._plumeSim[b15 + 2] = r;
+        this._plumeSim[b15 + 3] = vTang;
+        this._plumeSim[b15 + 4] = vy;
+        this._plumeSim[b15 + 5] = vRad;
+        this._plumeSim[b15 + 11] += this._plumeSim[b15 + 12] * dt;
       }
+
+      const life = age / maxAge;
+      const curPhi = this._plumeSim[b15];
+      const curY = this._plumeSim[b15 + 1];
+      const curR = this._plumeSim[b15 + 2];
+      const s0 = this._plumeSim[b15 + 8];
+      const s1 = this._plumeSim[b15 + 9];
+      const peakA = this._plumeSim[b15 + 10];
+
+      const fadeIn = Math.sin(Math.min(1.0, life / 0.20) * Math.PI * 0.5);
+      const fadeOut = Math.pow(Math.max(0.0, 1.0 - life), 1.25);
+
+      const p4 = i * 4;
+      this._plumePosBuf[p4] = Math.sin(curPhi) * curR;
+      this._plumePosBuf[p4 + 1] = curY;
+      this._plumePosBuf[p4 + 2] = Math.cos(curPhi) * curR;
+      this._plumePosBuf[p4 + 3] = s0 + (s1 - s0) * Math.sqrt(life);
+
+      this._plumeMetaBuf[p4] = this._plumeSim[b15 + 11];
+      this._plumeMetaBuf[p4 + 1] = peakA * fadeIn * fadeOut;
+      this._plumeMetaBuf[p4 + 2] = this._plumeSim[b15 + 13];
+      this._plumeMetaBuf[p4 + 3] = this._plumeSim[b15 + 14];
     }
 
-    // 4. Step 520 ballistic airborne sea-spray droplets
     const grav = 7.4;
     for (let i = 0; i < MAX_SEA_DROPLETS; i++) {
       const b12 = i * 12;
@@ -2210,16 +2197,16 @@ export class TowerFluidAndSparkVFX {
         let vRad = this._dropSim[b12 + 5];
 
         const drag = Math.max(0.0, 1.0 - 1.15 * dt);
-        vTang = (vTang + wind * 0.55 * dt) * drag;
+        vTang = (vTang + (wind * 0.55 + vortexSpin * 0.75) * dt) * drag;
         vRad *= drag;
         vy -= grav * dt;
 
         r += vRad * dt;
-        if (r < R + 0.06) {
-          r = R + 0.06;
+        if (r < R + 0.08) {
+          r = R + 0.08;
           vRad = Math.abs(vRad) * 0.42;
         }
-        phi = wrapPositiveAngle(phi + (vTang / Math.max(1.5, r)) * dt);
+        phi = wrapPositiveAngle(phi + (vTang / Math.max(2.0, r)) * dt);
         y += vy * dt;
 
         if (y < -0.06 && vy < 0) {
@@ -2252,14 +2239,13 @@ export class TowerFluidAndSparkVFX {
       const fadeOut = 1.0 - life * life;
       const m4 = i * 4;
       this._dropMetaBuf[m4] = baseSize * (0.88 + 0.34 * life);
-      this._dropMetaBuf[m4 + 1] = fadeIn * fadeOut * (isOrig ? 0.58 : 0.92);
+      this._dropMetaBuf[m4 + 1] = fadeIn * fadeOut * 0.90;
       this._dropMetaBuf[m4 + 2] = this._dropSim[b12 + 9];
       this._dropMetaBuf[m4 + 3] = this._dropSim[b12 + 11];
     }
 
-    // 5. Spawn dreamy flank & basal sea-mist banks (slots `0 .. SEA_MIST_SLOTS - 1`)
-    if (!isOrig && dt > 0) {
-      this._seaMistAccum += Math.min(30.0, 24.0 * surgeFactor) * dt;
+    if (dt > 0) {
+      this._seaMistAccum += Math.min(34.0, 22.0 * this._biomeMistRateScale) * dt;
       while (this._seaMistAccum >= 1.0) {
         this._seaMistAccum -= 1.0;
         const slot = this._seaMistCursor;
@@ -2268,22 +2254,22 @@ export class TowerFluidAndSparkVFX {
         const side = this._rand() < 0.5 ? -1.0 : 1.0;
         const mPhi =
           this._rand() < 0.75
-            ? wrapPositiveAngle(camPhi + side * (0.58 + this._rand() * 0.85))
+            ? wrapPositiveAngle(camPhi + side * (0.55 + this._rand() * 0.90))
             : this._rand() * TWO_PI;
         const b16 = slot * 16;
 
         this._mistSim[b16] = mPhi;
-        this._mistSim[b16 + 1] = localWaterY + 0.35 + this._rand() * 1.45;
-        this._mistSim[b16 + 2] = R + 0.32 + this._rand() * 0.95;
-        this._mistSim[b16 + 3] = (this._rand() - 0.5) * 0.35 + wind * 0.35;
-        this._mistSim[b16 + 4] = 0.28 + this._rand() * 0.45;
+        this._mistSim[b16 + 1] = localWaterY + 0.35 + this._rand() * 1.65;
+        this._mistSim[b16 + 2] = R + 0.38 + this._rand() * 1.25;
+        this._mistSim[b16 + 3] = (this._rand() - 0.5) * 0.35 + wind * 0.35 + flowDrift * 0.18;
+        this._mistSim[b16 + 4] = 0.24 + this._rand() * 0.42;
         this._mistSim[b16 + 5] = 0.12 + this._rand() * 0.26;
         this._mistSim[b16 + 6] = 0;
-        this._mistSim[b16 + 7] = 1.85 + this._rand() * 1.35;
-        this._mistSim[b16 + 8] = 1.25 + this._rand() * 0.95;
-        this._mistSim[b16 + 9] = 0.16 + this._rand() * 0.055; // <= 0.215
+        this._mistSim[b16 + 7] = 2.0 + this._rand() * 1.4;
+        this._mistSim[b16 + 8] = 1.45 + this._rand() * 1.15;
+        this._mistSim[b16 + 9] = 0.15 + this._rand() * 0.055;
         this._mistSim[b16 + 10] = this._rand() * TWO_PI;
-        this._mistSim[b16 + 11] = (this._rand() - 0.5) * 0.36;
+        this._mistSim[b16 + 11] = (this._rand() - 0.5) * 0.34;
         this._mistSim[b16 + 12] = Math.floor(this._rand() * 4);
         this._mistSim[b16 + 13] = 3;
         this._mistSim[b16 + 14] = localWaterY;
@@ -2296,19 +2282,19 @@ export class TowerFluidAndSparkVFX {
     const idx = this._plumeCursor;
     this._plumeCursor = (this._plumeCursor + 1) % MAX_SURF_PLUMES;
     const b15 = idx * 15;
-    const e = Math.min(1.85, Math.max(0.75, energy));
+    const e = Math.min(1.85, Math.max(0.45, energy));
 
     this._plumeSim[b15] = wrapPositiveAngle(phi + (this._rand() - 0.5) * 0.12);
-    this._plumeSim[b15 + 1] = 0.12 + this._rand() * 0.35;
+    this._plumeSim[b15 + 1] = 0.12 + this._rand() * 0.38;
     this._plumeSim[b15 + 2] = r;
-    this._plumeSim[b15 + 3] = (this._rand() - 0.5) * 0.65 + wind * 0.38;
-    this._plumeSim[b15 + 4] = (1.65 + this._rand() * 2.15) * e;
-    this._plumeSim[b15 + 5] = (0.38 + this._rand() * 0.92) * e;
+    this._plumeSim[b15 + 3] = (this._rand() - 0.5) * 0.65 + wind * 0.42;
+    this._plumeSim[b15 + 4] = (1.60 + this._rand() * 2.15) * e;
+    this._plumeSim[b15 + 5] = (0.38 + this._rand() * 0.95) * e;
     this._plumeSim[b15 + 6] = 0;
     this._plumeSim[b15 + 7] = 0.72 + this._rand() * 0.58;
-    this._plumeSim[b15 + 8] = (0.68 + this._rand() * 0.42) * Math.sqrt(e);
-    this._plumeSim[b15 + 9] = (1.55 + this._rand() * 0.85) * Math.sqrt(e);
-    this._plumeSim[b15 + 10] = Math.min(0.68, 0.42 + this._rand() * 0.22 * e);
+    this._plumeSim[b15 + 8] = (0.75 + this._rand() * 0.46) * Math.sqrt(e);
+    this._plumeSim[b15 + 9] = (1.65 + this._rand() * 0.92) * Math.sqrt(e);
+    this._plumeSim[b15 + 10] = Math.min(0.68, 0.36 + this._rand() * 0.24 * e);
     this._plumeSim[b15 + 11] = this._rand() * TWO_PI;
     this._plumeSim[b15 + 12] = (this._rand() - 0.5) * 1.35;
     this._plumeSim[b15 + 13] = Math.floor(this._rand() * 4);
@@ -2319,36 +2305,29 @@ export class TowerFluidAndSparkVFX {
     const idx = this._dropCursor;
     this._dropCursor = (this._dropCursor + 1) % MAX_SEA_DROPLETS;
     const b12 = idx * 12;
-    const isOrig = this.era === 'original';
-    const e = Math.min(1.32, Math.max(0.75, energy));
+    const e = Math.min(1.38, Math.max(0.45, energy));
 
-    // Crisp glistening sea-spray droplets topping out naturally around 1.4m..2.5m above waterY!
     this._dropSim[b12] = wrapPositiveAngle(phi + (this._rand() - 0.5) * 0.16);
-    this._dropSim[b12 + 1] = Math.min(1.15, y);
+    this._dropSim[b12 + 1] = Math.min(1.25, y);
     this._dropSim[b12 + 2] = r;
-    this._dropSim[b12 + 3] = (this._rand() - 0.5) * 1.25 + wind * 0.45;
-    this._dropSim[b12 + 4] = (1.65 + this._rand() * 2.55) * e * (isOrig ? 0.55 : 1.0);
-    this._dropSim[b12 + 5] = (0.22 + this._rand() * 1.05) * e;
+    this._dropSim[b12 + 3] = (this._rand() - 0.5) * 1.25 + wind * 0.48;
+    this._dropSim[b12 + 4] = (1.65 + this._rand() * 2.55) * e;
+    this._dropSim[b12 + 5] = (0.24 + this._rand() * 1.08) * e;
     this._dropSim[b12 + 6] = 0;
-    this._dropSim[b12 + 7] = (0.52 + this._rand() * 0.54) * (isOrig ? 0.72 : 1.0);
-    this._dropSim[b12 + 8] = isOrig ? (0.11 + this._rand() * 0.08) : (0.11 + this._rand() * 0.14);
+    this._dropSim[b12 + 7] = 0.52 + this._rand() * 0.54;
+    this._dropSim[b12 + 8] = 0.12 + this._rand() * 0.15;
     this._dropSim[b12 + 9] = this._rand() * TWO_PI;
     this._dropSim[b12 + 10] = (this._rand() - 0.5) * 2.4;
     this._dropSim[b12 + 11] = Math.floor(this._rand() * 4);
   }
 
-  // --------------------------------------------------------------------------
-  // Physics Step 2: Luminous Doorway Rim-Mist & Flank/Corbel-Ledge Mist
-  // --------------------------------------------------------------------------
-  _stepDoorAndLedgeMist(localWaterY, camCol, wind, time, dt, toppleDeltaY = 0) {
+  _stepDoorAndLedgeMist(localWaterY, _camCol, wind, time, dt, toppleDeltaY = 0) {
     const R = this.towerRadius;
     const doorMistCap = MAX_MIST_WISPS - SEA_MIST_SLOTS;
 
     if (dt > 0) {
-      // 1. Spawn doorway mist right at `r = R + 0.17 .. R + 0.31` (100% in front of the
-      //    ashlar doorway portal plane AND directly behind Pogo at `R + 0.38` for rim-lighting!)
       if (this._doorEmitterCount > 0) {
-        const doorRate = Math.min(44.0, this._doorEmitterCount * 5.8);
+        const doorRate = Math.min(44.0, this._doorEmitterCount * 5.6 * this._biomeMistRateScale);
         this._doorMistAccum += doorRate * dt;
         while (this._doorMistAccum >= 1.0) {
           this._doorMistAccum -= 1.0;
@@ -2367,37 +2346,30 @@ export class TowerFluidAndSparkVFX {
           this._doorMistCursor = SEA_MIST_SLOTS + ((slot - SEA_MIST_SLOTS + 1) % doorMistCap);
           const b16 = slot * 16;
 
-          const isForgeSillMist = tintType === 2 && rateWeight < 0.85;
-          this._mistSim[b16] = wrapPositiveAngle(dPhi + (this._rand() - 0.5) * 0.09);
-          this._mistSim[b16 + 1] = isForgeSillMist
-            ? dFloorY + 0.08 + this._rand() * 0.18
+          const isSillMist = tintType === 2 && rateWeight < 0.85;
+          this._mistSim[b16] = wrapPositiveAngle(dPhi + (this._rand() - 0.5) * 0.08);
+          this._mistSim[b16 + 1] = isSillMist
+            ? dFloorY + 0.10 + this._rand() * 0.22
             : dFloorY + dH * (0.12 + this._rand() * 0.62);
-          this._mistSim[b16 + 2] = isForgeSillMist
-            ? R + 0.28 + this._rand() * 0.14
-            : R + 0.17 + this._rand() * 0.14;
-          this._mistSim[b16 + 3] = (this._rand() - 0.5) * 0.26 + wind * 0.18;
+          this._mistSim[b16 + 2] = isSillMist ? R + 0.34 + this._rand() * 0.18 : R + 0.22 + this._rand() * 0.18;
+          this._mistSim[b16 + 3] = (this._rand() - 0.5) * 0.28 + wind * 0.18;
           this._mistSim[b16 + 4] = -0.04 - this._rand() * 0.08;
-          this._mistSim[b16 + 5] = 0.08 + this._rand() * 0.16;
+          this._mistSim[b16 + 5] = 0.09 + this._rand() * 0.18;
           this._mistSim[b16 + 6] = 0;
           this._mistSim[b16 + 7] = 2.0 + this._rand() * 1.25;
-          this._mistSim[b16 + 8] = isForgeSillMist
-            ? 0.56 + this._rand() * 0.28
-            : 0.74 + this._rand() * 0.46;
-          this._mistSim[b16 + 9] = isForgeSillMist
-            ? 0.15 + this._rand() * 0.045
-            : 0.18 + this._rand() * 0.04; // luminous 0.18..0.22 rim-mist!
+          this._mistSim[b16 + 8] = isSillMist ? 0.68 + this._rand() * 0.34 : 0.92 + this._rand() * 0.56;
+          this._mistSim[b16 + 9] = isSillMist ? 0.14 + this._rand() * 0.045 : 0.17 + this._rand() * 0.04;
           this._mistSim[b16 + 10] = this._rand() * TWO_PI;
           this._mistSim[b16 + 11] = (this._rand() - 0.5) * 0.24;
           this._mistSim[b16 + 12] = Math.floor(this._rand() * 4);
           this._mistSim[b16 + 13] = tintType;
-          this._mistSim[b16 + 14] = dFloorY + 0.08;
+          this._mistSim[b16 + 14] = dFloorY + 0.10;
           this._mistSim[b16 + 15] = 1;
         }
       }
 
-      // 2. Spawn soft volumetric sea-mist drifting off wet corbel ledges & right/left flanks!
       if (this._ledgeMistCount > 0) {
-        const ledgeRate = Math.min(24.0, this._ledgeMistCount * 2.4);
+        const ledgeRate = Math.min(26.0, this._ledgeMistCount * 2.4 * this._biomeMistRateScale);
         this._ledgeMistAccum += ledgeRate * dt;
         while (this._ledgeMistAccum >= 1.0) {
           this._ledgeMistAccum -= 1.0;
@@ -2416,26 +2388,25 @@ export class TowerFluidAndSparkVFX {
 
           const sideDir = this._rand() < 0.5 ? -1 : 1;
           this._mistSim[b16] = wrapPositiveAngle(phiMid + (this._rand() - 0.5) * spanRad);
-          this._mistSim[b16 + 1] = surfY + 0.08 + this._rand() * 0.34;
-          this._mistSim[b16 + 2] = R + 0.36 + this._rand() * 0.58;
-          this._mistSim[b16 + 3] = sideDir * (0.10 + this._rand() * 0.24) + wind * 0.26;
+          this._mistSim[b16 + 1] = surfY + 0.10 + this._rand() * 0.38;
+          this._mistSim[b16 + 2] = R + 0.46 + this._rand() * 0.72;
+          this._mistSim[b16 + 3] = sideDir * (0.12 + this._rand() * 0.26) + wind * 0.26;
           this._mistSim[b16 + 4] = -0.02 + this._rand() * 0.09;
-          this._mistSim[b16 + 5] = 0.09 + this._rand() * 0.20;
+          this._mistSim[b16 + 5] = 0.10 + this._rand() * 0.22;
           this._mistSim[b16 + 6] = 0;
           this._mistSim[b16 + 7] = 2.2 + this._rand() * 1.45;
-          this._mistSim[b16 + 8] = (0.98 + this._rand() * 0.72) * sizeMult;
-          this._mistSim[b16 + 9] = 0.15 + this._rand() * 0.065; // <= 0.215!
+          this._mistSim[b16 + 8] = (1.15 + this._rand() * 0.85) * sizeMult;
+          this._mistSim[b16 + 9] = 0.14 + this._rand() * 0.065;
           this._mistSim[b16 + 10] = this._rand() * TWO_PI;
           this._mistSim[b16 + 11] = (this._rand() - 0.5) * 0.22;
           this._mistSim[b16 + 12] = Math.floor(this._rand() * 4);
           this._mistSim[b16 + 13] = 0;
-          this._mistSim[b16 + 14] = surfY + 0.06;
+          this._mistSim[b16 + 14] = surfY + 0.08;
           this._mistSim[b16 + 15] = 2;
         }
       }
     }
 
-    // 3. Advance all 256 volumetric mist wisps
     for (let i = 0; i < MAX_MIST_WISPS; i++) {
       const b16 = i * 16;
       let age = this._mistSim[b16 + 6];
@@ -2472,11 +2443,11 @@ export class TowerFluidAndSparkVFX {
         r += vRad * dt;
 
         if (kind >= 1) {
-          if (r < R + 0.86 && y < floorY) {
+          if (r < R + 1.15 && y < floorY) {
             y = floorY;
             vy = 0.015;
             vTang += (vTang >= 0 ? 1 : -1) * 0.18 * dt;
-          } else if (r >= R + 0.86) {
+          } else if (r >= R + 1.15) {
             vy = Math.max(-0.16, vy - 0.06 * dt);
           }
         } else {
@@ -2487,7 +2458,7 @@ export class TowerFluidAndSparkVFX {
           if (y < localWaterY + 0.08) y = localWaterY + 0.08;
         }
 
-        phi = wrapPositiveAngle(phi + (vTang / Math.max(1.5, r)) * dt);
+        phi = wrapPositiveAngle(phi + (vTang / Math.max(2.0, r)) * dt);
 
         this._mistSim[b16] = phi;
         this._mistSim[b16 + 1] = y;
@@ -2526,15 +2497,13 @@ export class TowerFluidAndSparkVFX {
     }
   }
 
-  // --------------------------------------------------------------------------
-  // Physics Step 3: 3x Richer Bouncing Welding Spark Showers + Wet-Stone Glow!
-  // --------------------------------------------------------------------------
   _stepSparksAndGlows(localWaterY, camCol, wind, time, dt, liveLedges) {
     const archCount = this._sparkArchCount;
     if (archCount === 0) return;
 
     const R = this.towerRadius;
-    const camPhi = camCol * COL_ANGLE;
+    const cols = this.cols;
+    const camPhi = camCol * this.colAngle;
 
     let bestIdx0 = -1;
     let bestScore0 = -1;
@@ -2554,7 +2523,7 @@ export class TowerFluidAndSparkVFX {
       const seed = this._sparkArchData[sBase + 4];
       const wasSub = this._sparkArchData[sBase + 5];
 
-      const submerged = floorY + 0.12 <= localWaterY;
+      const submerged = floorY + 0.15 <= localWaterY;
       if (submerged) {
         if (wasSub < 0.5 && dt > 0) {
           this._sparkArchData[sBase + 5] = 1;
@@ -2562,11 +2531,11 @@ export class TowerFluidAndSparkVFX {
           for (let q = 0; q < 10; q++) {
             this._spawnSteamPuff(
               phi + (this._rand() - 0.5) * 0.16,
-              localWaterY + 0.06,
-              R + 0.34 + this._rand() * 0.28,
-              3.4 + this._rand() * 2.6,
-              0.32,
-              0.92,
+              localWaterY + 0.08,
+              R + 0.45 + this._rand() * 0.35,
+              3.8 + this._rand() * 2.8,
+              0.38,
+              1.05,
               0.36,
               0.58,
               wind
@@ -2577,7 +2546,6 @@ export class TowerFluidAndSparkVFX {
       }
       this._sparkArchData[sBase + 5] = 0;
 
-      // Vigorous welding/furnace sputter oscillator
       const w1 = Math.sin(time * 7.3 + seed);
       const w2 = Math.sin(time * 19.1 + seed * 2.3);
       const w3 = Math.cos(time * 34.7 - seed * 1.7);
@@ -2585,58 +2553,53 @@ export class TowerFluidAndSparkVFX {
       const sputter = Math.min(1.0, Math.pow(rawSpike, 1.85) * 1.48);
       const flicker = 0.54 + 0.46 * sputter;
 
-      // Focus 3x spark budget heavily on visible front-hemisphere arches so hero view has ~140+ live sparks!
       const angDelta = Math.abs(wrapAngle(phi - camPhi));
       const inFront = angDelta < 1.95;
       if (dt > 0) {
-        const rate = (inFront ? 125.0 + sputter * 215.0 : 28.0 + sputter * 42.0);
+        const rate = inFront ? 120.0 + sputter * 200.0 : 26.0 + sputter * 40.0;
         let accum = this._sparkArchData[sBase + 6] + rate * dt;
         while (accum >= 1.0) {
           accum -= 1.0;
-          this._spawnFurnaceSpark(phi, floorY, doorH, tangDir, sputter);
+          this._spawnConduitSpark(phi, floorY, doorH, tangDir, sputter);
         }
         this._sparkArchData[sBase + 6] = accum;
       }
 
-      // 3 layered glow quads per sparkArch:
-      //   1) Wide wet-flagstone specular reflection pool across the walkway where sparks bounce
-      //   2) Hot concentrated bounce-impact pool right outside the iron tunnel mouth
-      //   3) Warm recessed inner-hearth ember glow inside the tunnel
       if (glowSlot + 2 < MAX_SPARK_GLOWS) {
-        const poolPhi = phi + (tangDir * 0.46) / R;
-        const poolR = R + 0.48;
+        const poolPhi = phi + (tangDir * 0.56) / R;
+        const poolR = R + 0.62;
         const g0 = glowSlot * 4;
         this._glowPosBuf[g0] = Math.sin(poolPhi) * poolR;
-        this._glowPosBuf[g0 + 1] = floorY + 0.024;
+        this._glowPosBuf[g0 + 1] = floorY + 0.03;
         this._glowPosBuf[g0 + 2] = Math.cos(poolPhi) * poolR;
         this._glowPosBuf[g0 + 3] = poolPhi;
-        this._glowScaleBuf[g0] = 1.48 + sputter * 0.34;
-        this._glowScaleBuf[g0 + 1] = 0.78 + sputter * 0.16;
+        this._glowScaleBuf[g0] = 1.75 + sputter * 0.40;
+        this._glowScaleBuf[g0 + 1] = 0.95 + sputter * 0.20;
         this._glowScaleBuf[g0 + 2] = 0.72 + flicker * 0.62;
         this._glowScaleBuf[g0 + 3] = 0;
         glowSlot++;
 
-        const mouthPoolPhi = phi + (tangDir * 0.18) / R;
-        const mouthPoolR = R + 0.44;
+        const mouthPoolPhi = phi + (tangDir * 0.24) / R;
+        const mouthPoolR = R + 0.56;
         const g1 = glowSlot * 4;
         this._glowPosBuf[g1] = Math.sin(mouthPoolPhi) * mouthPoolR;
-        this._glowPosBuf[g1 + 1] = floorY + 0.026;
+        this._glowPosBuf[g1 + 1] = floorY + 0.032;
         this._glowPosBuf[g1 + 2] = Math.cos(mouthPoolPhi) * mouthPoolR;
         this._glowPosBuf[g1 + 3] = mouthPoolPhi;
-        this._glowScaleBuf[g1] = 0.78 + sputter * 0.22;
-        this._glowScaleBuf[g1 + 1] = 0.56 + sputter * 0.12;
+        this._glowScaleBuf[g1] = 0.92 + sputter * 0.26;
+        this._glowScaleBuf[g1 + 1] = 0.68 + sputter * 0.14;
         this._glowScaleBuf[g1 + 2] = 0.85 + flicker * 0.68;
         this._glowScaleBuf[g1 + 3] = 0;
         glowSlot++;
 
-        const hearthR = R + 0.26;
+        const hearthR = R + 0.34;
         const g2 = glowSlot * 4;
         this._glowPosBuf[g2] = Math.sin(phi) * hearthR;
-        this._glowPosBuf[g2 + 1] = floorY + 0.16;
+        this._glowPosBuf[g2 + 1] = floorY + 0.22;
         this._glowPosBuf[g2 + 2] = Math.cos(phi) * hearthR;
         this._glowPosBuf[g2 + 3] = phi;
-        this._glowScaleBuf[g2] = 0.52;
-        this._glowScaleBuf[g2 + 1] = 0.34;
+        this._glowScaleBuf[g2] = 0.62;
+        this._glowScaleBuf[g2 + 1] = 0.42;
         this._glowScaleBuf[g2 + 2] = 0.56 + flicker * 0.52;
         this._glowScaleBuf[g2 + 3] = 1;
         glowSlot++;
@@ -2661,7 +2624,6 @@ export class TowerFluidAndSparkVFX {
       this._glowScaleBuf[g * 4 + 2] = 0;
     }
 
-    // Bind 2 warm orange PointLights right over the active spark shower on the wet stone ledge!
     for (let li = 0; li < SPARK_LIGHT_POOL; li++) {
       const light = this.sparkLights[li];
       const chosenIdx = li === 0 ? bestIdx0 : bestIdx1;
@@ -2669,9 +2631,9 @@ export class TowerFluidAndSparkVFX {
       const chosenScore = li === 0 ? bestScore0 : bestScore1;
       if (chosenIdx >= 0 && chosenScore > 0.25) {
         const sb = chosenIdx * 7;
-        const lPhi = this._sparkArchData[sb] + (this._sparkArchData[sb + 3] * 0.42) / R;
-        const lY = this._sparkArchData[sb + 1] + 0.32;
-        const lR = R + 0.68;
+        const lPhi = this._sparkArchData[sb] + (this._sparkArchData[sb + 3] * 0.52) / R;
+        const lY = this._sparkArchData[sb + 1] + 0.42;
+        const lR = R + 0.85;
         light.position.set(Math.sin(lPhi) * lR, lY, Math.cos(lPhi) * lR);
         const hemiWeight = Math.min(1.0, Math.max(0.0, (chosenScore - 0.22) * 0.88));
         light.intensity = (1.65 + chosenFlicker * 2.35) * hemiWeight;
@@ -2680,8 +2642,7 @@ export class TowerFluidAndSparkVFX {
       }
     }
 
-    // Step all 720 ballistic sparks & skipping stone-floor embers!
-    const sparkGrav = 8.6;
+    const sparkGrav = 9.2;
     const fh = this.fh;
 
     for (let i = 0; i < MAX_SPARKS; i++) {
@@ -2720,13 +2681,13 @@ export class TowerFluidAndSparkVFX {
         y += vy * dt;
         r += vRad * dt;
 
-        if (r < R + 0.08 && age > 0.06) {
-          r = R + 0.08;
-          vRad = Math.abs(vRad) * 0.52 + 0.14;
+        if (r < R + 0.10 && age > 0.06) {
+          r = R + 0.10;
+          vRad = Math.abs(vRad) * 0.52 + 0.16;
           vTang *= 0.84;
         }
 
-        phi = wrapPositiveAngle(phi + (vTang / Math.max(1.5, r)) * dt);
+        phi = wrapPositiveAngle(phi + (vTang / Math.max(2.0, r)) * dt);
 
         if (y <= localWaterY + 0.02) {
           this._sparkSim[b12 + 6] = maxAge + 1;
@@ -2734,14 +2695,13 @@ export class TowerFluidAndSparkVFX {
           continue;
         }
 
-        // Physical bounce across the full curved flagstone ledge depth (`R + 0.02 .. R + 0.90`)!
-        if (vy < -0.04 && r >= R + 0.02 && r <= R + 0.90) {
-          const col = wrapColIndex(Math.floor(phi / COL_ANGLE));
-          const approxFl = Math.round((y + 0.08) / fh);
+        if (vy < -0.04 && r >= R + 0.02 && r <= R + 1.38) {
+          const col = wrapColIndex(Math.floor(phi / this.colAngle), cols);
+          const approxFl = Math.round((y + 0.10) / fh);
           if (approxFl >= 0 && approxFl < MAX_GRID_FLOORS) {
-            const cell = approxFl * COLS + col;
+            const cell = approxFl * cols + col;
             const surfY = this._ledgeSurfaceGrid[cell];
-            if (surfY > -1e5 && prevY >= surfY - 0.055 && y <= surfY + 0.016) {
+            if (surfY > -1e5 && prevY >= surfY - 0.08 && y <= surfY + 0.02) {
               let slabSolid = true;
               if (liveLedges) {
                 const lIdx = this._ledgeIndexGrid[cell];
@@ -2758,15 +2718,14 @@ export class TowerFluidAndSparkVFX {
                 const restitution = 0.35 + this._rand() * 0.26;
                 const impactSpeed = -vy;
 
-                y = surfY + 0.016;
+                y = surfY + 0.02;
                 vy = impactSpeed * restitution;
-                vTang = vTang * 0.78 + (this._rand() - 0.46) * Math.min(1.8, impactSpeed * 0.45);
-                vRad = vRad * 0.76 + (this._rand() - 0.42) * Math.min(1.4, impactSpeed * 0.38);
+                vTang = vTang * 0.78 + (this._rand() - 0.46) * Math.min(1.9, impactSpeed * 0.45);
+                vRad = vRad * 0.76 + (this._rand() - 0.42) * Math.min(1.5, impactSpeed * 0.38);
                 heatBoost = Math.min(0.55, 0.26 + impactSpeed * 0.08);
                 this._sparkSim[b12 + 10] = bounces + 1;
 
-                // Shatter secondary micro-sparks on stone impact for dense forge floor scatter!
-                if (bounces < 1.5 && impactSpeed > 1.15 && this._rand() < 0.65) {
+                if (bounces < 1.5 && impactSpeed > 1.2 && this._rand() < 0.65) {
                   this._spawnBounceMicroSpark(phi, y + 0.01, r, vTang, vy, vRad);
                 }
               }
@@ -2814,37 +2773,33 @@ export class TowerFluidAndSparkVFX {
     }
   }
 
-  _spawnFurnaceSpark(archPhi, floorY, doorH, tangDir, sputter) {
+  _spawnConduitSpark(archPhi, floorY, doorH, tangDir, sputter) {
     const idx = this._sparkCursor;
     this._sparkCursor = (this._sparkCursor + 1) % MAX_SPARKS;
     const b12 = idx * 12;
     const R = this.towerRadius;
 
-    // Clear `towerArchitecture.js`'s `archDepth = 0.44` iron barrel leg (`r >= R + 0.43`)
-    // so 100% of sparks shoot freely out of the arched mouth and cascade across the flagstones!
-    const dirBias = tangDir !== 0 ? tangDir : (this._rand() < 0.5 ? -1 : 1);
-    const speedScale = 0.88 + sputter * 0.58;
-    const isDeepHearthJet = this._rand() < 0.24;
+    const dirBias = tangDir !== 0 ? tangDir : this._rand() < 0.5 ? -1 : 1;
+    const speedScale = 0.92 + sputter * 0.62;
+    const isDeepJet = this._rand() < 0.24;
 
     this._sparkSim[b12] = wrapPositiveAngle(
-      archPhi + (isDeepHearthJet ? 0 : dirBias * 0.045) + (this._rand() - 0.5) * 0.085
+      archPhi + (isDeepJet ? 0 : dirBias * 0.042) + (this._rand() - 0.5) * 0.08
     );
-    this._sparkSim[b12 + 1] = floorY + 0.06 + this._rand() * Math.min(0.34, doorH * 0.42);
-    this._sparkSim[b12 + 2] = isDeepHearthJet
-      ? R + 0.28 + this._rand() * 0.14
-      : R + 0.43 + this._rand() * 0.15;
+    this._sparkSim[b12 + 1] = floorY + 0.08 + this._rand() * Math.min(0.45, doorH * 0.42);
+    this._sparkSim[b12 + 2] = isDeepJet ? R + 0.36 + this._rand() * 0.18 : R + 0.54 + this._rand() * 0.18;
 
-    this._sparkSim[b12 + 3] = isDeepHearthJet
-      ? (dirBias * (0.65 + this._rand() * 1.15) + (this._rand() - 0.5) * 0.55) * speedScale
-      : (dirBias * (1.35 + this._rand() * 2.55) + (this._rand() - 0.45) * 0.85) * speedScale;
-    this._sparkSim[b12 + 4] = (0.22 + this._rand() * 2.05) * speedScale;
-    this._sparkSim[b12 + 5] = isDeepHearthJet
-      ? (1.45 + this._rand() * 1.65) * speedScale
-      : (0.12 + this._rand() * 0.88) * speedScale;
+    this._sparkSim[b12 + 3] = isDeepJet
+      ? (dirBias * (0.75 + this._rand() * 1.25) + (this._rand() - 0.5) * 0.6) * speedScale
+      : (dirBias * (1.50 + this._rand() * 2.85) + (this._rand() - 0.45) * 0.9) * speedScale;
+    this._sparkSim[b12 + 4] = (0.28 + this._rand() * 2.25) * speedScale;
+    this._sparkSim[b12 + 5] = isDeepJet
+      ? (1.60 + this._rand() * 1.80) * speedScale
+      : (0.16 + this._rand() * 0.95) * speedScale;
 
     this._sparkSim[b12 + 6] = 0;
-    this._sparkSim[b12 + 7] = 0.52 + this._rand() * 0.62;
-    this._sparkSim[b12 + 8] = 0.040 + Math.pow(this._rand(), 1.35) * 0.048;
+    this._sparkSim[b12 + 7] = 0.52 + this._rand() * 0.64;
+    this._sparkSim[b12 + 8] = 0.046 + Math.pow(this._rand(), 1.35) * 0.054;
     this._sparkSim[b12 + 9] = 0.28;
     this._sparkSim[b12 + 10] = 0;
     this._sparkSim[b12 + 11] = this._rand();
@@ -2858,20 +2813,17 @@ export class TowerFluidAndSparkVFX {
     this._sparkSim[b12] = phi;
     this._sparkSim[b12 + 1] = y;
     this._sparkSim[b12 + 2] = r;
-    this._sparkSim[b12 + 3] = parentVT * 0.62 + (this._rand() - 0.5) * 1.85;
-    this._sparkSim[b12 + 4] = Math.max(0.42, parentVY * (0.62 + this._rand() * 0.58));
-    this._sparkSim[b12 + 5] = parentVR * 0.58 + (this._rand() - 0.45) * 1.25;
+    this._sparkSim[b12 + 3] = parentVT * 0.62 + (this._rand() - 0.5) * 1.95;
+    this._sparkSim[b12 + 4] = Math.max(0.45, parentVY * (0.62 + this._rand() * 0.58));
+    this._sparkSim[b12 + 5] = parentVR * 0.58 + (this._rand() - 0.45) * 1.35;
     this._sparkSim[b12 + 6] = 0;
     this._sparkSim[b12 + 7] = 0.26 + this._rand() * 0.30;
-    this._sparkSim[b12 + 8] = 0.026 + this._rand() * 0.022;
+    this._sparkSim[b12 + 8] = 0.030 + this._rand() * 0.025;
     this._sparkSim[b12 + 9] = 0.38;
     this._sparkSim[b12 + 10] = 2;
     this._sparkSim[b12 + 11] = this._rand();
   }
 
-  // --------------------------------------------------------------------------
-  // Physics Step 4: Pressurized `steamVent` Plumes
-  // --------------------------------------------------------------------------
   _stepSteamVents(localWaterY, wind, time, dt, liveLedges) {
     const R = this.towerRadius;
 
@@ -2918,11 +2870,11 @@ export class TowerFluidAndSparkVFX {
           if (steamActive) {
             this._spawnSteamPuff(
               phi + (this._rand() - 0.5) * 0.05,
-              surfY + 0.04,
-              R + 0.34 + (this._rand() - 0.5) * 0.08,
-              5.4 + this._rand() * 2.8,
-              0.24 + this._rand() * 0.10,
-              0.78 + this._rand() * 0.28,
+              surfY + 0.05,
+              R + 0.48 + (this._rand() - 0.5) * 0.10,
+              6.2 + this._rand() * 3.2,
+              0.30 + this._rand() * 0.12,
+              0.92 + this._rand() * 0.34,
               0.34,
               0.32,
               wind
@@ -2930,11 +2882,11 @@ export class TowerFluidAndSparkVFX {
           } else if (steamWarn) {
             this._spawnSteamPuff(
               phi + (this._rand() - 0.5) * 0.08,
-              surfY + 0.03,
-              R + 0.34 + (this._rand() - 0.5) * 0.12,
-              1.45 + this._rand() * 1.15,
-              0.18 + this._rand() * 0.08,
-              0.46 + this._rand() * 0.16,
+              surfY + 0.04,
+              R + 0.48 + (this._rand() - 0.5) * 0.14,
+              1.65 + this._rand() * 1.35,
+              0.22 + this._rand() * 0.10,
+              0.56 + this._rand() * 0.18,
               0.24,
               0.68,
               wind
@@ -2942,11 +2894,11 @@ export class TowerFluidAndSparkVFX {
           } else {
             this._spawnSteamPuff(
               phi + (this._rand() - 0.5) * 0.06,
-              surfY + 0.03,
-              R + 0.34,
-              0.55 + this._rand() * 0.35,
-              0.16,
-              0.42,
+              surfY + 0.04,
+              R + 0.48,
+              0.65 + this._rand() * 0.40,
+              0.20,
+              0.48,
               0.08,
               0.22,
               wind
@@ -2984,13 +2936,13 @@ export class TowerFluidAndSparkVFX {
         let vRad = this._steamSim[b15 + 5];
 
         const drag = Math.max(0.0, 1.0 - 2.25 * dt);
-        vy = vy * drag + 0.45 * dt;
+        vy = vy * drag + 0.48 * dt;
         vTang = (vTang + wind * 0.48 * dt + Math.sin(time * 9.0 + i) * 0.35 * dt) * drag;
         vRad *= drag;
 
         y += vy * dt;
-        r = Math.max(R + 0.12, r + vRad * dt);
-        phi = wrapPositiveAngle(phi + (vTang / Math.max(1.5, r)) * dt);
+        r = Math.max(R + 0.15, r + vRad * dt);
+        phi = wrapPositiveAngle(phi + (vTang / Math.max(2.0, r)) * dt);
 
         this._steamSim[b15] = phi;
         this._steamSim[b15 + 1] = y;
@@ -3041,9 +2993,9 @@ export class TowerFluidAndSparkVFX {
     this._steamSim[b15 + 2] = r;
     this._steamSim[b15 + 3] = (this._rand() - 0.5) * 0.52 + wind * 0.28;
     this._steamSim[b15 + 4] = vy;
-    this._steamSim[b15 + 5] = (this._rand() - 0.42) * 0.45;
+    this._steamSim[b15 + 5] = (this._rand() - 0.42) * 0.48;
     this._steamSim[b15 + 6] = 0;
-    this._steamSim[b15 + 7] = 0.38 + this._rand() * 0.34;
+    this._steamSim[b15 + 7] = 0.40 + this._rand() * 0.36;
     this._steamSim[b15 + 8] = startSize;
     this._steamSim[b15 + 9] = endSize;
     this._steamSim[b15 + 10] = peakAlpha;

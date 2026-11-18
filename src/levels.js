@@ -1,14 +1,26 @@
-// Tower Toppler '26 — Cell-for-Cell 1987 Classic Towers, 8 Reboot Story Monoliths,
-// 4-Sector Archipelago World Metadata, Rune Doors, & Verified Procedural/Daily Generator
-// Pure leaf module (zero internal imports per ARCHITECTURE_CONTRACT.md §1)
+// Towering Waters: Gateway's Descent — 5 Earth Water Biomes, 10 Handcrafted Campaign Spires,
+// Real Walkable Staircases, Pipe-Valve Routing, Gecko Wall-Strips, Grapple Rings,
+// 7 Siphon Syndicate Enemies & Verified Procedural/Daily/Sanctum/Flood/Expedition Composer
+// Pure leaf module (zero internal imports)
 
-export const COLS = 16;
+export const COLS = 20;
 
-function wrapCol(c) {
+export function wrapCol(c) {
   return ((Math.round(c) % COLS) + COLS) % COLS;
 }
 
-function colDist(a, b) {
+function wrapFloatCol(c) {
+  return (((Number(c) || 0) % COLS) + COLS) % COLS;
+}
+
+function floatColDist(a, b) {
+  let d = wrapFloatCol(b) - wrapFloatCol(a);
+  if (d > COLS / 2) d -= COLS;
+  if (d < -COLS / 2) d += COLS;
+  return d;
+}
+
+export function colDist(a, b) {
   let d = wrapCol(b) - wrapCol(a);
   if (d > COLS / 2) d -= COLS;
   if (d < -COLS / 2) d += COLS;
@@ -30,7 +42,7 @@ export function mulberry32(seed) {
 }
 
 /**
- * Returns UTC daily challenge seed & ISO date key: { seed: 20261116, dateKey: '2026-11-16' }.
+ * Returns UTC daily challenge seed & ISO date key: { seed: 20261118, dateKey: '2026-11-18' }.
  * @param {Date|number|string} [date=new Date()]
  */
 export function getDailySeed(date = new Date()) {
@@ -48,693 +60,326 @@ export function getDailySeed(date = new Date()) {
 }
 
 // ============================================================================
-// 4-SECTOR OPERATION NEBULUS ARCHIPELAGO WORLD MAP METADATA
+// 5 EARTH WATERSHED ACTS (WORLD MAP METADATA)
 // ============================================================================
+
+export const BIOME_THEMES = [
+  'canyon_river',
+  'alpine_lake',
+  'mist_bayou',
+  'coral_sea',
+  'storm_ocean'
+];
 
 export const SECTOR_WORLDS = [
   {
     id: 1,
-    key: 'sector_1',
-    code: 'SECTOR I',
-    name: 'THE DROWNED WATCH',
-    subtitle: 'SECTOR I • STORM APPROACH',
-    lore: 'Moonlit watchtowers battered by surging abyssal tides and bioluminescent mist.',
-    blurb: 'Moonlit watchtowers battered by surging abyssal tides and bioluminescent mist.',
-    skyTheme: 'moonlit_storm',
-    accentColor: '#5efce8',
+    act: 1,
+    key: 'act_1',
+    biome: 'canyon_river',
+    theme: 'canyon_river',
+    skyTheme: 'canyon_river',
+    code: 'ACT I',
+    name: 'REDWOOD CANYON RIVERS',
+    subtitle: 'ACT I • SUNLIT GORGE & WHITEWATER CATARACTS',
+    guardian: 'Elder Oakhaven',
+    lore: 'Golden morning sunlight pours into red-rock sandstone gorges where giant Siphon dams choke roaring redwood waterfalls.',
+    blurb: 'Golden morning sunlight pours into red-rock sandstone gorges where giant Siphon dams choke roaring redwood waterfalls.',
+    accentColor: '#2dd4bf',
     towerIds: [1, 2],
     towers: [1, 2],
-    routeType: 'submarine',
-    exitRouteType: 'glide',
-    intraRoute: { type: 'submarine', mode: 'submarine', badge: 'SUB', label: 'SEA ROUTE • MK.7 SUB-HUNTER', title: 'MK.7 Sub-Hunter' },
-    summitRoute: { type: 'glide', mode: 'glide', badge: 'GLIDE', label: 'SUMMIT SKY-WING • THE GLIDE', title: 'The Glide (Sky-Wing)' }
+    routeType: 'rapids_surf',
+    exitRouteType: 'frill_glide',
+    intraRoute: {
+      type: 'rapids_surf',
+      mode: 'rapids_surf',
+      badge: 'SURF',
+      label: 'GORGE RAPIDS • WHITEWATER TAIL-SURF',
+      title: 'Whitewater Rapids Tail-Surf'
+    },
+    summitRoute: {
+      type: 'frill_glide',
+      mode: 'frill_glide',
+      badge: 'GLIDE',
+      label: 'CANYON UPDRAFT • FRILL-GLIDE',
+      title: 'Canyon Updraft Frill-Glide'
+    }
   },
   {
     id: 2,
-    key: 'sector_2',
-    code: 'SECTOR II',
-    name: 'SMELTER & BOREAL REACH',
-    subtitle: 'SECTOR II • FIRE & FROST',
-    lore: 'Soot-darkened steam foundries rising into howling gale-force arctic monoliths.',
-    blurb: 'Soot-darkened steam foundries rising into howling gale-force arctic monoliths.',
-    skyTheme: 'boreal_aurora',
-    accentColor: '#67e8f9',
+    act: 2,
+    key: 'act_2',
+    biome: 'alpine_lake',
+    theme: 'alpine_lake',
+    skyTheme: 'alpine_lake',
+    code: 'ACT II',
+    name: 'CRYSTAL ALPINE LAKES',
+    subtitle: 'ACT II • MIRROR TARNS & ALPENGLOW PEAKS',
+    guardian: 'Spirit Lumi',
+    lore: 'Snow-capped silver-granite peaks reflect in glassy turquoise mountain tarns locked behind brass cryo-spillways.',
+    blurb: 'Snow-capped silver-granite peaks reflect in glassy turquoise mountain tarns locked behind brass cryo-spillways.',
+    accentColor: '#38bdf8',
     towerIds: [3, 4],
     towers: [3, 4],
-    routeType: 'skimmer',
-    exitRouteType: 'glide',
-    intraRoute: { type: 'skimmer', mode: 'skimmer', badge: 'SKIM', label: 'STORM SPRINT • HYDRO-SKIMMER', title: 'Hydro-Skimmer Run' },
-    summitRoute: { type: 'glide', mode: 'glide', badge: 'GLIDE', label: 'SUMMIT SKY-WING • THE GLIDE', title: 'The Glide (Sky-Wing)' }
+    routeType: 'reef_swim',
+    exitRouteType: 'frill_glide',
+    intraRoute: {
+      type: 'reef_swim',
+      mode: 'reef_swim',
+      badge: 'SWIM',
+      label: 'LAKEBED DIVE • CRYSTAL TARN FREE-SWIM',
+      title: 'Alpine Lakebed Free-Swim'
+    },
+    summitRoute: {
+      type: 'frill_glide',
+      mode: 'frill_glide',
+      badge: 'GLIDE',
+      label: 'ALPENGLOW RIDGE • FRILL-GLIDE',
+      title: 'Alpenglow Ridge Frill-Glide'
+    }
   },
   {
     id: 3,
-    key: 'sector_3',
-    code: 'SECTOR III',
-    name: 'ARCANE & HYDRAULIC TRENCH',
-    subtitle: 'SECTOR III • PRISM & IRON',
-    lore: 'Crystalline laser labyrinths anchored beside colossal offshore hydraulic piston rigs.',
-    blurb: 'Crystalline laser labyrinths anchored beside colossal offshore hydraulic piston rigs.',
-    skyTheme: 'prism_twilight',
-    accentColor: '#e879f9',
+    act: 3,
+    key: 'act_3',
+    biome: 'mist_bayou',
+    theme: 'mist_bayou',
+    skyTheme: 'mist_bayou',
+    code: 'ACT III',
+    name: 'EMERALD MIST BAYOUS',
+    subtitle: 'ACT III • FIREFLY CYPRESS & SUNKEN TEMPLES',
+    guardian: 'Keeper Mossback',
+    lore: 'Warm amber twilight glows through moss-draped cypress arches, glowing lotus channels, and ancient river-delta sanctums.',
+    blurb: 'Warm amber twilight glows through moss-draped cypress arches, glowing lotus channels, and ancient river-delta sanctums.',
+    accentColor: '#fbbf24',
     towerIds: [5, 6],
     towers: [5, 6],
-    routeType: 'submarine',
-    exitRouteType: 'glide',
-    intraRoute: { type: 'submarine', mode: 'submarine', badge: 'SUB', label: 'SEA ROUTE • MK.7 SUB-HUNTER', title: 'MK.7 Sub-Hunter' },
-    summitRoute: { type: 'glide', mode: 'glide', badge: 'GLIDE', label: 'SUMMIT SKY-WING • THE GLIDE', title: 'The Glide (Sky-Wing)' }
+    routeType: 'rapids_surf',
+    exitRouteType: 'reef_swim',
+    intraRoute: {
+      type: 'rapids_surf',
+      mode: 'rapids_surf',
+      badge: 'SURF',
+      label: 'BAYOU CHANNEL • LOTUS WAKE SURF',
+      title: 'Bayou Firefly Tail-Surf'
+    },
+    summitRoute: {
+      type: 'reef_swim',
+      mode: 'reef_swim',
+      badge: 'SWIM',
+      label: 'ESTUARY CROSSING • MANGROVE FREE-SWIM',
+      title: 'Estuary Mangrove Free-Swim'
+    }
   },
   {
     id: 4,
-    key: 'sector_4',
-    code: 'SECTOR IV',
-    name: 'MAELSTROM CORE',
-    subtitle: 'SECTOR IV • ECLIPSED REACTOR',
-    lore: 'Blackout thunder-citadels guarding the master Apex reactor at the eye of the maelstrom.',
-    blurb: 'Blackout thunder-citadels guarding the master Apex reactor at the eye of the maelstrom.',
-    skyTheme: 'maelstrom_storm',
-    accentColor: '#fbbf24',
+    act: 4,
+    key: 'act_4',
+    biome: 'coral_sea',
+    theme: 'coral_sea',
+    skyTheme: 'coral_sea',
+    code: 'ACT IV',
+    name: 'SUNLIT CORAL SEAS',
+    subtitle: 'ACT IV • TURQUOISE ATOLLS & LIVING REEFS',
+    guardian: 'Matriarch Aurelia',
+    lore: 'Dazzling tropical lagoons reveal living coral gardens and gliding manta rays beneath sun-bleached sea-glass spires.',
+    blurb: 'Dazzling tropical lagoons reveal living coral gardens and gliding manta rays beneath sun-bleached sea-glass spires.',
+    accentColor: '#f472b6',
     towerIds: [7, 8],
     towers: [7, 8],
-    routeType: 'skimmer',
+    routeType: 'reef_swim',
+    exitRouteType: 'frill_glide',
+    intraRoute: {
+      type: 'reef_swim',
+      mode: 'reef_swim',
+      badge: 'SWIM',
+      label: 'CORAL LAGOON • REEF GUARDIAN SWIM',
+      title: 'Sunlit Coral Reef Free-Swim'
+    },
+    summitRoute: {
+      type: 'frill_glide',
+      mode: 'frill_glide',
+      badge: 'GLIDE',
+      label: 'TRADEWIND ARCHES • FRILL-GLIDE',
+      title: 'Tropical Tradewind Frill-Glide'
+    }
+  },
+  {
+    id: 5,
+    act: 5,
+    key: 'act_5',
+    biome: 'storm_ocean',
+    theme: 'storm_ocean',
+    skyTheme: 'storm_ocean',
+    code: 'ACT V',
+    name: 'POLAR & TEMPEST OCEANS',
+    subtitle: 'ACT V • AURORA ICEBERGS & THE MOTHER SIPHON',
+    guardian: 'Oracle Borealis',
+    lore: 'Shimmering polar auroras crown towering turquoise icebergs where the Mother Siphon churns the deep ocean into a maelstrom.',
+    blurb: 'Shimmering polar auroras crown towering turquoise icebergs where the Mother Siphon churns the deep ocean into a maelstrom.',
+    accentColor: '#5efce8',
+    towerIds: [9, 10],
+    towers: [9, 10],
+    routeType: 'rapids_surf',
     exitRouteType: null,
-    intraRoute: { type: 'skimmer', mode: 'skimmer', badge: 'SKIM', label: 'STORM SPRINT • HYDRO-SKIMMER', title: 'Hydro-Skimmer Run' },
+    intraRoute: {
+      type: 'rapids_surf',
+      mode: 'rapids_surf',
+      badge: 'SURF',
+      label: 'MAELSTROM RUN • GLACIAL SURGE SURF',
+      title: 'Maelstrom Surge Tail-Surf'
+    },
     summitRoute: null
+  }
+];
+
+export const WATERSHED_ACTS = SECTOR_WORLDS;
+
+export const BIOME_PALETTES = {
+  canyon_river: {
+    brickA: '#9a4a2e',
+    brickB: '#b85d3b',
+    mortar: '#4a2114',
+    ledge: '#c98a5b',
+    ledgeTop: '#e8b98a',
+    glow: '#2dd4bf',
+    moss: '#2f7a4f',
+    pipe: '#b86b35',
+    skyTop: '#1e6fa8',
+    skyMid: '#f4b166',
+    fog: '#d99b66',
+    water: '#0e7490',
+    foam: '#ecfeff'
+  },
+  alpine_lake: {
+    brickA: '#64748b',
+    brickB: '#7c8ea6',
+    mortar: '#293548',
+    ledge: '#cbd5e1',
+    ledgeTop: '#f8fafc',
+    glow: '#38bdf8',
+    moss: '#3b7a75',
+    pipe: '#b58d3d',
+    skyTop: '#0284c7',
+    skyMid: '#bae6fd',
+    fog: '#93c5fd',
+    water: '#0369a1',
+    foam: '#f0f9ff'
+  },
+  mist_bayou: {
+    brickA: '#3f4f42',
+    brickB: '#526654',
+    mortar: '#1c261e',
+    ledge: '#78866b',
+    ledgeTop: '#a3b18a',
+    glow: '#fbbf24',
+    moss: '#2d6a4f',
+    pipe: '#8c6d3f',
+    skyTop: '#4c1d95',
+    skyMid: '#d97706',
+    fog: '#785a46',
+    water: '#115e59',
+    foam: '#d1fae5'
+  },
+  coral_sea: {
+    brickA: '#d6c2a8',
+    brickB: '#e7d8c3',
+    mortar: '#7c6853',
+    ledge: '#5eead4',
+    ledgeTop: '#ccfbf1',
+    glow: '#f472b6',
+    moss: '#14b8a6',
+    pipe: '#2da89b',
+    skyTop: '#0ea5e9',
+    skyMid: '#7dd3fc',
+    fog: '#67e8f9',
+    water: '#0891b2',
+    foam: '#ffffff'
+  },
+  storm_ocean: {
+    brickA: '#1e293b',
+    brickB: '#334155',
+    mortar: '#0f172a',
+    ledge: '#475569',
+    ledgeTop: '#94a3b8',
+    glow: '#5efce8',
+    moss: '#0d9488',
+    pipe: '#475569',
+    skyTop: '#09152b',
+    skyMid: '#1e3a5f',
+    fog: '#162c4a',
+    water: '#0c4a6e',
+    foam: '#cffafe'
+  }
+};
+
+export const DAILY_TIDE_MODIFIERS = [
+  {
+    id: 'geyser_bloom',
+    name: 'Spring Geyser Bloom',
+    badge: 'GEYSER SURGE',
+    description: 'Pressurized thermal vents erupt more frequently, launching Gateway +3.4 floors skyward.',
+    mechanicsPatch: { geyserMult: 1.25 }
+  },
+  {
+    id: 'feather_mist',
+    name: 'Buoyant Canyon Mist',
+    badge: 'UPDRAFT MIST',
+    description: 'Warm rising mist softens gravity at jump apex for extended horizontal chasm leaps.',
+    mechanicsPatch: { lowGravApex: true }
+  },
+  {
+    id: 'golden_eddy',
+    name: 'Gilded Tide Eddy',
+    badge: '2X HYDRO-GEARS',
+    description: 'Harmonic currents wash double golden Hydro-Gears onto spire terraces.',
+    mechanicsPatch: { doubleGears: true }
+  },
+  {
+    id: 'tradewind_gale',
+    name: 'Tradewind Squall',
+    badge: 'RHYTHMIC BREEZE',
+    description: 'Brisk coastal tradewinds sweep around the spire in 6.5-second cadences.',
+    mechanicsPatch: { windForce: 0.34, windPeriod: 6.5 }
+  },
+  {
+    id: 'rising_spring',
+    name: 'Surging Spring Tide',
+    badge: 'RISING TIDE',
+    description: 'A steady tide climbs the lower spire—spin brass Drain Valves to vent head pressure!',
+    mechanicsPatch: { waterRiseRate: 0.14 }
   }
 ];
 
 const DEFAULT_MECHANICS = Object.freeze({
   waterBaseFloor: -0.55,
   waterRiseRate: 0,
+  waterPurified: false,
   windForce: 0,
   windPeriod: 6.0,
   blackoutCycle: 0,
   lightningInterval: 0
 });
 
-// ============================================================================
-// VERBATIM CELL-FOR-CELL 1987 TOWER DATA (Atari 7800 / Hewson Nebulus)
-// ============================================================================
-
-export const REAL_TIME_LIMITS = [100, 120, 140, 160, 180, 200, 220, 240];
-
-export const REAL_TOWER_GRIDS = {
-  1: [ // THE TOWER OF EYES (47 rows, 100s)
-    "                ",
-    "                ",
-    " #  T    #      ",
-    " #  T    #      ",
-    " #  T    #      ",
-    " ----    --v6   ",
-    "#!      # !     ",
-    "#!      # !     ",
-    "#!      # !^    ",
-    "--   v.-- ------",
-    "                ",
-    "                ",
-    "       1        ",
-    "      ---       ",
-    "                ",
-    "                ",
-    "         4      ",
-    "                ",
-    "    -       --v ",
-    "    !       !   ",
-    "    !  2    !   ",
-    "    -.-------   ",
-    "     .          ",
-    "     .          ",
-    "     ^          ",
-    " #   -   #      ",
-    " #       #      ",
-    " #     4 #  3 ^ ",
-    " ->>     ------ ",
-    "    >>          ",
-    "      >         ",
-    "       >    b   ",
-    "        >3  b   ",
-    "         -----v ",
-    "                ",
-    "                ",
-    "                ",
-    "         1    ^ ",
-    "        ----v-- ",
-    "                ",
-    "      #       # ",
-    "      #       # ",
-    "      # 4   ^ # ",
-    "  #   v   # --- ",
-    "  #       #     ",
-    "  #   ^   #     ",
-    "---..------     ",
-    "                "
-  ],
-  2: [ // THE REALM OF ROBOTS (71 rows, 120s)
-    "                ",
-    "                ",
-    "     T          ",
-    "     T          ",
-    "     T          ",
-    "     v          ",
-    "                ",
-    "                ",
-    "                ",
-    "    -.-         ",
-    "       -        ",
-    " 7      ---     ",
-    "     ^     -    ",
-    "     --     --- ",
-    "               -",
-    "--         7    ",
-    " #-      #      ",
-    " # -     #      ",
-    " #  -    #      ",
-    " .   -----v     ",
-    " .              ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "    #       #   ",
-    "    #       #   ",
-    "    #       #   ",
-    "   ---v 6       ",
-    " --             ",
-    "-              -",
-    "          ^  -- ",
-    "          ---   ",
-    "                ",
-    "                ",
-    "                ",
-    "          4     ",
-    "                ",
-    "                ",
-    "                ",
-    "           >>v  ",
-    "          -     ",
-    "  #      -#     ",
-    "  #     - # 4   ",
-    "  #   ^-  #     ",
-    "  -v  -   --    ",
-    "  !       !     ",
-    "  !6      !     ",
-    "  !       !  ^  ",
-    "  !^      ----  ",
-    " v---           ",
-    "     >          ",
-    "      >         ",
-    "       >    4   ",
-    " ^      -       ",
-    " -v  #   -   #  ",
-    "     #    -  #  ",
-    "     #     - #  ",
-    "     --v    --  ",
-    "  ^             ",
-    " --            -",
-    "       ^5v      ",
-    "       -        ",
-    "                ",
-    "         ^      ",
-    "-..     --- - --",
-    "                "
-  ],
-  3: [ // TRAP OF TRICKS (49 rows, 140s)
-    "                ",
-    "                ",
-    "    T           ",
-    "    T           ",
-    "    T           ",
-    "   v-      ---  ",
-    "                ",
-    "                ",
-    "       #       #",
-    "       #       #",
-    "       #       #",
-    "       --v      ",
-    "    #       #   ",
-    "    #    6  #   ",
-    "   ^#       # --",
-    "   --       --  ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "         b      ",
-    "         b      ",
-    "          ---   ",
-    "    6        -  ",
-    "              - ",
-    "     v-        -",
-    "-      - ^      ",
-    " -      -- 4    ",
-    "  -             ",
-    "   -- 4         ",
-    "           -v   ",
-    "                ",
-    "          -     ",
-    "     ^          ",
-    "     -----      ",
-    "     !#       # ",
-    "     !#       # ",
-    "     !#       # ",
-    "  -v-----v      ",
-    "                ",
-    "                ",
-    "                ",
-    "        3   ^   ",
-    "    -----.  --- ",
-    "                ",
-    "    #       #   ",
-    "    #       #   ",
-    "   ^#    ^3 #   ",
-    "-  --    -------",
-    "                "
-  ],
-  4: [ // SLIPPERY SLIDE (66 rows, 160s)
-    "                ",
-    "                ",
-    "         T      ",
-    "         T      ",
-    "         T      ",
-    " v-      ---v   ",
-    "  !        !    ",
-    "  !        !    ",
-    "  !  2 2   !    ",
-    "  ----.-----    ",
-    "      .         ",
-    "      .         ",
-    "      .         ",
-    "      .         ",
-    "      .         ",
-    "      --..-     ",
-    "                ",
-    "                ",
-    "            ^   ",
-    "           --   ",
-    "                ",
-    " 3              ",
-    " ^ -            ",
-    " -- -.-         ",
-    "       -        ",
-    "        -       ",
-    "         - 4    ",
-    "     -v-  - 4   ",
-    "           -    ",
-    "       #    -  #",
-    "    6  #     - #",
-    "       #      -#",
-    "   --- ----    -",
-    "           -    ",
-    "            -   ",
-    "                ",
-    "    3           ",
-    " v---           ",
-    "    !-^ 44      ",
-    "- # ! -   #     ",
-    "  # !     #     ",
-    "# # !  -# #     ",
-    "#b-v-   # -     ",
-    "#     # #-    # ",
-    "-b    # -     # ",
-    "    3 #       #-",
-    " ^  ---       - ",
-    " -              ",
-    "                ",
-    "                ",
-    "     #       #  ",
-    "#    #  #    #  ",
-    "#  ^ #  #    #  ",
-    "#  ---  #    -  ",
-    "-       -v    -.",
-    "  b             ",
-    "  b      b      ",
-    "  >>>>>v        ",
-    " -       ^      ",
-    "-        -------",
-    "    4           ",
-    "                ",
-    "   - - ^        ",
-    "  -   4-        ",
-    " -              ",
-    "-   . .    -----",
-    "                "
-  ],
-  5: [ // BROKEN PATH (96 rows, 180s)
-    "                ",
-    "                ",
-    "    -     T     ",
-    "     -    T     ",
-    "          T     ",
-    "    4     -v    ",
-    "     4    !     ",
-    "          !     ",
-    "          !     ",
-    "          !     ",
-    "  23      !^    ",
-    "---------v------",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "       #       #",
-    "     7 #       #",
-    "  5  # # ^   # #",
-    "     # - --- #  ",
-    "   # #-    #-#  ",
-    "   # -     # -  ",
-    " # #-    # #    ",
-    " # -     #      ",
-    " #-   4# #     #",
-    " -     # -     #",
-    "     # #-    # #",
-    "     # -     #  ",
-    "   # #-    # #  ",
-    "   # -     #    ",
-    "   #-      #    ",
-    "   -       v    ",
-    "                ",
-    "                ",
-    "   6-v-         ",
-    "                ",
-    " -           4  ",
-    "  -         5   ",
-    "   -   >>       ",
-    "    - -         ",
-    ">             >>",
-    "             -  ",
-    "           ^-   ",
-    "       4   -    ",
-    "                ",
-    "                ",
-    "   -  #       # ",
-    "   v  #       # ",
-    "      # --    # ",
-    "           v-.. ",
-    "       -        ",
-    "                ",
-    "     b          ",
-    "       5        ",
-    "-v      - - - --",
-    "     ^   4      ",
-    "     ---        ",
-    "         .      ",
-    "                ",
-    "                ",
-    "    7           ",
-    "          -     ",
-    "                ",
-    "                ",
-    "- - - - -v5     ",
-    "           ^    ",
-    "  -       --    ",
-    " . .            ",
-    "                ",
-    " b              ",
-    " b              ",
-    " ^ ^            ",
-    " ---            ",
-    "                ",
-    "    7           ",
-    "         ^      ",
-    "        --      ",
-    "       -        ",
-    "   #  -    #    ",
-    "   # -     #    ",
-    "   #-      #    ",
-    "   -       -    ",
-    "          -     ",
-    "         -    3 ",
-    "-v      -     --",
-    "   4  v-      ! ",
-    "      b       ! ",
-    "        2     ! ",
-    " +--.- -.------ ",
-    "                ",
-    "                ",
-    "                ",
-    " ^    ^         ",
-    "--    ----      ",
-    "                "
-  ],
-  6: [ // SWIMMER'S DELIGHT (64 rows, 200s)
-    "                ",
-    "                ",
-    "  T             ",
-    "  T             ",
-    "  T             ",
-    "  -             ",
-    "          6     ",
-    " -              ",
-    "    6           ",
-    "-               ",
-    "            6   ",
-    "               -",
-    "      6         ",
-    "              - ",
-    "                ",
-    "          -  -  ",
-    "       -        ",
-    "         b  -   ",
-    "                ",
-    "      -  v -    ",
-    "     -          ",
-    "  v--     5     ",
-    "           4    ",
-    "                ",
-    "                ",
-    "            4   ",
-    "           --v  ",
-    "         ^-     ",
-    "         -      ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "             ^  ",
-    "v    - v------  ",
-    "      -         ",
-    " #.     -#      ",
-    " #   5   #      ",
-    "^#.      #      ",
-    "--       --5-   ",
-    "  .   5^        ",
-    "   v----     -  ",
-    " #. #    #  #   ",
-    " #  #    #  # - ",
-    " #^^#    #  #   ",
-    "-----    ----  -",
-    " -      -       ",
-    "       -        ",
-    "  b   -         ",
-    "- v---        v-",
-    " #       #      ",
-    " #       #      ",
-    " #       #    b ",
-    "  ^--v 4 -5     ",
-    "  -       -v    ",
-    "4               ",
-    "              ^ ",
-    " - v- --     ---",
-    "    !           ",
-    "    !b          ",
-    "   ^!^  5  ^    ",
-    "------------    ",
-    "                "
-  ],
-  7: [ // NASTY ONE (80 rows, 220s — authentically ZERO tunnel doors!)
-    "                ",
-    "                ",
-    " T              ",
-    " T              ",
-    " T              ",
-    " v              ",
-    "                ",
-    "                ",
-    "            2  2",
-    "-.       v------",
-    "                ",
-    "                ",
-    "              22",
-    "-.        v-----",
-    "                ",
-    "                ",
-    "     2          ",
-    " .------v       ",
-    "                ",
-    "                ",
-    "  2             ",
-    " ^-- --v        ",
-    " -  -           ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "    4           ",
-    "   4 4          ",
-    "                ",
-    "       ^^^^     ",
-    "  v--------     ",
-    "                ",
-    "                ",
-    "        7       ",
-    "                ",
-    "           -   -",
-    "- ^    -- - - - ",
-    " --   v  -   -  ",
-    "                ",
-    "                ",
-    "     6          ",
-    "      ^  4      ",
-    "    ---         ",
-    " - -       - - -",
-    ". .       - . . ",
-    "         -      ",
-    "       v-       ",
-    "                ",
-    "                ",
-    "                ",
-    "    6 v         ",
-    "       ^        ",
-    "       -        ",
-    "                ",
-    "    6v          ",
-    "      ^         ",
-    "      -         ",
-    "                ",
-    "     6          ",
-    "     b          ",
-    "     b          ",
-    "   - ^          ",
-    "  - --  v-      ",
-    " -        -     ",
-    "-          -    ",
-    "            ----",
-    "     v--.   v   ",
-    "                ",
-    "                ",
-    "              4 ",
-    "     +-.b       ",
-    "       v     5 5",
-    "                ",
-    "     6      ^   ",
-    "       ^    -   ",
-    "   --.--.-   -  ",
-    "  -           - ",
-    " -   ^  ^      -",
-    "-    -----      ",
-    "                "
-  ],
-  8: [ // EDGE OF DOOM (96 rows, 240s — 8-door summit ring #### #T##!)
-    "                ",
-    "                ",
-    " ####    #T##   ",
-    " ####    #T##   ",
-    " ####    #T##   ",
-    "         ----v  ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "   -            ",
-    " .  -           ",
-    "     -          ",
-    "      -      b  ",
-    "    4  -        ",
-    "- -#    -  #  - ",
-    "   #     - #    ",
-    "   #      -# b  ",
-    "   -  4    -    ",
-    "    -        ^ .",
-    "     -       -  ",
-    "      -v        ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "                ",
-    "   v---         ",
-    "                ",
-    "                ",
-    "                ",
-    "           6    ",
-    "                ",
-    "    -    -      ",
-    "     - b-       ",
-    "      -b        ",
-    "       ^        ",
-    "--- --------v---",
-    "                ",
-    "      7         ",
-    "                ",
-    "                ",
-    "   ^            ",
-    "   -..------+   ",
-    "                ",
-    "                ",
-    "                ",
-    "     1          ",
-    "  v --.--       ",
-    "#       #       ",
-    "#       #       ",
-    "#       #1     -",
-    "-    ------   - ",
-    "             -  ",
-    "            .   ",
-    "            .   ",
-    "            .   ",
-    " - #       #.   ",
-    " - #   #   #.  #",
-    "   #   #   #^  #",
-    "  b-v  # - --  #",
-    "-      -       -",
-    "                ",
-    "                ",
-    "  b             ",
-    "  ^ ^ -   -4-v  ",
-    "  ---   -4      ",
-    "       4        ",
-    "     4          ",
-    "                ",
-    "     -   - - ^  ",
-    "#   -  -#    -  ",
-    "#  -    #       ",
-    "# -     #       ",
-    "--   #  --v  #  ",
-    "     #       #  ",
-    "     #       #  ",
-    "   3 --v  .---  ",
-    "  3-            ",
-    "3 - -           ",
-    "-             3 ",
-    " -   -    b   - ",
-    "   -        -  -",
-    "             -  ",
-    "                ",
-    "                ",
-    "                ",
-    "     4          ",
-    "    4           ",
-    "   4            ",
-    "  4    ^  ^     ",
-    "--------  -     ",
-    "                "
-  ]
+const CANONICAL_ENEMY_MAP = {
+  snap_crab: 'snap_crab',
+  gulp_hopper: 'gulp_hopper',
+  volt_eel: 'volt_eel',
+  rail_skater: 'rail_skater',
+  barnacle_mortar: 'barnacle_mortar',
+  vent_stalker: 'vent_stalker',
+  siphon_warden: 'siphon_warden',
+  // Legacy compatibility mapping -> 7 original Siphon Syndicate foes
+  roller: 'snap_crab',
+  bouncer: 'gulp_hopper',
+  molecule: 'volt_eel',
+  robotH: 'rail_skater',
+  robotV: 'vent_stalker',
+  eye: 'barnacle_mortar'
 };
 
 // ============================================================================
-// SHARED BUILDERS & NORMALIZATION HELPERS
+// SHARED BUILDERS & STAIRCASE / MECHANISM HELPERS
 // ============================================================================
 
 function span(ledges, floor, startCol, count, type = 'solid', extra = {}) {
@@ -744,9 +389,11 @@ function span(ledges, floor, startCol, count, type = 'solid', extra = {}) {
       floor,
       type,
       switchGroup: extra.switchGroup ?? null,
+      pipeGroup: extra.pipeGroup ?? null,
       inverted: Boolean(extra.inverted),
       phasePeriod: extra.phasePeriod ?? 3.2,
       phaseOffset: extra.phaseOffset ?? 0,
+      ...(extra.stairDir !== undefined ? { stairDir: extra.stairDir } : {}),
       ...(extra.h !== undefined ? { h: extra.h } : {})
     });
   }
@@ -758,26 +405,66 @@ function tile(ledges, col, floor, type = 'solid', extra = {}) {
     floor,
     type,
     switchGroup: extra.switchGroup ?? null,
+    pipeGroup: extra.pipeGroup ?? null,
     inverted: Boolean(extra.inverted),
     phasePeriod: extra.phasePeriod ?? 3.2,
     phaseOffset: extra.phaseOffset ?? 0,
+    ...(extra.stairDir !== undefined ? { stairDir: extra.stairDir } : {}),
     ...(extra.h !== undefined ? { h: extra.h } : {})
   });
 }
 
-function normalizeEnemy(en) {
+/**
+ * Builds an engineered ascending staircase flight where Gateway runs smoothly up & down
+ * real 5-riser treads without needing to jump!
+ * Places a base landing, `steps` ascending stair treads (+1 floor per column in `dir`),
+ * and a wide `topLandingLen`-column terrace at `startFloor + steps`.
+ */
+function stairFlight(ledges, startFloor, startCol, steps, dir = 1, topLandingLen = 3, type = 'solid') {
+  const stepSign = dir >= 0 ? 1 : -1;
+  // Base landing lead-in (2 cols: startCol - stepSign, startCol)
+  tile(ledges, startCol - stepSign, startFloor, type);
+  tile(ledges, startCol, startFloor, type, { stairDir: stepSign });
+
+  for (let s = 1; s < steps; s++) {
+    tile(ledges, startCol + stepSign * s, startFloor + s, type, { stairDir: stepSign });
+  }
+
+  // Top landing terrace starting at startCol + stepSign * steps on floor startFloor + steps
+  const topAnchor = startCol + stepSign * steps;
+  const terraceStart = stepSign === 1 ? topAnchor : topAnchor - (topLandingLen - 1);
+  span(ledges, startFloor + steps, terraceStart, topLandingLen, type);
   return {
-    type: en.type,
+    topFloor: startFloor + steps,
+    endCol: wrapCol(topAnchor + stepSign * (topLandingLen - 1)),
+    midCol: wrapCol(topAnchor + stepSign * Math.floor(topLandingLen / 2))
+  };
+}
+
+function normalizeEnemy(en, idx = 0) {
+  const canonical = CANONICAL_ENEMY_MAP[en.type] || 'snap_crab';
+  const defaultAmp =
+    canonical === 'gulp_hopper'
+      ? 0.78
+      : canonical === 'volt_eel'
+      ? 0.36
+      : canonical === 'siphon_warden'
+      ? 0.55
+      : 0.22;
+  return {
+    type: canonical,
     col: ((Number(en.col) % COLS) + COLS) % COLS,
     floor: Number(en.floor),
     dir: en.dir === -1 ? -1 : 1,
-    speed: Number(en.speed ?? en.kspeed ?? 1.6),
-    amp: Number(en.amp ?? (en.type === 'bouncer' ? 0.65 : en.type === 'molecule' ? 0.4 : 0.25)),
+    speed: Number(en.speed ?? (canonical === 'barnacle_mortar' ? 0 : canonical === 'siphon_warden' ? 2.1 : 1.65)),
+    amp: Number(en.amp ?? defaultAmp),
+    axis: en.axis || (en.type === 'robotV' || canonical === 'vent_stalker' ? 'v' : 'h'),
+    hp: Number(en.hp ?? (canonical === 'siphon_warden' ? 3 : 1)),
+    maxHp: Number(en.maxHp ?? en.hp ?? (canonical === 'siphon_warden' ? 3 : 1)),
+    firePeriod: Number(en.firePeriod ?? 3.4),
+    phaseOffset: Number(en.phaseOffset ?? (idx * 1.17) % 6.28),
     minFloor: en.minFloor !== undefined && en.minFloor !== null ? Number(en.minFloor) : null,
     maxFloor: en.maxFloor !== undefined && en.maxFloor !== null ? Number(en.maxFloor) : null,
-    ...(en.kind !== undefined ? { kind: en.kind } : {}),
-    ...(en.kspeed !== undefined ? { kspeed: Number(en.kspeed) } : {}),
-    ...(en.spawnKey !== undefined ? { spawnKey: en.spawnKey } : {}),
     ...(en.minCol !== undefined ? { minCol: wrapCol(en.minCol) } : {}),
     ...(en.maxCol !== undefined ? { maxCol: wrapCol(en.maxCol) } : {})
   };
@@ -793,7 +480,7 @@ function computeLedgeSpanAt(ledges, col, floor) {
         Math.abs(l.floor - floor) < 0.25 &&
         wrapCol(l.col) === wrapCol(c)
     );
-  const startTile = Math.floor(wrapCol(col));
+  const startTile = Math.floor(wrapFloatCol(col));
   if (!hasTile(startTile)) {
     return { onRealTile: false, startCol: startTile, length: 0 };
   }
@@ -809,15 +496,15 @@ function computeLedgeSpanAt(ledges, col, floor) {
 }
 
 function enemyVertEnvelope(en) {
-  if (en.type === 'robotV') {
-    return [en.minFloor ?? en.floor - 1.5, en.maxFloor ?? en.floor + 1.5];
+  if (en.axis === 'v' || en.type === 'vent_stalker') {
+    return [en.minFloor ?? en.floor - 1.4, en.maxFloor ?? en.floor + 1.4];
   }
-  if (en.type === 'molecule') {
+  if (en.type === 'volt_eel' || en.type === 'siphon_warden') {
     const amp = en.amp || 0.4;
     return [en.floor - amp, en.floor + amp];
   }
-  if (en.type === 'bouncer') {
-    const amp = en.amp || 0.65;
+  if (en.type === 'gulp_hopper') {
+    const amp = en.amp || 0.78;
     return [en.floor, en.floor + amp];
   }
   return [en.floor, en.floor];
@@ -826,7 +513,10 @@ function enemyVertEnvelope(en) {
 function sanitizeEnemySpawns(enemies, doors, elevators, spawn, ledges, totalFloors) {
   const anchors = [{ col: wrapCol(spawn.col) + 0.5, floor: spawn.floor }];
   for (const d of doors) {
-    anchors.push({ col: wrapCol(d.col) + 0.5, floor: d.floor });
+    // Allow Act Bosses (`siphon_warden`) to orbit near the upper tiers while keeping spawn & mid doors safe
+    if (!d.isExit) {
+      anchors.push({ col: wrapCol(d.col) + 0.5, floor: d.floor });
+    }
   }
   for (const el of elevators) {
     const ec = wrapCol(el.col) + 0.5;
@@ -839,6 +529,15 @@ function sanitizeEnemySpawns(enemies, doors, elevators, spawn, ledges, totalFloo
 
   return enemies.map((orig) => {
     const en = { ...orig };
+    if (en.type === 'siphon_warden') {
+      // Keep Siphon Warden at a fair initial angular offset from spawn/exit door
+      const exitD = doors.find((d) => d.isExit);
+      if (exitD && Math.abs(en.floor - exitD.floor) < 1.5 && Math.abs(colDist(en.col, exitD.col + 0.5)) < 4.5) {
+        en.col = wrapCol(exitD.col + 9) + 0.5;
+      }
+      return en;
+    }
+
     const relevantForFloor = (testFloor) => {
       const probe = { ...en, floor: testFloor };
       const [minY, maxY] = enemyVertEnvelope(probe);
@@ -849,43 +548,63 @@ function sanitizeEnemySpawns(enemies, doors, elevators, spawn, ledges, totalFloo
       });
     };
 
-    if (en.type === 'robotH') {
+    const isTerraceEnemy =
+      en.type === 'snap_crab' ||
+      en.type === 'barnacle_mortar' ||
+      en.type === 'gulp_hopper' ||
+      (en.type === 'rail_skater' && en.axis !== 'v');
+
+    if (isTerraceEnemy) {
       const fRound = Math.round(en.floor);
-      const sp = computeLedgeSpanAt(ledges, en.col, fRound);
-      const rel = relevantForFloor(en.floor);
-      let spanUnsafe = !sp.onRealTile || sp.length < 2;
-      if (!spanUnsafe && rel.length > 0) {
-        for (const a of rel) {
-          for (let k = 0; k < sp.length; k++) {
-            const tileCenter = wrapCol(sp.startCol + k) + 0.5;
-            if (Math.abs(colDist(tileCenter, a.col)) < 1.5) {
-              spanUnsafe = true;
-              break;
-            }
-          }
-          if (spanUnsafe) break;
-        }
-      }
-      const minAnchorDist = rel.reduce((m, a) => Math.min(m, Math.abs(colDist(en.col, a.col))), Infinity);
-      if (spanUnsafe || minAnchorDist < 4.2) {
-        en.type = 'roller';
-        delete en.minCol;
-        delete en.maxCol;
-      } else {
+      const minSafeDist = 1.65;
+      const rel = relevantForFloor(fRound);
+      const spHere = computeLedgeSpanAt(ledges, en.col, fRound);
+      const curDist = rel.reduce((m, a) => Math.min(m, Math.abs(floatColDist(en.col, a.col))), Infinity);
+
+      if (spHere.onRealTile && (en.type !== 'rail_skater' || spHere.length >= 2) && curDist >= minSafeDist) {
+        en.floor = fRound;
+        en.col = Number(wrapFloatCol(en.col).toFixed(2));
         return en;
       }
+
+      // Search real walkable tiles on fRound first, then nearby floors if needed, NEVER placing in mid-air!
+      let bestPick = null;
+      for (const df of [0, 1, -1, 2, -2, 3, -3]) {
+        const tf = fRound + df;
+        if (tf < 1 || tf > totalFloors - 2) continue;
+        const relTf = relevantForFloor(tf);
+        for (let step = 0; step < COLS; step++) {
+          const tileCol = wrapCol(Math.floor(wrapFloatCol(en.col)) + step);
+          const cand = tileCol + 0.5;
+          const sp = computeLedgeSpanAt(ledges, cand, tf);
+          if (!sp.onRealTile) continue;
+          if ((en.type === 'rail_skater' || en.type === 'snap_crab') && sp.length < 2 && df !== 0) continue;
+          const dMin = relTf.reduce((m, a) => Math.min(m, Math.abs(floatColDist(cand, a.col))), Infinity);
+          if (!bestPick || dMin > bestPick.minDist + 1e-6) {
+            bestPick = { col: cand, floor: tf, minDist: dMin };
+            if (df === 0 && dMin >= 2.2) break;
+          }
+        }
+        if (bestPick && bestPick.minDist >= 2.0) break;
+      }
+
+      if (bestPick) {
+        en.col = Number(bestPick.col.toFixed(2));
+        en.floor = bestPick.floor;
+      }
+      return en;
     }
 
     const bestColForFloor = (testFloor) => {
       const rel = relevantForFloor(testFloor);
       if (rel.length === 0) return { col: en.col, minDist: Infinity };
       const curMin = rel.reduce((m, a) => Math.min(m, Math.abs(colDist(en.col, a.col))), Infinity);
-      if (curMin >= 4.2) return { col: en.col, minDist: curMin };
+      if (curMin >= 3.2) return { col: en.col, minDist: curMin };
 
       let bestCol = en.col;
       let bestMin = curMin;
-      for (let step = 0; step < 32; step++) {
-        const cand = (((en.col + 5 + step * 0.5) % COLS) + COLS) % COLS;
+      for (let step = 0; step < 40; step++) {
+        const cand = (((en.col + 4 + step * 0.5) % COLS) + COLS) % COLS;
         const dMin = rel.reduce((m, a) => Math.min(m, Math.abs(colDist(cand, a.col))), Infinity);
         if (dMin > bestMin + 1e-6) {
           bestMin = dMin;
@@ -896,7 +615,7 @@ function sanitizeEnemySpawns(enemies, doors, elevators, spawn, ledges, totalFloo
     };
 
     let pick = bestColForFloor(en.floor);
-    if (pick.minDist < 4.2 && en.type !== 'robotV') {
+    if (pick.minDist < 3.2 && en.axis !== 'v') {
       for (const df of [1, -1, 2, -2]) {
         const nf = en.floor + df;
         if (nf < 1.5 || nf > totalFloors - 2.2) continue;
@@ -904,7 +623,7 @@ function sanitizeEnemySpawns(enemies, doors, elevators, spawn, ledges, totalFloo
         if (alt.minDist > pick.minDist + 0.25) {
           en.floor = Number(nf.toFixed(2));
           pick = alt;
-          if (pick.minDist >= 4.5) break;
+          if (pick.minDist >= 3.5) break;
         }
       }
     }
@@ -914,12 +633,12 @@ function sanitizeEnemySpawns(enemies, doors, elevators, spawn, ledges, totalFloo
 }
 
 // ============================================================================
-// DETERMINISTIC EXTERIOR RUNE-DOOR CLUE DERIVATION (1:1 WITH src/puzzleRoom.js)
+// DETERMINISTIC EXTERIOR SANCTUM-DOOR CLUE DERIVATION (1:1 WITH src/puzzleRoom.js)
 // ============================================================================
 
 const RUNE_PUZZLE_TYPES = new Set(['lights', 'bells', 'beam', 'blocks']);
 const RUNE_BELL_COLORS = ['#ff4f64', '#ffb02e', '#3fe07e', '#3ab0ff', '#c77dff'];
-const RUNE_BELL_COLOR_NAMES = ['RED', 'GOLD', 'GREEN', 'BLUE', 'VIOLET'];
+const RUNE_BELL_COLOR_NAMES = ['CORAL', 'GOLD', 'EMERALD', 'AZURE', 'VIOLET'];
 
 function hashPuzzleSeed(seed, salt) {
   let h = 2166136261 >>> 0;
@@ -952,10 +671,6 @@ function applyRuneLightsPress(lit, n, idx) {
   return lit;
 }
 
-/**
- * Deterministically derives the exact exterior architectural clue for a Rune Door
- * using the bit-for-bit identical PRNG & generator rules as `makePuzzle` in `src/puzzleRoom.js`.
- */
 export function deriveRuneDoorClue({
   puzzleType = 'lights',
   puzzleSeed = 10101,
@@ -1081,23 +796,73 @@ function resolveClueColOffset(dc, df, sortedLedges, normElevators) {
   return 0;
 }
 
+function annotateStairDirections(sortedLedges, normElevators) {
+  const walkableAt = new Map();
+  const blockedOverhead = new Set();
+
+  for (const el of normElevators) {
+    for (let f = Math.round(el.minFloor); f <= Math.round(el.maxFloor); f++) {
+      blockedOverhead.add(`${el.col}:${f}`);
+    }
+  }
+
+  for (const l of sortedLedges) {
+    if (l.type === 'box' || l.type === 'pillar' || l.type === 'laserGate') {
+      const h = Math.max(1, Math.round(l.h || 1));
+      for (let k = 0; k <= h; k++) {
+        blockedOverhead.add(`${l.col}:${l.floor + k}`);
+      }
+      continue;
+    }
+    walkableAt.set(`${l.col}:${l.floor}`, l);
+  }
+
+  for (const l of sortedLedges) {
+    if (l.type === 'box' || l.type === 'pillar' || l.type === 'laserGate') continue;
+    const cPlus = wrapCol(l.col + 1);
+    const cMinus = wrapCol(l.col - 1);
+    const upPlus =
+      walkableAt.has(`${cPlus}:${l.floor + 1}`) &&
+      !walkableAt.has(`${l.col}:${l.floor + 1}`) &&
+      !blockedOverhead.has(`${l.col}:${l.floor + 1}`);
+    const upMinus =
+      walkableAt.has(`${cMinus}:${l.floor + 1}`) &&
+      !walkableAt.has(`${l.col}:${l.floor + 1}`) &&
+      !blockedOverhead.has(`${l.col}:${l.floor + 1}`);
+
+    const downPlus =
+      walkableAt.has(`${cPlus}:${l.floor - 1}`) && !walkableAt.has(`${cPlus}:${l.floor}`);
+    const downMinus =
+      walkableAt.has(`${cMinus}:${l.floor - 1}`) && !walkableAt.has(`${cMinus}:${l.floor}`);
+
+    if (l.stairDir === undefined) {
+      if (upPlus && !upMinus) l.stairDir = 1;
+      else if (upMinus && !upPlus) l.stairDir = -1;
+      else if (upPlus) l.stairDir = 1;
+      else l.stairDir = 0;
+    }
+    l.stairDownDir = downPlus ? 1 : downMinus ? -1 : 0;
+    l.isStair = Boolean(l.stairDir !== 0 || l.stairDownDir !== 0);
+  }
+}
+
 function finalizeTower({
   id,
   key,
-  era = 'reboot',
-  real = false,
+  act = 1,
   casual = false,
   casualMission = null,
+  dailyModifier = null,
   workbench = null,
   treasureChest = null,
   cacheKey = null,
   name,
   subtitle = '',
-  theme = 'mist',
+  theme = 'canyon_river',
   floors = 18,
   exitFloor = null,
-  timeLimit = 95,
-  parTime = 35,
+  timeLimit = 100,
+  parTime = 38,
   spawn = { col: 0, floor: 0 },
   palette,
   mechanics = {},
@@ -1105,31 +870,46 @@ function finalizeTower({
   elevators = [],
   doors = [],
   switches = [],
+  wallStrips = [],
+  grappleRings = [],
   collectibles = [],
   enemies = []
 }) {
-  const normElevators = elevators.map((el) => ({
+  const normElevators = elevators.map((el, idx) => ({
+    id: String(el.id || `lift_${idx + 1}`),
     col: wrapCol(el.col),
     minFloor: Number(el.minFloor),
     maxFloor: Number(el.maxFloor),
     startFloor: Number(el.startFloor ?? el.minFloor),
-    speed: Number(el.speed ?? 1.6),
-    ...(Array.isArray(el.stops) ? { stops: [...el.stops] } : {}),
-    ...(el.rowsPerSec !== undefined ? { rowsPerSec: Number(el.rowsPerSec) } : {})
+    speed: Number(el.speed ?? 1.75),
+    pipeGroup: el.pipeGroup ? String(el.pipeGroup) : null,
+    powered: el.powered !== undefined ? Boolean(el.powered) : !el.pipeGroup
   }));
 
-  // Keep step ledges separate from body-height barriers ('box' | 'pillar' | 'laserGate')
-  // so shooting a 'box' preserves the floor underneath!
-  // For non-real (Reboot/Procedural) towers, keep cage-elevator shafts clear of static steps.
+  const normWallStrips = (wallStrips || []).map((ws, idx) => ({
+    id: String(ws.id || `strip_${idx + 1}`),
+    col: wrapCol(ws.col),
+    minFloor: Math.round(Number(ws.minFloor)),
+    maxFloor: Math.round(Number(ws.maxFloor))
+  }));
+
+  const normGrappleRings = (grappleRings || []).map((gr, idx) => ({
+    id: String(gr.id || `ring_${idx + 1}`),
+    col: ((Number(gr.col) % COLS) + COLS) % COLS,
+    floor: Number(gr.floor)
+  }));
+
   const byCoord = new Map();
   for (const raw of ledges) {
     const c = wrapCol(raw.col);
     const f = Math.round(Number(raw.floor));
     const t = raw.type || 'solid';
     const isBarrier = t === 'box' || t === 'pillar' || t === 'laserGate';
-    if (!real && !isBarrier) {
+    if (!isBarrier) {
       const inShaft = normElevators.some((el) => el.col === c && f >= el.minFloor && f <= el.maxFloor);
       if (inShaft) continue;
+      const inStripMid = normWallStrips.some((ws) => ws.col === c && f > ws.minFloor && f <= ws.maxFloor);
+      if (inStripMid) continue;
     }
     const slotKey = isBarrier ? `${c}:${f}:${t}` : `${c}:${f}:step`;
     byCoord.set(slotKey, {
@@ -1137,21 +917,43 @@ function finalizeTower({
       floor: f,
       type: t,
       switchGroup: raw.switchGroup ?? null,
+      pipeGroup: raw.pipeGroup ?? null,
       inverted: Boolean(raw.inverted),
       phasePeriod: Number(raw.phasePeriod ?? 3.2),
       phaseOffset: Number(raw.phaseOffset ?? 0),
+      ...(raw.stairDir !== undefined ? { stairDir: Number(raw.stairDir) } : {}),
       ...(raw.h !== undefined ? { h: Number(raw.h) } : {})
     });
   }
 
+  // Ensure bottom pad exists at base of every Gecko Wall-Strip
+  for (const ws of normWallStrips) {
+    if (!byCoord.has(`${ws.col}:${ws.minFloor}:step`)) {
+      const inShaft = normElevators.some((el) => el.col === ws.col && ws.minFloor >= el.minFloor && ws.minFloor <= el.maxFloor);
+      if (!inShaft) {
+        byCoord.set(`${ws.col}:${ws.minFloor}:step`, {
+          col: ws.col,
+          floor: ws.minFloor,
+          type: 'solid',
+          switchGroup: null,
+          pipeGroup: null,
+          inverted: false,
+          phasePeriod: 3.2,
+          phaseOffset: 0
+        });
+      }
+    }
+  }
+
   const spawnCol = wrapCol(spawn.col);
   const spawnFloor = Math.round(Number(spawn.floor));
-  if (!real && !byCoord.has(`${spawnCol}:${spawnFloor}:step`)) {
+  if (!byCoord.has(`${spawnCol}:${spawnFloor}:step`)) {
     byCoord.set(`${spawnCol}:${spawnFloor}:step`, {
       col: spawnCol,
       floor: spawnFloor,
       type: 'solid',
       switchGroup: null,
+      pipeGroup: null,
       inverted: false,
       phasePeriod: 3.2,
       phaseOffset: 0
@@ -1161,12 +963,13 @@ function finalizeTower({
   const normDoors = doors.map((d) => {
     const dc = wrapCol(d.col);
     const df = Math.round(Number(d.floor));
-    if (!real && !byCoord.has(`${dc}:${df}:step`)) {
+    if (!byCoord.has(`${dc}:${df}:step`)) {
       byCoord.set(`${dc}:${df}:step`, {
         col: dc,
         floor: df,
         type: 'solid',
         switchGroup: null,
+        pipeGroup: null,
         inverted: false,
         phasePeriod: 3.2,
         phaseOffset: 0
@@ -1186,8 +989,6 @@ function finalizeTower({
       ? d.puzzleSeed !== undefined && d.puzzleSeed !== null
         ? Number(d.puzzleSeed) >>> 0 || 10101
         : (((Number(id) || 1) * 2654435761 + dc * 7919 + df * 104729) >>> 0) || 10101
-      : d.puzzleSeed !== undefined && d.puzzleSeed !== null
-      ? Number(d.puzzleSeed)
       : undefined;
     const resolvedPuzzleDifficulty = isRune
       ? d.puzzleDifficulty !== undefined && d.puzzleDifficulty !== null
@@ -1204,7 +1005,7 @@ function finalizeTower({
       isExit,
       isVault,
       isRune,
-      decoy: Boolean(d.decoy),
+      decoy: false,
       ...(resolvedPuzzleType !== undefined ? { puzzleType: resolvedPuzzleType } : {}),
       ...(resolvedPuzzleSeed !== undefined ? { puzzleSeed: resolvedPuzzleSeed } : {}),
       ...(resolvedPuzzleDifficulty !== undefined ? { puzzleDifficulty: resolvedPuzzleDifficulty } : {}),
@@ -1216,12 +1017,13 @@ function finalizeTower({
   const normSwitches = switches.map((sw, idx) => {
     const sc = wrapCol(sw.col);
     const sf = Math.round(Number(sw.floor));
-    if (!real && !byCoord.has(`${sc}:${sf}:step`)) {
+    if (!byCoord.has(`${sc}:${sf}:step`)) {
       byCoord.set(`${sc}:${sf}:step`, {
         col: sc,
         floor: sf,
         type: 'solid',
         switchGroup: null,
+        pipeGroup: null,
         inverted: false,
         phasePeriod: 3.2,
         phaseOffset: 0
@@ -1231,8 +1033,10 @@ function finalizeTower({
       id: String(sw.id || `sw_${idx + 1}`),
       col: sc,
       floor: sf,
-      group: sw.group || 'red',
-      mode: sw.mode || 'toggle'
+      group: sw.group || sw.pipeGroup || 'red',
+      pipeGroup: sw.pipeGroup || (sw.mode === 'pipeValve' ? sw.group || 'pipeA' : null),
+      mode: sw.mode || 'toggle',
+      ...(sw.targetWaterFloor !== undefined ? { targetWaterFloor: Number(sw.targetWaterFloor) } : {})
     };
   });
 
@@ -1261,12 +1065,14 @@ function finalizeTower({
   });
 
   const exitDoor = normDoors.find((d) => d.isExit);
-  const computedExitFloor = exitFloor !== null ? Number(exitFloor) : (exitDoor ? exitDoor.floor : Math.max(1, floors - 2));
+  const computedExitFloor =
+    exitFloor !== null ? Number(exitFloor) : exitDoor ? exitDoor.floor : Math.max(1, floors - 2);
 
   const sortedLedges = Array.from(byCoord.values()).sort((a, b) => a.floor - b.floor || a.col - b.col);
+  annotateStairDirections(sortedLedges, normElevators);
+
   const clampedFloors = Math.max(8, Math.round(Number(floors)));
 
-  // Attach deterministic exterior Rune Door clues & plaque clearance offsets
   for (const nd of normDoors) {
     if (!nd.isRune) continue;
     const offset =
@@ -1294,10 +1100,8 @@ function finalizeTower({
 
   const normEnemies = casual
     ? []
-    : real
-    ? enemies.map(normalizeEnemy)
     : sanitizeEnemySpawns(
-        enemies.map(normalizeEnemy),
+        enemies.map((e, i) => normalizeEnemy(e, i)),
         normDoors,
         normElevators,
         { col: spawnCol, floor: spawnFloor },
@@ -1305,13 +1109,18 @@ function finalizeTower({
         clampedFloors
       );
 
+  const resolvedTheme = BIOME_PALETTES[theme] ? theme : 'canyon_river';
+  const resolvedPalette = palette || BIOME_PALETTES[resolvedTheme];
+
   return {
     id: Number(id),
+    act: Number(act || Math.min(5, Math.ceil(Number(id || 1) / 2))),
     key: String(key),
     ...(cacheKey ? { cacheKey: String(cacheKey) } : {}),
-    real: Boolean(real),
+    real: false,
     casual: Boolean(casual),
     casualMission: casualMission ? { ...casualMission } : null,
+    dailyModifier: dailyModifier ? { ...dailyModifier } : null,
     clue: primaryClue,
     runeDoors,
     vaultDoor,
@@ -1332,16 +1141,17 @@ function finalizeTower({
           ...(treasureChest.gearReward !== undefined ? { gearReward: Number(treasureChest.gearReward) } : {})
         }
       : null,
-    era: era === 'original' ? 'original' : 'reboot',
+    era: 'reboot',
+    biome: resolvedTheme,
     name: String(name),
     subtitle: String(subtitle),
-    theme: String(theme),
+    theme: resolvedTheme,
     floors: clampedFloors,
     exitFloor: computedExitFloor,
-    timeLimit: Math.max(30, Math.round(Number(timeLimit))),
-    parTime: Math.max(10, Math.round(Number(parTime))),
+    timeLimit: Math.max(45, Math.round(Number(timeLimit))),
+    parTime: Math.max(15, Math.round(Number(parTime))),
     spawn: { col: spawnCol, floor: spawnFloor },
-    palette: { ...palette },
+    palette: { ...resolvedPalette },
     mechanics: {
       ...DEFAULT_MECHANICS,
       ...mechanics
@@ -1350,1268 +1160,683 @@ function finalizeTower({
     elevators: normElevators,
     doors: normDoors,
     switches: normSwitches,
+    wallStrips: normWallStrips,
+    grappleRings: normGrappleRings,
     collectibles: normCollectibles,
     enemies: normEnemies
   };
 }
 
 // ============================================================================
-// ORIGINAL MODE — CELL-FOR-CELL 1987 TOWERS IN 2007–2010 XBLA HD PALETTES
+// 10 HANDCRAFTED CAMPAIGN SPIRES ACROSS EARTH'S 5 WATER BIOMES (COLS = 20)
 // ============================================================================
 
-const ORIGINAL_PALETTES = [
-  // 1. Royal Cobalt Blue / Sky-Blue
-  {
-    brickA: '#1d4ed8',
-    brickB: '#2563eb',
-    mortar: '#091536',
-    ledge: '#60a5fa',
-    ledgeTop: '#bfdbfe',
-    glow: '#38bdf8',
-    skyTop: '#040b24',
-    skyMid: '#0c1f52',
-    fog: '#071430',
-    water: '#06284d',
-    foam: '#bae6fd'
-  },
-  // 2. Cyber Violet / Electric Cyan
-  {
-    brickA: '#6d28d9',
-    brickB: '#7c3aed',
-    mortar: '#1e0b3b',
-    ledge: '#22d3ee',
-    ledgeTop: '#a5f3fc',
-    glow: '#c084fc',
-    skyTop: '#0d0626',
-    skyMid: '#1e1147',
-    fog: '#12092e',
-    water: '#0c1e42',
-    foam: '#cffafe'
-  },
-  // 3. Emerald Green / Gold Amber
-  {
-    brickA: '#047857',
-    brickB: '#059669',
-    mortar: '#04261c',
-    ledge: '#fbbf24',
-    ledgeTop: '#fde68a',
-    glow: '#34d399',
-    skyTop: '#031716',
-    skyMid: '#08332c',
-    fog: '#05211d',
-    water: '#062c30',
-    foam: '#d1fae5'
-  },
-  // 4. Glacier Cerulean / Frost White
-  {
-    brickA: '#0284c7',
-    brickB: '#0ea5e9',
-    mortar: '#08263b',
-    ledge: '#e0f2fe',
-    ledgeTop: '#ffffff',
-    glow: '#7dd3fc',
-    skyTop: '#041326',
-    skyMid: '#0c2c4d',
-    fog: '#081f38',
-    water: '#072a47',
-    foam: '#f0f9ff'
-  },
-  // 5. Crimson Brick / Pale Coral
-  {
-    brickA: '#991b1b',
-    brickB: '#dc2626',
-    mortar: '#260606',
-    ledge: '#fca5a5',
-    ledgeTop: '#fee2e2',
-    glow: '#f87171',
-    skyTop: '#1a0509',
-    skyMid: '#380d14',
-    fog: '#24080d',
-    water: '#1f1024',
-    foam: '#fecaca'
-  },
-  // 6. Deep Ocean Teal / Toxic Lime
-  {
-    brickA: '#0f766e',
-    brickB: '#14b8a6',
-    mortar: '#042220',
-    ledge: '#a3e635',
-    ledgeTop: '#ecfccb',
-    glow: '#2dd4bf',
-    skyTop: '#03171a',
-    skyMid: '#093438',
-    fog: '#062326',
-    water: '#052e33',
-    foam: '#d9f99d'
-  },
-  // 7. Magma Orange / Sulfur Yellow
-  {
-    brickA: '#c2410c',
-    brickB: '#ea580c',
-    mortar: '#290f04',
-    ledge: '#fde047',
-    ledgeTop: '#fef9c3',
-    glow: '#fb923c',
-    skyTop: '#1c0904',
-    skyMid: '#3d1609',
-    fog: '#260e06',
-    water: '#1f1410',
-    foam: '#fef08a'
-  },
-  // 8. Midnight Maroon / Neon Magenta & Sky
-  {
-    brickA: '#9d174d',
-    brickB: '#db2777',
-    mortar: '#240515',
-    ledge: '#38bdf8',
-    ledgeTop: '#e0f2fe',
-    glow: '#f472b6',
-    skyTop: '#170414',
-    skyMid: '#36092b',
-    fog: '#21061b',
-    water: '#160d2e',
-    foam: '#fbcfe8'
-  }
-];
-
-const ORIGINAL_META = [
-  { id: 1, name: 'THE TOWER OF EYES', subtitle: 'TOWER I • DESTRUCTO INC. OUTPOST' },
-  { id: 2, name: 'THE REALM OF ROBOTS', subtitle: 'TOWER II • AUTOMATON GARRISON' },
-  { id: 3, name: 'TRAP OF TRICKS', subtitle: 'TOWER III • HALL OF DECEPTION' },
-  { id: 4, name: 'SLIPPERY SLIDE', subtitle: 'TOWER IV • GLACIER CITADEL' },
-  { id: 5, name: 'BROKEN PATH', subtitle: 'TOWER V • SHATTERED RUINS' },
-  { id: 6, name: "SWIMMER'S DELIGHT", subtitle: 'TOWER VI • HIGH-ALTITUDE ABYSS' },
-  { id: 7, name: 'NASTY ONE', subtitle: 'TOWER VII • THE GAUNTLET' },
-  { id: 8, name: 'EDGE OF DOOM', subtitle: 'TOWER VIII • FINAL DEMOLITION' }
-];
-
-const REAL_ENEMY_KIND = {
-  1: { kind: 'roll', type: 'roller', kspeed: 2.0 },
-  2: { kind: 'bounce', type: 'bouncer', kspeed: 2.0 },
-  3: { kind: 'park', type: 'bouncer', kspeed: 0 },
-  4: { kind: 'vpat', kspeed: 4.0 },
-  5: { kind: 'vpat', kspeed: 8.0 },
-  6: { kind: 'hpat', kspeed: 2.0 },
-  7: { kind: 'hpat', kspeed: 4.0 }
-};
-
-function resolvePatrollerType(towerId, kind) {
-  if (kind === 'vpat') {
-    return towerId === 2 || towerId === 5 || towerId === 7 ? 'robotV' : 'eye';
-  }
-  return towerId === 2 || towerId === 6 || towerId === 7 || towerId === 8 ? 'robotH' : 'eye';
-}
-
-function buildRealOriginalTower(id, meta) {
-  const top = REAL_TOWER_GRIDS[id];
-  const rows = top.slice().reverse();
-  while (rows.length && !rows[0].trim()) rows.shift();
-  const H = rows.length;
-  const at = (r, c) => (r >= 0 && r < H ? rows[r][wrapCol(c)] : ' ');
-
-  const ledges = [];
-  const doors = [];
-  const elevators = [];
-  const enemies = [];
-
-  // 1. Walkable step cells ('-', '.', '>', '<') — keep ALL cells intact including under '^' lifts!
-  for (let r = 0; r < H; r++) {
-    for (let c = 0; c < COLS; c++) {
-      const ch = at(r, c);
-      const type =
-        ch === '-'
-          ? 'solid'
-          : ch === '.'
-          ? 'crumble'
-          : ch === '>'
-          ? 'slideR'
-          : ch === '<'
-          ? 'slideL'
-          : null;
-      if (type) {
-        ledges.push({ col: c, floor: r, type });
-      }
-    }
-  }
-
-  // Helper: scan vertical runs of a symbol in each column
-  const scanRuns = (sym) => {
-    const out = [];
-    for (let c = 0; c < COLS; c++) {
-      let r = 0;
-      while (r < H) {
-        if (at(r, c) === sym) {
-          let n = 0;
-          while (r + n < H && at(r + n, c) === sym) n++;
-          out.push({ c, r0: r, n });
-          r += n;
-        } else {
-          r++;
-        }
-      }
-    }
-    return out;
-  };
-
-  // 2. Solid non-shootable pillars ('!') & shootable flashing blocks ('b') resting on floor = r0 - 1
-  for (const { c, r0, n } of scanRuns('!')) {
-    ledges.push({ col: c, floor: r0 - 1, type: 'pillar', h: n });
-  }
-  for (const { c, r0, n } of scanRuns('b')) {
-    ledges.push({ col: c, floor: r0 - 1, type: 'box', h: n });
-  }
-
-  // 3. 3-row core doors ('#') & summit exit door ('T')
-  const idTag = `real${id}`;
-  const doorAt = new Map();
-  for (const sym of ['#', 'T']) {
-    for (const { c, r0, n } of scanRuns(sym)) {
-      for (let k = 0; k + 3 <= n; k += 3) {
-        const floor = r0 + k - 1;
-        const d = {
-          id: `${idTag}d${c}f${floor}`,
-          col: c,
-          floor,
-          targetId: null,
-          isExit: sym === 'T',
-          isVault: false,
-          isRune: false,
-          decoy: false,
-          tunnelStyle: 'stone'
-        };
-        doors.push(d);
-        doorAt.set(`${c},${floor}`, d);
-      }
-    }
-  }
-
-  for (const d of doors) {
-    if (d.isExit) continue;
-    const far = doorAt.get(`${wrapCol(d.col + 8)},${d.floor}`);
-    if (far && !far.isExit) {
-      d.targetId = far.id;
-      d.decoy = false;
-    } else {
-      d.targetId = null;
-      d.decoy = true;
-    }
-  }
-
-  // 4. Multi-stop lifts ('^' -> '+' -> 'v')
-  for (let r = 0; r < H; r++) {
-    for (let c = 0; c < COLS; c++) {
-      if (at(r, c) !== '^') continue;
-      const stops = [r];
-      let topStop = null;
-      for (let k = r + 1; k < H; k++) {
-        const ch = at(k, c);
-        if (ch === '+') stops.push(k);
-        else if (ch === 'v') {
-          topStop = k;
-          break;
-        }
-      }
-      if (topStop === null) continue;
-      stops.push(topStop);
-      elevators.push({
-        col: c,
-        minFloor: r,
-        maxFloor: topStop,
-        startFloor: r,
-        stops,
-        rowsPerSec: 3.1,
-        speed: 3.1
-      });
-    }
-  }
-
-  // 5. 7-code enemy spawn points (codes 1..7)
-  for (let r = 0; r < H; r++) {
-    for (let c = 0; c < COLS; c++) {
-      const code = Number(at(r, c));
-      const spec = REAL_ENEMY_KIND[code];
-      if (!spec) continue;
-      const resolvedType = spec.type || resolvePatrollerType(id, spec.kind);
-      enemies.push({
-        type: resolvedType,
-        kind: spec.kind,
-        kspeed: spec.kspeed,
-        speed: spec.kspeed,
-        col: c + 0.5,
-        floor: r - 1,
-        // Low spawn-column vertical patrollers start upward so they never dive onto Pogo's (0, 0) spawn
-        dir: spec.kind === 'vpat' && c === 0 && r <= 12 ? 1 : (r + c) % 2 ? 1 : -1,
-        spawnKey: `${c},${r}`
-      });
-    }
-  }
-
-  const timeLimit = REAL_TIME_LIMITS[id - 1] || 100;
-  const parTime = Math.round(timeLimit * 0.4);
-  const exitDoor = doors.find((d) => d.isExit);
-
-  // Build initial tower so we can select BFS-verified reachable solid ledges for optional collectibles
-  const baseTower = finalizeTower({
-    id,
-    key: `orig_t${id}`,
-    cacheKey: `real${id}`,
-    real: true,
-    era: 'original',
-    name: meta.name,
-    subtitle: meta.subtitle,
-    theme: 'classic',
-    floors: H,
-    exitFloor: exitDoor ? exitDoor.floor : H - 4,
-    timeLimit,
-    parTime,
-    spawn: { col: 0, floor: 0 },
-    palette: ORIGINAL_PALETTES[id - 1],
-    ledges,
-    elevators,
-    doors,
-    switches: [],
-    collectibles: [],
-    enemies
-  });
-
-  // Deterministically place 1 floating Star Core + 3 Golden Gears on verified reachable solid steps
-  const solveInfo = solveRealTowerBFS(baseTower);
-  const doorCoordSet = new Set(baseTower.doors.map((d) => `${d.col}:${d.floor}`));
-  const liftCoordSet = new Set(baseTower.elevators.map((e) => `${e.col}:${e.minFloor - 1}`));
-  const candidateCells = baseTower.ledges.filter(
-    (l) =>
-      l.type === 'solid' &&
-      l.floor >= 4 &&
-      l.floor <= H - 4 &&
-      solveInfo.reached.has(`${l.col}:${l.floor}`) &&
-      !doorCoordSet.has(`${l.col}:${l.floor}`) &&
-      !liftCoordSet.has(`${l.col}:${l.floor}`)
-  );
-
-  const collectibles = [];
-  if (candidateCells.length >= 4) {
-    const pickAtFrac = (frac) => candidateCells[Math.min(candidateCells.length - 1, Math.floor(candidateCells.length * frac))];
-    const g1 = pickAtFrac(0.22);
-    const g2 = pickAtFrac(0.50);
-    const star = pickAtFrac(0.68);
-    const g3 = pickAtFrac(0.86);
-    collectibles.push(
-      { id: `orig_t${id}_g1`, col: g1.col, floor: g1.floor, type: 'gear' },
-      { id: `orig_t${id}_g2`, col: g2.col, floor: g2.floor, type: 'gear' },
-      { id: `orig_t${id}_g3`, col: g3.col, floor: g3.floor, type: 'gear' },
-      { id: `orig_t${id}_star`, col: star.col, floor: star.floor, type: 'starCore' }
-    );
-  }
-
-  baseTower.collectibles = collectibles;
-  return baseTower;
-}
-
-export function createOriginalTowers() {
-  return ORIGINAL_META.map((meta) => buildRealOriginalTower(meta.id, meta));
-}
-
-// ============================================================================
-// REBOOT MODE — ALL 8 "OPERATION NEBULUS" STORY CAMPAIGN TOWERS
-// (Odd T1, T3, T5, T7 -> Rune Doors; Even T2, T4, T6, T8 -> Core Lock Vaults)
-// ============================================================================
-
-const REBOOT_PALETTES = {
-  mist: {
-    brickA: '#242544',
-    brickB: '#2f325b',
-    mortar: '#0d0e1d',
-    ledge: '#525b70',
-    ledgeTop: '#73809c',
-    glow: '#5efce8',
-    moss: '#365e30',
-    pipe: '#3b3538',
-    skyTop: '#060a14',
-    skyMid: '#101b30',
-    fog: '#0b1526',
-    water: '#091926',
-    foam: '#e8f6ff'
-  },
-  sinking: {
-    brickA: '#172b3a',
-    brickB: '#1f3b4d',
-    mortar: '#08131c',
-    ledge: '#3f6275',
-    ledgeTop: '#6792a8',
-    glow: '#22d3ee',
-    moss: '#24594c',
-    pipe: '#47362b',
-    skyTop: '#040c17',
-    skyMid: '#0c2238',
-    fog: '#091b2e',
-    water: '#062030',
-    foam: '#d8f3ff'
-  },
-  foundry: {
-    brickA: '#2b2124',
-    brickB: '#3b2b2e',
-    mortar: '#120c0e',
-    ledge: '#5c4942',
-    ledgeTop: '#876d62',
-    glow: '#f59e0b',
-    moss: '#3d3522',
-    pipe: '#6e4228',
-    skyTop: '#0d080a',
-    skyMid: '#241512',
-    fog: '#1c1110',
-    water: '#171112',
-    foam: '#fde68a'
-  },
-  blizzard: {
-    brickA: '#1e2f4d',
-    brickB: '#284066',
-    mortar: '#0b1526',
-    ledge: '#7dd3fc',
-    ledgeTop: '#e0f2fe',
-    glow: '#67e8f9',
-    moss: '#2c4c54',
-    pipe: '#3b495c',
-    skyTop: '#050d1c',
-    skyMid: '#122947',
-    fog: '#0f223d',
-    water: '#081b2e',
-    foam: '#f0f9ff'
-  },
-  prism: {
-    brickA: '#281942',
-    brickB: '#38235c',
-    mortar: '#10081f',
-    ledge: '#5b4b7a',
-    ledgeTop: '#8975b0',
-    glow: '#e879f9',
-    moss: '#2d4739',
-    pipe: '#4a3859',
-    skyTop: '#090514',
-    skyMid: '#1c1036',
-    fog: '#140b29',
-    water: '#110a24',
-    foam: '#f5d0fe'
-  },
-  piston: {
-    brickA: '#1f2d33',
-    brickB: '#2b3e47',
-    mortar: '#0c1417',
-    ledge: '#566b73',
-    ledgeTop: '#829ca6',
-    glow: '#34d399',
-    moss: '#2f6142',
-    pipe: '#78552b',
-    skyTop: '#050e12',
-    skyMid: '#0f262e',
-    fog: '#0b1d24',
-    water: '#071f24',
-    foam: '#d1fae5'
-  },
-  blackout: {
-    brickA: '#1a1d30',
-    brickB: '#242942',
-    mortar: '#090b14',
-    ledge: '#475069',
-    ledgeTop: '#6e7b9e',
-    glow: '#818cf8',
-    moss: '#254238',
-    pipe: '#383a4a',
-    skyTop: '#03050d',
-    skyMid: '#0c1329',
-    fog: '#080d1c',
-    water: '#060f1c',
-    foam: '#e0e7ff'
-  },
-  apex: {
-    brickA: '#211836',
-    brickB: '#2f224d',
-    mortar: '#0b0714',
-    ledge: '#63537a',
-    ledgeTop: '#eab308',
-    glow: '#fbbf24',
-    moss: '#2e473b',
-    pipe: '#785027',
-    skyTop: '#070412',
-    skyMid: '#1d1038',
-    fog: '#120a24',
-    water: '#0d0921',
-    foam: '#fef08a'
-  }
-};
-
-export function createRebootTowers() {
+export function createCampaignTowers() {
   // --------------------------------------------------------------------------
-  // T1: WATCHTOWER OF THE MIST (Reference Photo Hero + 'lights' Rune Chamber)
+  // ACT I — REDWOOD CANYON RIVERS ('canyon_river', Spires 1 & 2)
   // --------------------------------------------------------------------------
-  const r1Ledges = [];
-  span(r1Ledges, 0, 1, 2, 'solid');
-  span(r1Ledges, 1, 14, 3, 'solid');
-  span(r1Ledges, 2, 3, 2, 'solid');
-  span(r1Ledges, 3, 13, 2, 'solid');
-  span(r1Ledges, 4, 14, 4, 'solid');
-  span(r1Ledges, 5, 11, 3, 'solid');
-  span(r1Ledges, 6, 3, 5, 'solid');
-  span(r1Ledges, 6, 9, 2, 'crumble');
-  span(r1Ledges, 7, 11, 2, 'solid');  // Secret Rune Door r_t1_rune at col 12, floor 7 (f=8..10 col 12 clear!)
-  span(r1Ledges, 8, 13, 3, 'solid');
-  span(r1Ledges, 9, 1, 3, 'solid');
-  span(r1Ledges, 10, 4, 5, 'solid');
-  tile(r1Ledges, 6, 10, 'box');
-  tile(r1Ledges, 6, 12, 'solid');
-  span(r1Ledges, 12, 15, 4, 'solid');
-  span(r1Ledges, 13, 4, 3, 'solid');
-  span(r1Ledges, 16, 8, 5, 'solid');
-  span(r1Ledges, 17, 13, 2, 'solid');
 
-  const r1 = finalizeTower({
+  // SPIRE 1: SUNLIT GORGE SLUICE (18 floors — Real Staircases, Snap-Crab Springboards & Mosaic Sanctum)
+  const s1Ledges = [];
+  span(s1Ledges, 0, 18, 4, 'solid');                 // Wide 4-col spawn quay [18,19,0,1]
+  stairFlight(s1Ledges, 0, 2, 3, 1, 4, 'solid');     // Smooth 3-floor staircase 2->3->4 onto [5,6,7,8] at f=3!
+  stairFlight(s1Ledges, 3, 9, 2, 1, 4, 'solid');     // Staircase 9->10 onto [11,12,13,14] at f=5!
+  // Elevator at col 15 (f=5..9) -> terrace at f=9 [16,17,18,19]
+  span(s1Ledges, 9, 16, 4, 'solid');
+  // Sanctum side-spur at f=9 [12,13,14] reachable via 1-col hop left from 16->14
+  span(s1Ledges, 9, 12, 3, 'solid');
+  stairFlight(s1Ledges, 9, 0, 3, 1, 4, 'solid');     // Staircase 0->1->2 onto [3,4,5,6] at f=12!
+  tile(s1Ledges, 5, 12, 'box');                      // Siphon crate shattered with Tail-Whip or Hydro-Pulse
+  // Hydro-conduit shortcut or staircase climb f=12 -> f=16
+  stairFlight(s1Ledges, 12, 7, 2, 1, 3, 'solid');    // [9,10,11] at f=14
+  stairFlight(s1Ledges, 14, 12, 2, 1, 5, 'solid');   // Crown terrace [14,15,16,17,18] at f=16!
+  span(s1Ledges, 17, 19, 2, 'solid');                // Bonus Harmonic Seed perch [19,0] at f=17
+
+  const t1 = finalizeTower({
     id: 1,
-    key: 'reboot_t1',
-    era: 'reboot',
-    name: 'WATCHTOWER OF THE MIST',
-    subtitle: 'SECTOR I • STORM APPROACH',
-    theme: 'mist',
+    act: 1,
+    key: 'spire_1',
+    name: 'SUNLIT GORGE SLUICE',
+    subtitle: 'ACT I • REDWOOD CANYON RIVERS',
+    theme: 'canyon_river',
     floors: 18,
-    timeLimit: 95,
-    parTime: 35,
-    spawn: { col: 0, floor: 1 },
-    palette: REBOOT_PALETTES.mist,
-    ledges: r1Ledges,
-    elevators: [
-      { col: 2, minFloor: 2, maxFloor: 6, startFloor: 2, speed: 1.5 },
-      { col: 7, minFloor: 13, maxFloor: 16, startFloor: 13, speed: 1.6 }
-    ],
-    doors: [
-      { id: 'r1_d1a', col: 0, floor: 1, targetId: 'r1_d1b', isExit: false, isVault: false, tunnelStyle: 'stone' },
-      { id: 'r1_d1b', col: 0, floor: 4, targetId: 'r1_d1a', isExit: false, isVault: false, tunnelStyle: 'stone' },
-      { id: 'r1_spark1a', col: 14, floor: 1, targetId: 'r1_spark1b', isExit: false, isVault: false, tunnelStyle: 'sparkArch' },
-      { id: 'r1_spark1b', col: 7, floor: 6, targetId: 'r1_spark1a', isExit: false, isVault: false, tunnelStyle: 'sparkArch' },
-      { id: 'r_t1_rune', col: 12, floor: 7, targetId: null, isExit: false, isVault: false, isRune: true, puzzleType: 'lights', puzzleSeed: 10101, tunnelStyle: 'stone' },
-      { id: 'r1_spark2a', col: 8, floor: 10, targetId: 'r1_spark2b', isExit: false, isVault: false, tunnelStyle: 'sparkArch' },
-      { id: 'r1_spark2b', col: 0, floor: 12, targetId: 'r1_spark2a', isExit: false, isVault: false, tunnelStyle: 'sparkArch' },
-      { id: 'r1_exit', col: 10, floor: 16, targetId: null, isExit: true, isVault: false, tunnelStyle: 'stone' }
-    ],
-    switches: [],
-    collectibles: [
-      { id: 'r1_g1', col: 2, floor: 0, type: 'gear' },
-      { id: 'r1_g2', col: 4, floor: 2, type: 'gear' },
-      { id: 'r1_g3', col: 11, floor: 5, type: 'gear' },
-      { id: 'r1_g4', col: 9, floor: 6, type: 'gear' },
-      { id: 'r1_g5', col: 5, floor: 13, type: 'gear' },
-      { id: 'r1_relic', col: 13, floor: 3, type: 'relic', relicId: 'relic_t1' },
-      { id: 'r1_star', col: 14, floor: 17, type: 'starCore' }
-    ],
-    enemies: [
-      { type: 'eye', col: 13.9, floor: 2.85, dir: -1, speed: 1.5, amp: 0.2 },
-      { type: 'molecule', col: 3.1, floor: -0.02, dir: 1, speed: 1.6, amp: 0.2 },
-      { type: 'roller', col: 13.5, floor: 6, dir: -1, speed: 1.5 },
-      { type: 'bouncer', col: 2.5, floor: 9, dir: 1, speed: 1.5 },
-      { type: 'eye', col: 12.0, floor: 12.5, dir: 1, speed: 1.7, amp: 0.25 },
-      { type: 'molecule', col: 1.0, floor: 16.5, dir: -1, speed: 1.8, amp: 0.35 }
-    ]
-  });
-
-  // --------------------------------------------------------------------------
-  // T2: THE SINKING RELIQUARY (Rising Sea 0.17 + Drain Valves + Core Lock Vault)
-  // --------------------------------------------------------------------------
-  const r2Ledges = [];
-  span(r2Ledges, 0, 15, 4, 'solid');
-  span(r2Ledges, 1, 3, 3, 'solid');
-  span(r2Ledges, 2, 6, 3, 'crumble');
-  span(r2Ledges, 3, 9, 4, 'solid');
-  span(r2Ledges, 4, 13, 3, 'solid');
-  span(r2Ledges, 8, 1, 4, 'solid');
-  span(r2Ledges, 9, 13, 3, 'solid');
-  span(r2Ledges, 9, 5, 3, 'crumble');
-  span(r2Ledges, 10, 8, 4, 'solid');
-  span(r2Ledges, 13, 2, 4, 'solid');
-  span(r2Ledges, 14, 6, 3, 'crumble');
-  span(r2Ledges, 15, 9, 4, 'solid');
-  span(r2Ledges, 16, 13, 4, 'solid');
-  span(r2Ledges, 17, 1, 3, 'crumble');
-  span(r2Ledges, 18, 4, 5, 'solid');
-  span(r2Ledges, 19, 9, 2, 'solid');
-
-  const r2 = finalizeTower({
-    id: 2,
-    key: 'reboot_t2',
-    era: 'reboot',
-    name: 'THE SINKING RELIQUARY',
-    subtitle: 'SECTOR I • RISING ABYSS',
-    theme: 'sinking',
-    floors: 20,
-    timeLimit: 90,
-    parTime: 34,
-    spawn: { col: 0, floor: 0 },
-    palette: REBOOT_PALETTES.sinking,
-    mechanics: { waterRiseRate: 0.17 },
-    ledges: r2Ledges,
-    elevators: [{ col: 0, minFloor: 4, maxFloor: 8, startFloor: 4, speed: 1.9 }],
-    doors: [
-      { id: 'r2_vault', col: 14, floor: 9, targetId: null, isExit: false, isVault: true, tunnelStyle: 'stone' },
-      { id: 'r2_s1a', col: 11, floor: 10, targetId: 'r2_s1b', isExit: false, isVault: false, tunnelStyle: 'sparkArch' },
-      { id: 'r2_s1b', col: 3, floor: 13, targetId: 'r2_s1a', isExit: false, isVault: false, tunnelStyle: 'sparkArch' },
-      { id: 'r2_exit', col: 6, floor: 18, targetId: null, isExit: true, isVault: false, tunnelStyle: 'stone' }
-    ],
-    switches: [
-      { id: 'r2_drain1', col: 14, floor: 4, group: 'drain', mode: 'drainValve' },
-      { id: 'r2_drain2', col: 9, floor: 10, group: 'drain', mode: 'drainValve' },
-      { id: 'r2_drain3', col: 11, floor: 15, group: 'drain', mode: 'drainValve' }
-    ],
-    collectibles: [
-      { id: 'r2_g1', col: 5, floor: 1, type: 'gear' },
-      { id: 'r2_g2', col: 15, floor: 9, type: 'gear' },
-      { id: 'r2_g3', col: 10, floor: 10, type: 'gear' },
-      { id: 'r2_g4', col: 5, floor: 13, type: 'gear' },
-      { id: 'r2_g5', col: 8, floor: 18, type: 'gear' },
-      { id: 'r2_relic', col: 12, floor: 3, type: 'relic', relicId: 'relic_t2' },
-      { id: 'r2_star', col: 10, floor: 19, type: 'starCore' }
-    ],
-    enemies: [
-      { type: 'roller', col: 5.5, floor: 1, dir: 1, speed: 1.7 },
-      { type: 'molecule', col: 9.0, floor: 2.5, dir: -1, speed: 1.9, amp: 0.4 },
-      { type: 'bouncer', col: 7.5, floor: 8, dir: 1, speed: 1.7 },
-      { type: 'eye', col: 4.5, floor: 10.6, dir: -1, speed: 1.9 },
-      { type: 'roller', col: 14.5, floor: 16, dir: -1, speed: 1.9 },
-      { type: 'molecule', col: 14.5, floor: 18.5, dir: 1, speed: 2.0, amp: 0.35 }
-    ]
-  });
-
-  // --------------------------------------------------------------------------
-  // T3: CLOCKWORK FOUNDRY (steamVent + conveyorFlip + 'bells' Rune Chamber)
-  // --------------------------------------------------------------------------
-  const r3Ledges = [];
-  span(r3Ledges, 0, 14, 5, 'solid');
-  span(r3Ledges, 1, 3, 4, 'conveyorL');
-  tile(r3Ledges, 2, 0, 'solid');
-  tile(r3Ledges, 7, 2, 'steamVent', { phasePeriod: 3.4, phaseOffset: 0.0 });
-  span(r3Ledges, 2, 8, 3, 'solid');
-  span(r3Ledges, 3, 11, 3, 'solid');
-  span(r3Ledges, 5, 6, 3, 'solid');
-  span(r3Ledges, 6, 3, 4, 'solid');
-  span(r3Ledges, 7, 7, 4, 'conveyorR');
-  span(r3Ledges, 8, 11, 3, 'solid');
-  tile(r3Ledges, 14, 9, 'steamVent', { phasePeriod: 3.2, phaseOffset: 1.1 });
-  tile(r3Ledges, 15, 9, 'solid');
-  span(r3Ledges, 10, 15, 3, 'solid');
-  span(r3Ledges, 11, 12, 3, 'solid'); // Secret Rune Door r_t3_rune at col 13, floor 11 (f=12..14 col 13 clear!)
-  span(r3Ledges, 14, 3, 4, 'solid');
-  span(r3Ledges, 15, 7, 3, 'conveyorL');
-  tile(r3Ledges, 10, 16, 'solid');
-  tile(r3Ledges, 11, 16, 'steamVent', { phasePeriod: 3.4, phaseOffset: 0.5 });
-  span(r3Ledges, 17, 12, 3, 'solid');
-  span(r3Ledges, 18, 15, 6, 'solid');
-  span(r3Ledges, 19, 5, 2, 'solid');
-
-  const r3 = finalizeTower({
-    id: 3,
-    key: 'reboot_t3',
-    era: 'reboot',
-    name: 'CLOCKWORK FOUNDRY',
-    subtitle: 'SECTOR II • STEAM & IRON',
-    theme: 'foundry',
-    floors: 20,
-    timeLimit: 100,
-    parTime: 36,
-    spawn: { col: 0, floor: 0 },
-    palette: REBOOT_PALETTES.foundry,
-    ledges: r3Ledges,
-    elevators: [{ col: 2, minFloor: 10, maxFloor: 14, startFloor: 10, speed: 1.8 }],
-    doors: [
-      { id: 'r3_s1a', col: 12, floor: 3, targetId: 'r3_s1b', isExit: false, isVault: false, tunnelStyle: 'sparkArch' },
-      { id: 'r3_s1b', col: 4, floor: 6, targetId: 'r3_s1a', isExit: false, isVault: false, tunnelStyle: 'sparkArch' },
-      { id: 'r_t3_rune', col: 13, floor: 11, targetId: null, isExit: false, isVault: false, isRune: true, puzzleType: 'bells', puzzleSeed: 30303, tunnelStyle: 'stone' },
-      { id: 'r3_exit', col: 2, floor: 18, targetId: null, isExit: true, isVault: false, tunnelStyle: 'stone' }
-    ],
-    switches: [
-      { id: 'r3_conv1', col: 2, floor: 0, group: 'conv', mode: 'conveyorFlip' },
-      { id: 'r3_conv2', col: 11, floor: 8, group: 'conv', mode: 'conveyorFlip' }
-    ],
-    collectibles: [
-      { id: 'r3_g1', col: 7, floor: 5, type: 'gear' },
-      { id: 'r3_g2', col: 9, floor: 7, type: 'gear' },
-      { id: 'r3_g3', col: 14, floor: 11, type: 'gear' },
-      { id: 'r3_g4', col: 9, floor: 15, type: 'gear' },
-      { id: 'r3_g5', col: 4, floor: 18, type: 'gear' },
-      { id: 'r3_relic', col: 6, floor: 5, type: 'relic', relicId: 'relic_t3' },
-      { id: 'r3_star', col: 6, floor: 19, type: 'starCore' }
-    ],
-    enemies: [
-      { type: 'roller', col: 6.5, floor: 1, dir: -1, speed: 1.8 },
-      { type: 'eye', col: 12.5, floor: 6.5, dir: 1, speed: 1.8 },
-      { type: 'molecule', col: 5.5, floor: 8.5, dir: -1, speed: 2.0, amp: 0.4 },
-      { type: 'robotV', col: 9.5, floor: 14.5, dir: 1, speed: 2.1, amp: 1.4, minFloor: 13.1, maxFloor: 15.9 },
-      { type: 'robotH', col: 13.5, floor: 17, dir: 1, speed: 1.7, minCol: 12, maxCol: 14 },
-      { type: 'bouncer', col: 10.5, floor: 18, dir: 1, speed: 1.8 }
-    ]
-  });
-
-  // --------------------------------------------------------------------------
-  // T4: BOREAL SPIRE (windForce: 0.50 + Glacier Ice + Core Lock Vault)
-  // --------------------------------------------------------------------------
-  const r4Ledges = [];
-  span(r4Ledges, 0, 14, 5, 'solid');
-  span(r4Ledges, 1, 3, 4, 'ice');
-  span(r4Ledges, 2, 7, 4, 'ice');
-  span(r4Ledges, 3, 11, 4, 'solid');
-  span(r4Ledges, 6, 4, 4, 'ice');
-  tile(r4Ledges, 5, 6, 'solid');
-  span(r4Ledges, 7, 8, 4, 'solid');
-  span(r4Ledges, 11, 13, 3, 'ice');
-  span(r4Ledges, 12, 9, 3, 'solid');
-  span(r4Ledges, 12, 0, 4, 'solid');
-  span(r4Ledges, 13, 4, 4, 'ice');
-  span(r4Ledges, 14, 8, 4, 'crumble');
-  span(r4Ledges, 15, 12, 5, 'solid');
-  span(r4Ledges, 19, 2, 5, 'ice');
-  tile(r4Ledges, 4, 19, 'solid');
-  span(r4Ledges, 20, 7, 2, 'solid');
-
-  const r4 = finalizeTower({
-    id: 4,
-    key: 'reboot_t4',
-    era: 'reboot',
-    name: 'BOREAL SPIRE',
-    subtitle: 'SECTOR II • GALE-FORCE MONOLITH',
-    theme: 'blizzard',
-    floors: 21,
     timeLimit: 105,
-    parTime: 38,
+    parTime: 40,
     spawn: { col: 0, floor: 0 },
-    palette: REBOOT_PALETTES.blizzard,
-    mechanics: { windForce: 0.50, windPeriod: 6.0 },
-    ledges: r4Ledges,
+    ledges: s1Ledges,
     elevators: [
-      { col: 12, minFloor: 7, maxFloor: 11, startFloor: 7, speed: 1.8 },
-      { col: 1, minFloor: 15, maxFloor: 19, startFloor: 15, speed: 1.9 }
+      { id: 's1_lift1', col: 15, minFloor: 5, maxFloor: 9, startFloor: 5, speed: 1.8 }
     ],
     doors: [
-      { id: 'r4_d1a', col: 13, floor: 3, targetId: 'r4_d1b', isExit: false, isVault: false, tunnelStyle: 'stone' },
-      { id: 'r4_d1b', col: 5, floor: 6, targetId: 'r4_d1a', isExit: false, isVault: false, tunnelStyle: 'stone' },
-      { id: 'r4_vault', col: 9, floor: 12, targetId: null, isExit: false, isVault: true, tunnelStyle: 'stone' },
-      { id: 'r4_exit', col: 4, floor: 19, targetId: null, isExit: true, isVault: false, tunnelStyle: 'stone' }
+      { id: 's1_c1a', col: 7, floor: 3, targetId: 's1_c1b', tunnelStyle: 'sparkArch' },
+      { id: 's1_c1b', col: 17, floor: 9, targetId: 's1_c1a', tunnelStyle: 'sparkArch' },
+      { id: 's1_sanctum', col: 13, floor: 9, isRune: true, puzzleType: 'lights', puzzleSeed: 11011 },
+      { id: 's1_crown', col: 16, floor: 16, isExit: true }
     ],
     switches: [],
+    grappleRings: [{ id: 's1_ring1', col: 15.2, floor: 10.3 }],
     collectibles: [
-      { id: 'r4_g1', col: 5, floor: 1, type: 'gear' },
-      { id: 'r4_g2', col: 10, floor: 2, type: 'gear' },
-      { id: 'r4_g3', col: 10, floor: 12, type: 'gear' },
-      { id: 'r4_g4', col: 7, floor: 13, type: 'gear' },
-      { id: 'r4_g5', col: 6, floor: 19, type: 'gear' },
-      { id: 'r4_relic', col: 11, floor: 12, type: 'relic', relicId: 'relic_t4' },
-      { id: 'r4_star', col: 8, floor: 20, type: 'starCore' }
+      { id: 's1_g1', col: 3, floor: 1, type: 'gear' },
+      { id: 's1_g2', col: 12, floor: 5, type: 'gear' },
+      { id: 's1_g3', col: 18, floor: 9, type: 'gear' },
+      { id: 's1_g4', col: 4, floor: 12, type: 'gear' },
+      { id: 's1_g5', col: 15, floor: 16, type: 'gear' },
+      { id: 's1_log', col: 12, floor: 9, type: 'relic', relicId: 'relic_t1' },
+      { id: 's1_seed', col: 19, floor: 17, type: 'starCore' }
     ],
     enemies: [
-      { type: 'roller', col: 6.5, floor: 1, dir: 1, speed: 1.8 },
-      { type: 'molecule', col: 5.5, floor: 2.6, dir: -1, speed: 2.0, amp: 0.4 },
-      { type: 'bouncer', col: 1.0, floor: 6, dir: 1, speed: 1.8 },
-      { type: 'eye', col: 3.0, floor: 11.5, dir: -1, speed: 2.0 },
-      { type: 'bouncer', col: 2.5, floor: 13, dir: -1, speed: 1.9 },
-      { type: 'molecule', col: 11.0, floor: 19.6, dir: 1, speed: 2.1, amp: 0.35 }
+      { type: 'snap_crab', col: 6.5, floor: 3, dir: 1, speed: 1.5 },
+      { type: 'gulp_hopper', col: 13.5, floor: 5, dir: -1, speed: 1.5 },
+      { type: 'rail_skater', col: 18.0, floor: 9, dir: 1, speed: 1.6, axis: 'h' },
+      { type: 'snap_crab', col: 4.5, floor: 12, dir: -1, speed: 1.6 },
+      { type: 'volt_eel', col: 10.5, floor: 14.4, dir: 1, speed: 1.7, amp: 0.3 }
     ]
   });
 
-  // --------------------------------------------------------------------------
-  // T5: PRISM LABYRINTH (Red & Cyan Switches + 'beam' Mirror Rune Chamber)
-  // --------------------------------------------------------------------------
-  const r5Ledges = [];
-  span(r5Ledges, 0, 14, 5, 'solid');
-  span(r5Ledges, 1, 3, 3, 'solid');
-  span(r5Ledges, 2, 7, 3, 'solid');
-  span(r5Ledges, 3, 11, 3, 'solid');
-  span(r5Ledges, 4, 15, 4, 'solid');
-  span(r5Ledges, 5, 3, 2, 'phaseBlock', { switchGroup: 'red', inverted: false });
-  span(r5Ledges, 5, 5, 3, 'solid');
-  tile(r5Ledges, 7, 5, 'laserGate', { switchGroup: 'red', inverted: false });
-  tile(r5Ledges, 7, 7, 'solid');
-  span(r5Ledges, 5, 8, 3, 'solid');
+  // SPIRE 2: REDWOOD CATARACT DAM (20 floors — Pipe-Valve Lift, Floodgate Swim, Vault & Act I Siphon Warden)
+  const s2Ledges = [];
+  span(s2Ledges, 0, 18, 4, 'solid');                 // Spawn [18,19,0,1]
+  stairFlight(s2Ledges, 0, 2, 2, 1, 4, 'solid');     // [4,5,6,7] at f=2 (Floodgate Valve at col 6, f=2!)
+  // Broken bridge chasm cols 8..10 at f=2 (can cross via Floodgate Water swim OR 1-col stepping stone at col 9, f=3!)
+  span(s2Ledges, 3, 9, 2, 'crumble');                // Stepping stones [9,10] at f=3 (plus Floodgate raises clean water to f=2.2!)
+  span(s2Ledges, 3, 12, 4, 'solid');                 // [12,13,14,15] at f=3 (Pipe-Valve at col 14 powers Lift at col 16!)
+  // Pipe-powered mechanical elevator at col 16 (f=3..8)
+  span(s2Ledges, 8, 17, 4, 'solid');                 // [17,18,19,0] at f=8
+  stairFlight(s2Ledges, 8, 1, 3, 1, 4, 'solid');     // [4,5,6,7] at f=11 (Core Vault at col 6, f=11)
+  stairFlight(s2Ledges, 11, 8, 3, 1, 4, 'solid');    // [11,12,13,14] at f=14
+  // Geyser Vent boost at col 14, f=14 or staircase to f=18!
+  tile(s2Ledges, 15, 15, 'steamVent', { phasePeriod: 3.2, phaseOffset: 0.2 });
+  stairFlight(s2Ledges, 14, 15, 4, 1, 5, 'solid');   // Crown Dam Terrace [19,0,1,2,3] at f=18!
+  span(s2Ledges, 19, 4, 2, 'solid');                 // [4,5] at f=19
 
-  span(r5Ledges, 9, 15, 5, 'solid');
-  tile(r5Ledges, 15, 9, 'laserGate', { switchGroup: 'cyan', inverted: false });
-  tile(r5Ledges, 15, 11, 'solid');
-  span(r5Ledges, 9, 12, 3, 'solid'); // Rune Chamber r_t5_rune at col 13, floor 9 (f=10..12 col 13 clear!)
-  span(r5Ledges, 10, 4, 3, 'phaseBlock', { switchGroup: 'cyan', inverted: false });
-  span(r5Ledges, 10, 7, 2, 'solid');
-
-  span(r5Ledges, 14, 10, 4, 'solid');
-  span(r5Ledges, 15, 15, 3, 'solid');
-  tile(r5Ledges, 1, 15, 'laserGate', { switchGroup: 'red', inverted: true });
-  tile(r5Ledges, 1, 17, 'solid');
-  span(r5Ledges, 15, 2, 3, 'solid');
-  span(r5Ledges, 16, 5, 3, 'solid');
-  span(r5Ledges, 17, 8, 4, 'crumble');
-  span(r5Ledges, 18, 12, 3, 'solid');
-  span(r5Ledges, 19, 15, 5, 'solid');
-  span(r5Ledges, 20, 4, 2, 'solid');
-
-  const r5 = finalizeTower({
-    id: 5,
-    key: 'reboot_t5',
-    era: 'reboot',
-    name: 'PRISM LABYRINTH',
-    subtitle: 'SECTOR III • RESONATOR CORE',
-    theme: 'prism',
-    floors: 21,
-    timeLimit: 110,
-    parTime: 40,
+  const t2 = finalizeTower({
+    id: 2,
+    act: 1,
+    key: 'spire_2',
+    name: 'REDWOOD CATARACT DAM',
+    subtitle: 'ACT I BOSS • RIVER FLOODGATE CITADEL',
+    theme: 'canyon_river',
+    floors: 20,
+    timeLimit: 115,
+    parTime: 44,
     spawn: { col: 0, floor: 0 },
-    palette: REBOOT_PALETTES.prism,
-    ledges: r5Ledges,
-    elevators: [{ col: 9, minFloor: 10, maxFloor: 14, startFloor: 10, speed: 1.9 }],
+    ledges: s2Ledges,
+    elevators: [
+      { id: 's2_lift_pipe', col: 16, minFloor: 3, maxFloor: 8, startFloor: 3, speed: 1.9, pipeGroup: 'pipeA', powered: false }
+    ],
     doors: [
-      { id: 'r5_d1a', col: 9, floor: 5, targetId: 'r5_d1b', isExit: false, isVault: false, tunnelStyle: 'stone' },
-      { id: 'r5_d1b', col: 1, floor: 9, targetId: 'r5_d1a', isExit: false, isVault: false, tunnelStyle: 'stone' },
-      { id: 'r_t5_rune', col: 13, floor: 9, targetId: null, isExit: false, isVault: false, isRune: true, puzzleType: 'beam', puzzleSeed: 50505, tunnelStyle: 'stone' },
-      { id: 'r5_exit', col: 1, floor: 19, targetId: null, isExit: true, isVault: false, tunnelStyle: 'stone' }
+      { id: 's2_vault', col: 6, floor: 11, isVault: true },
+      { id: 's2_c1a', col: 13, floor: 14, targetId: 's2_c1b', tunnelStyle: 'sparkArch' },
+      { id: 's2_c1b', col: 0, floor: 18, targetId: 's2_c1a', tunnelStyle: 'sparkArch' },
+      { id: 's2_crown', col: 2, floor: 18, isExit: true }
     ],
     switches: [
-      { id: 'r5_sw_red1', col: 0, floor: 4, group: 'red', mode: 'toggle' },
-      { id: 'r5_sw_cyan1', col: 3, floor: 9, group: 'cyan', mode: 'toggle' },
-      { id: 'r5_sw_red2', col: 12, floor: 14, group: 'red', mode: 'toggle' }
+      { id: 's2_flood1', col: 6, floor: 2, group: 'flood', mode: 'floodValve', targetWaterFloor: 2.35 },
+      { id: 's2_pipe1', col: 14, floor: 3, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve' }
     ],
+    grappleRings: [{ id: 's2_ring1', col: 9.5, floor: 3.6 }],
     collectibles: [
-      { id: 'r5_g1', col: 8, floor: 2, type: 'gear' },
-      { id: 'r5_g2', col: 10, floor: 5, type: 'gear' },
-      { id: 'r5_g3', col: 12, floor: 9, type: 'gear' },
-      { id: 'r5_g4', col: 4, floor: 15, type: 'gear' },
-      { id: 'r5_g5', col: 3, floor: 19, type: 'gear' },
-      { id: 'r5_relic', col: 14, floor: 9, type: 'relic', relicId: 'relic_t5' },
-      { id: 'r5_star', col: 5, floor: 20, type: 'starCore' }
+      { id: 's2_g1', col: 5, floor: 2, type: 'gear' },
+      { id: 's2_g2', col: 13, floor: 3, type: 'gear' },
+      { id: 's2_g3', col: 19, floor: 8, type: 'gear' },
+      { id: 's2_g4', col: 12, floor: 14, type: 'gear' },
+      { id: 's2_g5', col: 1, floor: 18, type: 'gear' },
+      { id: 's2_log', col: 5, floor: 11, type: 'relic', relicId: 'relic_t2' },
+      { id: 's2_seed', col: 4, floor: 19, type: 'starCore' }
     ],
     enemies: [
-      { type: 'roller', col: 8.5, floor: 2, dir: -1, speed: 1.9 },
-      { type: 'molecule', col: 12.5, floor: 3.5, dir: 1, speed: 2.1, amp: 0.4 },
-      { type: 'eye', col: 7.5, floor: 8.35, dir: 1, speed: 2.0 },
-      { type: 'bouncer', col: 2.5, floor: 14, dir: 1, speed: 1.9 },
-      { type: 'robotH', col: 3.5, floor: 15, dir: -1, speed: 1.9, minCol: 2, maxCol: 4 },
-      { type: 'molecule', col: 9.5, floor: 19.6, dir: -1, speed: 2.2, amp: 0.4 }
+      { type: 'snap_crab', col: 13.5, floor: 3, dir: -1, speed: 1.6 },
+      { type: 'barnacle_mortar', col: 19.5, floor: 8, dir: -1, firePeriod: 3.6 },
+      { type: 'gulp_hopper', col: 5.5, floor: 11, dir: 1, speed: 1.65 },
+      { type: 'rail_skater', col: 12.5, floor: 14, dir: 1, speed: 1.75, axis: 'h' },
+      { type: 'siphon_warden', col: 11.5, floor: 17.8, dir: -1, speed: 2.0, hp: 3 }
     ]
   });
 
   // --------------------------------------------------------------------------
-  // T6: TIDAL PISTON RIG (Timed Piston Ledges + Dual Lifts + Core Lock Vault)
+  // ACT II — CRYSTAL ALPINE LAKES ('alpine_lake', Spires 3 & 4)
   // --------------------------------------------------------------------------
-  const r6Ledges = [];
-  span(r6Ledges, 0, 14, 5, 'solid');
-  span(r6Ledges, 1, 3, 2, 'piston', { phasePeriod: 3.2, phaseOffset: 0.0 });
-  span(r6Ledges, 2, 5, 4, 'solid');
-  span(r6Ledges, 3, 9, 2, 'piston', { phasePeriod: 3.2, phaseOffset: 0.9 });
-  span(r6Ledges, 4, 11, 4, 'solid');
-  span(r6Ledges, 9, 0, 4, 'solid');
-  span(r6Ledges, 10, 4, 2, 'piston', { phasePeriod: 3.0, phaseOffset: 0.4 });
-  span(r6Ledges, 11, 6, 2, 'piston', { phasePeriod: 3.0, phaseOffset: 1.2 });
-  span(r6Ledges, 12, 8, 5, 'solid');
-  span(r6Ledges, 13, 13, 3, 'solid');
-  span(r6Ledges, 15, 2, 4, 'solid');
-  span(r6Ledges, 16, 6, 2, 'piston', { phasePeriod: 3.0, phaseOffset: 0.0 });
-  span(r6Ledges, 16, 8, 3, 'solid');
-  span(r6Ledges, 20, 12, 5, 'solid');
-  span(r6Ledges, 21, 1, 2, 'solid');
 
-  const r6 = finalizeTower({
-    id: 6,
-    key: 'reboot_t6',
-    era: 'reboot',
-    name: 'TIDAL PISTON RIG',
-    subtitle: 'SECTOR III • HYDRAULIC DERRICK',
-    theme: 'piston',
-    floors: 22,
+  // SPIRE 3: MIRROR TARN AQUEDUCT (20 floors — Gecko Wall-Scamper Crystal Strips & Harmonic Bells Sanctum)
+  const s3Ledges = [];
+  span(s3Ledges, 0, 18, 4, 'solid');
+  stairFlight(s3Ledges, 0, 2, 3, 1, 3, 'solid');     // [5,6,7] at f=3
+  // Gecko Crystal Wall-Strip at col 8 (f=3..7) + backup stair/lift so player scampers right up crystal vein!
+  span(s3Ledges, 7, 9, 4, 'ice');                    // [9,10,11,12] at f=7
+  tile(s3Ledges, 10, 7, 'solid');
+  stairFlight(s3Ledges, 7, 13, 3, 1, 4, 'solid');    // [16,17,18,19] at f=10 (Bells Sanctum at col 18, f=10)
+  // Mechanical Lift at col 0 (f=10..14)
+  span(s3Ledges, 14, 1, 4, 'solid');                 // [1,2,3,4] at f=14
+  // Second Gecko Crystal Wall-Strip at col 5 (f=14..17)
+  span(s3Ledges, 17, 6, 3, 'ice');                   // [6,7,8] at f=17
+  stairFlight(s3Ledges, 17, 9, 1, 1, 5, 'solid');    // Crown Aqueduct [10,11,12,13,14] at f=18!
+  span(s3Ledges, 19, 15, 2, 'solid');
+
+  const t3 = finalizeTower({
+    id: 3,
+    act: 2,
+    key: 'spire_3',
+    name: 'MIRROR TARN AQUEDUCT',
+    subtitle: 'ACT II • CRYSTAL ALPINE LAKES',
+    theme: 'alpine_lake',
+    floors: 20,
     timeLimit: 110,
-    parTime: 40,
-    spawn: { col: 0, floor: 0 },
-    palette: REBOOT_PALETTES.piston,
-    mechanics: { windForce: 0.28, windPeriod: 7.0 },
-    ledges: r6Ledges,
-    elevators: [
-      { col: 15, minFloor: 4, maxFloor: 9, startFloor: 4, speed: 2.0 },
-      { col: 11, minFloor: 16, maxFloor: 20, startFloor: 16, speed: 2.0 }
-    ],
-    doors: [
-      { id: 'r6_vault', col: 14, floor: 13, targetId: null, isExit: false, isVault: true, tunnelStyle: 'stone' },
-      { id: 'r6_s1a', col: 11, floor: 12, targetId: 'r6_s1b', isExit: false, isVault: false, tunnelStyle: 'sparkArch' },
-      { id: 'r6_s1b', col: 3, floor: 15, targetId: 'r6_s1a', isExit: false, isVault: false, tunnelStyle: 'sparkArch' },
-      { id: 'r6_exit', col: 14, floor: 20, targetId: null, isExit: true, isVault: false, tunnelStyle: 'stone' }
-    ],
-    switches: [],
-    collectibles: [
-      { id: 'r6_g1', col: 7, floor: 2, type: 'gear' },
-      { id: 'r6_g2', col: 2, floor: 9, type: 'gear' },
-      { id: 'r6_g3', col: 15, floor: 13, type: 'gear' },
-      { id: 'r6_g4', col: 5, floor: 15, type: 'gear' },
-      { id: 'r6_g5', col: 0, floor: 20, type: 'gear' },
-      { id: 'r6_relic', col: 13, floor: 13, type: 'relic', relicId: 'relic_t6' },
-      { id: 'r6_star', col: 2, floor: 21, type: 'starCore' }
-    ],
-    enemies: [
-      { type: 'robotH', col: 7.5, floor: 2, dir: 1, speed: 1.9, minCol: 6, maxCol: 8 },
-      { type: 'roller', col: 7.5, floor: 9, dir: 1, speed: 2.0 },
-      { type: 'molecule', col: 4.5, floor: 11.2, dir: -1, speed: 2.2, amp: 0.45 },
-      { type: 'eye', col: 10.0, floor: 14.85, dir: 1, speed: 2.2 },
-      { type: 'robotV', col: 5.5, floor: 17.5, dir: 1, speed: 2.3, amp: 1.2, minFloor: 16.3, maxFloor: 18.7 },
-      { type: 'roller', col: 5.0, floor: 20, dir: -1, speed: 2.2 }
-    ]
-  });
-
-  // --------------------------------------------------------------------------
-  // T7: BLACKOUT CITADEL (Storm Blackouts + Lightning + 'blocks' Rune Chamber)
-  // --------------------------------------------------------------------------
-  const r7Ledges = [];
-  span(r7Ledges, 0, 14, 5, 'solid');
-  span(r7Ledges, 1, 3, 4, 'ice');
-  span(r7Ledges, 2, 7, 4, 'crumble');
-  span(r7Ledges, 3, 11, 3, 'solid');
-  span(r7Ledges, 6, 3, 4, 'solid');
-  span(r7Ledges, 7, 7, 4, 'conveyorR');
-  span(r7Ledges, 8, 11, 4, 'solid');
-  span(r7Ledges, 13, 0, 4, 'solid');
-  span(r7Ledges, 14, 11, 4, 'solid'); // Rune Chamber r_t7_rune at col 12, floor 14 (f=15..16 col 12 clear!)
-  span(r7Ledges, 14, 4, 3, 'phaseBlock', { switchGroup: 'cyan', inverted: false });
-  span(r7Ledges, 14, 7, 3, 'solid');
-  span(r7Ledges, 17, 15, 4, 'solid');
-  span(r7Ledges, 18, 3, 4, 'crumble');
-  span(r7Ledges, 19, 7, 3, 'ice');
-  span(r7Ledges, 20, 10, 4, 'crumble');
-  span(r7Ledges, 21, 14, 5, 'solid');
-  span(r7Ledges, 22, 3, 2, 'solid');
-
-  const r7 = finalizeTower({
-    id: 7,
-    key: 'reboot_t7',
-    era: 'reboot',
-    name: 'BLACKOUT CITADEL',
-    subtitle: 'SECTOR IV • TEMPEST FORTRESS',
-    theme: 'blackout',
-    floors: 23,
-    timeLimit: 115,
     parTime: 42,
     spawn: { col: 0, floor: 0 },
-    palette: REBOOT_PALETTES.blackout,
-    mechanics: { windForce: 0.38, windPeriod: 6.5, blackoutCycle: 9.0, lightningInterval: 7.5 },
-    ledges: r7Ledges,
-    elevators: [{ col: 15, minFloor: 8, maxFloor: 13, startFloor: 8, speed: 2.0 }],
-    doors: [
-      { id: 'r7_s1a', col: 12, floor: 3, targetId: 'r7_s1b', isExit: false, isVault: false, tunnelStyle: 'sparkArch' },
-      { id: 'r7_s1b', col: 4, floor: 6, targetId: 'r7_s1a', isExit: false, isVault: false, tunnelStyle: 'sparkArch' },
-      { id: 'r_t7_rune', col: 12, floor: 14, targetId: null, isExit: false, isVault: false, isRune: true, puzzleType: 'blocks', puzzleSeed: 70707, tunnelStyle: 'stone' },
-      { id: 'r7_s2a', col: 8, floor: 14, targetId: 'r7_s2b', isExit: false, isVault: false, tunnelStyle: 'sparkArch' },
-      { id: 'r7_s2b', col: 0, floor: 17, targetId: 'r7_s2a', isExit: false, isVault: false, tunnelStyle: 'sparkArch' },
-      { id: 'r7_exit', col: 0, floor: 21, targetId: null, isExit: true, isVault: false, tunnelStyle: 'stone' }
+    ledges: s3Ledges,
+    elevators: [
+      { id: 's3_lift1', col: 0, minFloor: 10, maxFloor: 14, startFloor: 10, speed: 1.85 }
     ],
-    switches: [{ id: 'r7_sw_cyan', col: 1, floor: 13, group: 'cyan', mode: 'toggle' }],
+    wallStrips: [
+      { id: 's3_gecko1', col: 8, minFloor: 3, maxFloor: 7 },
+      { id: 's3_gecko2', col: 5, minFloor: 14, maxFloor: 17 }
+    ],
+    doors: [
+      { id: 's3_sanctum', col: 18, floor: 10, isRune: true, puzzleType: 'bells', puzzleSeed: 33033 },
+      { id: 's3_crown', col: 12, floor: 18, isExit: true }
+    ],
+    switches: [],
     collectibles: [
-      { id: 'r7_g1', col: 5, floor: 1, type: 'gear' },
-      { id: 'r7_g2', col: 9, floor: 7, type: 'gear' },
-      { id: 'r7_g3', col: 13, floor: 14, type: 'gear' },
-      { id: 'r7_g4', col: 8, floor: 19, type: 'gear' },
-      { id: 'r7_g5', col: 2, floor: 21, type: 'gear' },
-      { id: 'r7_relic', col: 1, floor: 17, type: 'relic', relicId: 'relic_t7' },
-      { id: 'r7_star', col: 4, floor: 22, type: 'starCore' }
+      { id: 's3_g1', col: 6, floor: 3, type: 'gear' },
+      { id: 's3_g2', col: 11, floor: 7, type: 'gear' },
+      { id: 's3_g3', col: 17, floor: 10, type: 'gear' },
+      { id: 's3_g4', col: 3, floor: 14, type: 'gear' },
+      { id: 's3_g5', col: 11, floor: 18, type: 'gear' },
+      { id: 's3_log', col: 19, floor: 10, type: 'relic', relicId: 'relic_t3' },
+      { id: 's3_seed', col: 15, floor: 19, type: 'starCore' }
     ],
     enemies: [
-      { type: 'eye', col: 6.5, floor: 1.6, dir: 1, speed: 2.1 },
-      { type: 'bouncer', col: 12.5, floor: 6, dir: -1, speed: 2.0 },
-      { type: 'molecule', col: 7.5, floor: 8.5, dir: 1, speed: 2.3, amp: 0.45 },
-      { type: 'eye', col: 4.0, floor: 13.6, dir: -1, speed: 2.3 },
-      { type: 'molecule', col: 8.5, floor: 17.5, dir: -1, speed: 2.4, amp: 0.4 },
-      { type: 'robotH', col: 8.5, floor: 19, dir: 1, speed: 2.0, minCol: 7, maxCol: 9 },
-      { type: 'eye', col: 8.5, floor: 21.6, dir: 1, speed: 2.4 }
+      { type: 'gulp_hopper', col: 6.5, floor: 3, dir: -1, speed: 1.65 },
+      { type: 'vent_stalker', col: 11.5, floor: 7.8, dir: 1, speed: 1.8, axis: 'v', minFloor: 6.5, maxFloor: 9.2 },
+      { type: 'snap_crab', col: 16.5, floor: 10, dir: 1, speed: 1.7 },
+      { type: 'rail_skater', col: 2.5, floor: 14, dir: -1, speed: 1.8, axis: 'h' },
+      { type: 'volt_eel', col: 8.5, floor: 17.5, dir: 1, speed: 1.85, amp: 0.35 }
     ]
   });
 
-  // --------------------------------------------------------------------------
-  // T8: APEX OF NEBULUS (Grand Convergence + Core Lock Vault)
-  // --------------------------------------------------------------------------
-  const r8Ledges = [];
-  span(r8Ledges, 0, 14, 5, 'solid');
-  span(r8Ledges, 1, 3, 4, 'ice');
-  span(r8Ledges, 2, 7, 2, 'piston', { phasePeriod: 3.0, phaseOffset: 0.0 });
-  span(r8Ledges, 3, 9, 4, 'solid');
-  span(r8Ledges, 4, 13, 3, 'phaseBlock', { switchGroup: 'red', inverted: false });
-  span(r8Ledges, 4, 0, 2, 'solid');
-  span(r8Ledges, 9, 3, 4, 'solid');
-  span(r8Ledges, 10, 7, 4, 'conveyorR');
-  span(r8Ledges, 11, 11, 4, 'solid');
-  span(r8Ledges, 14, 1, 7, 'solid');
-  tile(r8Ledges, 3, 14, 'laserGate', { switchGroup: 'cyan', inverted: false });
-  tile(r8Ledges, 3, 16, 'solid');
-  span(r8Ledges, 15, 8, 3, 'phaseBlock', { switchGroup: 'cyan', inverted: false });
-  span(r8Ledges, 16, 11, 3, 'solid');
-  tile(r8Ledges, 14, 17, 'solid');
-  tile(r8Ledges, 15, 17, 'steamVent', { phasePeriod: 3.2, phaseOffset: 0.6 });
-  span(r8Ledges, 18, 0, 3, 'solid');
-  span(r8Ledges, 22, 4, 3, 'ice');
-  span(r8Ledges, 23, 7, 6, 'solid');
-  span(r8Ledges, 24, 13, 2, 'solid');
+  // SPIRE 4: ALPENGLOW SPILLWAY SPIRE (21 floors — Mountain Winds, Tail-Grapple Chasms, Vault & Act II Warden)
+  const s4Ledges = [];
+  span(s4Ledges, 0, 18, 4, 'solid');
+  stairFlight(s4Ledges, 0, 2, 3, 1, 4, 'ice');       // [5,6,7,8] at f=3
+  tile(s4Ledges, 7, 3, 'solid');
+  // Tail-Grapple Swing Ring across cols 9..11 (also 2-col stepping pad at col 10, f=3 so always fair!)
+  span(s4Ledges, 3, 10, 2, 'solid');
+  span(s4Ledges, 4, 12, 4, 'solid');                 // [12,13,14,15] at f=4
+  // Pipe-Valve at col 14, f=4 activates Spillway Lift at col 16 (f=4..9)
+  span(s4Ledges, 9, 17, 4, 'solid');                 // [17,18,19,0] at f=9
+  stairFlight(s4Ledges, 9, 1, 3, 1, 4, 'solid');     // [4,5,6,7] at f=12 (Core Vault at col 5, f=12)
+  // Doorway shelter f=12 -> f=15
+  span(s4Ledges, 15, 14, 4, 'ice');                  // [14,15,16,17] at f=15
+  tile(s4Ledges, 15, 15, 'solid');
+  stairFlight(s4Ledges, 15, 18, 4, 1, 5, 'solid');   // Crown Spillway [2,3,4,5,6] at f=19!
+  span(s4Ledges, 20, 7, 2, 'solid');
 
-  const r8 = finalizeTower({
-    id: 8,
-    key: 'reboot_t8',
-    era: 'reboot',
-    name: 'APEX OF NEBULUS',
-    subtitle: 'SECTOR IV • ECLIPSED REACTOR',
-    theme: 'apex',
-    floors: 25,
-    timeLimit: 125,
-    parTime: 45,
+  const t4 = finalizeTower({
+    id: 4,
+    act: 2,
+    key: 'spire_4',
+    name: 'ALPENGLOW SPILLWAY SPIRE',
+    subtitle: 'ACT II BOSS • GLACIAL GALE MONOLITH',
+    theme: 'alpine_lake',
+    floors: 21,
+    timeLimit: 115,
+    parTime: 44,
     spawn: { col: 0, floor: 0 },
-    palette: REBOOT_PALETTES.apex,
-    mechanics: {
-      waterRiseRate: 0.14,
-      windForce: 0.48,
-      windPeriod: 6.0,
-      blackoutCycle: 11.0,
-      lightningInterval: 8.0
-    },
-    ledges: r8Ledges,
+    mechanics: { windForce: 0.42, windPeriod: 6.2 },
+    ledges: s4Ledges,
     elevators: [
-      { col: 2, minFloor: 4, maxFloor: 9, startFloor: 4, speed: 2.2 },
-      { col: 3, minFloor: 18, maxFloor: 22, startFloor: 18, speed: 2.2 }
+      { id: 's4_lift1', col: 16, minFloor: 4, maxFloor: 9, startFloor: 4, speed: 1.9, pipeGroup: 'pipeA', powered: false }
+    ],
+    grappleRings: [
+      { id: 's4_ring1', col: 10.5, floor: 4.8 },
+      { id: 's4_ring2', col: 9.5, floor: 13.8 }
     ],
     doors: [
-      { id: 'r8_s1a', col: 13, floor: 11, targetId: 'r8_s1b', isExit: false, isVault: false, tunnelStyle: 'sparkArch' },
-      { id: 'r8_s1b', col: 5, floor: 14, targetId: 'r8_s1a', isExit: false, isVault: false, tunnelStyle: 'sparkArch' },
-      { id: 'r8_vault', col: 1, floor: 14, targetId: null, isExit: false, isVault: true, tunnelStyle: 'stone' },
-      { id: 'r8_exit', col: 10, floor: 23, targetId: null, isExit: true, isVault: false, tunnelStyle: 'stone' }
+      { id: 's4_d1a', col: 7, floor: 12, targetId: 's4_d1b', tunnelStyle: 'stone' },
+      { id: 's4_d1b', col: 15, floor: 15, targetId: 's4_d1a', tunnelStyle: 'stone' },
+      { id: 's4_vault', col: 5, floor: 12, isVault: true },
+      { id: 's4_crown', col: 4, floor: 19, isExit: true }
     ],
     switches: [
-      { id: 'r8_drain1', col: 11, floor: 3, group: 'drain', mode: 'drainValve' },
-      { id: 'r8_sw_red', col: 12, floor: 3, group: 'red', mode: 'toggle' },
-      { id: 'r8_drain2', col: 4, floor: 9, group: 'drain', mode: 'drainValve' },
-      { id: 'r8_sw_cyan', col: 6, floor: 14, group: 'cyan', mode: 'toggle' },
-      { id: 'r8_drain3', col: 12, floor: 16, group: 'drain', mode: 'drainValve' }
+      { id: 's4_pipe1', col: 14, floor: 4, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve' }
     ],
     collectibles: [
-      { id: 'r8_g1', col: 5, floor: 1, type: 'gear' },
-      { id: 'r8_g2', col: 9, floor: 10, type: 'gear' },
-      { id: 'r8_g3', col: 2, floor: 14, type: 'gear' },
-      { id: 'r8_g4', col: 13, floor: 16, type: 'gear' },
-      { id: 'r8_g5', col: 5, floor: 22, type: 'gear' },
-      { id: 'r8_g6', col: 12, floor: 23, type: 'gear' },
-      { id: 'r8_relic', col: 8, floor: 23, type: 'relic', relicId: 'relic_t8' },
-      { id: 'r8_star', col: 14, floor: 24, type: 'starCore' }
+      { id: 's4_g1', col: 6, floor: 3, type: 'gear' },
+      { id: 's4_g2', col: 13, floor: 4, type: 'gear' },
+      { id: 's4_g3', col: 18, floor: 9, type: 'gear' },
+      { id: 's4_g4', col: 16, floor: 15, type: 'gear' },
+      { id: 's4_g5', col: 3, floor: 19, type: 'gear' },
+      { id: 's4_log', col: 6, floor: 12, type: 'relic', relicId: 'relic_t4' },
+      { id: 's4_seed', col: 7, floor: 20, type: 'starCore' }
     ],
     enemies: [
-      { type: 'roller', col: 6.5, floor: 1, dir: 1, speed: 2.2 },
-      { type: 'bouncer', col: 10.5, floor: 9, dir: -1, speed: 2.1 },
-      { type: 'molecule', col: 5.5, floor: 11.5, dir: 1, speed: 2.5, amp: 0.45 },
-      { type: 'eye', col: 11.5, floor: 14.6, dir: -1, speed: 2.4 },
-      { type: 'robotV', col: 10.5, floor: 15.5, dir: 1, speed: 2.4, amp: 1.5, minFloor: 14.0, maxFloor: 17.0 },
-      { type: 'robotH', col: 12.5, floor: 16, dir: -1, speed: 2.2, minCol: 11, maxCol: 13 },
-      { type: 'roller', col: 15.0, floor: 23, dir: -1, speed: 2.2 }
+      { type: 'snap_crab', col: 13.5, floor: 4, dir: 1, speed: 1.75 },
+      { type: 'vent_stalker', col: 18.5, floor: 10.2, dir: -1, speed: 1.9, axis: 'v', minFloor: 9.0, maxFloor: 11.6 },
+      { type: 'barnacle_mortar', col: 2.5, floor: 12, dir: 1, firePeriod: 3.4 },
+      { type: 'gulp_hopper', col: 16.5, floor: 15, dir: -1, speed: 1.8 },
+      { type: 'siphon_warden', col: 13.5, floor: 18.8, dir: 1, speed: 2.1, hp: 3 }
     ]
   });
 
-  return [r1, r2, r3, r4, r5, r6, r7, r8];
+  // --------------------------------------------------------------------------
+  // ACT III — EMERALD MIST BAYOUS ('mist_bayou', Spires 5 & 6)
+  // --------------------------------------------------------------------------
+
+  // SPIRE 5: FIREFLY CYPRESS RELIQUARY (22 floors — Dual Valve Sluices, Volt-Eels & Sea-Glass Prism Sanctum)
+  const s5Ledges = [];
+  span(s5Ledges, 0, 18, 4, 'solid');
+  stairFlight(s5Ledges, 0, 2, 4, 1, 4, 'solid');     // [6,7,8,9] at f=4 (Red Valve at col 8, f=4)
+  span(s5Ledges, 5, 10, 2, 'phaseBlock', { switchGroup: 'red', inverted: false });
+  span(s5Ledges, 5, 12, 4, 'solid');                 // [12,13,14,15] at f=5
+  stairFlight(s5Ledges, 5, 16, 4, 1, 4, 'solid');    // [0,1,2,3] at f=9 (Cyan Valve at col 2, f=9)
+  span(s5Ledges, 9, 15, 3, 'solid');                 // [15,16,17] at f=9 (Prism Sanctum at col 16, f=9!)
+  span(s5Ledges, 10, 4, 3, 'phaseBlock', { switchGroup: 'cyan', inverted: false });
+  span(s5Ledges, 10, 7, 3, 'solid');                 // [7,8,9] at f=10
+  // Lift at col 10 (f=10..15)
+  span(s5Ledges, 15, 11, 4, 'solid');                // [11,12,13,14] at f=15
+  // Vine Gecko Wall-Strip at col 15 (f=15..18)
+  span(s5Ledges, 18, 16, 3, 'solid');                // [16,17,18] at f=18
+  stairFlight(s5Ledges, 18, 19, 2, 1, 5, 'solid');   // Crown Cypress Terrace [1,2,3,4,5] at f=20!
+  span(s5Ledges, 21, 6, 2, 'solid');
+
+  const t5 = finalizeTower({
+    id: 5,
+    act: 3,
+    key: 'spire_5',
+    name: 'FIREFLY CYPRESS RELIQUARY',
+    subtitle: 'ACT III • EMERALD MIST BAYOUS',
+    theme: 'mist_bayou',
+    floors: 22,
+    timeLimit: 120,
+    parTime: 45,
+    spawn: { col: 0, floor: 0 },
+    ledges: s5Ledges,
+    elevators: [
+      { id: 's5_lift1', col: 10, minFloor: 10, maxFloor: 15, startFloor: 10, speed: 1.9 }
+    ],
+    wallStrips: [
+      { id: 's5_gecko1', col: 15, minFloor: 15, maxFloor: 18 }
+    ],
+    doors: [
+      { id: 's5_d1a', col: 0, floor: 9, targetId: 's5_d1b', tunnelStyle: 'stone' },
+      { id: 's5_d1b', col: 15, floor: 9, targetId: 's5_d1a', tunnelStyle: 'stone' },
+      { id: 's5_sanctum', col: 16, floor: 9, isRune: true, puzzleType: 'beam', puzzleSeed: 55055 },
+      { id: 's5_crown', col: 3, floor: 20, isExit: true }
+    ],
+    switches: [
+      { id: 's5_sw_red', col: 8, floor: 4, group: 'red', mode: 'toggle' },
+      { id: 's5_sw_cyan', col: 2, floor: 9, group: 'cyan', mode: 'toggle' }
+    ],
+    collectibles: [
+      { id: 's5_g1', col: 7, floor: 4, type: 'gear' },
+      { id: 's5_g2', col: 14, floor: 5, type: 'gear' },
+      { id: 's5_g3', col: 17, floor: 9, type: 'gear' },
+      { id: 's5_g4', col: 13, floor: 15, type: 'gear' },
+      { id: 's5_g5', col: 4, floor: 20, type: 'gear' },
+      { id: 's5_log', col: 12, floor: 15, type: 'relic', relicId: 'relic_t5' },
+      { id: 's5_seed', col: 6, floor: 21, type: 'starCore' }
+    ],
+    enemies: [
+      { type: 'volt_eel', col: 13.5, floor: 5.4, dir: -1, speed: 1.85, amp: 0.35 },
+      { type: 'barnacle_mortar', col: 8.5, floor: 10, dir: -1, firePeriod: 3.3 },
+      { type: 'snap_crab', col: 12.5, floor: 15, dir: 1, speed: 1.8 },
+      { type: 'gulp_hopper', col: 17.5, floor: 18, dir: 1, speed: 1.85 },
+      { type: 'rail_skater', col: 2.5, floor: 20, dir: -1, speed: 1.9, axis: 'h' }
+    ]
+  });
+
+  // SPIRE 6: SUNKEN LOTUS FLOODGATE (22 floors — Rising Bayou Brine, Drain Valves, Mortar Reflect & Act III Warden)
+  const s6Ledges = [];
+  span(s6Ledges, 0, 18, 4, 'solid');
+  stairFlight(s6Ledges, 0, 2, 4, 1, 4, 'solid');     // [6,7,8,9] at f=4 (Drain Valve 1 at col 8, f=4)
+  // Lift at col 10 (f=4..9)
+  span(s6Ledges, 9, 11, 4, 'solid');                 // [11,12,13,14] at f=9 (Core Vault at col 13, f=9)
+  stairFlight(s6Ledges, 9, 15, 3, 1, 4, 'solid');    // [18,19,0,1] at f=12 (Drain Valve 2 at col 0, f=12)
+  span(s6Ledges, 13, 2, 3, 'conveyorR');             // Lotus current channel [2,3,4] at f=13
+  stairFlight(s6Ledges, 13, 5, 3, 1, 4, 'solid');    // [8,9,10,11] at f=16 (Drain Valve 3 at col 10, f=16)
+  stairFlight(s6Ledges, 16, 12, 4, 1, 5, 'solid');   // Crown Lotus Terrace [16,17,18,19,0] at f=20!
+  span(s6Ledges, 21, 1, 2, 'solid');
+
+  const t6 = finalizeTower({
+    id: 6,
+    act: 3,
+    key: 'spire_6',
+    name: 'SUNKEN LOTUS FLOODGATE',
+    subtitle: 'ACT III BOSS • RISING DELTA SLUICE',
+    theme: 'mist_bayou',
+    floors: 22,
+    timeLimit: 115,
+    parTime: 44,
+    spawn: { col: 0, floor: 0 },
+    mechanics: { waterRiseRate: 0.15 },
+    ledges: s6Ledges,
+    elevators: [
+      { id: 's6_lift1', col: 10, minFloor: 4, maxFloor: 9, startFloor: 4, speed: 2.0 }
+    ],
+    doors: [
+      { id: 's6_vault', col: 13, floor: 9, isVault: true },
+      { id: 's6_c1a', col: 1, floor: 12, targetId: 's6_c1b', tunnelStyle: 'sparkArch' },
+      { id: 's6_c1b', col: 9, floor: 16, targetId: 's6_c1a', tunnelStyle: 'sparkArch' },
+      { id: 's6_crown', col: 18, floor: 20, isExit: true }
+    ],
+    switches: [
+      { id: 's6_drain1', col: 8, floor: 4, group: 'drain', mode: 'drainValve' },
+      { id: 's6_drain2', col: 0, floor: 12, group: 'drain', mode: 'drainValve' },
+      { id: 's6_drain3', col: 10, floor: 16, group: 'drain', mode: 'drainValve' }
+    ],
+    collectibles: [
+      { id: 's6_g1', col: 7, floor: 4, type: 'gear' },
+      { id: 's6_g2', col: 12, floor: 9, type: 'gear' },
+      { id: 's6_g3', col: 19, floor: 12, type: 'gear' },
+      { id: 's6_g4', col: 11, floor: 16, type: 'gear' },
+      { id: 's6_g5', col: 17, floor: 20, type: 'gear' },
+      { id: 's6_log', col: 14, floor: 9, type: 'relic', relicId: 'relic_t6' },
+      { id: 's6_seed', col: 1, floor: 21, type: 'starCore' }
+    ],
+    enemies: [
+      { type: 'snap_crab', col: 6.5, floor: 4, dir: 1, speed: 1.8 },
+      { type: 'barnacle_mortar', col: 14.5, floor: 9, dir: -1, firePeriod: 3.1 },
+      { type: 'volt_eel', col: 3.5, floor: 13.4, dir: 1, speed: 1.95, amp: 0.36 },
+      { type: 'gulp_hopper', col: 9.5, floor: 16, dir: -1, speed: 1.9 },
+      { type: 'siphon_warden', col: 8.5, floor: 19.8, dir: -1, speed: 2.15, hp: 3 }
+    ]
+  });
+
+  // --------------------------------------------------------------------------
+  // ACT IV — SUNLIT CORAL SEAS ('coral_sea', Spires 7 & 8)
+  // --------------------------------------------------------------------------
+
+  // SPIRE 7: MOTHER-OF-PEARL ATOLL SPIRE (23 floors — Lagoon Geysers, Grapple Arches & Sluice Basins Sanctum)
+  const s7Ledges = [];
+  span(s7Ledges, 0, 18, 4, 'solid');
+  stairFlight(s7Ledges, 0, 2, 3, 1, 4, 'solid');     // [5,6,7,8] at f=3
+  tile(s7Ledges, 8, 3, 'steamVent', { phasePeriod: 3.2, phaseOffset: 0.0 }); // Geyser launches to f=6!
+  stairFlight(s7Ledges, 3, 9, 3, 1, 4, 'solid');     // [12,13,14,15] at f=6
+  // Grapple Arch across cols 16..17 + stepping coral at col 16, f=6
+  span(s7Ledges, 6, 16, 2, 'crumble');
+  span(s7Ledges, 7, 18, 4, 'solid');                 // [18,19,0,1] at f=7
+  // Lift at col 2 (f=7..12)
+  span(s7Ledges, 12, 3, 5, 'solid');                 // [3,4,5,6,7] at f=12 (Sluice Basins Sanctum at col 5, f=12)
+  stairFlight(s7Ledges, 12, 8, 4, 1, 4, 'solid');    // [12,13,14,15] at f=16
+  // Sea-Glass Gecko Strip at col 16 (f=16..19)
+  span(s7Ledges, 19, 17, 3, 'solid');                // [17,18,19] at f=19
+  stairFlight(s7Ledges, 19, 0, 2, 1, 5, 'solid');    // Crown Atoll Terrace [2,3,4,5,6] at f=21!
+  span(s7Ledges, 22, 7, 2, 'solid');
+
+  const t7 = finalizeTower({
+    id: 7,
+    act: 4,
+    key: 'spire_7',
+    name: 'MOTHER-OF-PEARL ATOLL SPIRE',
+    subtitle: 'ACT IV • SUNLIT CORAL SEAS',
+    theme: 'coral_sea',
+    floors: 23,
+    timeLimit: 120,
+    parTime: 46,
+    spawn: { col: 0, floor: 0 },
+    ledges: s7Ledges,
+    elevators: [
+      { id: 's7_lift1', col: 2, minFloor: 7, maxFloor: 12, startFloor: 7, speed: 2.0 }
+    ],
+    wallStrips: [
+      { id: 's7_gecko1', col: 16, minFloor: 16, maxFloor: 19 }
+    ],
+    grappleRings: [
+      { id: 's7_ring1', col: 16.8, floor: 7.8 }
+    ],
+    doors: [
+      { id: 's7_sanctum', col: 5, floor: 12, isRune: true, puzzleType: 'blocks', puzzleSeed: 77077 },
+      { id: 's7_crown', col: 4, floor: 21, isExit: true }
+    ],
+    switches: [],
+    collectibles: [
+      { id: 's7_g1', col: 6, floor: 3, type: 'gear' },
+      { id: 's7_g2', col: 13, floor: 6, type: 'gear' },
+      { id: 's7_g3', col: 6, floor: 12, type: 'gear' },
+      { id: 's7_g4', col: 14, floor: 16, type: 'gear' },
+      { id: 's7_g5', col: 3, floor: 21, type: 'gear' },
+      { id: 's7_log', col: 4, floor: 12, type: 'relic', relicId: 'relic_t7' },
+      { id: 's7_seed', col: 7, floor: 22, type: 'starCore' }
+    ],
+    enemies: [
+      { type: 'snap_crab', col: 13.5, floor: 6, dir: -1, speed: 1.85 },
+      { type: 'rail_skater', col: 19.5, floor: 7, dir: 1, speed: 1.95, axis: 'h' },
+      { type: 'gulp_hopper', col: 13.5, floor: 16, dir: 1, speed: 1.9 },
+      { type: 'barnacle_mortar', col: 18.5, floor: 19, dir: -1, firePeriod: 3.1 },
+      { type: 'volt_eel', col: 10.5, floor: 20.5, dir: -1, speed: 2.0, amp: 0.38 }
+    ]
+  });
+
+  // SPIRE 8: PELAGIC REEF CONDUIT (24 floors — Coral Pistons, Pipe-Valve Routing, Vault & Act IV Warden)
+  const s8Ledges = [];
+  span(s8Ledges, 0, 18, 4, 'solid');
+  stairFlight(s8Ledges, 0, 2, 3, 1, 4, 'solid');     // [5,6,7,8] at f=3 (Pipe-Valve A at col 7, f=3)
+  span(s8Ledges, 4, 9, 2, 'piston', { phasePeriod: 3.2, phaseOffset: 0.0 });
+  span(s8Ledges, 5, 11, 4, 'solid');                 // [11,12,13,14] at f=5
+  // Pipe-powered Lift at col 15 (f=5..10)
+  span(s8Ledges, 10, 16, 4, 'solid');                // [16,17,18,19] at f=10 (Flume Flip Switch at col 18)
+  span(s8Ledges, 11, 0, 4, 'conveyorL');             // Reversible Coral Flume [0,1,2,3] at f=11
+  stairFlight(s8Ledges, 11, 4, 3, 1, 5, 'solid');    // [7,8,9,10,11] at f=14 (Core Vault at col 9, f=14)
+  span(s8Ledges, 15, 12, 2, 'piston', { phasePeriod: 3.0, phaseOffset: 0.8 });
+  stairFlight(s8Ledges, 15, 14, 3, 1, 4, 'solid');   // [17,18,19,0] at f=18
+  // Lift 2 at col 1 (f=18..22)
+  span(s8Ledges, 22, 2, 6, 'solid');                 // Crown Reef Terrace [2,3,4,5,6,7] at f=22!
+  span(s8Ledges, 23, 8, 2, 'solid');
+
+  const t8 = finalizeTower({
+    id: 8,
+    act: 4,
+    key: 'spire_8',
+    name: 'PELAGIC REEF CONDUIT',
+    subtitle: 'ACT IV BOSS • OFFSHORE CORAL SIPHON',
+    theme: 'coral_sea',
+    floors: 24,
+    timeLimit: 125,
+    parTime: 48,
+    spawn: { col: 0, floor: 0 },
+    ledges: s8Ledges,
+    elevators: [
+      { id: 's8_lift1', col: 15, minFloor: 5, maxFloor: 10, startFloor: 5, speed: 2.0, pipeGroup: 'pipeA', powered: false },
+      { id: 's8_lift2', col: 1, minFloor: 18, maxFloor: 22, startFloor: 18, speed: 2.05 }
+    ],
+    doors: [
+      { id: 's8_vault', col: 9, floor: 14, isVault: true },
+      { id: 's8_crown', col: 5, floor: 22, isExit: true }
+    ],
+    switches: [
+      { id: 's8_pipe1', col: 7, floor: 3, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve' },
+      { id: 's8_conv1', col: 18, floor: 10, group: 'conv', mode: 'conveyorFlip' }
+    ],
+    collectibles: [
+      { id: 's8_g1', col: 6, floor: 3, type: 'gear' },
+      { id: 's8_g2', col: 13, floor: 5, type: 'gear' },
+      { id: 's8_g3', col: 17, floor: 10, type: 'gear' },
+      { id: 's8_g4', col: 10, floor: 14, type: 'gear' },
+      { id: 's8_g5', col: 4, floor: 22, type: 'gear' },
+      { id: 's8_log', col: 8, floor: 14, type: 'relic', relicId: 'relic_t8' },
+      { id: 's8_seed', col: 8, floor: 23, type: 'starCore' }
+    ],
+    enemies: [
+      { type: 'rail_skater', col: 12.5, floor: 5, dir: 1, speed: 1.95, axis: 'h' },
+      { type: 'snap_crab', col: 17.5, floor: 10, dir: -1, speed: 1.9 },
+      { type: 'vent_stalker', col: 5.5, floor: 15.5, dir: 1, speed: 2.05, axis: 'v', minFloor: 14.2, maxFloor: 16.8 },
+      { type: 'barnacle_mortar', col: 19.5, floor: 18, dir: -1, firePeriod: 3.0 },
+      { type: 'siphon_warden', col: 14.5, floor: 21.8, dir: 1, speed: 2.2, hp: 3 }
+    ]
+  });
+
+  // --------------------------------------------------------------------------
+  // ACT V — POLAR & TEMPEST OCEANS ('storm_ocean', Spires 9 & 10)
+  // --------------------------------------------------------------------------
+
+  // SPIRE 9: AURORA ICEBERG BASTION (24 floors — Polar Aurora Tempest, Glacier Wall-Strips & Prism Sanctum)
+  const s9Ledges = [];
+  span(s9Ledges, 0, 18, 4, 'solid');
+  stairFlight(s9Ledges, 0, 2, 4, 1, 4, 'ice');       // [6,7,8,9] at f=4
+  tile(s9Ledges, 8, 4, 'solid');
+  // Glacier Gecko Strip at col 10 (f=4..8)
+  span(s9Ledges, 8, 11, 4, 'solid');                 // [11,12,13,14] at f=8
+  stairFlight(s9Ledges, 8, 15, 4, 1, 4, 'solid');    // [19,0,1,2] at f=12 (Cyan Switch at col 1, f=12)
+  span(s9Ledges, 13, 3, 3, 'phaseBlock', { switchGroup: 'cyan', inverted: false });
+  span(s9Ledges, 13, 6, 4, 'solid');                 // [6,7,8,9] at f=13 (Prism Sanctum at col 8, f=13)
+  // Lift at col 10 (f=13..18)
+  span(s9Ledges, 18, 11, 4, 'ice');                  // [11,12,13,14] at f=18
+  tile(s9Ledges, 12, 18, 'solid');
+  stairFlight(s9Ledges, 18, 15, 4, 1, 5, 'solid');   // Crown Aurora Terrace [19,0,1,2,3] at f=22!
+  span(s9Ledges, 23, 4, 2, 'solid');
+
+  const t9 = finalizeTower({
+    id: 9,
+    act: 5,
+    key: 'spire_9',
+    name: 'AURORA ICEBERG BASTION',
+    subtitle: 'ACT V • POLAR & TEMPEST OCEANS',
+    theme: 'storm_ocean',
+    floors: 24,
+    timeLimit: 125,
+    parTime: 48,
+    spawn: { col: 0, floor: 0 },
+    mechanics: { windForce: 0.38, windPeriod: 6.4, lightningInterval: 7.5 },
+    ledges: s9Ledges,
+    elevators: [
+      { id: 's9_lift1', col: 10, minFloor: 13, maxFloor: 18, startFloor: 13, speed: 2.1 }
+    ],
+    wallStrips: [
+      { id: 's9_gecko1', col: 10, minFloor: 4, maxFloor: 8 }
+    ],
+    grappleRings: [
+      { id: 's9_ring1', col: 4.5, floor: 14.2 }
+    ],
+    doors: [
+      { id: 's9_d1a', col: 13, floor: 8, targetId: 's9_d1b', tunnelStyle: 'sparkArch' },
+      { id: 's9_d1b', col: 0, floor: 12, targetId: 's9_d1a', tunnelStyle: 'sparkArch' },
+      { id: 's9_sanctum', col: 8, floor: 13, isRune: true, puzzleType: 'beam', puzzleSeed: 99099 },
+      { id: 's9_crown', col: 1, floor: 22, isExit: true }
+    ],
+    switches: [
+      { id: 's9_sw_cyan', col: 1, floor: 12, group: 'cyan', mode: 'toggle' }
+    ],
+    collectibles: [
+      { id: 's9_g1', col: 7, floor: 4, type: 'gear' },
+      { id: 's9_g2', col: 12, floor: 8, type: 'gear' },
+      { id: 's9_g3', col: 7, floor: 13, type: 'gear' },
+      { id: 's9_g4', col: 13, floor: 18, type: 'gear' },
+      { id: 's9_g5', col: 2, floor: 22, type: 'gear' },
+      { id: 's9_log', col: 9, floor: 13, type: 'relic', relicId: 'relic_t9' },
+      { id: 's9_seed', col: 4, floor: 23, type: 'starCore' }
+    ],
+    enemies: [
+      { type: 'snap_crab', col: 12.5, floor: 8, dir: 1, speed: 1.95 },
+      { type: 'volt_eel', col: 17.5, floor: 10.5, dir: -1, speed: 2.05, amp: 0.4 },
+      { type: 'vent_stalker', col: 6.5, floor: 14.5, dir: 1, speed: 2.1, axis: 'v', minFloor: 13.2, maxFloor: 15.8 },
+      { type: 'barnacle_mortar', col: 13.5, floor: 18, dir: -1, firePeriod: 2.9 },
+      { type: 'rail_skater', col: 18.0, floor: 21, dir: 1, speed: 2.05, axis: 'h' },
+      { type: 'gulp_hopper', col: 0.5, floor: 22, dir: -1, speed: 1.95 }
+    ]
+  });
+
+  // SPIRE 10: THE MOTHER SIPHON CITADEL (26 floors — Grand Watershed Finale, All Mechanics & Supreme Warden)
+  const s10Ledges = [];
+  span(s10Ledges, 0, 18, 4, 'solid');
+  stairFlight(s10Ledges, 0, 2, 4, 1, 4, 'solid');    // [6,7,8,9] at f=4 (Pipe-Valve A + Drain Valve 1)
+  // Pipe-powered Lift 1 at col 10 (f=4..9)
+  span(s10Ledges, 9, 11, 4, 'solid');                // [11,12,13,14] at f=9 (Red Switch at col 13)
+  span(s10Ledges, 10, 15, 2, 'phaseBlock', { switchGroup: 'red', inverted: false });
+  stairFlight(s10Ledges, 10, 17, 4, 1, 5, 'solid');  // [1,2,3,4,5] at f=14 (Core Vault at col 3, Drain Valve 2 at col 4)
+  // Gecko Crystal Strip at col 6 (f=14..18)
+  span(s10Ledges, 18, 7, 4, 'solid');                // [7,8,9,10] at f=18
+  tile(s10Ledges, 10, 18, 'steamVent', { phasePeriod: 3.1, phaseOffset: 0.4 });
+  stairFlight(s10Ledges, 18, 11, 2, 1, 4, 'solid');  // [13,14,15,16] at f=20 (Drain Valve 3 at col 15)
+  // Lift 2 at col 17 (f=20..24)
+  span(s10Ledges, 24, 18, 6, 'solid');               // Grand Nexus Crown [18,19,0,1,2,3] at f=24!
+  span(s10Ledges, 25, 4, 2, 'solid');
+
+  const t10 = finalizeTower({
+    id: 10,
+    act: 5,
+    key: 'spire_10',
+    name: 'THE MOTHER SIPHON CITADEL',
+    subtitle: 'GRAND FINALE • PLANETARY HYDRO-NEXUS',
+    theme: 'storm_ocean',
+    floors: 26,
+    timeLimit: 135,
+    parTime: 52,
+    spawn: { col: 0, floor: 0 },
+    mechanics: {
+      waterRiseRate: 0.13,
+      windForce: 0.40,
+      windPeriod: 6.2,
+      lightningInterval: 7.2
+    },
+    ledges: s10Ledges,
+    elevators: [
+      { id: 's10_lift1', col: 10, minFloor: 4, maxFloor: 9, startFloor: 4, speed: 2.15, pipeGroup: 'pipeA', powered: false },
+      { id: 's10_lift2', col: 17, minFloor: 20, maxFloor: 24, startFloor: 20, speed: 2.2 }
+    ],
+    wallStrips: [
+      { id: 's10_gecko1', col: 6, minFloor: 14, maxFloor: 18 }
+    ],
+    grappleRings: [
+      { id: 's10_ring1', col: 15.8, floor: 11.4 }
+    ],
+    doors: [
+      { id: 's10_c1a', col: 14, floor: 9, targetId: 's10_c1b', tunnelStyle: 'sparkArch' },
+      { id: 's10_c1b', col: 1, floor: 14, targetId: 's10_c1a', tunnelStyle: 'sparkArch' },
+      { id: 's10_vault', col: 3, floor: 14, isVault: true },
+      { id: 's10_crown', col: 1, floor: 24, isExit: true }
+    ],
+    switches: [
+      { id: 's10_pipe1', col: 7, floor: 4, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve' },
+      { id: 's10_drain1', col: 8, floor: 4, group: 'drain', mode: 'drainValve' },
+      { id: 's10_sw_red', col: 13, floor: 9, group: 'red', mode: 'toggle' },
+      { id: 's10_drain2', col: 4, floor: 14, group: 'drain', mode: 'drainValve' },
+      { id: 's10_drain3', col: 15, floor: 20, group: 'drain', mode: 'drainValve' }
+    ],
+    collectibles: [
+      { id: 's10_g1', col: 6, floor: 4, type: 'gear' },
+      { id: 's10_g2', col: 12, floor: 9, type: 'gear' },
+      { id: 's10_g3', col: 2, floor: 14, type: 'gear' },
+      { id: 's10_g4', col: 8, floor: 18, type: 'gear' },
+      { id: 's10_g5', col: 14, floor: 20, type: 'gear' },
+      { id: 's10_g6', col: 2, floor: 24, type: 'gear' },
+      { id: 's10_log', col: 0, floor: 24, type: 'relic', relicId: 'relic_t10' },
+      { id: 's10_seed', col: 4, floor: 25, type: 'starCore' }
+    ],
+    enemies: [
+      { type: 'snap_crab', col: 7.5, floor: 4, dir: 1, speed: 2.0 },
+      { type: 'gulp_hopper', col: 12.5, floor: 9, dir: -1, speed: 2.0 },
+      { type: 'volt_eel', col: 8.5, floor: 18.4, dir: 1, speed: 2.15, amp: 0.42 },
+      { type: 'barnacle_mortar', col: 15.5, floor: 20, dir: -1, firePeriod: 2.85 },
+      { type: 'vent_stalker', col: 12.5, floor: 21.2, dir: 1, speed: 2.2, axis: 'v', minFloor: 19.8, maxFloor: 22.6 },
+      { type: 'siphon_warden', col: 10.5, floor: 23.8, dir: -1, speed: 2.3, hp: 4, maxHp: 4 }
+    ]
+  });
+
+  return [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10];
 }
+
+export const createRebootTowers = createCampaignTowers;
 
 /**
- * Convenience dispatcher returning Original or Reboot campaign towers.
- * @param {string} [era='reboot']
+ * Dispatcher returning the 10 handcrafted Watershed Campaign Spires (or mode-specific list).
  */
-export function createTowers(era = 'reboot') {
-  return era === 'original' ? createOriginalTowers() : createRebootTowers();
+export function createTowers(mode = 'campaign') {
+  if (mode === 'sanctum_trials') {
+    return createSanctumTowers();
+  }
+  return createCampaignTowers();
 }
 
 // ============================================================================
-// BFS SOLVABILITY VERIFIERS (1987 Real-Grid Solver + Next-Gen State-Space Solver)
+// STATE-SPACE BFS SOLVABILITY VERIFIER (COLS = 20, STAIRS, VALVES, WALL-STRIPS, GRAPPLES)
 // ============================================================================
-
-const REAL_STEP_TYPES = new Set(['solid', 'crumble', 'slideR', 'slideL', 'ice', 'conveyorL', 'conveyorR']);
-
-function solveRealTowerBFS(tower) {
-  const H = Math.max(8, Math.round(Number(tower.floors) || 48));
-  const platGrid = Array.from({ length: H }, () => Array(COLS).fill(false));
-  const crumbleGrid = Array.from({ length: H }, () => Array(COLS).fill(false));
-  const pillarGrid = Array.from({ length: H }, () => Array(COLS).fill(false));
-  const liftBottomAt = new Map(); // `${c}:${r}` -> elevator
-  const doorMap = new Map(); // `${c}:${r}` -> door
-
-  for (const l of tower.ledges) {
-    const c = wrapCol(l.col);
-    const f = Math.round(l.floor);
-    if (REAL_STEP_TYPES.has(l.type)) {
-      if (f >= 0 && f < H) {
-        platGrid[f][c] = true;
-        if (l.type === 'crumble') crumbleGrid[f][c] = true;
-      }
-    } else if (l.type === 'pillar') {
-      const h = Math.max(1, Math.round(l.h || 1));
-      for (let k = 1; k <= h; k++) {
-        if (f + k >= 0 && f + k < H) pillarGrid[f + k][c] = true;
-      }
-    }
-  }
-
-  for (const el of tower.elevators || []) {
-    const c = wrapCol(el.col);
-    const minF = Math.round(el.minFloor);
-    liftBottomAt.set(`${c}:${minF}`, el);
-  }
-
-  for (const d of tower.doors || []) {
-    doorMap.set(`${wrapCol(d.col)}:${Math.round(d.floor)}`, d);
-  }
-
-  const hasPlat = (c, r) => r >= 0 && r < H && platGrid[r][wrapCol(c)];
-  const hasPillar = (c, r) => r >= 0 && r < H && pillarGrid[r][wrapCol(c)];
-  const hasLiftBot = (c, r) => liftBottomAt.has(`${wrapCol(c)}:${r}`);
-
-  const standable = (c, r) => {
-    if (r < 0 || r >= H) return false;
-    if (!hasPlat(c, r) && !hasLiftBot(c, r)) return false;
-    if (hasPillar(c, r + 1) || hasPillar(c, r + 2)) return false;
-    if (hasLiftBot(c, r + 1)) return false;
-    return true;
-  };
-
-  // Classic 1987 jump reach: 1.5-col ARC_JUMP clears 1-brick empty gaps (dx<=2) at dy=0,+1
-  // (+2 peak onto adjacent lip if clear), ARC_CLIMB steps +1 at dx=1, and gravity drops dy<0 up to dx<=3.
-  const realReach = (dx, dy) => {
-    if (dx < 1) return false;
-    if (dy >= 3) return false;
-    if (dy === 2) return dx <= 2;
-    if (dy >= 0) return dx <= 2;
-    return dx <= 3;
-  };
-
-  // Solid slab underside head-bump: a platform 3 rows up blocks jumping
-  const ceilingClear = (c0, dir, dx, r) => {
-    for (let k = 0; k <= dx; k++) {
-      if (hasPlat(c0 + dir * k, r + 3) || hasPillar(c0 + dir * k, r + 3)) return false;
-    }
-    return true;
-  };
-
-  const reached = new Map(); // `${c}:${r}` -> steps
-  const queue = [];
-  const enqueue = (c, r, steps) => {
-    const wc = wrapCol(c);
-    const k = `${wc}:${r}`;
-    if (!reached.has(k)) {
-      reached.set(k, steps);
-      queue.push({ c: wc, r, steps });
-    }
-  };
-
-  const sc = wrapCol(tower.spawn?.col ?? 0);
-  const sf = Math.round(tower.spawn?.floor ?? 0);
-  if (standable(sc, sf)) {
-    enqueue(sc, sf, 0);
-  }
-
-  let head = 0;
-  let exitSteps = -1;
-
-  const tryDoorAt = (c, r, steps) => {
-    const d = doorMap.get(`${wrapCol(c)}:${r}`);
-    if (!d) return;
-    if (d.isExit) {
-      if (exitSteps === -1 || steps < exitSteps) exitSteps = steps;
-      return;
-    }
-    if (d.targetId && !d.decoy) {
-      const farCol = wrapCol(c + 8);
-      let fr = r;
-      while (fr >= 0 && !standable(farCol, fr)) fr--;
-      if (fr >= 0) enqueue(farCol, fr, steps + 1);
-    }
-  };
-
-  while (head < queue.length) {
-    const { c, r, steps } = queue[head++];
-    tryDoorAt(c, r, steps);
-
-    // Contiguous walkable run on row r (pillars split runs; boxes are shootable)
-    let a = c;
-    while (standable(a - 1, r) && wrapCol(a - 1) !== c) a--;
-    let b = c;
-    while (standable(b + 1, r) && wrapCol(b + 1) !== wrapCol(a)) b++;
-    for (let k = a; k <= b; k++) {
-      enqueue(k, r, steps + (wrapCol(k) === c ? 0 : 1));
-    }
-
-    // Standing on a crumbling '.' cell dissolves it in-place (dx = 0 vertical drop!)
-    if (r > 0 && crumbleGrid[r][c]) {
-      let fr = r - 1;
-      while (fr >= 0 && !standable(c, fr)) fr--;
-      if (fr >= 0) enqueue(c, fr, steps + 1);
-    }
-
-    // Jumps, auto-steps, and drops from both ends of the run
-    for (const [end, dir] of [
-      [b, 1],
-      [a, -1]
-    ]) {
-      for (let dx = 1; dx <= 3; dx++) {
-        for (let dy = -H; dy <= 2; dy++) {
-          if (!realReach(dx, dy)) continue;
-          if (r + dy < 0 || r + dy >= H) continue;
-          if ((dy >= 0 || dx >= 2) && !(dx === 1 && dy === 1) && !ceilingClear(end, dir, dx, r)) continue;
-          if (dx === 1 && dy === 1 && (hasPlat(end, r + 3) && hasPillar(end, r + 2))) continue;
-          // Ensure vertical drop isn't passing through intermediate platforms at target column
-          const tc = end + dir * dx;
-          if (dy < 0) {
-            let blockedAbove = false;
-            for (let midR = r - 1; midR > r + dy; midR--) {
-              if (standable(tc, midR)) {
-                blockedAbove = true;
-                break;
-              }
-            }
-            if (blockedAbove) continue;
-          }
-          if (standable(tc, r + dy)) {
-            enqueue(tc, r + dy, steps + 1);
-          }
-        }
-      }
-    }
-
-    // Multi-stop lift traversal from '^' bottom platform
-    const lift = liftBottomAt.get(`${c}:${r}`);
-    if (lift) {
-      const stops = Array.isArray(lift.stops) ? lift.stops : [lift.minFloor, lift.maxFloor];
-      for (const s of stops) {
-        if (s === r) continue;
-        tryDoorAt(c, s, steps + 1);
-        for (const dir of [1, -1]) {
-          for (let dx = 1; dx <= 3; dx++) {
-            for (let dy = -H; dy <= 2; dy++) {
-              if (!realReach(dx, dy)) continue;
-              if (s + dy < 0 || s + dy >= H) continue;
-              if ((dy >= 0 || dx >= 2) && !(dx === 1 && dy === 1) && !ceilingClear(c, dir, dx, s)) continue;
-              const tc = c + dir * dx;
-              if (dy < 0) {
-                let blockedAbove = false;
-                for (let midR = s - 1; midR > s + dy; midR--) {
-                  if (standable(tc, midR)) {
-                    blockedAbove = true;
-                    break;
-                  }
-                }
-                if (blockedAbove) continue;
-              }
-              if (standable(tc, s + dy)) {
-                enqueue(tc, s + dy, steps + 2);
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return {
-    solvable: exitSteps !== -1,
-    minSteps: exitSteps,
-    reachableExit: exitSteps !== -1,
-    reached
-  };
-}
 
 const GROUP_BITS = {
   red: 1,
   cyan: 2,
-  conv: 4
+  conv: 4,
+  pipeA: 8,
+  pipeB: 16
 };
 
 function isSwitchGroupOn(mask, group) {
@@ -2633,7 +1858,9 @@ function isLaserBlockingAt(laserLedges, col, minF, maxF, mask) {
   for (const lg of laserLedges) {
     if (lg.col !== c) continue;
     const active = lg.switchGroup
-      ? (lg.inverted ? isSwitchGroupOn(mask, lg.switchGroup) : !isSwitchGroupOn(mask, lg.switchGroup))
+      ? lg.inverted
+        ? isSwitchGroupOn(mask, lg.switchGroup)
+        : !isSwitchGroupOn(mask, lg.switchGroup)
       : true;
     if (active && lg.floor >= minF - 0.5 && lg.floor <= maxF + 0.8) {
       return true;
@@ -2643,23 +1870,14 @@ function isLaserBlockingAt(laserLedges, col, minF, maxF, mask) {
 }
 
 /**
- * Runs BFS reachability verification across ledges, step-ups, jumps, elevators, doors, and switches.
- * Dispatches automatically to the 1987 real-grid solver when `tower.real === true`.
+ * Verifies 100% reachability across ledges, staircases, jumps, pipe-valve elevators,
+ * Gecko wall-scamper strips, grapple rings, interior portals, and switches.
  * @param {object} tower
  * @returns {{ solvable: boolean, minSteps: number, reachableExit: boolean }}
  */
 export function verifyTowerSolvable(tower) {
   if (!tower || !Array.isArray(tower.ledges) || !Array.isArray(tower.doors)) {
     return { solvable: false, minSteps: -1, reachableExit: false };
-  }
-
-  if (tower.real) {
-    const res = solveRealTowerBFS(tower);
-    return {
-      solvable: res.solvable,
-      minSteps: res.minSteps,
-      reachableExit: res.reachableExit
-    };
   }
 
   const exitDoors = tower.doors.filter((d) => d.isExit);
@@ -2689,7 +1907,8 @@ export function verifyTowerSolvable(tower) {
       floor: Math.round(l.floor),
       kind: 'ledge',
       ledge: l,
-      elevatorId: -1
+      elevatorId: -1,
+      pipeGroup: null
     });
   }
 
@@ -2704,13 +1923,33 @@ export function verifyTowerSolvable(tower) {
         floor: f,
         kind: 'elevator',
         ledge: null,
-        elevatorId: elIdx
+        elevatorId: elIdx,
+        pipeGroup: el.powered === false && el.pipeGroup ? el.pipeGroup : null
+      });
+    }
+  });
+
+  const wallStrips = Array.isArray(tower.wallStrips) ? tower.wallStrips : [];
+  wallStrips.forEach((ws, wsIdx) => {
+    const c = wrapCol(ws.col);
+    for (let f = Math.round(ws.minFloor); f <= Math.round(ws.maxFloor); f++) {
+      registerNode({
+        col: c,
+        floor: f,
+        kind: 'wallStrip',
+        ledge: null,
+        elevatorId: -100 - wsIdx,
+        pipeGroup: null
       });
     }
   });
 
   const isNodeActive = (node, mask) => {
-    if (node.kind === 'elevator') return true;
+    if (node.kind === 'elevator') {
+      if (node.pipeGroup) return isSwitchGroupOn(mask, node.pipeGroup);
+      return true;
+    }
+    if (node.kind === 'wallStrip') return true;
     return isLedgeSupportActive(node.ledge, mask);
   };
 
@@ -2734,6 +1973,7 @@ export function verifyTowerSolvable(tower) {
 
   const doorById = new Map(tower.doors.map((d) => [d.id, d]));
   const switches = Array.isArray(tower.switches) ? tower.switches : [];
+  const grappleRings = Array.isArray(tower.grappleRings) ? tower.grappleRings : [];
 
   const isGoalNode = (node) =>
     exitDoors.some((d) => wrapCol(d.col) === node.col && Math.abs(d.floor - node.floor) <= 0.5);
@@ -2764,12 +2004,13 @@ export function verifyTowerSolvable(tower) {
       }
     };
 
-    // 1. Toggle switches on same ledge or within unobstructed horizontal snowball range
+    // 1. Toggle switches or spin Pipe-Valves (on foot, Tail-Whip, or Hydro-Pulse within 6 cols)
     for (const sw of switches) {
-      const bit = GROUP_BITS[sw.group] || 0;
+      const grpKey = sw.pipeGroup || sw.group;
+      const bit = GROUP_BITS[grpKey] || 0;
       if (!bit) continue;
       const dc = colDist(cur.col, sw.col);
-      const sameFloor = Math.abs(sw.floor - cur.floor) <= 0.5;
+      const sameFloor = Math.abs(sw.floor - cur.floor) <= 0.6;
       if (!sameFloor || Math.abs(dc) > 6) continue;
 
       let blocked = false;
@@ -2786,14 +2027,15 @@ export function verifyTowerSolvable(tower) {
       }
     }
 
-    // 2. Interior through-tower portals
+    // 2. Interior through-spire portals
     if (cur.kind === 'ledge') {
       for (const d of tower.doors) {
         if (d.isExit || d.isVault || d.isRune || !d.targetId) continue;
         if (wrapCol(d.col) === cur.col && Math.abs(d.floor - cur.floor) <= 0.5) {
           const target = doorById.get(d.targetId);
           if (target) {
-            const destIndices = nodeIndicesByCoord.get(`${wrapCol(target.col)}:${Math.round(target.floor)}`) || [];
+            const destIndices =
+              nodeIndicesByCoord.get(`${wrapCol(target.col)}:${Math.round(target.floor)}`) || [];
             for (const destIdx of destIndices) {
               if (isNodeActive(supportNodes[destIdx], mask)) {
                 pushState(destIdx, mask, 1);
@@ -2804,7 +2046,41 @@ export function verifyTowerSolvable(tower) {
       }
     }
 
-    // 3. Conservative physical moves (indexed by column [-2..+2])
+    // 3. Steam/Hydro-Geyser vertical launch (+3 floors)
+    if (cur.kind === 'ledge' && cur.ledge?.type === 'steamVent') {
+      for (let dc = -2; dc <= 2; dc++) {
+        const tc = wrapCol(cur.col + dc);
+        for (const nextIdx of nodesByCol[tc]) {
+          const nxt = supportNodes[nextIdx];
+          if (!isNodeActive(nxt, mask)) continue;
+          const df = nxt.floor - cur.floor;
+          if (df >= 1 && df <= 3) {
+            pushState(nextIdx, mask, 1);
+          }
+        }
+      }
+    }
+
+    // 4. Tail-Grapple Swing Rings across chasms (3..4 col span)
+    for (const ring of grappleRings) {
+      const distToRing = colDist(cur.col, ring.col);
+      const dfRing = ring.floor - cur.floor;
+      if (Math.abs(distToRing) >= 1 && Math.abs(distToRing) <= 2.4 && dfRing >= -0.5 && dfRing <= 2.2) {
+        const swingDir = Math.sign(distToRing) || 1;
+        for (let spanStep = 1; spanStep <= 2; spanStep++) {
+          const landCol = wrapCol(Math.round(ring.col + swingDir * spanStep));
+          for (const nextIdx of nodesByCol[landCol]) {
+            const nxt = supportNodes[nextIdx];
+            if (!isNodeActive(nxt, mask)) continue;
+            if (nxt.floor >= cur.floor - 2 && nxt.floor <= cur.floor + 2) {
+              pushState(nextIdx, mask, 1);
+            }
+          }
+        }
+      }
+    }
+
+    // 5. Conservative physical moves (stairs, walks, jumps, elevators & Gecko wall-strips [-2..+2])
     for (let dc = -2; dc <= 2; dc++) {
       const targetCol = wrapCol(cur.col + dc);
       const absDc = Math.abs(dc);
@@ -2819,7 +2095,12 @@ export function verifyTowerSolvable(tower) {
         const df = nxt.floor - cur.floor;
         if (df > 1 || df < -6) continue;
 
-        if (absDc === 0 && cur.kind === 'elevator' && nxt.kind === 'elevator' && cur.elevatorId === nxt.elevatorId) {
+        if (
+          absDc === 0 &&
+          ((cur.kind === 'elevator' && nxt.kind === 'elevator') ||
+            (cur.kind === 'wallStrip' && nxt.kind === 'wallStrip')) &&
+          cur.elevatorId === nxt.elevatorId
+        ) {
           if (Math.abs(df) === 1) {
             pushState(nextIdx, mask, 1);
           }
@@ -2827,7 +2108,9 @@ export function verifyTowerSolvable(tower) {
         }
 
         if (absDc === 0) {
-          if (df < 0) {
+          if (df === 0 && cur.kind !== nxt.kind) {
+            pushState(nextIdx, mask, 0);
+          } else if (df < 0) {
             let intercepted = false;
             for (let f = cur.floor - 1; f > nxt.floor; f--) {
               if (hasCeilingAt(cur.col, f, mask) || isLaserBlockingAt(laserLedges, cur.col, f, f, mask)) {
@@ -2843,7 +2126,15 @@ export function verifyTowerSolvable(tower) {
         }
 
         if (absDc === 1) {
-          if (isLaserBlockingAt(laserLedges, nxt.col, Math.min(cur.floor, nxt.floor), Math.max(cur.floor, nxt.floor), mask)) {
+          if (
+            isLaserBlockingAt(
+              laserLedges,
+              nxt.col,
+              Math.min(cur.floor, nxt.floor),
+              Math.max(cur.floor, nxt.floor),
+              mask
+            )
+          ) {
             continue;
           }
           if (df === 1) {
@@ -2892,13 +2183,12 @@ export function verifyTowerSolvable(tower) {
 }
 
 // ============================================================================
-// 14-CHUNK PROCEDURAL COMPOSER + ENDLESS CASUAL EXPEDITIONS + SOLVABILITY PASS
+// PROCEDURAL COMPOSER FOR FLOOD RUSH, EXPEDITION, SANCTUM TRIALS & DAILY TIDE
 // ============================================================================
 
-const REBOOT_THEMES = ['mist', 'sinking', 'foundry', 'blizzard', 'prism', 'piston', 'blackout', 'apex'];
 const PROC_PUZZLE_TYPES = ['lights', 'bells', 'beam', 'blocks'];
-const CASUAL_MISSIONS = ['tower_repair', 'treasure_hunt', 'curio_survey', 'puzzle_architect'];
-const CASUAL_CURIO_IDS = [
+const SANCTUM_MISSIONS = ['puzzle_architect', 'tower_repair', 'treasure_hunt', 'curio_survey'];
+const CURIO_IDS = [
   'curio_astrolabe',
   'curio_nautilus',
   'curio_chronometer',
@@ -2909,85 +2199,26 @@ const CASUAL_CURIO_IDS = [
   'curio_thunder_glass'
 ];
 
-const PROCEDURAL_ADJECTIVES = [
-  'ABYSSAL',
-  'SHATTERED',
-  'IRONCLAD',
-  'HOWLING',
-  'LUMINOUS',
-  'SUNKEN',
-  'TEMPEST',
-  'OBSIDIAN',
-  'CYCLONE',
-  'ASTRAL',
-  'FROSTBOUND',
-  'CLOCKWORK',
-  'CELESTIAL',
-  'VERDIGRIS',
-  'SOLSTICE',
-  'DRIFTWOOD'
-];
+const BIOME_ADJECTIVES = {
+  canyon_river: ['REDWOOD', 'SUNLIT', 'CATARACT', 'COPPER', 'WHITEWATER'],
+  alpine_lake: ['ALPENGLOW', 'MIRROR', 'GLACIAL', 'SILVER', 'CRYSTAL'],
+  mist_bayou: ['FIREFLY', 'EMERALD', 'CYPRESS', 'LOTUS', 'TWILIGHT'],
+  coral_sea: ['TURQUOISE', 'PEARL', 'PELAGIC', 'ATOLL', 'LAGOON'],
+  storm_ocean: ['AURORA', 'TEMPEST', 'POLAR', 'MAELSTROM', 'LEVIATHAN']
+};
 
-const PROCEDURAL_NOUNS = [
-  'MONOLITH',
-  'WATCHTOWER',
+const SPIRE_NOUNS = [
+  'SLUICE',
+  'AQUEDUCT',
+  'SPILLWAY',
   'RELIQUARY',
-  'CITADEL',
-  'BASTION',
-  'SPIRE',
-  'DERRICK',
-  'SANCTUM',
-  'BEACON',
+  'FLOODGATE',
   'CONDUIT',
-  'LIGHTHOUSE',
-  'OBSERVATORY'
+  'SANCTUM',
+  'CITADEL',
+  'SPIRE',
+  'BASTION'
 ];
-
-function buildThemeMechanics(theme, difficulty, rng, casual = false) {
-  if (casual) {
-    // Peaceful exploration: zero lethal rising sea, gentle atmospheric breeze/storm only
-    switch (theme) {
-      case 'blizzard':
-        return { ...DEFAULT_MECHANICS, windForce: 0.30, windPeriod: 7.5 };
-      case 'blackout':
-        return { ...DEFAULT_MECHANICS, blackoutCycle: 12.0, lightningInterval: 9.5 };
-      default:
-        return { ...DEFAULT_MECHANICS };
-    }
-  }
-  const diffScale = Math.min(1.45, 0.75 + difficulty * 0.12);
-  switch (theme) {
-    case 'sinking':
-      return { ...DEFAULT_MECHANICS, waterRiseRate: Number((0.12 * diffScale).toFixed(3)) };
-    case 'blizzard':
-      return {
-        ...DEFAULT_MECHANICS,
-        windForce: Number(Math.min(0.50, 0.38 * diffScale).toFixed(2)),
-        windPeriod: 6.0
-      };
-    case 'piston':
-      return { ...DEFAULT_MECHANICS, windForce: 0.26, windPeriod: 7.0 };
-    case 'blackout':
-      return {
-        ...DEFAULT_MECHANICS,
-        windForce: 0.36,
-        windPeriod: 6.5,
-        blackoutCycle: Number((9.5 - Math.min(2.5, difficulty * 0.25)).toFixed(1)),
-        lightningInterval: Number((7.5 + rng() * 1.5).toFixed(1))
-      };
-    case 'apex':
-      return {
-        ...DEFAULT_MECHANICS,
-        waterRiseRate: Number((0.10 * diffScale).toFixed(3)),
-        windForce: Number(Math.min(0.48, 0.35 * diffScale).toFixed(2)),
-        windPeriod: 6.0,
-        blackoutCycle: 11.0,
-        lightningInterval: 8.0
-      };
-    default:
-      return { ...DEFAULT_MECHANICS };
-  }
-}
 
 function findReachableSolidCandidates(tower) {
   const occupied = new Set();
@@ -3028,15 +2259,20 @@ function findReachableSolidCandidates(tower) {
 }
 
 /**
- * 14-Template Modular Procedural Generator + Endless Casual Expedition Composer.
- * Supports heights `16..36` across the full `2^32` seed space, with 100% BFS-verified solvability.
+ * Generates a verified-solvable COLS=20 Spire tailored for:
+ * - 'flood_rush' (tall vertical escape with geysers, grapple rings, gecko strips & drain valves)
+ * - 'sanctum_trials' (`casual: true` / `modeHint: 'sanctum_trials'`, timer-free multi-valve & sanctum logic)
+ * - 'expedition' (rotating 5 biomes with dynamic enemy squads, pipe-valves & boss encounters)
+ * - 'daily_tide' (deterministic UTC daily challenge + daily tide modifier)
  */
 export function generateProceduralTower({
   seed = 1,
   index = 1,
   difficulty = 1,
-  era = 'reboot',
+  modeHint = 'expedition',
   casual = false,
+  themeOverride = null,
+  dailyModifier = null,
   keyOverride = null,
   nameOverride = null,
   subtitleOverride = null,
@@ -3044,110 +2280,133 @@ export function generateProceduralTower({
 } = {}) {
   const cleanSeed = (Number(seed) || 1) >>> 0;
   const rng = mulberry32(cleanSeed);
-  const isCasual = Boolean(casual);
-  const isOrig = !isCasual && era === 'original';
+  const isSanctum = Boolean(casual || modeHint === 'sanctum_trials');
+  const isFloodRush = modeHint === 'flood_rush';
+  const isExpedition = modeHint === 'expedition';
 
   const randInt = (min, max) => min + Math.floor(rng() * (max - min + 1));
   const pick = (arr) => arr[Math.floor(rng() * arr.length)];
 
   const depth = Math.max(1, Math.floor(Number(index) || 1));
   const diff = Math.max(1, Number(difficulty) || 1);
-  const dynamicHeight = 16 + Math.floor((depth - 1) * 1.6) + Math.floor(diff * 1.1) + randInt(0, 3);
+
+  const baseH = isFloodRush ? 22 : isSanctum ? 18 : 19;
+  const dynamicHeight = baseH + Math.floor((depth - 1) * 1.5) + Math.floor(diff * 0.9) + randInt(0, 2);
   const floors = floorsOverride
-    ? Math.max(14, Math.round(floorsOverride))
-    : Math.max(16, Math.min(36, dynamicHeight));
+    ? Math.max(16, Math.round(floorsOverride))
+    : Math.max(18, Math.min(34, dynamicHeight));
   const exitFloor = floors - 2;
 
-  const theme = isOrig
-    ? 'classic'
-    : REBOOT_THEMES[(depth - 1 + randInt(0, 7)) % REBOOT_THEMES.length];
+  const theme =
+    themeOverride && BIOME_PALETTES[themeOverride]
+      ? themeOverride
+      : BIOME_THEMES[(depth - 1 + cleanSeed) % BIOME_THEMES.length];
 
-  const palette = isOrig
-    ? ORIGINAL_PALETTES[(cleanSeed + depth) % ORIGINAL_PALETTES.length]
-    : REBOOT_PALETTES[theme] || REBOOT_PALETTES.mist;
+  const palette = BIOME_PALETTES[theme];
 
-  const mechanics = isOrig ? { ...DEFAULT_MECHANICS } : buildThemeMechanics(theme, diff, rng, isCasual);
+  const mechanics = { ...DEFAULT_MECHANICS };
+  if (isFloodRush) {
+    mechanics.waterRiseRate = Number(Math.min(0.42, 0.24 + (depth - 1) * 0.035).toFixed(3));
+  } else if (!isSanctum) {
+    if (theme === 'alpine_lake') {
+      mechanics.windForce = 0.30;
+      mechanics.windPeriod = 6.5;
+    } else if (theme === 'storm_ocean') {
+      mechanics.windForce = 0.34;
+      mechanics.windPeriod = 6.2;
+      mechanics.lightningInterval = 8.0;
+    } else if (theme === 'mist_bayou' && rng() < 0.5) {
+      mechanics.waterRiseRate = 0.12;
+    }
+  }
+  if (dailyModifier?.mechanicsPatch) {
+    Object.assign(mechanics, dailyModifier.mechanicsPatch);
+  }
 
-  const missionType = isCasual
-    ? CASUAL_MISSIONS[(depth - 1 + Math.floor(rng() * CASUAL_MISSIONS.length)) % CASUAL_MISSIONS.length]
+  const missionType = isSanctum
+    ? SANCTUM_MISSIONS[(depth - 1 + Math.floor(rng() * SANCTUM_MISSIONS.length)) % SANCTUM_MISSIONS.length]
     : null;
 
-  const adj = pick(PROCEDURAL_ADJECTIVES);
-  const noun = pick(PROCEDURAL_NOUNS);
-  const name = nameOverride || `${adj} ${noun}`;
+  const adjPool = BIOME_ADJECTIVES[theme] || BIOME_ADJECTIVES.canyon_river;
+  const name = nameOverride || `${pick(adjPool)} ${pick(SPIRE_NOUNS)}`;
   const subtitle =
     subtitleOverride ||
-    (isCasual
-      ? `CASUAL EXPEDITION ${depth} • ${missionType.replace('_', ' ').toUpperCase()}`
-      : `SECTOR ${depth} • SEED ${cleanSeed}`);
-  const key = keyOverride || `${isCasual ? 'casual' : 'endless'}_${depth}_${cleanSeed}`;
+    (isFloodRush
+      ? `FLASH-FLOOD SURGE ${depth} • OUTRUN THE TIDE`
+      : isSanctum
+      ? `SANCTUM TRIAL ${depth} • ${missionType.replace('_', ' ').toUpperCase()}`
+      : isExpedition
+      ? `WATERSHED EXPEDITION • SPIRE ${depth}`
+      : `WATERSHED SECTOR ${depth}`);
+  const key = keyOverride || `${modeHint}_${depth}_${cleanSeed}`;
 
-  const useRuneSecret =
-    !isOrig && (missionType === 'puzzle_architect' ? true : rng() < 0.5);
-  const procPuzzleType = pick(PROC_PUZZLE_TYPES);
+  const useRuneSecret = isSanctum ? true : rng() < 0.6;
+  const procPuzzleType = PROC_PUZZLE_TYPES[(depth - 1 + randInt(0, 3)) % PROC_PUZZLE_TYPES.length];
   const procPuzzleSeed = ((cleanSeed ^ 0x9e3779b9) + depth * 7919) >>> 0;
 
   const ledges = [];
   const elevators = [];
   const doors = [];
   const switches = [];
+  const wallStrips = [];
+  const grappleRings = [];
   const collectibles = [];
   const enemies = [];
 
-  span(ledges, 0, 14, 5, 'solid');
-  let curCol = 2;
+  span(ledges, 0, 18, 4, 'solid');
+  let curCol = 1;
   let curFloor = 0;
   let dir = rng() < 0.5 ? 1 : -1;
-  if (dir === -1) curCol = 14;
+  if (dir === -1) curCol = 18;
 
   let doorSeq = 1;
   let switchSeq = 1;
   let gearSeq = 1;
   let secretPlaced = false;
+  let usedPipeA = false;
   const switchStateTracker = { red: false, cyan: false };
 
+  const gearMult = dailyModifier?.mechanicsPatch?.doubleGears ? 2 : 1;
   const addGear = (col, floor) => {
-    collectibles.push({ id: `${key}_g${gearSeq++}`, col: wrapCol(col), floor, type: 'gear' });
+    for (let g = 0; g < gearMult; g++) {
+      collectibles.push({
+        id: `${key}_g${gearSeq++}`,
+        col: wrapCol(col + g),
+        floor,
+        type: 'gear'
+      });
+    }
   };
 
+  const ENEMY_ROTATION = ['snap_crab', 'gulp_hopper', 'volt_eel', 'rail_skater', 'barnacle_mortar', 'vent_stalker'];
   const addEnemy = (en) => {
-    if (!isCasual) enemies.push(en);
+    if (!isSanctum) enemies.push(en);
   };
 
   const pushSecretDoor = (col, floor) => {
-    if (isOrig) return;
     if (useRuneSecret) {
       doors.push({
-        id: `${key}_rune`,
+        id: `${key}_sanctum`,
         col: wrapCol(col),
         floor,
-        targetId: null,
-        isExit: false,
-        isVault: false,
         isRune: true,
         puzzleType: procPuzzleType,
-        puzzleSeed: procPuzzleSeed,
-        tunnelStyle: 'stone'
+        puzzleSeed: procPuzzleSeed
       });
     } else {
       doors.push({
         id: `${key}_vault`,
         col: wrapCol(col),
         floor,
-        targetId: null,
-        isExit: false,
-        isVault: true,
-        isRune: false,
-        tunnelStyle: 'stone'
+        isVault: true
       });
     }
   };
 
-  // Assemble climb from 14 distinct modular puzzle & architectural chunk templates!
-  while (curFloor < exitFloor - 1) {
+  while (curFloor < exitFloor - 2) {
     const remaining = exitFloor - curFloor;
 
-    if (!isOrig && mechanics.waterRiseRate > 0 && curFloor > 2 && curFloor % 5 <= 1) {
+    if (mechanics.waterRiseRate > 0 && curFloor > 2 && curFloor % 5 <= 1) {
       switches.push({
         id: `${key}_drain_${switchSeq++}`,
         col: wrapCol(curCol),
@@ -3157,226 +2416,176 @@ export function generateProceduralTower({
       });
     }
 
-    const chunkPool = [
-      'spiralCorbelRun',
-      'crumbleGapCrossing',
-      'conveyorMomentum',
-      'glacierSwitchbackAlcove'
-    ];
+    const chunkPool = ['realStairFlight', 'realStairFlight', 'grappleChasm', 'conveyorFlume'];
     if (remaining >= 4) {
-      chunkPool.push('cageLiftShaft', 'sparkTunnelShortcut', 'portalMazeSplit');
+      chunkPool.push('geckoWallClimb', 'mechLiftShaft', 'conduitArchWarp');
+      if (!usedPipeA) chunkPool.push('pipeValveLift');
     }
-    if (remaining >= 6) {
-      chunkPool.push('dualLiftRelay');
-    }
-    if (!isOrig && remaining >= 3) {
-      chunkPool.push(
-        'switchPhaseBridge',
-        'laserGateCorridor',
-        'reversibleConveyorPuzzle',
-        'pistonRhythmCascade',
-        'steamVentBoostTier'
-      );
-      if (remaining >= 4) chunkPool.push('multiSwitchCascade');
-      if (missionType === 'puzzle_architect') {
-        chunkPool.push(
-          'switchPhaseBridge',
-          'multiSwitchCascade',
-          'laserGateCorridor',
-          'reversibleConveyorPuzzle'
-        );
+    if (remaining >= 3) {
+      chunkPool.push('geyserUpdraftTier', 'switchPhaseSluice');
+      if (isSanctum) {
+        chunkPool.push('switchPhaseSluice', 'pipeValveLift', 'reversibleFlumePuzzle');
+      }
+      if (isFloodRush) {
+        chunkPool.push('geyserUpdraftTier', 'geckoWallClimb', 'grappleChasm');
       }
     }
 
     const chunk = pick(chunkPool);
 
-    // Template 1: dualLiftRelay (staggered 2-shaft elevator relay)
-    if (chunk === 'dualLiftRelay' && remaining >= 6) {
-      const shaft1 = wrapCol(curCol + dir);
-      const shaft2 = wrapCol(shaft1 + dir * 4);
-      const conflict1 = elevators.some((e) => e.col === shaft1 && curFloor <= e.maxFloor + 1);
-      const conflict2 = elevators.some((e) => e.col === shaft2 && curFloor + 3 <= e.maxFloor + 1);
-      if (!conflict1 && !conflict2 && shaft1 !== shaft2) {
+    // 1. Pipe-Valve Powered Mechanical Elevator
+    if (chunk === 'pipeValveLift' && !usedPipeA && remaining >= 4) {
+      const valveCol = wrapCol(curCol);
+      const shaftCol = wrapCol(valveCol + dir * 2);
+      const conflict = elevators.some((e) => e.col === shaftCol && curFloor <= e.maxFloor + 1);
+      if (!conflict) {
+        usedPipeA = true;
+        const baseStart = dir === 1 ? wrapCol(valveCol - 1) : wrapCol(valveCol - 1);
+        span(ledges, curFloor, baseStart, 3, 'solid');
+        switches.push({
+          id: `${key}_pipe_${switchSeq++}`,
+          col: valveCol,
+          floor: curFloor,
+          group: 'pipeA',
+          pipeGroup: 'pipeA',
+          mode: 'pipeValve'
+        });
+        const spanH = Math.min(4, remaining - 1);
         elevators.push({
-          col: shaft1,
+          id: `${key}_lift_pipe`,
+          col: shaftCol,
           minFloor: curFloor,
-          maxFloor: curFloor + 3,
+          maxFloor: curFloor + spanH,
           startFloor: curFloor,
-          speed: 1.65
+          speed: 1.95,
+          pipeGroup: 'pipeA',
+          powered: false
         });
-        const midStart = dir === 1 ? wrapCol(shaft1 + 1) : wrapCol(shaft1 - 3);
-        span(ledges, curFloor + 3, midStart, 3, 'solid');
-        elevators.push({
-          col: shaft2,
-          minFloor: curFloor + 3,
-          maxFloor: curFloor + 6,
-          startFloor: curFloor + 3,
-          speed: 1.75
-        });
-        const topStart = dir === 1 ? wrapCol(shaft2 + 1) : wrapCol(shaft2 - 3);
-        span(ledges, curFloor + 6, topStart, 3, 'solid');
-        addGear(wrapCol(shaft1 + dir * 2), curFloor + 3);
-        curFloor += 6;
+        const topStart = dir === 1 ? wrapCol(shaftCol + 1) : wrapCol(shaftCol - 3);
+        span(ledges, curFloor + spanH, topStart, 3, 'solid');
+        addGear(wrapCol(shaftCol + dir * 2), curFloor + spanH);
+        curFloor += spanH;
         curCol = dir === 1 ? wrapCol(topStart + 2) : topStart;
         continue;
       }
     }
 
-    // Template 2: cageLiftShaft (single 3..4 floor cage elevator)
-    if (chunk === 'cageLiftShaft' && remaining >= 4) {
+    // 2. Gecko Crystal/Moss Wall-Scamper Strip
+    if (chunk === 'geckoWallClimb' && remaining >= 4) {
+      const stripCol = wrapCol(curCol + dir);
+      const conflict =
+        elevators.some((e) => e.col === stripCol) || wallStrips.some((w) => w.col === stripCol);
+      if (!conflict) {
+        const climbH = Math.min(3, remaining - 1);
+        tile(ledges, curCol, curFloor, 'solid');
+        tile(ledges, stripCol, curFloor, 'solid');
+        wallStrips.push({
+          id: `${key}_gecko_${wallStrips.length + 1}`,
+          col: stripCol,
+          minFloor: curFloor,
+          maxFloor: curFloor + climbH
+        });
+        const topStart = dir === 1 ? wrapCol(stripCol + 1) : wrapCol(stripCol - 3);
+        span(ledges, curFloor + climbH, topStart, 3, 'solid');
+        addGear(stripCol, curFloor + Math.ceil(climbH / 2));
+        curFloor += climbH;
+        curCol = dir === 1 ? wrapCol(topStart + 2) : topStart;
+        continue;
+      }
+    }
+
+    // 3. Tail-Grapple Swing Ring Chasm (+ safe stepping backup)
+    if (chunk === 'grappleChasm' && remaining >= 2) {
+      const launchStart = dir === 1 ? wrapCol(curCol - 1) : wrapCol(curCol - 1);
+      span(ledges, curFloor, launchStart, 3, 'solid');
+      const ringCol = ((curCol + dir * 2 + COLS) % COLS) + 0.2 * dir;
+      grappleRings.push({
+        id: `${key}_ring_${grappleRings.length + 1}`,
+        col: ringCol,
+        floor: curFloor + 1.4
+      });
+      tile(ledges, wrapCol(curCol + dir * 2), curFloor, 'crumble');
+      const landCol = wrapCol(curCol + dir * 3);
+      const landStart = dir === 1 ? landCol : wrapCol(landCol - 2);
+      span(ledges, curFloor + 1, landStart, 3, 'solid');
+      addGear(wrapCol(curCol + dir * 2), curFloor + 2);
+      curFloor += 1;
+      curCol = dir === 1 ? wrapCol(landStart + 2) : landStart;
+      continue;
+    }
+
+    // 4. Hydro-Geyser Updraft Launch Tier
+    if (chunk === 'geyserUpdraftTier' && remaining >= 3) {
+      const ventCol = wrapCol(curCol + dir);
+      tile(ledges, curCol, curFloor, 'solid');
+      tile(ledges, ventCol, curFloor, 'steamVent', {
+        phasePeriod: 3.1,
+        phaseOffset: Number((rng() * 1.5).toFixed(2))
+      });
+      const upperStart = dir === 1 ? wrapCol(ventCol + 1) : wrapCol(ventCol - 3);
+      span(ledges, curFloor + 2, upperStart, 3, 'solid');
+      addGear(ventCol, curFloor + 2);
+      curFloor += 2;
+      curCol = dir === 1 ? wrapCol(upperStart + 2) : upperStart;
+      continue;
+    }
+
+    // 5. Standard Mechanical Elevator Shaft
+    if (chunk === 'mechLiftShaft' && remaining >= 4) {
       const liftSpan = Math.min(4, remaining - 1);
       const shaftCol = wrapCol(curCol + dir);
       const conflict = elevators.some((e) => e.col === shaftCol && curFloor <= e.maxFloor + 1);
       if (!conflict) {
         elevators.push({
+          id: `${key}_lift_${elevators.length + 1}`,
           col: shaftCol,
           minFloor: curFloor,
           maxFloor: curFloor + liftSpan,
           startFloor: curFloor,
-          speed: Number((1.5 + Math.min(0.8, diff * 0.1)).toFixed(2))
+          speed: Number((1.75 + Math.min(0.6, diff * 0.08)).toFixed(2))
         });
         const landStart = dir === 1 ? wrapCol(shaftCol + 1) : wrapCol(shaftCol - 3);
         span(ledges, curFloor + liftSpan, landStart, 3, 'solid');
         curFloor += liftSpan;
-        curCol = dir === 1 ? wrapCol(shaftCol + 3) : wrapCol(shaftCol - 3);
-
+        curCol = dir === 1 ? wrapCol(landStart + 2) : landStart;
         addEnemy({
-          type: 'eye',
-          col: wrapCol(shaftCol + 8) + 0.5,
-          floor: curFloor + 0.55,
+          type: ENEMY_ROTATION[(depth + curFloor) % ENEMY_ROTATION.length],
+          col: wrapCol(shaftCol + 10) + 0.5,
+          floor: curFloor,
           dir: -dir,
-          speed: Number((1.6 + Math.min(1.0, diff * 0.12)).toFixed(2))
+          speed: 1.75
         });
-        addGear(shaftCol + dir * 2, curFloor);
         continue;
       }
     }
 
-    // Template 3: sparkTunnelShortcut (side-arch or stone tunnel warp)
-    if (chunk === 'sparkTunnelShortcut' && remaining >= 4) {
+    // 6. Conduit Archway Shortcut
+    if (chunk === 'conduitArchWarp' && remaining >= 4) {
       const enterCol = wrapCol(curCol);
-      const exitCol = wrapCol(enterCol + 7 + randInt(0, 2));
+      const exitCol = wrapCol(enterCol + 9 + randInt(0, 2));
       const jumpFloors = Math.min(3, remaining - 1);
       const targetFloor = curFloor + jumpFloors;
       const dA = `${key}_d${doorSeq}a`;
       const dB = `${key}_d${doorSeq}b`;
       doorSeq++;
-      const tStyle = !isOrig && rng() < 0.6 ? 'sparkArch' : 'stone';
 
       span(ledges, curFloor, dir === 1 ? wrapCol(enterCol - 1) : enterCol, 2, 'solid');
       const platStart = dir === 1 ? wrapCol(exitCol - 1) : wrapCol(exitCol - 2);
       span(ledges, targetFloor, platStart, 4, 'solid');
 
       doors.push(
-        { id: dA, col: enterCol, floor: curFloor, targetId: dB, isExit: false, isVault: false, isRune: false, tunnelStyle: tStyle },
-        { id: dB, col: exitCol, floor: targetFloor, targetId: dA, isExit: false, isVault: false, isRune: false, tunnelStyle: tStyle }
+        { id: dA, col: enterCol, floor: curFloor, targetId: dB, tunnelStyle: 'sparkArch' },
+        { id: dB, col: exitCol, floor: targetFloor, targetId: dA, tunnelStyle: 'sparkArch' }
       );
 
-      if (rng() < 0.45) dir = -dir;
-      curFloor = targetFloor;
-      curCol = dir === 1 ? wrapCol(platStart + 3) : platStart;
-      addEnemy({
-        type: 'bouncer',
-        col: wrapCol(exitCol + 8) + 0.5,
-        floor: curFloor,
-        dir,
-        speed: Number((1.5 + Math.min(0.8, diff * 0.1)).toFixed(2))
-      });
-      continue;
-    }
-
-    // Template 4: portalMazeSplit (true portal + bonus gear spur)
-    if (chunk === 'portalMazeSplit' && remaining >= 4) {
-      const baseStart = dir === 1 ? curCol : wrapCol(curCol - 3);
-      span(ledges, curFloor, baseStart, 4, 'solid');
-      const trueEnter = wrapCol(baseStart + 1);
-      const spurCol = wrapCol(baseStart + 3);
-      addGear(spurCol, curFloor);
-
-      const exitCol = wrapCol(trueEnter + 8);
-      const targetFloor = curFloor + 3;
-      const dA = `${key}_d${doorSeq}a`;
-      const dB = `${key}_d${doorSeq}b`;
-      doorSeq++;
-
-      const platStart = dir === 1 ? wrapCol(exitCol - 1) : wrapCol(exitCol - 2);
-      span(ledges, targetFloor, platStart, 4, 'solid');
-      doors.push(
-        { id: dA, col: trueEnter, floor: curFloor, targetId: dB, isExit: false, isVault: false, isRune: false, tunnelStyle: 'stone' },
-        { id: dB, col: exitCol, floor: targetFloor, targetId: dA, isExit: false, isVault: false, isRune: false, tunnelStyle: 'stone' }
-      );
-      if (rng() < 0.45) dir = -dir;
+      if (rng() < 0.4) dir = -dir;
       curFloor = targetFloor;
       curCol = dir === 1 ? wrapCol(platStart + 3) : platStart;
       continue;
     }
 
-    // Template 5: multiSwitchCascade (red -> cyan 2-stage 2-tile phase bridge relay)
-    if (chunk === 'multiSwitchCascade' && !isOrig && remaining >= 4) {
-      const g1 = 'red';
-      const g2 = 'cyan';
-      const sw1Col = wrapCol(curCol);
-      span(ledges, curFloor, dir === 1 ? wrapCol(sw1Col - 1) : sw1Col, 2, 'solid');
-      switches.push({ id: `${key}_sw_${switchSeq++}`, col: sw1Col, floor: curFloor, group: g1, mode: 'toggle' });
-      switchStateTracker[g1] = !switchStateTracker[g1];
-
-      const br1Start = dir === 1 ? wrapCol(sw1Col + 1) : wrapCol(sw1Col - 2);
-      span(ledges, curFloor + 1, br1Start, 2, 'phaseBlock', {
-        switchGroup: g1,
-        inverted: !switchStateTracker[g1]
-      });
-      const br1End = dir === 1 ? wrapCol(br1Start + 1) : br1Start;
-
-      const midStart = dir === 1 ? wrapCol(br1End + 1) : wrapCol(br1End - 2);
-      span(ledges, curFloor + 2, midStart, 2, 'solid');
-      const sw2Col = dir === 1 ? wrapCol(midStart + 1) : midStart;
-      switches.push({ id: `${key}_sw_${switchSeq++}`, col: sw2Col, floor: curFloor + 2, group: g2, mode: 'toggle' });
-      switchStateTracker[g2] = !switchStateTracker[g2];
-
-      const br2Start = dir === 1 ? wrapCol(sw2Col + 1) : wrapCol(sw2Col - 2);
-      span(ledges, curFloor + 3, br2Start, 2, 'phaseBlock', {
-        switchGroup: g2,
-        inverted: !switchStateTracker[g2]
-      });
-      const br2End = dir === 1 ? wrapCol(br2Start + 1) : br2Start;
-
-      const destStart = dir === 1 ? wrapCol(br2End + 1) : wrapCol(br2End - 3);
-      span(ledges, curFloor + 4, destStart, 3, 'solid');
-      addGear(br2End, curFloor + 3);
-      curFloor += 4;
-      curCol = dir === 1 ? wrapCol(destStart + 2) : destStart;
-      continue;
-    }
-
-    // Template 6: laserGateCorridor (switch deactivating ceiling-capped laserGate)
-    if (chunk === 'laserGateCorridor' && !isOrig && remaining >= 3) {
-      const group = switchSeq % 2 === 1 ? 'red' : 'cyan';
-      const swCol = wrapCol(curCol);
-      span(ledges, curFloor, dir === 1 ? wrapCol(swCol - 1) : swCol, 2, 'solid');
-      switches.push({ id: `${key}_sw_${switchSeq++}`, col: swCol, floor: curFloor, group, mode: 'toggle' });
-      const nextState = !switchStateTracker[group];
-      switchStateTracker[group] = nextState;
-
-      const preCol = wrapCol(swCol + dir * 1);
-      const gateCol = wrapCol(swCol + dir * 2);
-      const corridorStart = dir === 1 ? preCol : wrapCol(swCol - 4);
-      span(ledges, curFloor + 1, corridorStart, 4, 'solid');
-      // In game.js: l.active = l.inverted ? swOn : !swOn -> we want active=false (open) when swOn === nextState!
-      tile(ledges, gateCol, curFloor + 1, 'laserGate', {
-        switchGroup: group,
-        inverted: !nextState
-      });
-      span(ledges, curFloor + 3, dir === 1 ? preCol : gateCol, 2, 'solid'); // 2-tile lintel cap above laserGate
-      const postEnd = dir === 1 ? wrapCol(corridorStart + 3) : corridorStart;
-      const upStart = dir === 1 ? wrapCol(postEnd + 1) : wrapCol(postEnd - 3);
-      span(ledges, curFloor + 2, upStart, 3, 'solid');
-      curFloor += 2;
-      curCol = dir === 1 ? wrapCol(upStart + 2) : upStart;
-      continue;
-    }
-
-    // Template 7: switchPhaseBridge (single resonator switch + 2-tile phaseBlock bridge)
-    if (chunk === 'switchPhaseBridge' && !isOrig && remaining >= 3) {
+    // 7. Switch + Phase Sluice Bridge
+    if (chunk === 'switchPhaseSluice' && remaining >= 3) {
       const group = switchSeq % 2 === 1 ? 'red' : 'cyan';
       const swCol = wrapCol(curCol);
       span(ledges, curFloor, dir === 1 ? wrapCol(swCol - 1) : swCol, 2, 'solid');
@@ -3390,8 +2599,7 @@ export function generateProceduralTower({
       const nextGroupState = !switchStateTracker[group];
       switchStateTracker[group] = nextGroupState;
 
-      const brGap = mechanics.windForce > 0.35 ? 1 : 2;
-      const brStart = dir === 1 ? wrapCol(swCol + brGap) : wrapCol(swCol - brGap - 1);
+      const brStart = dir === 1 ? wrapCol(swCol + 1) : wrapCol(swCol - 2);
       span(ledges, curFloor + 1, brStart, 2, 'phaseBlock', {
         switchGroup: group,
         inverted: !nextGroupState
@@ -3399,27 +2607,35 @@ export function generateProceduralTower({
       const brEnd = dir === 1 ? wrapCol(brStart + 1) : brStart;
       const destStart = dir === 1 ? wrapCol(brEnd + 1) : wrapCol(brEnd - 3);
       span(ledges, curFloor + 2, destStart, 3, 'solid');
-
       curFloor += 2;
       curCol = dir === 1 ? wrapCol(destStart + 2) : destStart;
       addGear(brEnd, curFloor - 1);
       continue;
     }
 
-    // Template 8: reversibleConveyorPuzzle (conveyorFlip switch + opposing belts)
-    if (chunk === 'reversibleConveyorPuzzle' && !isOrig && remaining >= 3) {
+    // 8. Reversible Hydro-Flume Puzzle
+    if ((chunk === 'reversibleFlumePuzzle' || chunk === 'conveyorFlume') && remaining >= 2) {
       const swCol = wrapCol(curCol);
       span(ledges, curFloor, dir === 1 ? wrapCol(swCol - 1) : swCol, 2, 'solid');
-      switches.push({
-        id: `${key}_conv_${switchSeq++}`,
-        col: swCol,
-        floor: curFloor,
-        group: 'conv',
-        mode: 'conveyorFlip'
-      });
-      const oppType = dir === 1 ? 'conveyorL' : 'conveyorR';
+      if (chunk === 'reversibleFlumePuzzle') {
+        switches.push({
+          id: `${key}_conv_${switchSeq++}`,
+          col: swCol,
+          floor: curFloor,
+          group: 'conv',
+          mode: 'conveyorFlip'
+        });
+      }
+      const flumeType =
+        chunk === 'reversibleFlumePuzzle'
+          ? dir === 1
+            ? 'conveyorL'
+            : 'conveyorR'
+          : dir === 1
+          ? 'conveyorR'
+          : 'conveyorL';
       const cStart = dir === 1 ? wrapCol(curCol + 1) : wrapCol(curCol - 3);
-      span(ledges, curFloor + 1, cStart, 3, oppType);
+      span(ledges, curFloor + 1, cStart, 3, flumeType);
       const endCol = dir === 1 ? wrapCol(cStart + 2) : cStart;
       const nextStart = dir === 1 ? wrapCol(endCol + 1) : wrapCol(endCol - 3);
       span(ledges, curFloor + 2, nextStart, 3, 'solid');
@@ -3428,128 +2644,32 @@ export function generateProceduralTower({
       continue;
     }
 
-    // Template 9: pistonRhythmCascade (staggered 2-tile hydraulic piston pads)
-    if (chunk === 'pistonRhythmCascade' && !isOrig && remaining >= 3) {
-      const pGap = mechanics.windForce > 0.35 ? 1 : 2;
-      const p1Start = dir === 1 ? wrapCol(curCol + pGap) : wrapCol(curCol - pGap - 1);
-      span(ledges, curFloor + 1, p1Start, 2, 'piston', { phasePeriod: 3.1, phaseOffset: 0.0 });
-      const p1End = dir === 1 ? wrapCol(p1Start + 1) : p1Start;
+    // Default: Smooth Multi-Tread Real Staircase Flight!
+    const flightSteps = Math.min(3, remaining);
+    const stepMat = theme === 'alpine_lake' && rng() < 0.35 ? 'ice' : 'solid';
+    const res = stairFlight(ledges, curFloor, wrapCol(curCol + dir), flightSteps, dir, 3, stepMat);
+    curFloor = res.topFloor;
+    curCol = res.endCol;
+    addGear(res.midCol, curFloor);
 
-      const p2Start = dir === 1 ? wrapCol(p1End + pGap) : wrapCol(p1End - pGap - 1);
-      span(ledges, curFloor + 2, p2Start, 2, 'piston', { phasePeriod: 3.1, phaseOffset: 0.9 });
-      const p2End = dir === 1 ? wrapCol(p2Start + 1) : p2Start;
-
-      const aStart = dir === 1 ? wrapCol(p2End + 1) : wrapCol(p2End - 3);
-      span(ledges, curFloor + 3, aStart, 3, 'solid');
-      addGear(p2End, curFloor + 2);
-      curFloor += 3;
-      curCol = dir === 1 ? wrapCol(aStart + 2) : aStart;
-      continue;
-    }
-
-    // Template 10: steamVentBoostTier (2-tile steam grate pad + 2-tile upper bonus perch)
-    if (chunk === 'steamVentBoostTier' && !isOrig && remaining >= 3) {
-      const padStart = dir === 1 ? wrapCol(curCol + 1) : wrapCol(curCol - 2);
-      const solidCol = dir === 1 ? padStart : wrapCol(padStart + 1);
-      const vCol = dir === 1 ? wrapCol(padStart + 1) : padStart;
-      tile(ledges, solidCol, curFloor + 1, 'solid');
-      tile(ledges, vCol, curFloor + 1, 'steamVent', { phasePeriod: 3.3, phaseOffset: Number((rng() * 1.4).toFixed(2)) });
-      span(ledges, curFloor + 3, dir === 1 ? wrapCol(vCol - 1) : vCol, 2, 'solid'); // 2-tile steam-launch bonus perch!
-      addGear(vCol, curFloor + 3);
-      const vGap = mechanics.windForce > 0.35 ? 1 : 2;
-      const aStart = dir === 1 ? wrapCol(vCol + vGap) : wrapCol(vCol - vGap - 2);
-      span(ledges, curFloor + 2, aStart, 3, 'solid');
-      curFloor += 2;
-      curCol = dir === 1 ? wrapCol(aStart + 2) : aStart;
-      continue;
-    }
-
-    // Template 11: crumbleGapCrossing (2-tile crumble bridge + 3-tile solid anchor)
-    if (chunk === 'crumbleGapCrossing' && remaining >= 2) {
-      const cGap = isOrig || mechanics.windForce > 0.35 ? 1 : 2;
-      const cStart = dir === 1 ? wrapCol(curCol + cGap) : wrapCol(curCol - cGap - 1);
-      span(ledges, curFloor + 1, cStart, 2, 'crumble');
-      const cEnd = dir === 1 ? wrapCol(cStart + 1) : cStart;
-      const nextAnchor = dir === 1 ? wrapCol(cEnd + 1) : wrapCol(cEnd - 3);
-      span(ledges, curFloor + 2, nextAnchor, 3, 'solid');
-
+    if (curFloor > 2 && rng() < 0.7) {
       addEnemy({
-        type: 'molecule',
-        col: wrapCol(cEnd + dir * 6) + 0.5,
-        floor: curFloor + 1.55,
-        dir: -dir,
-        speed: Number((1.8 + Math.min(0.9, diff * 0.1)).toFixed(2)),
-        amp: 0.4
+        type: ENEMY_ROTATION[(depth + curFloor) % ENEMY_ROTATION.length],
+        col: wrapCol(res.midCol + 9) + 0.5,
+        floor: curFloor,
+        dir,
+        speed: Number((1.65 + Math.min(0.7, diff * 0.08)).toFixed(2))
       });
-
-      curFloor += 2;
-      curCol = dir === 1 ? wrapCol(nextAnchor + 2) : nextAnchor;
-      addGear(cEnd, curFloor - 1);
-      continue;
-    }
-
-    // Template 12: conveyorMomentum (directional belt run)
-    if (chunk === 'conveyorMomentum' && remaining >= 2) {
-      const convType = dir === 1 ? 'conveyorR' : 'conveyorL';
-      const cStart = dir === 1 ? wrapCol(curCol + 1) : wrapCol(curCol - 3);
-      span(ledges, curFloor + 1, cStart, 3, convType);
-      const endCol = dir === 1 ? wrapCol(cStart + 2) : cStart;
-      const aGap = isOrig || mechanics.windForce > 0.35 ? 1 : 2;
-      const anchorStart = dir === 1 ? wrapCol(endCol + aGap) : wrapCol(endCol - aGap - 2);
-      span(ledges, curFloor + 2, anchorStart, 3, 'solid');
-
-      curFloor += 2;
-      curCol = dir === 1 ? wrapCol(anchorStart + 2) : anchorStart;
-      continue;
-    }
-
-    // Template 13: glacierSwitchbackAlcove (ice shelf + solid windbreak spur)
-    if (chunk === 'glacierSwitchbackAlcove' && remaining >= 2) {
-      const gapStep = isOrig || mechanics.windForce > 0.35 ? 1 : 2;
-      const iStart = dir === 1 ? wrapCol(curCol + gapStep) : wrapCol(curCol - gapStep - 2);
-      span(ledges, curFloor + 1, iStart, 3, 'ice');
-      const iEnd = dir === 1 ? wrapCol(iStart + 2) : iStart;
-      const aStart = dir === 1 ? wrapCol(iEnd + gapStep) : wrapCol(iEnd - gapStep - 2);
-      span(ledges, curFloor + 2, aStart, 3, 'solid');
-      curFloor += 2;
-      curCol = dir === 1 ? wrapCol(aStart + 2) : aStart;
-      continue;
-    }
-
-    // Template 14: spiralCorbelRun (+2..3 stepped stone floors + optional Secret Alcove)
-    const steps = Math.min(3, remaining);
-    for (let s = 0; s < steps; s++) {
-      curFloor += 1;
-      const stepDelta = isOrig || mechanics.windForce > 0.35 || s % 2 === 0 ? 1 : 2;
-      curCol = wrapCol(curCol + dir * stepDelta);
-      const runStart = dir === 1 ? curCol : wrapCol(curCol - 2);
-      span(ledges, curFloor, runStart, 3, 'solid');
-      if (s === 1 && curFloor > 2) {
-        const isRob = rng() < 0.35;
-        addEnemy({
-          type: isRob ? 'robotH' : 'roller',
-          col: (isRob ? wrapCol(runStart + 1) : wrapCol(runStart + 8)) + 0.5,
-          floor: curFloor,
-          dir,
-          speed: Number((1.6 + Math.min(0.9, diff * 0.1)).toFixed(2)),
-          ...(isRob ? { minCol: runStart, maxCol: wrapCol(runStart + 2) } : {})
-        });
-      }
-      curCol = dir === 1 ? wrapCol(runStart + 2) : runStart;
     }
 
     if (!secretPlaced && curFloor >= Math.floor(exitFloor * 0.45) && curFloor <= exitFloor - 3) {
-      // Extend Secret Alcove forward (+dir) over open air so it never caps curFloor - 1!
-      const frontCol = curCol;
-      const bridgeCol = wrapCol(frontCol + dir);
-      const sideCol = wrapCol(frontCol + dir * 2);
-      const starCol = wrapCol(frontCol + dir * 3);
-      const bStart = dir === 1 ? sideCol : starCol;
-      tile(ledges, bridgeCol, curFloor, isCasual || isOrig ? 'solid' : 'crumble');
-      span(ledges, curFloor, bStart, 2, 'solid');
+      const sideCol = wrapCol(curCol + dir * 2);
+      const starCol = wrapCol(curCol + dir * 3);
+      tile(ledges, wrapCol(curCol + dir), curFloor, 'solid');
+      span(ledges, curFloor, dir === 1 ? sideCol : starCol, 2, 'solid');
       pushSecretDoor(sideCol, curFloor);
       collectibles.push({
-        id: `${key}_star`,
+        id: `${key}_seed`,
         col: starCol,
         floor: curFloor,
         type: 'starCore'
@@ -3560,71 +2680,53 @@ export function generateProceduralTower({
   }
 
   while (curFloor < exitFloor) {
-    curFloor += 1;
-    const stepDelta = isOrig || mechanics.windForce > 0.35 || curFloor % 2 === 0 ? 1 : 2;
-    curCol = wrapCol(curCol + dir * stepDelta);
-    const sStart = dir === 1 ? curCol : wrapCol(curCol - 2);
-    span(ledges, curFloor, sStart, 3, 'solid');
-    curCol = dir === 1 ? wrapCol(sStart + 2) : sStart;
+    const res = stairFlight(ledges, curFloor, wrapCol(curCol + dir), 1, dir, 3, 'solid');
+    curFloor = res.topFloor;
+    curCol = res.endCol;
   }
 
-  // Extend summit terrace forward (+dir) from the approach landing [curCol-2..curCol] / [curCol..curCol+2]
-  // so exitFloor never caps exitFloor - 1!
   const summitStart = wrapCol(curCol - 2);
   span(ledges, exitFloor, summitStart, 5, 'solid');
   const exitCol = wrapCol(summitStart + 2);
   doors.push({
-    id: `${key}_exit`,
+    id: `${key}_crown`,
     col: exitCol,
     floor: exitFloor,
-    targetId: null,
-    isExit: true,
-    isVault: false,
-    isRune: false,
-    tunnelStyle: 'stone'
+    isExit: true
   });
-  addGear(dir === 1 ? wrapCol(summitStart + 4) : summitStart, exitFloor);
-
-  const bonusStart = dir === 1 ? wrapCol(curCol + 3) : wrapCol(curCol - 4);
-  const bonusDoorCol = dir === 1 ? wrapCol(curCol + 3) : wrapCol(curCol - 3);
-  const bonusStarCol = dir === 1 ? wrapCol(curCol + 4) : wrapCol(curCol - 4);
+  addGear(wrapCol(summitStart + 4), exitFloor);
 
   if (!secretPlaced) {
+    const bonusStart = dir === 1 ? wrapCol(curCol + 3) : wrapCol(curCol - 4);
+    const bonusDoorCol = dir === 1 ? wrapCol(curCol + 3) : wrapCol(curCol - 3);
+    const bonusStarCol = dir === 1 ? wrapCol(curCol + 4) : wrapCol(curCol - 4);
+    tile(ledges, wrapCol(curCol + dir * 2), exitFloor, 'solid');
     span(ledges, exitFloor, bonusStart, 2, 'solid');
     pushSecretDoor(bonusDoorCol, exitFloor);
-    collectibles.push({ id: `${key}_star`, col: bonusStarCol, floor: exitFloor, type: 'starCore' });
-  } else {
-    // Ensure mid-tower Rune Door has an unobstructed exterior wall plaque bay (df + 1..2 within +-1 col)
-    const runeEntry = doors.find((d) => d.isRune);
-    if (runeEntry && runeEntry.floor < exitFloor) {
-      const bayBlocked = (testCol) => {
-        const tc = wrapCol(testCol);
-        return (
-          elevators.some((el) => wrapCol(el.col) === tc && el.minFloor <= runeEntry.floor + 2.5 && el.maxFloor >= runeEntry.floor + 1) ||
-          ledges.some((l) => wrapCol(l.col) === tc && l.floor >= runeEntry.floor + 1 && l.floor <= runeEntry.floor + 2)
-        );
-      };
-      if (bayBlocked(runeEntry.col) && bayBlocked(runeEntry.col + 1) && bayBlocked(runeEntry.col - 1)) {
-        span(ledges, exitFloor, bonusStart, 2, 'solid');
-        runeEntry.col = bonusDoorCol;
-        runeEntry.floor = exitFloor;
-        const starItem = collectibles.find((c) => c.id === `${key}_star`);
-        if (starItem) {
-          starItem.col = bonusStarCol;
-          starItem.floor = exitFloor;
-        }
-      }
-    }
+    collectibles.push({ id: `${key}_seed`, col: bonusStarCol, floor: exitFloor, type: 'starCore' });
   }
 
-  const timeLimit = Math.min(180, 85 + Math.round((floors - 16) * 4.5));
-  const parTime = Math.max(28, Math.round(timeLimit * 0.36));
+  // Expedition boss encounter every 3rd spire!
+  if (isExpedition && depth % 3 === 0) {
+    addEnemy({
+      type: 'siphon_warden',
+      col: wrapCol(exitCol + 10) + 0.5,
+      floor: exitFloor - 0.2,
+      dir: -1,
+      speed: 2.1,
+      hp: 3
+    });
+  }
+
+  const timeLimit = Math.min(185, 95 + Math.round((floors - 16) * 4.5));
+  const parTime = Math.max(30, Math.round(timeLimit * 0.38));
 
   let tower = finalizeTower({
     id: depth,
+    act: Math.min(5, ((depth - 1) % 5) + 1),
     key,
-    era,
-    casual: isCasual,
+    casual: isSanctum,
+    dailyModifier,
     name,
     subtitle,
     theme,
@@ -3638,25 +2740,27 @@ export function generateProceduralTower({
     elevators,
     doors,
     switches,
+    wallStrips,
+    grappleRings,
     collectibles,
     enemies
   });
 
-  // Guaranteed Solvability Verification + Deterministic Bridge Repair Pass
   const check = verifyTowerSolvable(tower);
   const secretDoor = tower.doors.find((d) => d.isRune || d.isVault);
-  const secretReachable = !secretDoor || verifyTowerSolvable({
-    ...tower,
-    doors: tower.doors.map((d) => ({ ...d, isExit: d.id === secretDoor.id }))
-  }).solvable;
+  const secretReachable =
+    !secretDoor ||
+    verifyTowerSolvable({
+      ...tower,
+      doors: tower.doors.map((d) => ({ ...d, isExit: d.id === secretDoor.id }))
+    }).solvable;
+
   if (!check.solvable || !secretReachable) {
     tower = repairProceduralTower(tower, exitCol, exitFloor);
   }
 
-  // Populate Endless Casual Expedition Objectives onto BFS-Verified Reachable Solid Ledges!
-  if (isCasual && missionType) {
+  if (isSanctum && missionType) {
     const reachSpots = findReachableSolidCandidates(tower);
-    // Guarantee enough spread-out solid stations even on compact layouts
     const pickAtFrac = (frac, usedIdx) => {
       if (!reachSpots.length) return { col: wrapCol(exitCol - 1), floor: exitFloor };
       let idx = Math.min(reachSpots.length - 1, Math.floor(reachSpots.length * frac));
@@ -3668,7 +2772,7 @@ export function generateProceduralTower({
 
     const used = new Set();
     if (missionType === 'tower_repair') {
-      const partNames = ['Copper Coil', 'Prism Lens', 'Brass Shaft'];
+      const partNames = ['Copper Impeller', 'Sea-Glass Lens', 'Redwood Shaft'];
       for (let i = 0; i < 3; i++) {
         const spot = pickAtFrac(0.16 + i * 0.22, used);
         tower.collectibles.push({
@@ -3685,17 +2789,17 @@ export function generateProceduralTower({
         col: wbSpot.col,
         floor: wbSpot.floor,
         crafted: false,
-        label: 'Tinker Workbench'
+        label: 'Hydro-Workbench'
       };
       tower.casualMission = {
         type: 'tower_repair',
-        title: 'FIX THE MONOLITH',
-        subtitle: 'Scavenge 3 Salvage Parts • Craft Beacon Dynamo at Workbench • Activate Crown',
+        title: 'RESTORE THE SLUICE',
+        subtitle: 'Gather 3 Hydro-Parts • Craft Sluice Dynamo at Workbench • Open Crown Valve',
         targetCount: 3,
         requiresWorkbench: true
       };
     } else if (missionType === 'treasure_hunt') {
-      const keyNames = ['Sun Key', 'Tide Key', 'Star Key'];
+      const keyNames = ['River Key', 'Tide Key', 'Aurora Key'];
       for (let i = 0; i < 3; i++) {
         const spot = pickAtFrac(0.18 + i * 0.24, used);
         tower.collectibles.push({
@@ -3708,7 +2812,7 @@ export function generateProceduralTower({
         });
       }
       const chestSpot = pickAtFrac(0.88, used);
-      const curioId = CASUAL_CURIO_IDS[(cleanSeed + depth) % CASUAL_CURIO_IDS.length];
+      const curioId = CURIO_IDS[(cleanSeed + depth) % CURIO_IDS.length];
       tower.treasureChest = {
         col: chestSpot.col,
         floor: chestSpot.floor,
@@ -3718,15 +2822,15 @@ export function generateProceduralTower({
       };
       tower.casualMission = {
         type: 'treasure_hunt',
-        title: 'LOST TREASURE',
-        subtitle: 'Find 3 Compass Keys • Unlock the Sunken Chest Near the Summit',
+        title: 'SUNKEN RELIQUARY',
+        subtitle: 'Find 3 Wayfinder Keys • Unlock the Reliquary Chest Near the Crown',
         targetCount: 3,
         curioId
       };
     } else if (missionType === 'curio_survey') {
       for (let i = 0; i < 4; i++) {
         const spot = pickAtFrac(0.15 + i * 0.22, used);
-        const curioId = CASUAL_CURIO_IDS[(cleanSeed + depth + i * 3) % CASUAL_CURIO_IDS.length];
+        const curioId = CURIO_IDS[(cleanSeed + depth + i * 3) % CURIO_IDS.length];
         tower.collectibles.push({
           id: `${key}_curio_${i + 1}`,
           col: spot.col,
@@ -3737,13 +2841,13 @@ export function generateProceduralTower({
       }
       tower.casualMission = {
         type: 'curio_survey',
-        title: 'ARTIFACT SURVEY',
-        subtitle: 'Recover 4 Ancient Ocean Curios Across the Spire',
+        title: 'WATERSHED SURVEY',
+        subtitle: 'Catalog 4 Ancient Water Curios Across the Spire',
         targetCount: 4
       };
     } else {
       const spot = pickAtFrac(0.68, used);
-      const curioId = CASUAL_CURIO_IDS[(cleanSeed + depth) % CASUAL_CURIO_IDS.length];
+      const curioId = CURIO_IDS[(cleanSeed + depth) % CURIO_IDS.length];
       tower.collectibles.push({
         id: `${key}_curio_1`,
         col: spot.col,
@@ -3753,8 +2857,8 @@ export function generateProceduralTower({
       });
       tower.casualMission = {
         type: 'puzzle_architect',
-        title: 'MASTER PUZZLE SPIRE',
-        subtitle: 'Navigate Multi-Switch Conduits & Decipher the Hidden Rune Chamber',
+        title: 'AQUEDUCT SANCTUM TRIAL',
+        subtitle: 'Route Multi-Valve Conduits & Solve the Interior Aqueduct Sanctum',
         targetCount: 1,
         requiresRune: true
       };
@@ -3772,22 +2876,25 @@ function repairProceduralTower(tower, exitCol, exitFloor) {
   }
 
   let elevators = [...tower.elevators];
+  let wallStrips = [...(tower.wallStrips || [])];
   let switches = [...tower.switches];
   let doors = tower.doors.map((d) => ({ ...d }));
 
-  const dropShaftAt = (wc) => {
+  const dropVerticalAt = (wc) => {
     elevators = elevators.filter((e) => wrapCol(e.col) !== wc);
+    wallStrips = wallStrips.filter((w) => wrapCol(w.col) !== wc);
   };
 
   const placeSolidAt = (col, fl) => {
     const wc = wrapCol(col);
-    dropShaftAt(wc);
+    dropVerticalAt(wc);
     repairMap.delete(`${wc}:${fl}:laserGate`);
     repairMap.set(`${wc}:${fl}:step`, {
       col: wc,
       floor: fl,
       type: 'solid',
       switchGroup: null,
+      pipeGroup: null,
       inverted: false,
       phasePeriod: 3.2,
       phaseOffset: 0
@@ -3799,7 +2906,6 @@ function repairProceduralTower(tower, exitCol, exitFloor) {
     repairMap.delete(`${wc}:${fl}:step`);
     repairMap.delete(`${wc}:${fl}:laserGate`);
     switches = switches.filter((sw) => !(wrapCol(sw.col) === wc && Math.round(sw.floor) === fl));
-    // Unlink any interior portal sitting directly in the emergency stair's headroom cell
     const victimIds = new Set(
       doors
         .filter((d) => !d.isExit && !d.isRune && !d.isVault && wrapCol(d.col) === wc && Math.round(d.floor) === fl)
@@ -3818,7 +2924,6 @@ function repairProceduralTower(tower, exitCol, exitFloor) {
     stairPairAt.set(f, [wrapCol(exitCol - 2 * d - 1), wrapCol(exitCol - 2 * d)]);
   }
 
-  // Horizontal walk on spawnFloor from spawn.col -> stairPairAt.get(sf)[0] (df=0 requires no overhead clearance)
   const [startStairBack] = stairPairAt.get(sf);
   let hc = wrapCol(tower.spawn.col);
   placeSolidAt(hc, sf);
@@ -3829,7 +2934,6 @@ function repairProceduralTower(tower, exitCol, exitFloor) {
   }
   placeSolidAt(wrapCol(hc + 1), sf);
 
-  // Place each 2-column spiral step [cBack, cFront] and clear headroom directly above both tiles
   for (let f = sf; f <= exitFloor; f++) {
     const [cBack, cFront] = stairPairAt.get(f);
     placeSolidAt(cBack, f);
@@ -3840,7 +2944,6 @@ function repairProceduralTower(tower, exitCol, exitFloor) {
     }
   }
 
-  // Place any secret Rune/Vault door on the +1 side of exitCol on exitFloor (never capping stairPairAt(exitFloor-1)!)
   let secretOffset = 2;
   for (const sd of doors) {
     if (!sd.isRune && !sd.isVault) continue;
@@ -3857,26 +2960,49 @@ function repairProceduralTower(tower, exitCol, exitFloor) {
   return finalizeTower({
     ...tower,
     elevators,
+    wallStrips,
     switches,
     doors,
     ledges: Array.from(repairMap.values())
   });
 }
 
+export function createSanctumTowers(count = 5) {
+  const list = [];
+  for (let i = 0; i < count; i++) {
+    const theme = BIOME_THEMES[i % BIOME_THEMES.length];
+    list.push(
+      generateProceduralTower({
+        seed: (71001 + i * 9781) >>> 0,
+        index: i + 1,
+        difficulty: 1 + i * 0.35,
+        modeHint: 'sanctum_trials',
+        casual: true,
+        themeOverride: theme
+      })
+    );
+  }
+  return list;
+}
+
 /**
- * Builds today's deterministic 20-floor UTC Daily Challenge Tower.
+ * Builds today's deterministic 22-floor UTC Daily Tide Spire + Daily Tide Modifier.
  * @param {Date|number|string} [date=new Date()]
  */
 export function createDailyTower(date = new Date()) {
   const { seed, dateKey } = getDailySeed(date);
+  const mod = DAILY_TIDE_MODIFIERS[seed % DAILY_TIDE_MODIFIERS.length];
+  const theme = BIOME_THEMES[(seed >>> 3) % BIOME_THEMES.length];
   return generateProceduralTower({
     seed,
     index: 1,
-    difficulty: 2.5,
-    era: 'reboot',
+    difficulty: 2.4,
+    modeHint: 'daily_tide',
+    themeOverride: theme,
+    dailyModifier: mod,
     keyOverride: `daily_${seed}`,
-    nameOverride: `DAILY MONOLITH ${dateKey}`,
-    subtitleOverride: `UTC DAILY CHALLENGE • ${dateKey}`,
-    floorsOverride: 20
+    nameOverride: `DAILY TIDE SPIRE ${dateKey}`,
+    subtitleOverride: `UTC DAILY TIDE • ${mod.badge} • ${dateKey}`,
+    floorsOverride: 22
   });
 }

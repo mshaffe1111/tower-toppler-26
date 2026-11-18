@@ -1,287 +1,391 @@
-// Principal Environment, Sky, 3D Archipelago Horizon & Weather Shader System (`StormAtmosphere`)
-// - High-Resolution Baked Textures (zero blurry low-freq noise, zero artificial blobs):
-//   1. `1024x512` RGBA Seamless Multi-Octave Ridged/Worley Cumulonimbus Panorama (`uCloudPanoTex`):
-//      R = towering billowy cumulonimbus cloud banks, G = directional crest lighting normal for crisp
-//      silver-blue moonlit edges, B = feathery translucent cloud filaments & diagonal virga rain shafts,
-//      A = cosmic nebula dust & fine star clusters.
-//   2. `512x512` RGBA Photographic Cratered Full Moon Texture (`uMoonTex`):
-//      True near-side Lunar Maria (Imbrium, Procellarum, Serenitatis, Tranquillitatis, Crisium),
-//      68 multi-scale ringed impact craters + Tycho/Copernicus rays, veiled naturally ONLY by delicate
-//      translucent wispy cloud filaments (`uCloudPanoTex.b`).
-//   3. `512x256` RGBA Turbulent Gas-Giant Banded Texture (`uPlanetTex`) + Cassini Ring Shader for
-//      Original '87 Mode (3D spherical terminator, Rayleigh limb glow, ring shadow on planet & rings).
-// - Real 3D Layered Archipelago Horizon Silhouettes & Rolling Sea-Mist (`r = 52..86m`):
-//   4 distinct merged single-draw-call 3D biome horizon vistas (Coastal Sea-Stacks/Arches/Sister
-//   Watchtowers for T1-T2; Volcanic Calderas & Smoking Smelters/Rigs for T3/T6; Arctic Glacier Horns &
-//   Tabular Icebergs + 3D Multi-Curtain Boreal Aurora Ribbons for T4; Fractured Crystal Obelisks &
-//   7 Maelstrom Monolith Spires for T5/T7/T8; Alien Peaks for Original '87) + 3D Rolling Sea-Fog Ring
-//   eliminating any 1px CG horizon seam!
-// - 144 Multi-Scale Bioluminescent Cyan-Emerald Fireflies/Bokeh, 84 Wave-Synced Sea-Spray Plumes,
-//   Particulate Snow/Embers, Wind/Rain Streaks, and 3D Tapered Forked Lightning Bolts.
-// - Strict zero per-frame heap/GC allocations (`Float32Array` & pre-allocated scratch structs only).
+// ============================================================================
+// Towering Waters: Gateway's Descent — 5-Biome Daylight/Twilight Sky,
+// 3D Earth Watershed Vistas, Underwater Reefs, Waterfalls & Living Wildlife
+// Module: `src/stormSky.js` (`StormAtmosphere`)
+//
+// 5 Distinct, Vibrant 3D Earth Water Locations + Ecosystem Healing (`0..1`):
+//   1. `'canyon_river'` : Radiant cerulean-to-warm-gold morning sky, blazing sun
+//                         disc & volumetric golden god-rays, enclosing layered
+//                         red-rock sandstone canyon walls & mesas, 3D redwood/pine
+//                         forests, 6 animated 3D cliffside waterfalls with rainbow
+//                         plunge mist, & river boulders with frothy V-wakes!
+//   2. `'alpine_lake'`  : Brilliant high-altitude azure sky, sunlit white cumulus
+//                         clouds, majestic two-tone snow-capped granite peaks
+//                         catching warm rose-gold alpenglow, pine-forested rocky
+//                         islands, multi-arch stone aqueduct bridges & drifting
+//                         alpine blossoms/pine needles!
+//   3. `'mist_bayou'`   : Rich amber-violet sunset sky transitioning into warm
+//                         twilight, giant arching cypress & mangrove trees with
+//                         swaying Spanish moss, sunken ancient temple ruins with
+//                         amber lanterns, 220 golden fireflies & 3D floating
+//                         emerald lily pads with glowing lotus blossoms!
+//   4. `'coral_sea'`    : Dazzling sunlit tropical sky, towering bright-white
+//                         cumulus clouds, cream-limestone sea-arches, palm-topped
+//                         white-sand atolls, circling seabirds, AND visible 3D
+//                         underwater coral reef shelves & gliding manta rays!
+//   5. `'storm_ocean'`  : Electric polar tempest sky crowned with shimmering
+//                         emerald-violet Polar Aurora curtains, forked lightning,
+//                         towering translucent turquoise glacial icebergs &
+//                         distant offshore siphon rigs!
+//
+// Zero per-frame heap/GC allocations; 100% offline procedural textures & meshes.
+// ============================================================================
 
 import * as THREE from 'three';
 
 const TWO_PI = Math.PI * 2;
-const DEFAULT_COLS = 16;
-const COL_ANGLE = TWO_PI / DEFAULT_COLS;
-const DEFAULT_TOWER_RADIUS = 2.55;
-const DEFAULT_FLOOR_HEIGHT = 1.0;
-const STEP_ORIGINAL = 0.43;
+const DEFAULT_COLS = 20;
+const DEFAULT_TOWER_RADIUS = 3.75;
+const DEFAULT_FLOOR_HEIGHT = 1.50;
+
+export const BIOME_KEYS = Object.freeze([
+  'canyon_river',
+  'alpine_lake',
+  'mist_bayou',
+  'coral_sea',
+  'storm_ocean',
+]);
+
+const BIOME_ALIAS_LOOKUP = Object.freeze({
+  canyon_river: 'canyon_river',
+  canyon: 'canyon_river',
+  river: 'canyon_river',
+  redwood: 'canyon_river',
+  rapids: 'canyon_river',
+  foundry: 'canyon_river',
+  piston: 'canyon_river',
+
+  alpine_lake: 'alpine_lake',
+  alpine: 'alpine_lake',
+  lake: 'alpine_lake',
+  glacier: 'alpine_lake',
+  blizzard: 'alpine_lake',
+
+  mist_bayou: 'mist_bayou',
+  bayou: 'mist_bayou',
+  delta: 'mist_bayou',
+  swamp: 'mist_bayou',
+  mist: 'mist_bayou',
+  dusk: 'mist_bayou',
+
+  coral_sea: 'coral_sea',
+  coral: 'coral_sea',
+  reef: 'coral_sea',
+  lagoon: 'coral_sea',
+  sea: 'coral_sea',
+  sinking: 'coral_sea',
+  prism: 'coral_sea',
+  day: 'coral_sea',
+
+  storm_ocean: 'storm_ocean',
+  ocean: 'storm_ocean',
+  polar: 'storm_ocean',
+  tempest: 'storm_ocean',
+  maelstrom: 'storm_ocean',
+  blackout: 'storm_ocean',
+  apex: 'storm_ocean',
+  moonlit_storm: 'storm_ocean',
+  storm: 'storm_ocean',
+});
+
+export function resolveBiomeKey(raw, towerId = 1) {
+  if (typeof raw === 'string') {
+    const k = raw.trim().toLowerCase();
+    if (BIOME_ALIAS_LOOKUP[k]) return BIOME_ALIAS_LOOKUP[k];
+  }
+  const idx = Math.floor((Math.max(1, Number(towerId) || 1) - 1) / 2) % BIOME_KEYS.length;
+  return BIOME_KEYS[idx];
+}
+
+const CANONICAL_ATMOSPHERE_PRESETS = {
+  canyon_river: Object.freeze({
+    vista: 'canyon_river',
+    skyMode: 0, // Golden Morning Daylight
+    zenith: '#1a62b8',
+    midSky: '#4ea8e8',
+    horizon: '#f7c278',
+    horizonMist: '#fae0aa',
+    fogColor: '#ebd0a2',
+    bgColor: '#4ea8e8',
+    cloudDark: '#8ba8c7',
+    cloudMid: '#e8eff7',
+    cloudRim: '#fff3cc',
+    celestialTint: '#fff6d6',
+    corona: '#ffcf6e',
+    sunGlow: '#ffb84d',
+    mountNear: '#b84b29',
+    mountFar: '#d97a4e',
+    alpenglow: '#ffd28a',
+    beacon: '#ffb02e',
+    beaconAlt: '#2ef5c8',
+    moteA: '#ffe58f',
+    moteB: '#ffd166',
+    moteC: '#80ffdb',
+    godRayColor: '#ffe299',
+    godRays: 0.85,
+    rainbowBase: 0.34,
+    aurora: 0.0,
+    starAmt: 0.0,
+    cloudCover: 0.48,
+    celestialAmt: 1.25,
+    sunDisc: 1.0,
+    abyssMist: 0.36,
+    blossoms: 0,
+    iceCrystals: 0,
+    rain: 0.0,
+    ambientBolts: 0,
+    birds: 1,
+    fireflyBoost: 0.55,
+  }),
+
+  alpine_lake: Object.freeze({
+    vista: 'alpine_lake',
+    skyMode: 1, // Crisp High-Altitude Azure & Rose-Gold Alpenglow
+    zenith: '#124da0',
+    midSky: '#3f93eb',
+    horizon: '#e8cde0',
+    horizonMist: '#f2dce8',
+    fogColor: '#cfe2f5',
+    bgColor: '#3f93eb',
+    cloudDark: '#8ea8cc',
+    cloudMid: '#eef4fc',
+    cloudRim: '#ffe4ec',
+    celestialTint: '#fffaf5',
+    corona: '#ffd6e5',
+    sunGlow: '#ffb3c6',
+    mountNear: '#586b82',
+    mountFar: '#7d93ad',
+    alpenglow: '#ffafcc',
+    beacon: '#38bdf8',
+    beaconAlt: '#fbbf24',
+    moteA: '#ffd6e7',
+    moteB: '#ffffff',
+    moteC: '#9bf6ff',
+    godRayColor: '#ffeef5',
+    godRays: 0.42,
+    rainbowBase: 0.14,
+    aurora: 0.0,
+    starAmt: 0.0,
+    cloudCover: 0.52,
+    celestialAmt: 1.18,
+    sunDisc: 1.0,
+    abyssMist: 0.24,
+    blossoms: 1,
+    iceCrystals: 0,
+    rain: 0.0,
+    ambientBolts: 0,
+    birds: 1,
+    fireflyBoost: 0.48,
+  }),
+
+  mist_bayou: Object.freeze({
+    vista: 'mist_bayou',
+    skyMode: 2, // Rich Amber-Violet Sunset & Bioluminescent Dusk
+    zenith: '#231847',
+    midSky: '#72336c',
+    horizon: '#eb7d3c',
+    horizonMist: '#cfa06e',
+    fogColor: '#8d6e63',
+    bgColor: '#5c2c5d',
+    cloudDark: '#3d2247',
+    cloudMid: '#9a465c',
+    cloudRim: '#ffc978',
+    celestialTint: '#ffcf87',
+    corona: '#ff8c42',
+    sunGlow: '#ff6b35',
+    mountNear: '#273b2c',
+    mountFar: '#4c5c43',
+    alpenglow: '#ff9e5e',
+    beacon: '#fbbf24',
+    beaconAlt: '#34f5c5',
+    moteA: '#ffd147',
+    moteB: '#ffb703',
+    moteC: '#52ffb8',
+    godRayColor: '#ffb566',
+    godRays: 0.56,
+    rainbowBase: 0.08,
+    aurora: 0.0,
+    starAmt: 0.42,
+    cloudCover: 0.58,
+    celestialAmt: 1.15,
+    sunDisc: 1.0,
+    abyssMist: 0.62,
+    blossoms: 0,
+    iceCrystals: 0,
+    rain: 0.0,
+    ambientBolts: 0,
+    birds: 1,
+    fireflyBoost: 1.38,
+  }),
+
+  coral_sea: Object.freeze({
+    vista: 'coral_sea',
+    skyMode: 3, // Dazzling Sunlit Tropical Noon Lagoon
+    zenith: '#0866c6',
+    midSky: '#29acef',
+    horizon: '#8ef0fc',
+    horizonMist: '#c8f8fe',
+    fogColor: '#aceefb',
+    bgColor: '#29acef',
+    cloudDark: '#8cc0de',
+    cloudMid: '#f2f9ff',
+    cloudRim: '#ffffff',
+    celestialTint: '#fffef2',
+    corona: '#fff0a8',
+    sunGlow: '#ffe07d',
+    mountNear: '#dcd0b4',
+    mountFar: '#bce3e6',
+    alpenglow: '#fff5cc',
+    beacon: '#22f5e8',
+    beaconAlt: '#ff8fab',
+    moteA: '#72efdd',
+    moteB: '#fff3b0',
+    moteC: '#48bfe3',
+    godRayColor: '#fff6cc',
+    godRays: 0.64,
+    rainbowBase: 0.22,
+    aurora: 0.0,
+    starAmt: 0.0,
+    cloudCover: 0.54,
+    celestialAmt: 1.30,
+    sunDisc: 1.0,
+    abyssMist: 0.18,
+    blossoms: 0,
+    iceCrystals: 0,
+    rain: 0.0,
+    ambientBolts: 0,
+    birds: 1,
+    fireflyBoost: 0.45,
+  }),
+
+  storm_ocean: Object.freeze({
+    vista: 'storm_ocean',
+    skyMode: 4, // Polar Aurora & Electric Tempest Ocean Finale
+    zenith: '#0a1f3a',
+    midSky: '#154266',
+    horizon: '#28728a',
+    horizonMist: '#3e8ca3',
+    fogColor: '#1f546e',
+    bgColor: '#113554',
+    cloudDark: '#0d263d',
+    cloudMid: '#245273',
+    cloudRim: '#bef8ff',
+    celestialTint: '#e6fcff',
+    corona: '#5eead4',
+    sunGlow: '#38bdf8',
+    mountNear: '#1c5875',
+    mountFar: '#388aa8',
+    alpenglow: '#67e8f9',
+    beacon: '#00f5c8',
+    beaconAlt: '#c084fc',
+    moteA: '#00f5c8',
+    moteB: '#7dd3fc',
+    moteC: '#c084fc',
+    godRayColor: '#5efce8',
+    godRays: 0.22,
+    rainbowBase: 0.0,
+    aurora: 1.0,
+    starAmt: 0.58,
+    cloudCover: 0.74,
+    celestialAmt: 1.06,
+    sunDisc: 0.0, // crisp polar moon & cloud break
+    abyssMist: 0.44,
+    blossoms: 0,
+    iceCrystals: 1,
+    rain: 0.38,
+    ambientBolts: 1,
+    birds: 0,
+    fireflyBoost: 0.85,
+  }),
+};
 
 export const THEME_ATMOSPHERE_PRESETS = Object.freeze({
-  mist: Object.freeze({
-    vista: 'coastal',
-    zenith: '#030712',
-    midSky: '#0b182c',
-    horizon: '#162b44',
-    horizonMist: '#1f3b58',
-    cloudDark: '#050b16',
-    cloudMid: '#12243b',
-    cloudRim: '#dceeff',
-    moonTint: '#eef6ff',
-    corona: '#8cc4ff',
-    mountNear: '#060e1b',
-    mountFar: '#12263d',
-    beacon: '#ffaa33',
-    beaconAlt: '#00f5c8',
-    moteA: '#00f5c8',
-    moteB: '#0ee876',
-    moteC: '#00d4ff',
-    aurora: 0.0,
-    nebula: 0.0,
-    smog: 0.0,
-    maelstrom: 0.0,
-    virga: 0.35,
-    abyssMist: 0.28,
-    cloudCover: 0.82,
-    moonAmt: 1.02,
-    snow: 0,
-    embers: 0,
-    rain: 0.0,
-    ambientBolts: 0,
+  ...CANONICAL_ATMOSPHERE_PRESETS,
+  foundry: CANONICAL_ATMOSPHERE_PRESETS.canyon_river,
+  piston: CANONICAL_ATMOSPHERE_PRESETS.canyon_river,
+  blizzard: CANONICAL_ATMOSPHERE_PRESETS.alpine_lake,
+  mist: CANONICAL_ATMOSPHERE_PRESETS.mist_bayou,
+  sinking: CANONICAL_ATMOSPHERE_PRESETS.coral_sea,
+  prism: CANONICAL_ATMOSPHERE_PRESETS.coral_sea,
+  blackout: CANONICAL_ATMOSPHERE_PRESETS.storm_ocean,
+  apex: CANONICAL_ATMOSPHERE_PRESETS.storm_ocean,
+});
+
+export const BIOME_LIGHTING_PRESETS = Object.freeze({
+  canyon_river: Object.freeze({
+    isDaylight: true,
+    keyColor: '#fff0cc',
+    keyIntensity: 2.55,
+    hemiSky: '#7cc4f8',
+    hemiGround: '#b86236',
+    hemiIntensity: 0.92,
+    fillColor: '#4fd8c4',
+    fillIntensity: 0.58,
+    rimColor: '#ffd27d',
+    rimIntensity: 1.05,
+    fogColor: '#ebd0a2',
+    bgColor: '#4ea8e8',
   }),
-  sinking: Object.freeze({
-    vista: 'coastal',
-    zenith: '#030b13',
-    midSky: '#08222e',
-    horizon: '#123e4a',
-    horizonMist: '#1c5863',
-    cloudDark: '#041018',
-    cloudMid: '#143844',
-    cloudRim: '#bdf5f0',
-    moonTint: '#e4fcfc',
-    corona: '#67e8f9',
-    mountNear: '#051219',
-    mountFar: '#0f2f38',
-    beacon: '#00f5c8',
-    beaconAlt: '#ffaa33',
-    moteA: '#00f5c8',
-    moteB: '#0ee876',
-    moteC: '#00e5ff',
-    aurora: 0.0,
-    nebula: 0.0,
-    smog: 0.0,
-    maelstrom: 0.0,
-    virga: 0.42,
-    abyssMist: 0.92,
-    cloudCover: 0.85,
-    moonAmt: 0.96,
-    snow: 0,
-    embers: 0,
-    rain: 0.24,
-    ambientBolts: 0,
+  alpine_lake: Object.freeze({
+    isDaylight: true,
+    keyColor: '#fff6ee',
+    keyIntensity: 2.60,
+    hemiSky: '#78b8ff',
+    hemiGround: '#4a6b8a',
+    hemiIntensity: 0.96,
+    fillColor: '#67e8f9',
+    fillIntensity: 0.62,
+    rimColor: '#ffc2d4',
+    rimIntensity: 1.02,
+    fogColor: '#cfe2f5',
+    bgColor: '#3f93eb',
   }),
-  foundry: Object.freeze({
-    vista: 'volcanic',
-    zenith: '#08060b',
-    midSky: '#1b1218',
-    horizon: '#3d1d13',
-    horizonMist: '#5c2916',
-    cloudDark: '#0b080b',
-    cloudMid: '#2c1d21',
-    cloudRim: '#fed7aa',
-    moonTint: '#ffedd5',
-    corona: '#fdba74',
-    mountNear: '#0b0709',
-    mountFar: '#281513',
-    beacon: '#ff6a14',
-    beaconAlt: '#fbbf24',
-    moteA: '#ff7b00',
-    moteB: '#ffc300',
-    moteC: '#00f5c8',
-    aurora: 0.0,
-    nebula: 0.0,
-    smog: 1.0,
-    maelstrom: 0.0,
-    virga: 0.18,
-    abyssMist: 0.22,
-    cloudCover: 0.88,
-    moonAmt: 0.86,
-    snow: 0,
-    embers: 1,
-    rain: 0.0,
-    ambientBolts: 0,
+  mist_bayou: Object.freeze({
+    isDaylight: false,
+    keyColor: '#ffb870',
+    keyIntensity: 2.28,
+    hemiSky: '#9d5c88',
+    hemiGround: '#243b2c',
+    hemiIntensity: 0.78,
+    fillColor: '#34d399',
+    fillIntensity: 0.54,
+    rimColor: '#fbbf24',
+    rimIntensity: 1.08,
+    fogColor: '#8d6e63',
+    bgColor: '#5c2c5d',
   }),
-  blizzard: Object.freeze({
-    vista: 'glacial',
-    zenith: '#030917',
-    midSky: '#0a2039',
-    horizon: '#1c405f',
-    horizonMist: '#2d5a7b',
-    cloudDark: '#061222',
-    cloudMid: '#1d3a58',
-    cloudRim: '#e0f2fe',
-    moonTint: '#f0f9ff',
-    corona: '#7dd3fc',
-    mountNear: '#0c1e33',
-    mountFar: '#214463',
-    beacon: '#00e5ff',
-    beaconAlt: '#ffaa33',
-    moteA: '#00f5c8',
-    moteB: '#00d4ff',
-    moteC: '#0ee876',
-    aurora: 1.0,
-    nebula: 0.0,
-    smog: 0.0,
-    maelstrom: 0.0,
-    virga: 0.30,
-    abyssMist: 0.34,
-    cloudCover: 0.72,
-    moonAmt: 1.04,
-    snow: 1,
-    embers: 0,
-    rain: 0.0,
-    ambientBolts: 0,
+  coral_sea: Object.freeze({
+    isDaylight: true,
+    keyColor: '#fffbe8',
+    keyIntensity: 2.72,
+    hemiSky: '#68d4ff',
+    hemiGround: '#1cc8c0',
+    hemiIntensity: 1.05,
+    fillColor: '#22f5e8',
+    fillIntensity: 0.72,
+    rimColor: '#fff0a8',
+    rimIntensity: 0.98,
+    fogColor: '#aceefb',
+    bgColor: '#29acef',
   }),
-  prism: Object.freeze({
-    vista: 'maelstrom',
-    zenith: '#050313',
-    midSky: '#160e32',
-    horizon: '#2a184d',
-    horizonMist: '#3c2266',
-    cloudDark: '#080518',
-    cloudMid: '#251846',
-    cloudRim: '#f0abfc',
-    moonTint: '#fae8ff',
-    corona: '#c084fc',
-    mountNear: '#09061b',
-    mountFar: '#21133e',
-    beacon: '#e879f9',
-    beaconAlt: '#00f5c8',
-    moteA: '#00f5c8',
-    moteB: '#d946ef',
-    moteC: '#0ee876',
-    aurora: 0.18,
-    nebula: 1.0,
-    smog: 0.0,
-    maelstrom: 0.15,
-    virga: 0.12,
-    abyssMist: 0.25,
-    cloudCover: 0.75,
-    moonAmt: 0.98,
-    snow: 0,
-    embers: 0,
-    rain: 0.0,
-    ambientBolts: 0,
-  }),
-  piston: Object.freeze({
-    vista: 'volcanic',
-    zenith: '#040912',
-    midSky: '#102234',
-    horizon: '#1e384c',
-    horizonMist: '#284960',
-    cloudDark: '#060f1b',
-    cloudMid: '#1b3146',
-    cloudRim: '#cbe3ff',
-    moonTint: '#e8f3ff',
-    corona: '#7dd3fc',
-    mountNear: '#07101a',
-    mountFar: '#162a3d',
-    beacon: '#fbbf24',
-    beaconAlt: '#ef4444',
-    moteA: '#00f5c8',
-    moteB: '#0ee876',
-    moteC: '#00d4ff',
-    aurora: 0.0,
-    nebula: 0.0,
-    smog: 0.24,
-    maelstrom: 0.0,
-    virga: 0.65,
-    abyssMist: 0.32,
-    cloudCover: 0.88,
-    moonAmt: 0.92,
-    snow: 0,
-    embers: 0,
-    rain: 0.44,
-    ambientBolts: 0,
-  }),
-  blackout: Object.freeze({
-    vista: 'volcanic',
-    zenith: '#02050d',
-    midSky: '#091325',
-    horizon: '#14233c',
-    horizonMist: '#1e3250',
-    cloudDark: '#040912',
-    cloudMid: '#14243b',
-    cloudRim: '#c7e0ff',
-    moonTint: '#e2eeff',
-    corona: '#7dd3fc',
-    mountNear: '#040912',
-    mountFar: '#0f1d32',
-    beacon: '#38bdf8',
-    beaconAlt: '#ffaa33',
-    moteA: '#00f5c8',
-    moteB: '#0ee876',
-    moteC: '#00d4ff',
-    aurora: 0.0,
-    nebula: 0.0,
-    smog: 0.0,
-    maelstrom: 0.35,
-    virga: 0.85,
-    abyssMist: 0.28,
-    cloudCover: 0.93,
-    moonAmt: 0.90,
-    snow: 0,
-    embers: 0,
-    rain: 0.65,
-    ambientBolts: 1,
-  }),
-  apex: Object.freeze({
-    vista: 'maelstrom',
-    zenith: '#05030f',
-    midSky: '#180f2b',
-    horizon: '#2c1838',
-    horizonMist: '#3e2246',
-    cloudDark: '#070512',
-    cloudMid: '#251738',
-    cloudRim: '#e0e7ff',
-    moonTint: '#eef2ff',
-    corona: '#a5b4fc',
-    mountNear: '#080512',
-    mountFar: '#1f122e',
-    beacon: '#fbbf24',
-    beaconAlt: '#e879f9',
-    moteA: '#00f5c8',
-    moteB: '#0ee876',
-    moteC: '#fbbf24',
-    aurora: 0.38,
-    nebula: 0.65,
-    smog: 0.30,
-    maelstrom: 1.0,
-    virga: 0.62,
-    abyssMist: 0.34,
-    cloudCover: 0.91,
-    moonAmt: 0.94,
-    snow: 0,
-    embers: 0,
-    rain: 0.58,
-    ambientBolts: 1,
+  storm_ocean: Object.freeze({
+    isDaylight: false,
+    keyColor: '#d4f4ff',
+    keyIntensity: 2.22,
+    hemiSky: '#3b82a6',
+    hemiGround: '#0c283e',
+    hemiIntensity: 0.72,
+    fillColor: '#00f5c4',
+    fillIntensity: 0.56,
+    rimColor: '#a855f7',
+    rimIntensity: 1.04,
+    fogColor: '#1f546e',
+    bgColor: '#113554',
   }),
 });
 
 // ============================================================================
-// FAST BITWISE-PERIODIC NOISE & HIGH-RES TEXTURE BAKERS (ZERO EXTERNAL DEPS)
+// FAST PERIODIC NOISE & HIGH-RES PROCEDURAL TEXTURE BAKERS (ZERO NETWORK I/O)
 // ============================================================================
 
 function buildPermTable(seed = 1337) {
@@ -300,10 +404,9 @@ function buildPermTable(seed = 1337) {
   return p;
 }
 
-const PERM_A = buildPermTable(20261987);
-const PERM_B = buildPermTable(87192026);
+const PERM_A = buildPermTable(20260518);
+const PERM_B = buildPermTable(51820269);
 
-// Power-of-two periodic value noise (pxMask = periodX - 1, pyMask = periodY - 1) — ultra-fast in V8!
 function fastPeriodicNoise(u, v, px, py, perm, offsetSeed) {
   const x = u * px;
   const y = v * py;
@@ -327,29 +430,23 @@ function fastPeriodicNoise(u, v, px, py, perm, offsetSeed) {
   return (a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy) * (1 / 255);
 }
 
-// High-Resolution 1024x512 Seamless Cumulonimbus Storm Panorama
-// R: Multi-octave billowy cumulonimbus cloud density
-// G: Directional cloud-top / moonward illumination relief slope (chiseled silver-blue rims!)
-// B: High-frequency feathery wispy cloud filaments + diagonal virga rain shafts
-// A: Cosmic nebula dust + crisp star clusters
+// 1024x512 Seamless Cumulus, Cirrus, Sedimentary Strata & Aurora Curtain Panorama
 function createHighResCloudPanoramaTexture(w = 1024, h = 512) {
   const nCells = w * h;
   const heightField = new Float32Array(nCells);
   const wispField = new Float32Array(nCells);
-  const nebField = new Float32Array(nCells);
+  const strataField = new Float32Array(nCells);
 
   for (let y = 0; y < h; y++) {
     const v = y / h;
     for (let x = 0; x < w; x++) {
       const u = x / w;
 
-      // Subtle domain warp for wind-sheared storm anvils
       const wx = fastPeriodicNoise(u, v, 8, 4, PERM_A, 11) - 0.5;
       const wy = fastPeriodicNoise(u, v, 8, 4, PERM_B, 29) - 0.5;
-      const uw = u + wx * 0.055 + (v - 0.3) * 0.04;
-      const vw = v + wy * 0.045;
+      const uw = u + wx * 0.052 + (v - 0.3) * 0.032;
+      const vw = v + wy * 0.042;
 
-      // 6-octave ridged + billowy cumulonimbus synthesis
       const o1 = fastPeriodicNoise(uw, vw, 4, 2, PERM_A, 3);
       const o2 = 1 - Math.abs(2 * fastPeriodicNoise(uw, vw, 8, 4, PERM_B, 17) - 1);
       const o3 = 1 - Math.abs(2 * fastPeriodicNoise(uw, vw, 16, 8, PERM_A, 43) - 1);
@@ -359,25 +456,23 @@ function createHighResCloudPanoramaTexture(w = 1024, h = 512) {
 
       const macro = o1 * 0.38 + o2 * 0.28 + o3 * 0.17 + o4 * 0.09 + o5 * 0.05 + o6 * 0.03;
 
-      // Feathery high-altitude wisps + slanted virga streaks
-      const shearU = u + v * 0.22;
+      const shearU = u + v * 0.18;
       const f1 = 1 - Math.abs(2 * fastPeriodicNoise(shearU, v, 16, 8, PERM_B, 193) - 1);
       const f2 = fastPeriodicNoise(shearU, v, 32, 16, PERM_A, 211);
       const f3 = fastPeriodicNoise(shearU, v, 64, 32, PERM_B, 239);
-      const virga = fastPeriodicNoise(u + v * 0.38, v * 0.5, 64, 8, PERM_A, 97);
+      const cascade = fastPeriodicNoise(u * 0.5, v * 2.0, 32, 32, PERM_A, 97);
 
       const idx = y * w + x;
       heightField[idx] = macro;
-      wispField[idx] = Math.max(0, Math.min(1, f1 * 0.44 + f2 * 0.28 + f3 * 0.16 + virga * 0.12));
+      wispField[idx] = Math.max(0, Math.min(1, f1 * 0.44 + f2 * 0.28 + f3 * 0.16 + cascade * 0.12));
 
-      // Nebula filament lane
-      const n1 = 1 - Math.abs(2 * fastPeriodicNoise(u + wy * 0.08, v + wx * 0.08, 8, 4, PERM_A, 61) - 1);
-      const n2 = fastPeriodicNoise(u, v, 32, 16, PERM_B, 131);
-      nebField[idx] = Math.max(0, Math.min(1, Math.pow(n1, 1.8) * 0.72 + n2 * 0.28));
+      // Horizontal sedimentary canyon strata + vertical waterfall/aurora streaks
+      const band = 0.5 + 0.5 * Math.sin(v * 68.0 + wx * 3.2);
+      const n2 = fastPeriodicNoise(u, v, 32, 32, PERM_B, 131);
+      strataField[idx] = Math.max(0, Math.min(1, band * 0.62 + n2 * 0.38));
     }
   }
 
-  // Second pass: bake crisp finite-difference cloud-top normal slope into Channel G
   const data = new Uint8Array(nCells * 4);
   for (let y = 0; y < h; y++) {
     const yUp = Math.min(h - 1, y + 2);
@@ -387,7 +482,6 @@ function createHighResCloudPanoramaTexture(w = 1024, h = 512) {
       const xL = (x - 2 + w) & (w - 1);
       const idx = y * w + x;
       const c = heightField[idx];
-      // Slope facing upper-right moon (+x, +y) -> chiseled silver-lit turret crests!
       const dx = heightField[y * w + xL] - heightField[y * w + xR];
       const dy = heightField[yDn * w + x] - heightField[yUp * w + x];
       const slope = Math.max(0, Math.min(1, 0.5 + (dx * 1.9 + dy * 2.4)));
@@ -396,7 +490,7 @@ function createHighResCloudPanoramaTexture(w = 1024, h = 512) {
       data[o4] = Math.round(Math.max(0, Math.min(1, c)) * 255);
       data[o4 + 1] = Math.round(slope * 255);
       data[o4 + 2] = Math.round(wispField[idx] * 255);
-      data[o4 + 3] = Math.round(nebField[idx] * 255);
+      data[o4 + 3] = Math.round(strataField[idx] * 255);
     }
   }
 
@@ -410,43 +504,24 @@ function createHighResCloudPanoramaTexture(w = 1024, h = 512) {
   return tex;
 }
 
-// Photographic 512x512 Cratered Full Moon Texture (authentic near-side Lunar Maria + 68 ringed craters + rays)
-function createDetailedMoonTexture(size = 512) {
+// 512x512 Dual Celestial Texture: Crisp Lunar/Ice-Moon Relief in RGB + Smooth Disc Alpha
+// (In daylight/sunset biomes `uSunDisc > 0.5`, the shader renders a physical radiant solar disc + aureole!)
+function createCelestialDiscTexture(size = 512) {
   const data = new Uint8Array(size * size * 4);
-
-  // Deterministic crater list: [cx, cy, radius, depth, hasRays]
   const craters = [];
   let seed = 19690720;
   const rnd = () => {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
     return seed / 4294967296;
   };
-  // Hero ray craters (Tycho in south, Copernicus & Kepler in mid-west)
-  craters.push([-0.14, -0.56, 0.085, 0.95, 1]);
-  craters.push([-0.28, 0.12, 0.105, 0.88, 1]);
-  craters.push([-0.52, 0.06, 0.068, 0.82, 1]);
-  craters.push([0.34, -0.28, 0.092, 0.78, 0]);
-  craters.push([-0.18, 0.54, 0.082, 0.75, 0]);
-  for (let i = 0; i < 64; i++) {
+  for (let i = 0; i < 18; i++) {
     const ang = rnd() * TWO_PI;
-    const rad = Math.sqrt(rnd()) * 0.88;
-    craters.push([Math.cos(ang) * rad, Math.sin(ang) * rad, 0.018 + rnd() * 0.055, 0.35 + rnd() * 0.55, 0]);
+    const rad = Math.sqrt(rnd()) * 0.76;
+    craters.push([Math.cos(ang) * rad, Math.sin(ang) * rad, 0.045 + rnd() * 0.085, 0.18 + rnd() * 0.22]);
   }
 
-  // Authentic Lunar Maria centers: [mx, my, rx, ry, rot, darkness]
-  const maria = [
-    [-0.26, 0.30, 0.34, 0.28, 0.2, 0.54],  // Mare Imbrium
-    [-0.54, 0.04, 0.28, 0.44, -0.15, 0.48], // Oceanus Procellarum
-    [0.16, 0.28, 0.22, 0.20, 0.1, 0.52],   // Mare Serenitatis
-    [0.34, 0.04, 0.25, 0.20, -0.3, 0.49],  // Mare Tranquillitatis
-    [0.64, 0.20, 0.13, 0.16, 0.0, 0.55],   // Mare Crisium
-    [0.44, -0.18, 0.18, 0.16, 0.2, 0.44],  // Mare Fecunditatis
-    [-0.24, -0.26, 0.22, 0.18, -0.2, 0.42], // Mare Nubium
-    [-0.48, -0.34, 0.15, 0.14, 0.0, 0.46], // Mare Humorum
-  ];
-
   const half = size * 0.5;
-  const discR = half * 0.96;
+  const discR = half * 0.95;
 
   for (let py = 0; py < size; py++) {
     const ny = (half - py) / discR;
@@ -454,84 +529,34 @@ function createDetailedMoonTexture(size = 512) {
       const nx = (px - half) / discR;
       const r2 = nx * nx + ny * ny;
       const idx = (py * size + px) * 4;
-      if (r2 >= 1.03) {
+      if (r2 >= 1.04) {
         data[idx] = data[idx + 1] = data[idx + 2] = data[idx + 3] = 0;
         continue;
       }
-
       const r = Math.sqrt(r2);
-      const alpha = r <= 0.975 ? 1.0 : Math.max(0, 1.0 - (r - 0.975) / 0.055);
-      const nz = Math.sqrt(Math.max(0.01, 1.0 - Math.min(1.0, r2)));
-
-      // Spherical UV for multi-octave highland regolith micro-grain
-      const su = 0.5 + Math.atan2(nx, nz) / Math.PI * 0.5;
+      // Smooth anti-aliased atmospheric limb feathering
+      const alpha = r <= 0.92 ? 1.0 : Math.pow(Math.max(0, 1.0 - (r - 0.92) / 0.12), 1.6);
+      const nz = Math.sqrt(Math.max(0.02, 1.0 - Math.min(1.0, r2)));
+      const su = 0.5 + (Math.atan2(nx, nz) / Math.PI) * 0.5;
       const sv = 0.5 - Math.asin(Math.max(-1, Math.min(1, ny))) / Math.PI;
-      const reg1 = fastPeriodicNoise(su, sv, 16, 16, PERM_A, 19);
-      const reg2 = fastPeriodicNoise(su, sv, 64, 64, PERM_B, 57);
-      const reg3 = fastPeriodicNoise(su, sv, 128, 128, PERM_A, 113);
-      const grain = reg1 * 0.5 + reg2 * 0.32 + reg3 * 0.18;
-
-      // Sculpt ragged volcanic Mare shorelines
-      let mareAmt = 0.0;
-      for (let m = 0; m < maria.length; m++) {
-        const [mx, my, rx, ry, rot, dark] = maria[m];
-        const dx = nx - mx;
-        const dy = ny - my;
-        const c = Math.cos(rot);
-        const s = Math.sin(rot);
-        const ex = (dx * c - dy * s) / rx;
-        const ey = (dx * s + dy * c) / ry;
-        const dEll = Math.sqrt(ex * ex + ey * ey) + (reg1 - 0.5) * 0.36 + (reg2 - 0.5) * 0.16;
-        const mask = Math.max(0, Math.min(1, (1.05 - dEll) * 2.4));
-        mareAmt = Math.max(mareAmt, mask * dark);
-      }
-
-      // Accumulate crisp ringed craters + ejecta rays
-      let craterShade = 0.0;
-      let rayBright = 0.0;
+      const reg1 = fastPeriodicNoise(su, sv, 8, 8, PERM_A, 19);
+      const reg2 = fastPeriodicNoise(su, sv, 24, 24, PERM_B, 57);
+      let shade = 0;
       for (let k = 0; k < craters.length; k++) {
-        const [cx, cy, cr, cd, rays] = craters[k];
-        const dx = nx - cx;
-        const dy = ny - cy;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < cr * 1.45) {
+        const [cx, cy, cr, cd] = craters[k];
+        const dist = Math.hypot(nx - cx, ny - cy);
+        if (dist < cr * 1.25) {
           const q = dist / cr;
-          if (q < 0.82) {
-            // Depressed bowl + subtle directional upper-left sun relief
-            const bowl = (1.0 - (q / 0.82) * (q / 0.82)) * -0.14 * cd;
-            const innerSlope = ((dx * -0.65 + dy * 0.65) / Math.max(0.005, cr)) * 0.11 * cd;
-            craterShade += bowl + innerSlope;
-          } else if (q < 1.35) {
-            // Bright raised crater rim
-            const rim = Math.sin(((q - 0.82) / 0.53) * Math.PI);
-            const rimLight = 0.09 + 0.08 * ((dx * -0.65 + dy * 0.65) / Math.max(0.005, dist));
-            craterShade += rim * rimLight * cd;
-          }
-        }
-        if (rays && dist > cr * 0.9 && dist < cr * 8.5) {
-          const ang = Math.atan2(dy, dx);
-          const streak = fastPeriodicNoise((ang + Math.PI) / TWO_PI, dist * 0.5, 32, 4, PERM_B, 201);
-          const falloff = Math.exp(-(dist - cr) * 2.1);
-          if (streak > 0.56) {
-            rayBright += (streak - 0.56) * 1.45 * falloff * cd;
-          }
+          shade += q < 0.85 ? (1.0 - q * q) * -0.025 * cd : Math.sin(((q - 0.85) / 0.40) * Math.PI) * 0.018 * cd;
         }
       }
-
-      // Combine lunar highland ivory-silver vs refined slate-blue mare basalt + Oren-Nayar limb
-      const limb = 0.76 + 0.24 * Math.pow(nz, 0.36);
-      const softMare = mareAmt * 0.72;
-      const baseAlb = (0.88 + (grain - 0.5) * 0.13) * (1.0 - softMare) + (0.48 + (reg2 - 0.5) * 0.07) * softMare;
-      const lum = Math.max(0.24, Math.min(1.0, (baseAlb + craterShade * 0.82 + rayBright * 0.78) * limb));
-
-      // Cool silver-blue tint in maria, luminous ivory-silver in highlands
-      const rCol = lum * (1.0 - softMare * 0.14);
-      const gCol = lum * (1.0 - softMare * 0.05);
-      const bCol = Math.min(1.0, lum * (1.02 + softMare * 0.10));
-
-      data[idx] = Math.round(rCol * 255);
-      data[idx + 1] = Math.round(gCol * 255);
-      data[idx + 2] = Math.round(bCol * 255);
+      // Subtle pearlescent lunar maria (high floor >= 0.82 so moon glows luminous silver, never blotchy grey!)
+      const mare = Math.max(0, Math.min(1, (reg1 - 0.46) * 1.15)) * 0.095;
+      const limb = 0.90 + 0.10 * Math.pow(nz, 0.32);
+      const lum = Math.max(0.82, Math.min(1.0, (0.985 - mare + (reg2 - 0.5) * 0.025 + shade) * limb));
+      data[idx] = Math.round(lum * 246);
+      data[idx + 1] = Math.round(lum * 252);
+      data[idx + 2] = Math.round(Math.min(1, lum * 1.03) * 255);
       data[idx + 3] = Math.round(alpha * 255);
     }
   }
@@ -562,10 +587,10 @@ function createSoftWispTexture() {
   for (let i = 0; i < puffs.length; i++) {
     const [x, y, r, a] = puffs[i];
     const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-    g.addColorStop(0, `rgba(214, 232, 255, ${a})`);
-    g.addColorStop(0.45, `rgba(168, 198, 232, ${a * 0.48})`);
-    g.addColorStop(0.8, `rgba(120, 156, 196, ${a * 0.12})`);
-    g.addColorStop(1, 'rgba(120, 156, 196, 0)');
+    g.addColorStop(0, `rgba(245, 250, 255, ${a})`);
+    g.addColorStop(0.45, `rgba(218, 234, 250, ${a * 0.48})`);
+    g.addColorStop(0.8, `rgba(185, 212, 240, ${a * 0.12})`);
+    g.addColorStop(1, 'rgba(185, 212, 240, 0)');
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.arc(x, y, r, 0, TWO_PI);
@@ -596,9 +621,9 @@ function createRadialGlowTexture(size = 64) {
   const half = size * 0.5;
   const g = ctx.createRadialGradient(half, half, 0, half, half, half);
   g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.2, 'rgba(235,250,255,0.88)');
-  g.addColorStop(0.5, 'rgba(170,225,255,0.28)');
-  g.addColorStop(1, 'rgba(170,225,255,0)');
+  g.addColorStop(0.22, 'rgba(250,252,255,0.86)');
+  g.addColorStop(0.54, 'rgba(210,240,255,0.28)');
+  g.addColorStop(1, 'rgba(210,240,255,0)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, size, size);
   const tex = new THREE.CanvasTexture(c);
@@ -607,33 +632,77 @@ function createRadialGlowTexture(size = 64) {
 }
 
 // ============================================================================
-// PROCEDURAL 3D ARCHIPELAGO HORIZON GEOMETRY BUILDER (MERGED 1-CALL VISTAS)
+// MULTI-MATERIAL 3D WATERSHED VISTA BUILDER (1 MERGED DRAW CALL PER BIOME!)
+// Attributes:
+//   `position` : vec3 world local to waterY
+//   `normal`   : vec3 smooth/chiseled surface normal
+//   `aVista`   : vec4(layer 0..1, heightRatio 0..1, matKind, detailParam)
+//                matKind: 0 = Stratified Rock / Mountain / Beach
+//                         1 = Foliage / Redwood / Pine / Cypress / Palm / Moss
+//                         2 = Translucent Glacial Iceberg / Sea-Ice
+//                         3 = Carved Masonry / Aqueduct / Temple Ruin / Siphon Rig
+//                         4 = Emissive Lantern / Beacon / Glowing Lotus Heart
+//   `aColor`   : vec3 linear vertex albedo tint
 // ============================================================================
 
-class HorizonGeometryBuilder {
+const _tmpCol = new THREE.Color();
+
+class WatershedGeometryBuilder {
   constructor() {
     this.pos = [];
     this.norm = [];
-    this.attr = []; // vec4: [depthLayer (0=near,1=far), heightRatio (0..1), emissiveKind (0=none,1=beaconA,2=beaconB,3=lava/crystal), snowMask]
+    this.uvs = [];
+    this.vista = [];
+    this.col = [];
     this.idx = [];
   }
 
-  _pushTransformed(geo, mat4, layer, maxH, emissiveKind = 0, snowMask = 0) {
+  _pushGeo(geo, mat4, layer, maxH, matKind, detailParam, hexOrCol, topHex = null, uvRect = null) {
     const gPos = geo.attributes.position;
     const gNorm = geo.attributes.normal;
+    const gUv = geo.attributes.uv;
     const gIdx = geo.index;
     const baseVertex = this.pos.length / 3;
     const v = new THREE.Vector3();
     const n = new THREE.Vector3();
     const normalMat = new THREE.Matrix3().getNormalMatrix(mat4);
 
+    _tmpCol.set(hexOrCol);
+    const r0 = _tmpCol.r;
+    const g0 = _tmpCol.g;
+    const b0 = _tmpCol.b;
+
+    let r1 = r0;
+    let g1 = g0;
+    let b1 = b0;
+    if (topHex) {
+      _tmpCol.set(topHex);
+      r1 = _tmpCol.r;
+      g1 = _tmpCol.g;
+      b1 = _tmpCol.b;
+    }
+
     for (let i = 0; i < gPos.count; i++) {
       v.fromBufferAttribute(gPos, i).applyMatrix4(mat4);
       n.fromBufferAttribute(gNorm, i).applyMatrix3(normalMat).normalize();
       this.pos.push(v.x, v.y, v.z);
       this.norm.push(n.x, n.y, n.z);
-      const hr = Math.max(0, Math.min(1, (v.y + 1.5) / Math.max(2.0, maxH)));
-      this.attr.push(layer, hr, emissiveKind, snowMask);
+
+      let u = gUv ? gUv.getX(i) : 0.5;
+      let uvV = gUv ? gUv.getY(i) : 0.5;
+      if (uvRect) {
+        u = uvRect[0] + u * uvRect[2];
+        uvV = uvRect[1] + uvV * uvRect[3];
+      }
+      this.uvs.push(u, uvV);
+
+      const hr = Math.max(0, Math.min(1, (v.y + 1.2) / Math.max(1.5, maxH)));
+      this.vista.push(layer, hr, matKind, detailParam);
+      this.col.push(
+        r0 + (r1 - r0) * hr,
+        g0 + (g1 - g0) * hr,
+        b0 + (b1 - b0) * hr
+      );
     }
 
     if (gIdx) {
@@ -648,12 +717,626 @@ class HorizonGeometryBuilder {
     geo.dispose();
   }
 
-  // Sculpted craggy multi-spire sea-stack / jagged cliff / glacier peak / crystal obelisk
-  addCraggyPeak(ang, radius, width, height, segsRad, segsH, cragAmt, seedVal, layer, snowMask = 0, sharpCrystal = false, spireCount = 3) {
-    const buildSpire = (offAng, radOff, wScale, hScale, sOff) => {
-      const w = width * wScale;
-      const h = height * hScale;
-      const geo = new THREE.CylinderGeometry(w * (sharpCrystal ? 0.06 : 0.11), w * 1.12, h, segsRad, segsH, true);
+  _pushDoubleSidedCard(geo, mat4, layer, maxH, matKind, detailParam, hexOrCol, topHex = null, uvRect = null, crownCenter = null) {
+    const gPos = geo.attributes.position;
+    const gNorm = geo.attributes.normal;
+    const gUv = geo.attributes.uv;
+    const gIdx = geo.index;
+    const vCount = gPos.count;
+    const frontBase = this.pos.length / 3;
+    const backBase = frontBase + vCount;
+    const v = new THREE.Vector3();
+    const n = new THREE.Vector3();
+    const cDir = new THREE.Vector3();
+    const normalMat = new THREE.Matrix3().getNormalMatrix(mat4);
+
+    _tmpCol.set(hexOrCol);
+    const r0 = _tmpCol.r;
+    const g0 = _tmpCol.g;
+    const b0 = _tmpCol.b;
+    let r1 = r0;
+    let g1 = g0;
+    let b1 = b0;
+    if (topHex) {
+      _tmpCol.set(topHex);
+      r1 = _tmpCol.r;
+      g1 = _tmpCol.g;
+      b1 = _tmpCol.b;
+    }
+
+    for (let sidePass = 0; sidePass < 2; sidePass++) {
+      const sign = sidePass === 0 ? 1 : -1;
+      for (let i = 0; i < vCount; i++) {
+        v.fromBufferAttribute(gPos, i).applyMatrix4(mat4);
+        n.fromBufferAttribute(gNorm, i).applyMatrix3(normalMat).multiplyScalar(sign).normalize();
+        if (crownCenter) {
+          cDir.subVectors(v, crownCenter);
+          if (cDir.lengthSq() > 1e-4) {
+            cDir.normalize();
+            n.lerp(cDir, 0.72).normalize();
+          }
+        }
+        this.pos.push(v.x, v.y, v.z);
+        this.norm.push(n.x, n.y, n.z);
+
+        let u = gUv ? gUv.getX(i) : 0.5;
+        let uvV = gUv ? gUv.getY(i) : 0.5;
+        if (uvRect) {
+          u = uvRect[0] + u * uvRect[2];
+          uvV = uvRect[1] + uvV * uvRect[3];
+        }
+        this.uvs.push(u, uvV);
+
+        const hr = Math.max(0, Math.min(1, (v.y + 1.2) / Math.max(1.5, maxH)));
+        this.vista.push(layer, hr, matKind, detailParam);
+        this.col.push(
+          r0 + (r1 - r0) * hr,
+          g0 + (g1 - g0) * hr,
+          b0 + (b1 - b0) * hr
+        );
+      }
+    }
+
+    if (gIdx) {
+      for (let i = 0; i < gIdx.count; i += 3) {
+        const a = gIdx.getX(i);
+        const b = gIdx.getX(i + 1);
+        const c = gIdx.getX(i + 2);
+        this.idx.push(frontBase + a, frontBase + b, frontBase + c);
+        this.idx.push(backBase + a, backBase + c, backBase + b);
+      }
+    }
+    geo.dispose();
+  }
+
+  // 1. Layered Red-Rock Sandstone Canyon Mesa & Gorge Wall ('canyon_river')
+  addSandstoneMesa(ang, radius, width, height, seedVal, layer, withCrownTrees = true) {
+    const buildButte = (offAng, radOff, wS, hS, sOff, baseHex, capHex) => {
+      const w = width * wS;
+      const h = height * hS;
+      // Flat-topped terraced sandstone mesa cylinder (NEVER a pointed cone!)
+      const geo = new THREE.CylinderGeometry(w * 0.62, w * 1.12, h, 12, 8, false);
+      geo.translate(0, h * 0.5 - 1.2, 0);
+      const p = geo.attributes.position;
+      for (let i = 0; i < p.count; i++) {
+        let vx = p.getX(i);
+        let vy = p.getY(i);
+        let vz = p.getZ(i);
+        const hFrac = Math.max(0, Math.min(1, (vy + 1.2) / h));
+        const theta = Math.atan2(vz, vx);
+        const u = (theta + Math.PI) / TWO_PI;
+        const n1 = fastPeriodicNoise(u, hFrac * 0.9, 8, 8, PERM_A, (seedVal + sOff) & 255);
+        const n2 = fastPeriodicNoise(u, hFrac * 2.2, 16, 16, PERM_B, (seedVal * 3 + sOff) & 255);
+        const crag = 1.0 - Math.abs(2.0 * n1 - 1.0);
+        // Chiseled sedimentary horizontal sandstone benches & canyon buttresses
+        const bench = Math.sin(hFrac * 16.0) * 0.09 + Math.sin(hFrac * 33.0) * 0.04;
+        const radialScale = 0.76 + (crag * 0.34 + n2 * 0.16 + bench);
+        vx *= radialScale * 1.14;
+        vz *= radialScale * 0.80;
+        if (hFrac > 0.94) {
+          vy = h - 1.2 + (n1 - 0.5) * 0.55;
+        }
+        p.setXYZ(i, vx, vy, vz);
+      }
+      geo.computeVertexNormals();
+      const a = ang + offAng;
+      const r = radius + radOff;
+      const m = new THREE.Matrix4()
+        .makeTranslation(Math.sin(a) * r, 0, Math.cos(a) * r)
+        .multiply(new THREE.Matrix4().makeRotationY(a + sOff * 0.3));
+      this._pushGeo(geo, m, layer, h, 0, 0.85, baseHex, capHex);
+    };
+
+    // Rich Zion / Sedona crimson-terracotta & fiery Navajo-sandstone palette!
+    buildButte(0, 0, 1.0, 1.0, 0, '#7c2012', '#e07238');
+    buildButte(0.055, 2.8, 0.78, 0.74, 31, '#6b190d', '#cf5f29');
+    buildButte(-0.048, -1.6, 0.66, 0.56, 67, '#8f2916', '#ec8a49');
+
+    if (withCrownTrees) {
+      // Towering 4-tier Coast Redwood & Ponderosa Pine forests crowning the canyon rims!
+      this.addRedwoodPineCluster(ang, radius, height - 1.35, 7, width * 0.46, 4.2, 7.6, seedVal + 11, layer);
+      this.addRedwoodPineCluster(ang + 0.055, radius + 2.5, height * 0.74 - 1.35, 5, width * 0.34, 3.4, 5.8, seedVal + 47, layer);
+    }
+  }
+
+  // 2. 3D Towering Coast Redwood / Alpine Conifer Forest Cluster (`matKind = 1`)
+  addRedwoodPineCluster(ang, radius, baseY, count, spreadR, minH, maxH, seedVal, layer, snowDusted = false) {
+    let s = (seedVal * 747796405 + 2891336453) >>> 0;
+    const rnd = () => {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+      return s / 4294967296;
+    };
+    const cx = Math.sin(ang) * radius;
+    const cz = Math.cos(ang) * radius;
+
+    for (let i = 0; i < count; i++) {
+      const oa = rnd() * TWO_PI;
+      const or = Math.sqrt(rnd()) * spreadR;
+      const tx = cx + Math.cos(oa) * or;
+      const tz = cz + Math.sin(oa) * or;
+      const th = minH + rnd() * (maxH - minH);
+      const tw = th * (0.22 + rnd() * 0.07);
+      const ty = baseY - rnd() * 0.45;
+
+      // Rich cinnamon-redwood / mountain bark trunk
+      const trunk = new THREE.CylinderGeometry(tw * 0.13, tw * 0.24, th * 0.40, 6, 1, true);
+      trunk.translate(0, th * 0.20, 0);
+      const mTrunk = new THREE.Matrix4().makeTranslation(tx, ty, tz);
+      this._pushGeo(trunk, mTrunk, layer, ty + th, 3, 0.0, '#4f2414', '#703820');
+
+      // 4 stacked lush evergreen bough tiers
+      const foliageLow = snowDusted ? '#133b2f' : '#0f3d22';
+      const foliageHigh = snowDusted ? '#dff4f8' : '#2e7d3b';
+      for (let tier = 0; tier < 4; tier++) {
+        const tf = tier / 3;
+        const coneH = th * (0.38 - tier * 0.055);
+        const coneR = tw * (1.08 - tier * 0.20);
+        const coneY = ty + th * (0.26 + tier * 0.19);
+        const cone = new THREE.ConeGeometry(coneR, coneH, 7, 1, false);
+        cone.translate(0, coneH * 0.5, 0);
+        const mCone = new THREE.Matrix4()
+          .makeTranslation(tx, coneY, tz)
+          .multiply(new THREE.Matrix4().makeRotationY(rnd() * TWO_PI));
+        this._pushGeo(
+          cone,
+          mCone,
+          layer,
+          ty + th + 1.0,
+          1,
+          snowDusted ? 0.55 : 0.22,
+          foliageLow,
+          tf > 0.55 ? foliageHigh : '#1f6332'
+        );
+      }
+    }
+  }
+
+  // 3. Majestic Two-Tone Snow-Capped Granite Alpine Peak ('alpine_lake', exposed slate-granite + snowcaps!)
+  addAlpineGranitePeak(ang, radius, width, height, seedVal, layer, snowCapped = true) {
+    const buildHorn = (offAng, radOff, wS, hS, sOff) => {
+      const w = width * wS;
+      const h = height * hS;
+      const geo = new THREE.CylinderGeometry(w * 0.08, w * 1.18, h, 11, 7, true);
+      geo.translate(0, h * 0.5 - 1.3, 0);
+      const p = geo.attributes.position;
+      for (let i = 0; i < p.count; i++) {
+        let vx = p.getX(i);
+        let vy = p.getY(i);
+        let vz = p.getZ(i);
+        const hFrac = Math.max(0, (vy + 1.3) / h);
+        const theta = Math.atan2(vz, vx);
+        const u = (theta + Math.PI) / TWO_PI;
+        const n1 = fastPeriodicNoise(u, hFrac * 0.85, 8, 8, PERM_A, (seedVal + sOff) & 255);
+        const n2 = fastPeriodicNoise(u, hFrac * 1.9, 16, 16, PERM_B, (seedVal * 5 + sOff) & 255);
+        // Chiseled glacial arête ridges & granite couloirs
+        const arete = 1.0 - Math.abs(2.0 * n1 - 1.0);
+        const disp = 0.60 + (Math.pow(arete, 1.4) * 0.72 + n2 * 0.26) * (1.16 - hFrac * 0.30);
+        vx = vx * disp + hFrac * w * (((seedVal + sOff) % 5) - 2) * 0.14;
+        vz *= disp * 0.82;
+        if (hFrac > 0.70) {
+          vy += (arete - 0.45) * h * 0.20;
+        }
+        p.setXYZ(i, vx, vy, vz);
+      }
+      geo.computeVertexNormals();
+      const a = ang + offAng;
+      const r = radius + radOff;
+      const m = new THREE.Matrix4()
+        .makeTranslation(Math.sin(a) * r, 0, Math.cos(a) * r)
+        .multiply(new THREE.Matrix4().makeRotationY(a + sOff * 0.35));
+      // Rich blue-slate granite rock base ('#2e4057' -> '#5c738f') + snowpack mask when snowCapped = true!
+      this._pushGeo(geo, m, layer, h, 0, snowCapped ? 1.0 : 0.25, '#2d3f56', '#607894');
+    };
+
+    buildHorn(0, 0, 1.0, 1.0, 0);
+    buildHorn(0.048, 2.4, 0.74, 0.72, 29);
+    buildHorn(-0.044, -1.6, 0.65, 0.58, 73);
+  }
+
+  // 4. Multi-Arch Carved Stone Aqueduct Bridge ('alpine_lake')
+  addStoneAqueductBridge(ang, radius, totalSpan, deckH, archCount, layer) {
+    const cx = Math.sin(ang) * radius;
+    const cz = Math.cos(ang) * radius;
+    const mBase = new THREE.Matrix4()
+      .makeTranslation(cx, 0, cz)
+      .multiply(new THREE.Matrix4().makeRotationY(ang));
+
+    const bayW = totalSpan / archCount;
+    const pierW = bayW * 0.24;
+    const depth = 1.65;
+
+    // Upper aqueduct water-channel deck & cornice
+    const deck = new THREE.BoxGeometry(totalSpan + pierW, deckH * 0.18, depth * 1.15);
+    deck.translate(0, deckH * 0.91, 0);
+    this._pushGeo(deck, mBase, layer, deckH + 1.5, 3, 0.25, '#b8c4d4', '#e8eef5');
+
+    // Arched piers
+    for (let i = 0; i <= archCount; i++) {
+      const px = -totalSpan * 0.5 + i * bayW;
+      const pier = new THREE.BoxGeometry(pierW, deckH * 0.88, depth);
+      pier.translate(px, deckH * 0.44 - 0.5, 0);
+      this._pushGeo(pier, mBase, layer, deckH + 1.5, 3, 0.25, '#8a99ad', '#cfd8e6');
+
+      if (i < archCount) {
+        const archX = px + bayW * 0.5;
+        const arch = new THREE.TorusGeometry(bayW * 0.38, pierW * 0.46, 5, 10, Math.PI);
+        arch.translate(archX, deckH * 0.62, 0);
+        this._pushGeo(arch, mBase, layer, deckH + 1.5, 3, 0.25, '#9aa8bc', '#dee6f2');
+      }
+    }
+  }
+
+  // 5. Giant Arching Bayou Cypress & Mangrove Tree with Draped Tapered Spanish Moss ('mist_bayou')
+  addGiantCypressTree(ang, radius, height, seedVal, layer) {
+    const cx = Math.sin(ang) * radius;
+    const cz = Math.cos(ang) * radius;
+    let s = (seedVal * 1103515245 + 12345) >>> 0;
+    const rnd = () => {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+      return s / 4294967296;
+    };
+
+    // Fluted buttress cypress trunk with organic curve & bark twist
+    const trunkR = height * 0.076;
+    const trunk = new THREE.CylinderGeometry(trunkR * 0.42, trunkR * 2.15, height * 0.74, 10, 5, true);
+    const tp = trunk.attributes.position;
+    for (let ti = 0; ti < tp.count; ti++) {
+      let vx = tp.getX(ti);
+      const vy = tp.getY(ti) + height * 0.37 - 0.8;
+      let vz = tp.getZ(ti);
+      const hFrac = Math.max(0, (vy + 0.8) / (height * 0.74));
+      const th = Math.atan2(vz, vx);
+      // Fluted cypress buttress ribs near water base
+      const flute = 1.0 + (1.0 - hFrac) * (1.0 - hFrac) * 0.36 * Math.cos(th * 5.0 + seedVal);
+      const sway = Math.sin(hFrac * Math.PI * 0.85 + seedVal * 0.3) * height * 0.035;
+      tp.setXYZ(ti, vx * flute + sway, vy, vz * flute);
+    }
+    trunk.computeVertexNormals();
+    const mCenter = new THREE.Matrix4().makeTranslation(cx, 0, cz);
+    this._pushGeo(trunk, mCenter, layer, height, 3, 0.0, '#261912', '#593c28');
+
+    // Arching mangrove prop roots + cypress knees emerging from bayou water
+    for (let rIdx = 0; rIdx < 6; rIdx++) {
+      const ra = (rIdx / 6) * TWO_PI + rnd() * 0.35;
+      const rootArc = new THREE.TorusGeometry(trunkR * 2.35, trunkR * 0.20, 5, 9, Math.PI * 0.72);
+      const mRoot = new THREE.Matrix4()
+        .makeTranslation(cx, -0.18, cz)
+        .multiply(new THREE.Matrix4().makeRotationY(ra))
+        .multiply(new THREE.Matrix4().makeRotationZ(0.28));
+      this._pushGeo(rootArc, mRoot, layer, height, 3, 0.0, '#221610', '#4a3222');
+    }
+
+    // Sweeping Gnarled Boughs + Layered Tufted Twilight Canopy & Draped S-Curved Spanish Moss!
+    const boughs = 7;
+    for (let l = 0; l < boughs; l++) {
+      const la = (l / boughs) * TWO_PI + rnd() * 0.42;
+      const reach = l === 0 ? height * 0.04 : height * (0.16 + rnd() * 0.16);
+      const lx = cx + Math.cos(la) * reach;
+      const lz = cz + Math.sin(la) * reach;
+      const ly = height * (l === 0 ? 0.82 : 0.60 + (l % 3) * 0.08 + rnd() * 0.07);
+      const domeR = height * (l === 0 ? 0.25 : 0.17 + rnd() * 0.06);
+
+      // Visible gnarled wooden branch reaching from trunk out to canopy cluster
+      if (l > 0) {
+        const bLen = Math.hypot(reach, ly - height * 0.50);
+        const branch = new THREE.CylinderGeometry(trunkR * 0.16, trunkR * 0.36, bLen, 5, 2, true);
+        const mBranch = new THREE.Matrix4()
+          .makeTranslation((cx + lx) * 0.5, (height * 0.50 + ly) * 0.5, (cz + lz) * 0.5)
+          .multiply(new THREE.Matrix4().makeRotationY(-la))
+          .multiply(new THREE.Matrix4().makeRotationZ(-Math.atan2(reach, Math.max(0.5, ly - height * 0.50))));
+        this._pushGeo(branch, mBranch, layer, height, 3, 0.0, '#2b1d14', '#5c3f2b');
+      }
+
+      // Multi-tiered overlapping organic leaf tufts (rich jade-olive core + warm golden-amber twilight crown!)
+      for (let sub = 0; sub < 2; sub++) {
+        const subOffA = la + (sub - 0.5) * 0.9;
+        const sx = lx + (sub === 0 ? 0 : Math.cos(subOffA) * domeR * 0.48);
+        const sz = lz + (sub === 0 ? 0 : Math.sin(subOffA) * domeR * 0.48);
+        const sy = ly + sub * domeR * 0.26;
+        const sr = domeR * (sub === 0 ? 1.0 : 0.76);
+
+        const canopy = new THREE.IcosahedronGeometry(sr, 2);
+        const cp = canopy.attributes.position;
+        for (let vi = 0; vi < cp.count; vi++) {
+          const vx = cp.getX(vi);
+          const vy = cp.getY(vi);
+          const vz = cp.getZ(vi);
+          const uN = (Math.atan2(vz, vx) + Math.PI) / TWO_PI;
+          const vN = (vy / sr) * 0.5 + 0.5;
+          const n1 = fastPeriodicNoise(uN, vN, 8, 8, PERM_A, (seedVal + l * 17 + sub * 31) & 255);
+          const n2 = fastPeriodicNoise(uN * 2.0, vN * 2.0, 16, 16, PERM_B, (seedVal + l * 9) & 255);
+          // Feathered organic foliage tufts (NOT blocky blobs!)
+          const tuft = 0.72 + (1.0 - Math.abs(2.0 * n1 - 1.0)) * 0.42 + (n2 - 0.5) * 0.24;
+          cp.setXYZ(vi, vx * 1.46 * tuft, vy * 0.54 * tuft, vz * 1.38 * tuft);
+        }
+        canopy.computeVertexNormals();
+        const mCan = new THREE.Matrix4().makeTranslation(sx, sy, sz);
+        this._pushGeo(
+          canopy,
+          mCan,
+          layer,
+          height + 2.0,
+          1,
+          0.42,
+          sub === 0 ? '#183d24' : '#26542c',
+          sub === 0 ? '#5b9444' : '#8ec458'
+        );
+      }
+
+      // Draped, Curved & Feathered Tapered Spanish Moss Festoons (S-curved catenary curtains, NEVER stiff rectangles!)
+      for (let m = 0; m < 3; m++) {
+        const ma = la + (m - 1) * 0.72 + rnd() * 0.25;
+        const mr = domeR * (0.55 + (m % 2) * 0.34);
+        const mx = lx + Math.cos(ma) * mr;
+        const mz = lz + Math.sin(ma) * mr;
+        const mossLen = height * (0.14 + rnd() * 0.17);
+        const topW = 0.20 + rnd() * 0.14;
+        // Cone oriented downward: wide feathery attachment under bough tapering to delicate wisp point!
+        const moss = new THREE.ConeGeometry(topW, mossLen, 5, 5, true);
+        moss.rotateX(Math.PI); // apex at bottom (-mossLen/2), wide base at top (+mossLen/2)
+        moss.translate(0, -mossLen * 0.5, 0);
+        const mp = moss.attributes.position;
+        const drapeAng = ma + 0.6;
+        const dx = Math.cos(drapeAng);
+        const dz = Math.sin(drapeAng);
+        for (let vi = 0; vi < mp.count; vi++) {
+          let vx = mp.getX(vi);
+          const vy = mp.getY(vi);
+          let vz = mp.getZ(vi);
+          const dropT = Math.min(1.0, Math.max(0.0, -vy / mossLen)); // 0 at bough -> 1 at tip
+          // Graceful S-curve catenary wind drape + scalloped wispy silhouette
+          const curve = Math.pow(dropT, 1.7) * (0.42 + (m % 2) * 0.22) + Math.sin(dropT * Math.PI * 2.0 + m) * 0.10;
+          const scallop = 0.75 + 0.45 * Math.sin(dropT * 9.0 + vi);
+          vx = vx * scallop * 1.15 + dx * curve;
+          vz = vz * scallop * 0.55 + dz * curve;
+          mp.setXYZ(vi, vx, vy, vz);
+        }
+        moss.computeVertexNormals();
+        const mMoss = new THREE.Matrix4().makeTranslation(mx, ly - domeR * 0.08, mz);
+        this._pushGeo(moss, mMoss, layer, height + 2.0, 1, 0.92, '#4c6e3d', '#c5db82');
+      }
+    }
+  }
+
+  // 6. Sunken Ancient Bayou Temple Ruin + Sculpted Stone Shrine Lantern ('mist_bayou')
+  addSunkenTempleRuin(ang, radius, scaleH, seedVal, layer) {
+    const cx = Math.sin(ang) * radius;
+    const cz = Math.cos(ang) * radius;
+    const m = new THREE.Matrix4()
+      .makeTranslation(cx, 0, cz)
+      .multiply(new THREE.Matrix4().makeRotationY(ang + 0.18));
+
+    // Stepped mossy temple plinth emerging from the delta water
+    const plinth = new THREE.CylinderGeometry(scaleH * 0.60, scaleH * 0.78, scaleH * 0.30, 8, 1, false);
+    plinth.translate(0, scaleH * 0.15 - 0.6, 0);
+    this._pushGeo(plinth, m, layer, scaleH, 3, 0.3, '#344535', '#6c7d62');
+
+    // Twin carved fluted stone pillars + stepped lintel beam
+    const colSpan = scaleH * 0.35;
+    for (const side of [-1, 1]) {
+      const hCol = scaleH * 0.78;
+      const colGeo = new THREE.CylinderGeometry(scaleH * 0.082, scaleH * 0.105, hCol, 8, 1, false);
+      colGeo.translate(side * colSpan, hCol * 0.5 - 0.32, 0);
+      this._pushGeo(colGeo, m, layer, scaleH, 3, 0.3, '#465442', '#8e9c7e');
+    }
+    const lintel = new THREE.BoxGeometry(colSpan * 2.55, scaleH * 0.12, scaleH * 0.24);
+    lintel.translate(0, scaleH * 0.78 - 0.28, 0);
+    this._pushGeo(lintel, m, layer, scaleH, 3, 0.3, '#4e5c48', '#9dab8b');
+
+    const cap = new THREE.CylinderGeometry(colSpan * 0.95, colSpan * 1.35, scaleH * 0.09, 4, 1, false);
+    cap.rotateY(Math.PI * 0.25);
+    cap.translate(0, scaleH * 0.87 - 0.28, 0);
+    this._pushGeo(cap, m, layer, scaleH, 3, 0.3, '#3f4d3b', '#879678');
+
+    // Compact Carved Stone Pagoda Brazier + Warm Amber Flame Core (NEVER a giant white diamond!)
+    for (const side of [-1, 1]) {
+      const lx = side * colSpan;
+      const ly = scaleH * 0.94 - 0.26;
+      const cageRoof = new THREE.ConeGeometry(scaleH * 0.065, scaleH * 0.055, 6, 1, false);
+      cageRoof.translate(lx, ly + scaleH * 0.045, 0);
+      this._pushGeo(cageRoof, m, layer, scaleH, 3, 0.3, '#2f3b2d', '#6d7a64');
+
+      const flame = new THREE.SphereGeometry(scaleH * 0.028, 6, 5);
+      flame.scale(0.85, 1.35, 0.85);
+      flame.translate(lx, ly, 0);
+      this._pushGeo(flame, m, layer, scaleH, 4, 0.8, '#ff9505', '#ffd166');
+    }
+  }
+
+  // 7. Sun-Bleached Striated Golden-Cream Karst Sea-Arch & Tropical Jungle Atoll ('coral_sea')
+  addTropicalAtollAndArch(ang, radius, scaleW, archH, withArch, palmCount, seedVal, layer) {
+    const cx = Math.sin(ang) * radius;
+    const cz = Math.cos(ang) * radius;
+    let s = (seedVal * 22695477 + 1) >>> 0;
+    const rnd = () => {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+      return s / 4294967296;
+    };
+
+    const mBase = new THREE.Matrix4()
+      .makeTranslation(cx, 0, cz)
+      .multiply(new THREE.Matrix4().makeRotationY(ang + 0.32));
+
+    // Sunlit scalloped coral-sand atoll beach bar sloping gently into turquoise lagoon water!
+    const beach = new THREE.CylinderGeometry(scaleW * 0.74, scaleW * 1.28, 1.45, 16, 1, false);
+    const bp = beach.attributes.position;
+    for (let i = 0; i < bp.count; i++) {
+      const bx = bp.getX(i);
+      const bz = bp.getZ(i);
+      const th = (Math.atan2(bz, bx) + Math.PI) / TWO_PI;
+      const scallop = 0.86 + 0.28 * fastPeriodicNoise(th, 0.5, 8, 4, PERM_B, seedVal & 255);
+      bp.setXYZ(i, bx * 1.26 * scallop, bp.getY(i), bz * 0.90 * scallop);
+    }
+    beach.computeVertexNormals();
+    beach.translate(0, 0.06, 0);
+    this._pushGeo(beach, mBase, layer, archH + 4.0, 0, 0.15, '#e8ce9c', '#fff9e6');
+
+    // Helper: Build an organic, multi-tuft jagged tropical scrub cluster (NEVER squashed green pancakes!)
+    const addJungleTuftCluster = (localX, localY, localZ, baseR, count) => {
+      for (let tIdx = 0; tIdx < count; tIdx++) {
+        const ta = (tIdx / count) * TWO_PI + rnd() * 0.5;
+        const tr = tIdx === 0 ? 0 : baseR * (0.45 + rnd() * 0.45);
+        const tx = localX + Math.cos(ta) * tr;
+        const tz = localZ + Math.sin(ta) * tr * 0.75;
+        const ty = localY + (tIdx === 0 ? baseR * 0.22 : (rnd() - 0.3) * baseR * 0.28);
+        const tuftR = baseR * (tIdx === 0 ? 0.68 : 0.42 + rnd() * 0.26);
+
+        const tuft = new THREE.IcosahedronGeometry(tuftR, 2);
+        const tp = tuft.attributes.position;
+        for (let vi = 0; vi < tp.count; vi++) {
+          const vx = tp.getX(vi);
+          const vy = tp.getY(vi);
+          const vz = tp.getZ(vi);
+          const uN = (Math.atan2(vz, vx) + Math.PI) / TWO_PI;
+          const vN = (vy / tuftR) * 0.5 + 0.5;
+          const n = fastPeriodicNoise(uN, vN, 8, 8, PERM_A, (seedVal + tIdx * 23) & 255);
+          // Leafy spiky bromeliad/fern ridge lobes
+          const spike = 0.68 + Math.pow(1.0 - Math.abs(2.0 * n - 1.0), 0.85) * 0.68;
+          tp.setXYZ(vi, vx * 1.18 * spike, vy * (0.78 + vN * 0.32) * spike, vz * 1.08 * spike);
+        }
+        tuft.computeVertexNormals();
+        const mTuft = mBase.clone().multiply(new THREE.Matrix4().makeTranslation(tx, ty, tz));
+        this._pushGeo(
+          tuft,
+          mTuft,
+          layer,
+          archH + 4.0,
+          1,
+          0.35,
+          tIdx % 2 === 0 ? '#115e32' : '#1e7836',
+          tIdx % 2 === 0 ? '#52d669' : '#8ce868'
+        );
+      }
+
+      // Radiating sword-fern / pandanus frond bursts & draping coastal vines!
+      for (let f = 0; f < 5; f++) {
+        const fa = (f / 5) * TWO_PI + rnd() * 0.4;
+        const blade = new THREE.ConeGeometry(baseR * 0.16, baseR * 1.05, 4, 1, false);
+        blade.rotateZ(-0.78 - rnd() * 0.35);
+        blade.translate(baseR * 0.35, baseR * 0.22, 0);
+        const mBlade = mBase
+          .clone()
+          .multiply(new THREE.Matrix4().makeTranslation(localX, localY, localZ))
+          .multiply(new THREE.Matrix4().makeRotationY(fa));
+        this._pushGeo(blade, mBlade, layer, archH + 4.0, 1, 0.65, '#166934', '#7ae56e');
+      }
+    };
+
+    // Helper: Build a curved coconut/cliff palm at local coordinates relative to `mBase`
+    const addCurvedPalmLocal = (lx, ly, lz, palmH, lean, leanYaw, frondScale = 1.0) => {
+      const mPalm = mBase
+        .clone()
+        .multiply(new THREE.Matrix4().makeTranslation(lx, ly, lz))
+        .multiply(new THREE.Matrix4().makeRotationY(leanYaw))
+        .multiply(new THREE.Matrix4().makeRotationZ(lean));
+
+      const trunk = new THREE.CylinderGeometry(0.10 * frondScale, 0.23 * frondScale, palmH, 6, 4, true);
+      const tp = trunk.attributes.position;
+      for (let ti = 0; ti < tp.count; ti++) {
+        const ty = tp.getY(ti) + palmH * 0.5;
+        const bow = Math.pow(ty / palmH, 2.0) * 0.52 * frondScale;
+        tp.setXYZ(ti, tp.getX(ti) + bow, ty, tp.getZ(ti));
+      }
+      trunk.computeVertexNormals();
+      this._pushGeo(trunk, mPalm, layer, archH + palmH + 3.0, 3, 0.0, '#6e4b30', '#a67b56');
+
+      const crownX = 0.52 * frondScale;
+      const fronds = 8;
+      for (let f = 0; f < fronds; f++) {
+        const fa = (f / fronds) * TWO_PI + rnd() * 0.20;
+        const frondLen = 2.85 * frondScale;
+        const frondW = 0.92 * frondScale;
+        const frond = new THREE.PlaneGeometry(frondLen, frondW, 6, 2);
+        frond.rotateX(-Math.PI * 0.5);
+        const fp = frond.attributes.position;
+        for (let fi = 0; fi < fp.count; fi++) {
+          const uDist = (fp.getX(fi) + frondLen * 0.5) / frondLen;
+          const zRaw = fp.getZ(fi);
+          const xOut = uDist * frondLen;
+          const taperZ = zRaw * Math.sin(Math.max(0.10, uDist) * Math.PI);
+          // 3D V-chevron leaflet fold so fronds have thick 3D silhouette from below & edge-on!
+          const leafletDrop = Math.abs(taperZ) * 0.55;
+          const yArc = (Math.sin(uDist * Math.PI * 0.68) * 0.52 - uDist * uDist * 1.28) * frondScale - leafletDrop;
+          fp.setXYZ(fi, xOut, yArc, taperZ);
+        }
+        frond.computeVertexNormals();
+        const mFrond = mPalm
+          .clone()
+          .multiply(new THREE.Matrix4().makeTranslation(crownX, palmH, 0))
+          .multiply(new THREE.Matrix4().makeRotationY(fa));
+        this._pushGeo(frond, mFrond, layer, archH + palmH + 3.0, 1, 0.75, '#136e37', '#6fe376');
+      }
+    };
+
+    if (withArch) {
+      // Sculpted Chiseled Striated Golden-Cream Karst Sea-Arch (`detailParam = 0.56` triggers limestone strata + dark wet tidal base!)
+      const archRad = scaleW * 0.58;
+      const tubeRad = scaleW * 0.22;
+      const torus = new THREE.TorusGeometry(archRad, tubeRad, 12, 24, Math.PI);
+      const p = torus.attributes.position;
+      for (let i = 0; i < p.count; i++) {
+        let vx = p.getX(i);
+        let vy = p.getY(i) * (archH / Math.max(1.0, archRad + tubeRad));
+        let vz = p.getZ(i) * 1.52;
+        const uN = (vx + scaleW) / (scaleW * 2.0);
+        const vN = Math.max(0, (vy + 2.0) / (archH + 3.0));
+        const n1 = fastPeriodicNoise(uN, vN, 8, 8, PERM_A, seedVal & 255);
+        const n2 = fastPeriodicNoise(uN * 2.0, vN * 2.0, 16, 16, PERM_B, (seedVal + 37) & 255);
+        const crag = 1.0 - Math.abs(2.0 * n1 - 1.0);
+        // Stepped horizontal karst limestone ledges & sea-carved tidal undercut near y = 0..2m!
+        const strataStep = Math.sin(vy * 2.35 + n2 * 1.8) * 0.24;
+        const tidalNotch = vy < 2.2 && vy > -0.6 ? -Math.sin(((vy + 0.6) / 2.8) * Math.PI) * 0.42 : 0.0;
+        vx += (crag - 0.45) * scaleW * 0.19 + Math.sign(vx || 1) * (strataStep + tidalNotch * 0.5);
+        vy += (n1 - 0.42) * archH * 0.12 - 0.35;
+        vz = vz * (0.84 + crag * 0.38) + Math.sign(vz || 1) * strataStep * 0.65;
+        p.setXYZ(i, vx, vy, vz);
+      }
+      torus.computeVertexNormals();
+      this._pushGeo(torus, mBase, layer, archH + 2.0, 0, 0.56, '#c79a5b', '#faeac6');
+
+      // Flanking karst sea-stack buttress column for authentic asymmetric Ha Long / Palau silhouette!
+      const stackH = archH * 0.68;
+      const stack = new THREE.CylinderGeometry(scaleW * 0.14, scaleW * 0.28, stackH, 8, 5, false);
+      stack.translate(scaleW * 0.72, stackH * 0.5 - 0.4, -scaleW * 0.15);
+      const sp = stack.attributes.position;
+      for (let si = 0; si < sp.count; si++) {
+        const sy = sp.getY(si);
+        const step = 1.0 + 0.14 * Math.sin(sy * 2.6 + si * 0.3);
+        sp.setXYZ(si, sp.getX(si) * step, sy, sp.getZ(si) * step);
+      }
+      stack.computeVertexNormals();
+      this._pushGeo(stack, mBase, layer, archH + 2.0, 0, 0.56, '#be9052', '#f7e5bd');
+
+      // Lush organic multi-tuft jungle crown + wind-swept clifftop dwarf palms & hanging vines!
+      addJungleTuftCluster(0.0, archH * 0.96, 0.0, scaleW * 0.22, 5);
+      addJungleTuftCluster(-scaleW * 0.28, archH * 0.86, 0.12, scaleW * 0.17, 4);
+      addJungleTuftCluster(scaleW * 0.30, archH * 0.84, -0.10, scaleW * 0.16, 4);
+      addJungleTuftCluster(scaleW * 0.72, stackH - 0.25, -scaleW * 0.15, scaleW * 0.14, 3);
+
+      // 2 Wind-swept clifftop palms crowning the limestone sea-arch!
+      addCurvedPalmLocal(-scaleW * 0.10, archH * 0.95, 0.0, 3.2, 0.26, 0.55, 0.76);
+      addCurvedPalmLocal(scaleW * 0.22, archH * 0.88, 0.15, 2.7, -0.30, 2.15, 0.68);
+    }
+
+    // Beachfront 3D Curved Coconut Palm Trees!
+    for (let k = 0; k < palmCount; k++) {
+      const pa = (k / Math.max(1, palmCount)) * TWO_PI + seedVal * 0.4;
+      const pr = scaleW * (0.28 + (k % 3) * 0.18);
+      const lx = Math.cos(pa) * pr;
+      const lz = Math.sin(pa) * pr;
+      const palmH = 4.4 + ((seedVal + k) % 4) * 0.95;
+      const lean = 0.20 + (k % 2) * 0.14;
+      addCurvedPalmLocal(lx, 0.55, lz, palmH, lean, pa + 0.4, 1.0);
+    }
+  }
+
+  // 8. Towering Translucent Turquoise Glacial Iceberg & Dark-Basalt Hydro-Siphon Spire ('storm_ocean')
+  addGlacialIceberg(ang, radius, width, height, tabular, seedVal, layer) {
+    const buildBerg = (offAng, radOff, wS, hS, sOff) => {
+      const w = width * wS;
+      const h = height * hS;
+      const topScale = tabular ? 0.82 : 0.18;
+      const geo = new THREE.CylinderGeometry(w * topScale, w * 1.12, h, 8, 5, false);
       geo.translate(0, h * 0.5 - 1.4, 0);
       const p = geo.attributes.position;
       for (let i = 0; i < p.count; i++) {
@@ -663,212 +1346,236 @@ class HorizonGeometryBuilder {
         const hFrac = Math.max(0, (vy + 1.4) / h);
         const theta = Math.atan2(vz, vx);
         const u = (theta + Math.PI) / TWO_PI;
-        const n1 = fastPeriodicNoise(u, hFrac * 0.8, 8, 8, PERM_A, (seedVal + sOff) & 255);
-        const n2 = fastPeriodicNoise(u, hFrac * 1.6, 16, 16, PERM_B, (seedVal * 3 + sOff) & 255);
-        const ridge = 1.0 - Math.abs(2.0 * n1 - 1.0);
-        const stepTerrace = Math.sin(hFrac * (sharpCrystal ? 11.0 : 14.0)) * (sharpCrystal ? 0.09 : 0.06);
-        const disp = sharpCrystal
-          ? 0.56 + (Math.pow(ridge, 1.3) * 0.78 + n2 * 0.34 + stepTerrace) * (cragAmt * 1.15)
-          : 0.58 + (Math.pow(ridge, 1.35) * 0.72 + n2 * 0.28 + stepTerrace) * cragAmt * (1.2 - hFrac * 0.4);
-        // Asymmetric sheer sea-cliff lean + organic crag shoulders (never smooth straight cones!)
-        vx = vx * disp + hFrac * w * (((seedVal + sOff) % 5) - 2) * 0.16 + Math.sin(hFrac * 7.5 + sOff) * w * 0.10;
-        vz *= disp * (0.68 + ((seedVal + sOff) % 4) * 0.11);
-        if (hFrac > 0.68) {
-          vy += (ridge - 0.48) * h * 0.26 * ((Math.round(u * 5) % 2 === 0) ? 1.0 : -0.35);
+        const n1 = fastPeriodicNoise(u, hFrac, 8, 8, PERM_A, (seedVal + sOff) & 255);
+        const facet = 0.72 + (1.0 - Math.abs(2.0 * n1 - 1.0)) * 0.52;
+        vx *= facet * 1.15;
+        vz *= facet * 0.82;
+        if (tabular && hFrac > 0.92) {
+          vy = h - 1.4 + (n1 - 0.5) * 0.8;
         }
         p.setXYZ(i, vx, vy, vz);
       }
       geo.computeVertexNormals();
-
       const a = ang + offAng;
       const r = radius + radOff;
-      const m = new THREE.Matrix4();
-      const rotY = new THREE.Matrix4().makeRotationY(a + ((seedVal + sOff) % 7) * 0.4);
-      if (sharpCrystal) {
-        rotY.multiply(new THREE.Matrix4().makeRotationZ((((seedVal + sOff) % 5) - 2) * 0.12));
-      }
-      m.makeTranslation(Math.sin(a) * r, 0, Math.cos(a) * r).multiply(rotY);
-      this._pushTransformed(geo, m, layer, h, 0, snowMask);
+      const m = new THREE.Matrix4()
+        .makeTranslation(Math.sin(a) * r, 0, Math.cos(a) * r)
+        .multiply(new THREE.Matrix4().makeRotationY(a + sOff * 0.4));
+      this._pushGeo(geo, m, layer, h, 2, 1.0, '#12a8c8', '#effbff');
     };
 
-    // Main crag + asymmetric flanking sub-peaks for organic jagged island silhouettes (never single cones!)
-    buildSpire(0, 0, 1.0, 1.0, 0);
-    buildSpire(0.032, 1.8, 0.72, 0.66, 37);
-    if (spireCount >= 3) {
-      buildSpire(-0.028, -1.2, 0.62, 0.52, 83);
-    }
+    buildBerg(0, 0, 1.0, 1.0, 0);
+    buildBerg(0.046, 2.2, 0.68, 0.64, 41);
   }
 
-  // Sculpted 3D Natural Stone Sea-Arch bridging out of the waves
-  addSeaArch(ang, radius, spanW, archH, seedVal, layer, snowMask = 0) {
-    const torus = new THREE.TorusGeometry(spanW * 0.5, spanW * 0.17, 5, 10, Math.PI);
-    const p = torus.attributes.position;
-    for (let i = 0; i < p.count; i++) {
-      let vx = p.getX(i);
-      let vy = p.getY(i) * (archH / (spanW * 0.5));
-      let vz = p.getZ(i) * 1.35;
-      const n = fastPeriodicNoise((vx + spanW) / (spanW * 2), (vy + 2) / 12, 8, 8, PERM_A, seedVal & 255);
-      vx += (n - 0.5) * spanW * 0.14;
-      vy += (n - 0.45) * archH * 0.16 - 0.8;
-      p.setXYZ(i, vx, vy, vz);
-    }
-    torus.computeVertexNormals();
-
-    const m = new THREE.Matrix4();
-    // Orient arch broadside tangential/angled so its opening is clearly visible!
-    m.makeTranslation(Math.sin(ang) * radius, 0, Math.cos(ang) * radius);
-    m.multiply(new THREE.Matrix4().makeRotationY(ang + 0.42));
-    this._pushTransformed(torus, m, layer, archH, 0, snowMask);
-  }
-
-  // Distant Silhouetted Sister Watchtower / Smelter Monolith + Crown Beacon Pinpoint
-  addSisterWatchtower(ang, radius, baseR, towerH, beaconKind, layer) {
-    // Rocky island plinth
-    this.addCraggyPeak(ang, radius, baseR * 2.5, towerH * 0.24, 6, 2, 0.55, Math.round(ang * 97), layer, 0, false, 2);
-
-    const m = new THREE.Matrix4().makeTranslation(Math.sin(ang) * radius, 0, Math.cos(ang) * radius);
-
-    // Tapered cylindrical masonry shaft
-    const shaft = new THREE.CylinderGeometry(baseR * 0.78, baseR, towerH, 8, 1, true);
-    shaft.translate(0, towerH * 0.5 - 0.5, 0);
-    this._pushTransformed(shaft, m, layer, towerH + 2.0, 0, 0);
-
-    // Stepped crown cornice / lantern gallery
-    const crown = new THREE.CylinderGeometry(baseR * 0.96, baseR * 0.82, towerH * 0.08, 8, 1, false);
-    crown.translate(0, towerH - 0.35, 0);
-    this._pushTransformed(crown, m, layer, towerH + 2.0, 0, 0);
-
-    // Tiny glowing beacon lantern orb at crown summit
-    const beacon = new THREE.OctahedronGeometry(baseR * 0.30, 0);
-    beacon.translate(0, towerH + 0.35, 0);
-    this._pushTransformed(beacon, m, layer, towerH + 2.0, beaconKind, 0);
-  }
-
-  // Glowing Lava / Arcane Fissure Vein on Volcanic or Crystal Spires
-  addGlowingVent(ang, radius, yHeight, scaleW, scaleH, layer) {
-    const vent = new THREE.OctahedronGeometry(1, 0);
-    vent.scale(scaleW, scaleH, scaleW * 0.6);
-    vent.translate(0, yHeight, 0);
+  addDistantSiphonRig(ang, radius, rigH, layer) {
+    const cx = Math.sin(ang) * radius;
+    const cz = Math.cos(ang) * radius;
     const m = new THREE.Matrix4()
-      .makeTranslation(Math.sin(ang) * radius, 0, Math.cos(ang) * radius)
+      .makeTranslation(cx, 0, cz)
       .multiply(new THREE.Matrix4().makeRotationY(ang));
-    this._pushTransformed(vent, m, layer, yHeight + 4.0, 3, 0);
+
+    // Sleek Dark-Basalt Hydro-Siphon Spire Silhouette with Glowing Cyan Siphon Conduit & Crown Horns!
+    const baseSpan = rigH * 0.20;
+    const topSpan = rigH * 0.095;
+
+    // 4 Flared Armored Basalt Buttress Pylons converging upward + cross-brace collar rings
+    for (let k = 0; k < 4; k++) {
+      const ka = (k / 4) * TWO_PI + Math.PI * 0.25;
+      const bx = Math.cos(ka) * baseSpan;
+      const bz = Math.sin(ka) * baseSpan;
+      const tx = Math.cos(ka) * topSpan;
+      const tz = Math.sin(ka) * topSpan;
+      const legH = rigH * 0.66;
+      const pylon = new THREE.CylinderGeometry(rigH * 0.022, rigH * 0.052, legH, 6, 1, false);
+      const mp = m
+        .clone()
+        .multiply(new THREE.Matrix4().makeTranslation((bx + tx) * 0.5, legH * 0.5 - 0.8, (bz + tz) * 0.5))
+        .multiply(new THREE.Matrix4().makeRotationY(-ka))
+        .multiply(new THREE.Matrix4().makeRotationZ(Math.atan2(baseSpan - topSpan, legH)));
+      this._pushGeo(pylon, mp, layer, rigH + 2.0, 3, 0.0, '#0f1722', '#26384d');
+    }
+
+    // Horizontal dark-basalt structural brace rings at lower & mid elevations
+    for (const frac of [0.24, 0.46]) {
+      const ringR = baseSpan + (topSpan - baseSpan) * (frac / 0.66);
+      const brace = new THREE.CylinderGeometry(ringR * 1.08, ringR * 1.14, rigH * 0.038, 8, 1, false);
+      brace.translate(0, rigH * frac, 0);
+      this._pushGeo(brace, m, layer, rigH + 2.0, 3, 0.0, '#131d2b', '#2f455e');
+    }
+
+    // Glowing Vertical Cyan-Aquamarine Plasma Siphon Core Column (`matKind = 4`) plunging into the ocean!
+    const coreColumn = new THREE.CylinderGeometry(rigH * 0.030, rigH * 0.044, rigH * 0.88, 8, 1, false);
+    coreColumn.translate(0, rigH * 0.42 - 0.6, 0);
+    this._pushGeo(coreColumn, m, layer, rigH + 2.0, 4, 2.2, '#00e5ff', '#38f9d7');
+
+    // Tiered Octagonal Dark-Basalt Extractor Chamber & Turbine Shroud (replaces flat grey box!)
+    const lowerChamber = new THREE.CylinderGeometry(rigH * 0.14, rigH * 0.10, rigH * 0.12, 8, 1, false);
+    lowerChamber.translate(0, rigH * 0.60, 0);
+    this._pushGeo(lowerChamber, m, layer, rigH + 2.0, 3, 0.0, '#111b29', '#2b4059');
+
+    const glowCollar = new THREE.CylinderGeometry(rigH * 0.148, rigH * 0.148, rigH * 0.026, 8, 1, false);
+    glowCollar.translate(0, rigH * 0.67, 0);
+    this._pushGeo(glowCollar, m, layer, rigH + 2.0, 4, 2.2, '#00f5d4', '#72efdd');
+
+    const upperSpire = new THREE.CylinderGeometry(rigH * 0.055, rigH * 0.135, rigH * 0.22, 8, 1, false);
+    upperSpire.translate(0, rigH * 0.79, 0);
+    this._pushGeo(upperSpire, m, layer, rigH + 2.0, 3, 0.0, '#142030', '#334d69');
+
+    // Twin Curved Dark-Basalt Crown Forks framing the Apex Siphon Beacon!
+    for (const side of [-1, 1]) {
+      const horn = new THREE.ConeGeometry(rigH * 0.022, rigH * 0.20, 5, 1, false);
+      horn.rotateZ(-side * 0.16);
+      horn.translate(side * rigH * 0.055, rigH * 0.96, 0);
+      this._pushGeo(horn, m, layer, rigH + 2.0, 3, 0.0, '#0d1520', '#293e57');
+    }
+
+    // Pulsing Cyan-Emerald Siphon Crown Beacon (`matKind = 4`)
+    const beacon = new THREE.SphereGeometry(rigH * 0.028, 8, 6);
+    beacon.translate(0, rigH * 1.00, 0);
+    this._pushGeo(beacon, m, layer, rigH + 2.0, 4, 2.0, '#00f5d4', '#a5f3fc');
   }
 
   build() {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(this.norm, 3));
-    geo.setAttribute('aVista', new THREE.Float32BufferAttribute(this.attr, 4));
+    geo.setAttribute('aVista', new THREE.Float32BufferAttribute(this.vista, 4));
+    geo.setAttribute('aColor', new THREE.Float32BufferAttribute(this.col, 3));
     geo.setIndex(this.idx);
     return geo;
   }
 }
 
-function buildVistaGeometry(kind) {
-  const b = new HorizonGeometryBuilder();
+function buildBiomeVistaGeometry(kind) {
+  const b = new WatershedGeometryBuilder();
 
-  // Key azimuths around -Z (angle = PI in sin(a),cos(a)):
-  // At camCol = 0, camera looks toward -Z (`ang = PI`).
-  // Left flank corridor on 430x932 portrait & 16:9 is `ang = PI + 0.16 .. PI + 0.52`,
-  // Right flank corridor is `ang = PI - 0.16 .. PI - 0.52`, plus full 360-deg coverage!
-  if (kind === 'coastal') {
-    // Distant craggy sea-stacks, broken stone sea-arches & silhouetted Sister Watchtowers (r = 68..88m)
-    b.addSeaArch(Math.PI + 0.21, 70, 7.2, 5.4, 17, 0.25, 0);
-    b.addCraggyPeak(Math.PI + 0.255, 83, 5.6, 8.8, 7, 3, 0.80, 23, 0.72, 0, false, 3);
-    b.addSisterWatchtower(Math.PI - 0.20, 76, 1.15, 11.2, 1, 0.45);
-    b.addCraggyPeak(Math.PI - 0.255, 84, 5.4, 8.6, 7, 3, 0.78, 29, 0.75, 0, false, 3);
-    b.addCraggyPeak(Math.PI + 0.34, 78, 5.2, 8.2, 7, 3, 0.78, 31, 0.5, 0, false, 3);
-    b.addCraggyPeak(Math.PI - 0.32, 68, 4.2, 6.4, 7, 3, 0.82, 47, 0.2, 0, false, 3);
-    b.addSisterWatchtower(Math.PI + 0.45, 84, 1.25, 12.6, 2, 0.75);
-    b.addSeaArch(Math.PI - 0.43, 80, 8.2, 6.0, 63, 0.6, 0);
+  // Note on Camera Framing:
+  // At camCol = 0, camera sits around (0, y, +18) looking toward -Z (`ang = Math.PI`).
+  // Flanking hero vistas at `ang = Math.PI ± 0.18 .. ± 1.05` (`r = 34..88m`, heights `14..36m`)
+  // frame the spire majestically on BOTH 412x915 portrait & 16:9/20:9 landscape, while full
+  // 360-deg coverage (`r >= 34m` so camera at `r ~ 18m` never clips!) wraps the entire world!
+  if (kind === 'canyon_river') {
+    // Enclosing Layered Red-Rock Sandstone Canyon Walls & Mesas flanking a sunlit river bend!
+    // Left canyon wall (`ang = PI + 0.19 .. PI + 0.95`) & Right canyon wall (`ang = PI - 0.19 .. PI - 0.95`)
+    // leaving a golden sunlit river-gorge gap right around `ang = PI`!
+    b.addSandstoneMesa(Math.PI + 0.24, 42, 7.2, 18.5, 13, 0.20, true);
+    b.addSandstoneMesa(Math.PI - 0.24, 44, 7.4, 19.2, 29, 0.22, true);
+    b.addSandstoneMesa(Math.PI + 0.44, 54, 9.5, 24.5, 47, 0.45, true);
+    b.addSandstoneMesa(Math.PI - 0.45, 56, 9.8, 25.2, 61, 0.48, true);
+    b.addSandstoneMesa(Math.PI + 0.68, 48, 8.4, 21.0, 83, 0.35, true);
+    b.addSandstoneMesa(Math.PI - 0.68, 50, 8.6, 22.0, 97, 0.38, true);
+    // Distant towering golden-haze canyon rim mesas behind the river bend
+    b.addSandstoneMesa(Math.PI + 0.11, 82, 11.0, 27.5, 113, 0.85, false);
+    b.addSandstoneMesa(Math.PI - 0.12, 85, 11.5, 29.0, 131, 0.88, false);
+
+    // Full 360-deg winding canyon walls & redwood benches
+    for (let i = 0; i < 16; i++) {
+      const ang = (i / 16) * TWO_PI + 0.15;
+      if (Math.abs(ang - Math.PI) < 0.82) continue;
+      if (Math.abs(ang) < 0.22 || Math.abs(ang - TWO_PI) < 0.22) {
+        // Distant river outlet gorge behind camera (`r = 74m`)
+        b.addSandstoneMesa(ang, 74, 10.2, 23.0, i * 19 + 7, 0.72, true);
+        continue;
+      }
+      const isFar = i % 2 === 1;
+      const rad = isFar ? 66 + (i % 3) * 6 : 46 + (i % 3) * 5;
+      const h = isFar ? 22.0 + (i % 4) * 3.2 : 16.5 + (i % 3) * 2.8;
+      b.addSandstoneMesa(ang, rad, 7.8 + (i % 3) * 1.6, h, i * 23 + 5, isFar ? 0.68 : 0.30, true);
+    }
+  } else if (kind === 'alpine_lake') {
+    // Majestic Snow-Capped Granite Peaks, Pine-Forested Rocky Islands & Stone Aqueduct Bridges!
+    b.addAlpineGranitePeak(Math.PI + 0.22, 56, 8.2, 26.5, 17, 0.32);
+    b.addAlpineGranitePeak(Math.PI - 0.21, 58, 8.6, 28.0, 31, 0.35);
+    b.addAlpineGranitePeak(Math.PI + 0.42, 74, 11.5, 34.0, 53, 0.68);
+    b.addAlpineGranitePeak(Math.PI - 0.40, 76, 12.0, 35.5, 71, 0.72);
+    b.addAlpineGranitePeak(Math.PI + 0.04, 88, 13.5, 38.0, 89, 0.88);
+
+    // Foregrounds/Midground Pine-Forested Rocky Lake Islands (`r = 35..44m`, exposed granite shore cliffs!)
+    const islandAngles = [Math.PI + 0.32, Math.PI - 0.31, Math.PI + 0.85, Math.PI - 0.88, 0.75, TWO_PI - 0.75];
+    for (let k = 0; k < islandAngles.length; k++) {
+      const ia = islandAngles[k];
+      const ir = 35 + (k % 2) * 7;
+      b.addAlpineGranitePeak(ia, ir, 4.6, 5.2, 101 + k * 13, 0.12, false);
+      b.addRedwoodPineCluster(ia, ir, 2.2, 6, 3.2, 3.2, 5.4, 201 + k * 17, 0.12, true);
+    }
+
+    // Distant Multi-Arch Stone Aqueduct Bridges spanning mountain spurs!
+    b.addStoneAqueductBridge(Math.PI - 0.27, 48, 16.5, 9.2, 5, 0.28);
+    b.addStoneAqueductBridge(Math.PI + 0.58, 58, 19.0, 10.5, 6, 0.45);
+
+    for (let i = 0; i < 18; i++) {
+      const ang = (i / 18) * TWO_PI + 0.08;
+      if (Math.abs(ang - Math.PI) < 0.52) continue;
+      const isFar = i % 2 === 0;
+      const rad = isFar ? 78 + (i % 3) * 5 : 58 + (i % 3) * 5;
+      const h = isFar ? 25.0 + (i % 4) * 3.8 : 18.0 + (i % 3) * 3.2;
+      b.addAlpineGranitePeak(ang, rad, 8.5 + (i % 3) * 1.8, h, i * 29 + 11, isFar ? 0.76 : 0.38);
+    }
+  } else if (kind === 'mist_bayou') {
+    // Giant Arching Cypress & Mangrove Trees with Hanging Spanish Moss + Sunken Ancient Temple Ruins!
+    b.addGiantCypressTree(Math.PI + 0.21, 34, 17.5, 13, 0.18);
+    b.addGiantCypressTree(Math.PI - 0.22, 35, 18.2, 29, 0.20);
+    b.addSunkenTempleRuin(Math.PI + 0.33, 42, 9.8, 41, 0.28);
+    b.addSunkenTempleRuin(Math.PI - 0.34, 44, 10.4, 59, 0.30);
+    b.addGiantCypressTree(Math.PI + 0.48, 48, 21.0, 73, 0.42);
+    b.addGiantCypressTree(Math.PI - 0.49, 50, 20.5, 89, 0.45);
+    b.addGiantCypressTree(Math.PI + 0.08, 66, 23.5, 107, 0.72);
+    b.addGiantCypressTree(Math.PI - 0.10, 70, 24.0, 127, 0.76);
 
     for (let i = 0; i < 20; i++) {
-      const ang = (i / 20) * TWO_PI + 0.09;
-      if (Math.abs(ang - Math.PI) < 0.50) continue;
+      const ang = (i / 20) * TWO_PI + 0.11;
+      if (Math.abs(ang - Math.PI) < 0.56) continue;
       const isFar = i % 2 === 1;
-      const rad = isFar ? 82 + (i % 3) * 4 : 68 + (i % 4) * 3;
-      const h = isFar ? 7.2 + (i % 4) * 2.2 : 4.8 + (i % 3) * 2.0;
-      b.addCraggyPeak(ang, rad, 3.8 + (i % 3) * 1.4, h, 6, 3, 0.76, i * 19 + 7, isFar ? 0.8 : 0.3, 0, false, 2);
-      if (i % 6 === 2) {
-        b.addSisterWatchtower(ang + 0.11, 78, 1.18, 11.2 + (i % 3) * 1.6, (i % 2) + 1, 0.55);
-      } else if (i % 7 === 5) {
-        b.addSeaArch(ang + 0.08, 72, 7.2, 5.4, i * 29, 0.35, 0);
+      const rad = isFar ? 62 + (i % 3) * 6 : 38 + (i % 3) * 5;
+      const h = isFar ? 19.5 + (i % 3) * 2.5 : 15.5 + (i % 3) * 2.2;
+      b.addGiantCypressTree(ang, rad, h, i * 31 + 17, isFar ? 0.68 : 0.26);
+      if (i % 4 === 0) {
+        b.addSunkenTempleRuin(ang + 0.12, 44 + (i % 2) * 8, 9.2, i * 19 + 3, 0.34);
       }
     }
-  } else if (kind === 'volcanic') {
-    b.addCraggyPeak(Math.PI + 0.23, 72, 6.4, 10.2, 7, 3, 0.68, 13, 0.3, 0, false, 3);
-    b.addGlowingVent(Math.PI + 0.23, 70.2, 7.8, 0.95, 0.48, 0.3);
-    b.addSisterWatchtower(Math.PI - 0.20, 72, 1.32, 12.4, 1, 0.35);
-    b.addSisterWatchtower(Math.PI - 0.34, 84, 1.15, 10.6, 2, 0.7);
-    b.addCraggyPeak(Math.PI - 0.28, 78, 5.8, 8.2, 7, 3, 0.72, 41, 0.55, 0, false, 3);
-    b.addSisterWatchtower(Math.PI + 0.42, 82, 1.3, 13.0, 1, 0.65);
+  } else if (kind === 'coral_sea') {
+    // Cream-Limestone Sea-Arches & White-Sand Palm Atolls!
+    b.addTropicalAtollAndArch(Math.PI + 0.23, 40, 8.2, 11.8, true, 4, 19, 0.22);
+    b.addTropicalAtollAndArch(Math.PI - 0.24, 42, 7.6, 10.5, false, 5, 37, 0.24);
+    b.addTropicalAtollAndArch(Math.PI - 0.42, 54, 9.6, 14.2, true, 4, 53, 0.45);
+    b.addTropicalAtollAndArch(Math.PI + 0.46, 56, 8.8, 12.6, false, 5, 71, 0.48);
+    b.addTropicalAtollAndArch(Math.PI + 0.06, 76, 11.2, 15.8, true, 3, 97, 0.78);
 
-    for (let i = 0; i < 18; i++) {
-      const ang = (i / 18) * TWO_PI + 0.12;
-      if (Math.abs(ang - Math.PI) < 0.46) continue;
+    for (let i = 0; i < 16; i++) {
+      const ang = (i / 16) * TWO_PI + 0.14;
+      if (Math.abs(ang - Math.PI) < 0.54) continue;
       const isFar = i % 2 === 0;
-      const rad = isFar ? 83 + (i % 3) * 4 : 69 + (i % 3) * 3;
-      const h = 6.5 + (i % 4) * 2.6;
-      b.addCraggyPeak(ang, rad, 4.8 + (i % 3) * 1.5, h, 6, 3, 0.68, i * 23 + 5, isFar ? 0.8 : 0.3, 0, false, 2);
-      if (i % 5 === 0) {
-        b.addGlowingVent(ang, rad - 1.5, h * 0.70, 0.85, 0.42, isFar ? 0.8 : 0.3);
-      }
-      if (i % 6 === 3) {
-        b.addSisterWatchtower(ang + 0.1, 76, 1.25, 12.0, (i % 2) + 1, 0.5);
-      }
-    }
-  } else if (kind === 'glacial') {
-    b.addCraggyPeak(Math.PI + 0.21, 68, 4.8, 11.0, 7, 3, 0.85, 11, 0.25, 1.0, false, 3);
-    b.addSeaArch(Math.PI - 0.21, 68, 7.2, 5.8, 29, 0.2, 1.0);
-    b.addCraggyPeak(Math.PI - 0.32, 80, 5.8, 12.8, 7, 3, 0.82, 53, 0.65, 1.0, false, 3);
-    b.addSisterWatchtower(Math.PI + 0.35, 80, 1.18, 11.6, 1, 0.6);
-    b.addCraggyPeak(Math.PI + 0.45, 74, 4.8, 8.8, 7, 3, 0.82, 71, 0.4, 1.0, false, 3);
-
-    for (let i = 0; i < 18; i++) {
-      const ang = (i / 18) * TWO_PI + 0.07;
-      if (Math.abs(ang - Math.PI) < 0.48) continue;
-      const isFar = i % 2 === 1;
-      const rad = isFar ? 82 + (i % 3) * 4 : 67 + (i % 4) * 3;
-      const h = isFar ? 8.8 + (i % 4) * 2.6 : 5.8 + (i % 3) * 2.2;
-      b.addCraggyPeak(ang, rad, 4.2 + (i % 3) * 1.3, h, 6, 3, 0.82, i * 17 + 3, isFar ? 0.8 : 0.25, 1.0, false, 2);
-    }
-  } else if (kind === 'alien_orig') {
-    // Original '87 HD Horizon: Chiseled alien mountain peaks & crystal spires framed inside BOTH
-    // the narrow 18-deg telephoto portrait sky corridors (ang = PI +- 0.095..0.16) AND full 360-deg!
-    b.addCraggyPeak(Math.PI + 0.096, 68, 1.55, 7.4, 6, 3, 0.56, 17, 0.20, 0, true, 3);
-    b.addCraggyPeak(Math.PI + 0.124, 80, 2.20, 10.6, 6, 3, 0.62, 43, 0.68, 0, true, 3);
-    b.addSisterWatchtower(Math.PI - 0.104, 78, 0.68, 8.8, 2, 0.55);
-    b.addCraggyPeak(Math.PI - 0.094, 67, 1.45, 6.2, 6, 3, 0.58, 29, 0.18, 0, true, 3);
-    b.addCraggyPeak(Math.PI - 0.128, 82, 2.35, 9.8, 6, 3, 0.60, 71, 0.74, 0, true, 3);
-
-    for (let i = 0; i < 24; i++) {
-      const ang = (i / 24) * TWO_PI + 0.15;
-      if (Math.abs(ang - Math.PI) < 0.155) continue;
-      const isFar = i % 2 === 1;
-      const rad = isFar ? 80 + (i % 3) * 4 : 68 + (i % 3) * 3;
-      const h = isFar ? 8.0 + (i % 4) * 2.4 : 5.4 + (i % 3) * 2.0;
-      b.addCraggyPeak(ang, rad, 2.2 + (i % 3) * 0.9, h, 6, 3, 0.58, i * 23 + 11, isFar ? 0.75 : 0.25, 0, true, 2);
-      if (i % 5 === 2) {
-        b.addSisterWatchtower(ang + 0.07, 76, 0.95, 9.6, (i % 2) + 1, 0.50);
-      }
+      const rad = isFar ? 68 + (i % 3) * 6 : 44 + (i % 3) * 5;
+      b.addTropicalAtollAndArch(
+        ang,
+        rad,
+        7.5 + (i % 3) * 1.4,
+        10.5 + (i % 3) * 2.2,
+        i % 3 === 0,
+        3 + (i % 3),
+        i * 23 + 11,
+        isFar ? 0.72 : 0.30
+      );
     }
   } else {
-    b.addCraggyPeak(Math.PI + 0.20, 69, 2.5, 12.2, 6, 3, 0.58, 19, 0.25, 0, true, 3);
-    b.addGlowingVent(Math.PI + 0.20, 67.6, 6.2, 0.42, 2.0, 0.25);
-    b.addSisterWatchtower(Math.PI - 0.20, 74, 1.18, 12.6, 1, 0.35);
-    b.addCraggyPeak(Math.PI - 0.31, 68, 2.3, 10.4, 6, 3, 0.62, 37, 0.25, 0, true, 3);
-    b.addCraggyPeak(Math.PI + 0.35, 82, 4.0, 13.5, 6, 3, 0.62, 61, 0.7, 0, true, 3);
+    // 'storm_ocean': Towering Translucent Turquoise Glacial Icebergs & Distant Offshore Siphon Rigs!
+    b.addGlacialIceberg(Math.PI + 0.22, 42, 6.8, 18.5, true, 17, 0.22);
+    b.addGlacialIceberg(Math.PI - 0.23, 44, 6.4, 21.0, false, 31, 0.25);
+    b.addDistantSiphonRig(Math.PI - 0.38, 62, 18.5, 0.52);
+    b.addGlacialIceberg(Math.PI + 0.44, 58, 9.2, 25.0, true, 59, 0.48);
+    b.addDistantSiphonRig(Math.PI + 0.58, 68, 19.5, 0.62);
+    b.addGlacialIceberg(Math.PI - 0.05, 80, 11.5, 28.5, false, 83, 0.80);
 
     for (let i = 0; i < 18; i++) {
-      const ang = (i / 18) * TWO_PI + 0.11;
-      if (Math.abs(ang - Math.PI) < 0.42) continue;
-      const isFar = i % 2 === 0;
-      const rad = isFar ? 82 + (i % 3) * 4 : 68 + (i % 3) * 3;
-      const h = 7.4 + (i % 4) * 2.8;
-      b.addCraggyPeak(ang, rad, 2.6 + (i % 3) * 1.0, h, 6, 3, 0.58, i * 31 + 9, isFar ? 0.75 : 0.3, 0, true, 2);
-      if (i % 3 === 0) {
-        b.addSisterWatchtower(ang + 0.12, 78, 1.18, 12.4, (i % 2) + 1, 0.55);
+      const ang = (i / 18) * TWO_PI + 0.09;
+      if (Math.abs(ang - Math.PI) < 0.50) continue;
+      const isFar = i % 2 === 1;
+      const rad = isFar ? 74 + (i % 3) * 6 : 46 + (i % 3) * 5;
+      const h = isFar ? 21.0 + (i % 4) * 3.0 : 15.0 + (i % 3) * 2.8;
+      b.addGlacialIceberg(ang, rad, 6.5 + (i % 3) * 1.6, h, i % 2 === 0, i * 29 + 7, isFar ? 0.75 : 0.30);
+      if (i % 6 === 2) {
+        b.addDistantSiphonRig(ang + 0.14, 66, 17.8, 0.58);
       }
     }
   }
@@ -876,33 +1583,47 @@ function buildVistaGeometry(kind) {
   return b.build();
 }
 
-function createArchipelagoVistaMaterial(cloudPanoTex) {
+function createWatershedVistaMaterial(cloudPanoTex) {
   return new THREE.ShaderMaterial({
     fog: false,
     uniforms: {
       uPanoTex: { value: cloudPanoTex },
       uTime: { value: 0 },
-      uWaterY: { value: -0.55 },
-      uOrig: { value: 0 },
-      uNearColor: { value: new THREE.Color('#060e1b') },
-      uFarColor: { value: new THREE.Color('#12263d') },
-      uMistColor: { value: new THREE.Color('#1f3b58') },
-      uRimColor: { value: new THREE.Color('#dceeff') },
-      uBeaconA: { value: new THREE.Color('#ffaa33') },
-      uBeaconB: { value: new THREE.Color('#00f5c8') },
-      uVentColor: { value: new THREE.Color('#ff5500') },
-      uMoonDir: { value: new THREE.Vector3(0.42, 0.26, -0.87).normalize() },
+      uWaterY: { value: -0.82 },
+      uSunDir: { value: new THREE.Vector3(0.42, 0.36, -0.83).normalize() },
+      uSunColor: { value: new THREE.Color('#fff2cc') },
+      uSkyFillColor: { value: new THREE.Color('#4ea8e8') },
+      uMistColor: { value: new THREE.Color('#fae0aa') },
+      uAlpenglowColor: { value: new THREE.Color('#ffd28a') },
+      uBeaconA: { value: new THREE.Color('#ffb02e') },
+      uBeaconB: { value: new THREE.Color('#2ef5c8') },
       uBlackout: { value: 0.0 },
       uLightning: { value: 0.0 },
+      uPurification: { value: 0.0 },
     },
     vertexShader: /* glsl */ `
-      attribute vec4 aVista; // x: layer, y: heightRatio, z: emissiveKind, w: snowMask
+      attribute vec4 aVista; // x: layer, y: hRatio, z: matKind, w: detailParam
+      attribute vec3 aColor;
+      uniform float uTime;
+
       varying vec3 vWorldPos;
       varying vec3 vNormalW;
       varying vec4 vVista;
+      varying vec3 vVertCol;
+
       void main() {
         vVista = aVista;
-        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vVertCol = aColor;
+        vec3 p = position;
+
+        // Gentle organic wind sway on foliage, palm fronds & draped Spanish moss (matKind == 1)
+        if (abs(aVista.z - 1.0) < 0.25 && aVista.w > 0.1) {
+          float swayAmp = aVista.w * 0.28;
+          p.x += sin(uTime * 1.45 + position.x * 0.35 + position.z * 0.35) * swayAmp;
+          p.z += cos(uTime * 1.15 + position.y * 0.45) * swayAmp * 0.65;
+        }
+
+        vec4 wp = modelMatrix * vec4(p, 1.0);
         vWorldPos = wp.xyz;
         vNormalW = normalize(mat3(modelMatrix) * normal);
         gl_Position = projectionMatrix * viewMatrix * wp;
@@ -912,85 +1633,160 @@ function createArchipelagoVistaMaterial(cloudPanoTex) {
       uniform sampler2D uPanoTex;
       uniform float uTime;
       uniform float uWaterY;
-      uniform float uOrig;
-      uniform vec3 uNearColor;
-      uniform vec3 uFarColor;
+      uniform vec3 uSunDir;
+      uniform vec3 uSunColor;
+      uniform vec3 uSkyFillColor;
       uniform vec3 uMistColor;
-      uniform vec3 uRimColor;
+      uniform vec3 uAlpenglowColor;
       uniform vec3 uBeaconA;
       uniform vec3 uBeaconB;
-      uniform vec3 uVentColor;
-      uniform vec3 uMoonDir;
       uniform float uBlackout;
       uniform float uLightning;
+      uniform float uPurification;
 
       varying vec3 vWorldPos;
       varying vec3 vNormalW;
       varying vec4 vVista;
+      varying vec3 vVertCol;
+
+      float hash31(vec3 p) {
+        p = fract(p * vec3(443.897, 441.423, 437.195));
+        p += dot(p, p.yzx + 19.19);
+        return fract((p.x + p.y) * p.z);
+      }
+
+      float rockGrain3D(vec3 p) {
+        vec3 i = floor(p);
+        vec3 f = fract(p);
+        vec3 u = f * f * (3.0 - 2.0 * f);
+        float n000 = hash31(i);
+        float n100 = hash31(i + vec3(1.0, 0.0, 0.0));
+        float n010 = hash31(i + vec3(0.0, 1.0, 0.0));
+        float n110 = hash31(i + vec3(1.0, 1.0, 0.0));
+        float n001 = hash31(i + vec3(0.0, 0.0, 1.0));
+        float n101 = hash31(i + vec3(1.0, 0.0, 1.0));
+        float n011 = hash31(i + vec3(0.0, 1.0, 1.0));
+        float n111 = hash31(i + vec3(1.0, 1.0, 1.0));
+        return mix(
+          mix(mix(n000, n100, u.x), mix(n010, n110, u.x), u.y),
+          mix(mix(n001, n101, u.x), mix(n011, n111, u.x), u.y),
+          u.z
+        );
+      }
 
       void main() {
         float layer = vVista.x;
         float hRatio = vVista.y;
-        float emKind = vVista.z;
-        float snowMask = vVista.w;
+        float matKind = vVista.z;
+        float detailParam = vVista.w;
 
-        if (emKind > 0.5) {
-          float pulse = 0.68 + 0.32 * sin(uTime * 3.1 + vWorldPos.x * 0.4 + vWorldPos.z * 0.4);
-          vec3 emCol = emKind < 1.5 ? uBeaconA : (emKind < 2.5 ? uBeaconB : uVentColor);
-          vec3 finalEm = emCol * (emKind > 2.5 ? 1.25 : 1.75) * pulse;
-          gl_FragColor = vec4(finalEm, 1.0);
+        // Emissive Shrine Braziers, Lotus Hearts & Siphon Plasma Cores/Beacons (matKind == 4)
+        // Saturated emissive values (< 1.25) so cyan & warm-amber glow richly without white-clipping!
+        if (matKind > 3.5) {
+          float pulse = 0.78 + 0.22 * sin(uTime * 3.0 + vWorldPos.x * 0.3 + vWorldPos.z * 0.3);
+          vec3 emCol = detailParam > 1.5
+            ? mix(vec3(0.0, 0.90, 0.98), vec3(0.18, 0.98, 0.78), 0.5 + 0.5 * sin(uTime * 2.4 + vWorldPos.y * 0.45))
+            : vVertCol;
+          gl_FragColor = vec4(emCol * 1.15 * pulse, 1.0);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
           return;
         }
 
-        if (uOrig > 0.5) {
-          float cliffAzO = atan(vWorldPos.x, vWorldPos.z) * 0.159154943;
-          vec4 oDet = texture2D(uPanoTex, vec2(cliffAzO * 14.0, clamp((vWorldPos.y - uWaterY) * 0.08, 0.02, 0.98)));
-          vec3 origBase = mix(vec3(0.006, 0.014, 0.044), vec3(0.018, 0.040, 0.105), layer) * (0.78 + 0.44 * oDet.r);
-          vec3 viewDirO = normalize(cameraPosition - vWorldPos);
-          float fresO = pow(1.0 - max(0.0, dot(vNormalW, viewDirO)), 2.2);
-          float origRim = (pow(max(0.0, vNormalW.y * 0.65 + 0.35), 2.0) * 0.65 + fresO * 0.75) * smoothstep(0.08, 0.78, hRatio);
-          vec3 origCol = origBase + (uBeaconB * 0.38 + vec3(0.08, 0.16, 0.42)) * origRim * (0.68 - layer * 0.22);
-          float hSeaO = max(0.0, vWorldPos.y - uWaterY);
-          origCol = mix(origCol, vec3(0.032, 0.048, 0.125), exp(-hSeaO * 0.38) * 0.52);
-          gl_FragColor = vec4(origCol, 1.0);
-          #include <tonemapping_fragment>
-          #include <colorspace_fragment>
-          return;
-        }
-
-        float darkScale = mix(1.0, 0.26, clamp(uBlackout, 0.0, 1.0));
-        // Procedural basalt cliff striations & craggy micro-relief sampled from 1024x512 uPanoTex
+        float darkScale = mix(1.0, 0.34, clamp(uBlackout, 0.0, 1.0));
+        float hAboveWater = max(0.0, vWorldPos.y - uWaterY);
         float cliffAz = atan(vWorldPos.x, vWorldPos.z) * 0.159154943;
-        vec4 rockDetail = texture2D(uPanoTex, vec2(cliffAz * 12.0, clamp((vWorldPos.y - uWaterY) * 0.06, 0.02, 0.98)));
-        vec3 n = normalize(vNormalW + vec3((rockDetail.g - 0.5) * 0.65, (rockDetail.b - 0.5) * 0.45, (rockDetail.r - 0.5) * 0.65));
-        vec3 mDir = normalize(uMoonDir);
+        vec4 tex = texture2D(uPanoTex, vec2(cliffAz * 14.0, clamp(hAboveWater * 0.038, 0.02, 0.98)));
 
-        // Moody dark basalt silhouette (never pale grey clay!)
-        vec3 baseRock = mix(uNearColor * 0.75, uFarColor * 0.68, layer) * (0.72 + 0.52 * rockDetail.r) * darkScale;
+        // High-frequency 3D world-space sandstone/limestone micro-grain for foreground boulders & cliffs!
+        float gCoarse = rockGrain3D(vWorldPos * 1.85);
+        float gFine = rockGrain3D(vWorldPos * 5.60);
+        float rockMicro = gCoarse * 0.62 + gFine * 0.38;
 
-        // Chiseled silver-blue moonlight grazing cliff arrises
-        float ndl = max(0.0, dot(n, mDir));
-        vec3 viewDir = normalize(cameraPosition - vWorldPos);
-        float fresnelRim = pow(1.0 - max(0.0, dot(n, viewDir)), 3.0);
-        float moonRim = (pow(ndl, 1.8) * 0.65 + fresnelRim * 0.45) * smoothstep(0.12, 0.72, hRatio);
-        vec3 col = baseRock + uRimColor * moonRim * (0.11 * (1.0 - layer * 0.45));
+        vec3 n = normalize(
+          vNormalW
+          + vec3((tex.g - 0.5) * 0.38 + (gFine - 0.5) * 0.28, (tex.b - 0.5) * 0.24 + (gCoarse - 0.5) * 0.20, (tex.r - 0.5) * 0.38 + (gFine - 0.5) * 0.28)
+        );
+        vec3 L = normalize(uSunDir);
+        vec3 V = normalize(cameraPosition - vWorldPos);
+        float ndl = max(0.0, dot(n, L));
+        float hemi = 0.5 + 0.5 * n.y;
 
-        if (snowMask > 0.1) {
-          float snowSlope = smoothstep(0.28, 0.72, n.y + hRatio * 0.38);
-          vec3 snowTint = mix(uMistColor, uRimColor, 0.55) * 0.42 * darkScale;
-          col = mix(col, snowTint, snowSlope * snowMask * 0.76);
+        vec3 alb = vVertCol * (0.76 + 0.28 * tex.r + 0.24 * rockMicro);
+        float wetSpec = 0.0;
+        vec3 warmBounce = vec3(0.0);
+        float aerialScale = 1.0;
+
+        if (matKind < 0.5) {
+          // Stratified Rock / Karst Limestone / Canyon Sandstone / Alpine Granite + Snowpack
+          if (detailParam > 0.45 && detailParam <= 0.68) {
+            // Sun-Bleached Striated Golden-Cream Karst Limestone + Dark Wet Tidal Base ('coral_sea')!
+            float karstBand = sin(hAboveWater * 2.45 + tex.a * 2.1 + gFine * 0.9);
+            float fineTravertine = sin(hAboveWater * 6.8 + tex.r * 2.6);
+            vec3 sunBleachedCream = vec3(1.16, 0.96, 0.62) * (0.90 + 0.18 * gFine);
+            vec3 warmOchreTravertine = vec3(0.82, 0.56, 0.28) * (0.86 + 0.22 * gFine);
+            alb = mix(warmOchreTravertine, sunBleachedCream, smoothstep(-0.48, 0.48, karstBand * 0.74 + fineTravertine * 0.26));
+
+            // Dark wet mossy-slate & barnacle tidal undercut base right along the lagoon waterline!
+            float tideLine = smoothstep(0.35, 2.75, hAboveWater + (tex.r - 0.5) * 0.55);
+            vec3 wetTidalRock = mix(vec3(0.09, 0.16, 0.14), vec3(0.22, 0.26, 0.18), gFine);
+            alb = mix(wetTidalRock, alb, tideLine);
+            wetSpec = (1.0 - tideLine) * 0.65;
+            // Warm sunlit coral-sand bounce light keeps sun-shaded limestone golden-cream instead of grey!
+            warmBounce = alb * vec3(0.46, 0.34, 0.16) * tideLine;
+            aerialScale = 0.42;
+          } else if (detailParam > 0.70 && detailParam < 0.92) {
+            // Vivid Zion/Sedona Red-Rock Sandstone strata + Glossy Dark Wet-Waterline Skirt on river boulders!
+            float strata = sin(hAboveWater * 2.25 + tex.a * 2.6 + gCoarse * 1.9);
+            float fineLayer = sin(hAboveWater * 6.8 + gFine * 3.2);
+            vec3 fierySandstone = alb * vec3(1.34, 0.90, 0.58);
+            vec3 deepTerracotta = alb * vec3(0.68, 0.34, 0.24);
+            alb = mix(deepTerracotta, fierySandstone, smoothstep(-0.48, 0.52, strata * 0.72 + fineLayer * 0.28));
+
+            // Dark glossy wet-sandstone skirt on river boulders & cliff bases!
+            float wetZone = 1.0 - smoothstep(0.08, 0.68, hAboveWater + (gFine - 0.5) * 0.14);
+            alb *= mix(1.0, 0.32, wetZone);
+            wetSpec = wetZone * 0.85;
+          } else if (detailParam >= 0.95) {
+            // True Two-Tone Chiseled Granite + High-Altitude Snowcaps ('alpine_lake')!
+            float snowDrivers = hRatio * 0.68 + max(0.0, n.y) * 0.52 + (tex.r - 0.5) * 0.26;
+            float snowMask = smoothstep(0.56, 0.78, snowDrivers) * smoothstep(0.24, 0.48, hRatio);
+            vec3 snowAlb = mix(vec3(0.74, 0.85, 0.96), vec3(0.96, 0.97, 1.0), ndl);
+            snowAlb += uAlpenglowColor * (0.34 * pow(ndl, 1.3) * smoothstep(0.45, 0.90, hRatio));
+            alb = mix(alb, snowAlb, snowMask);
+          }
+        } else if (matKind < 1.5) {
+          // Foliage / Redwood / Cypress / Draped Spanish Moss / Tropical Jungle: subsurface scattering + warm twilight rim!
+          float leafSss = pow(max(0.0, dot(-V, L) * 0.5 + 0.5), 2.0) * 0.46;
+          float rimFres = pow(1.0 - abs(dot(n, V)), 2.1) * (0.35 + 0.65 * max(0.0, n.y + 0.35));
+          alb *= (0.88 + 0.28 * gFine) * (1.0 + uPurification * 0.18);
+          alb += alb * uSunColor * leafSss + uSunColor * rimFres * (0.12 + detailParam * 0.16);
+        } else if (matKind < 2.5) {
+          // Translucent Turquoise Glacial Iceberg ('storm_ocean')
+          float fresIce = pow(1.0 - max(0.0, dot(n, V)), 2.5);
+          float iceSss = pow(max(0.0, dot(-V, L) * 0.5 + 0.5), 2.0);
+          float crevasse = smoothstep(0.62, 0.28, tex.r);
+          alb = mix(alb, vec3(0.04, 0.42, 0.64), crevasse * 0.55);
+          float snowCap = smoothstep(0.58, 0.88, n.y + hRatio * 0.30);
+          alb = mix(alb, vec3(0.90, 0.97, 1.0), snowCap * 0.70);
+          alb += vec3(0.08, 0.56, 0.72) * (iceSss * 0.48 + fresIce * 0.38);
         }
+
+        // Direct Sun + Sky Hemisphere Fill + Warm Lagoon Bounce + Glossy Wet-Waterline Specular Glint!
+        vec3 sunLit = uSunColor * (0.24 + 0.96 * ndl);
+        vec3 skyLit = uSkyFillColor * (0.26 + 0.36 * hemi);
+        vec3 H = normalize(L + V);
+        float specGlint = pow(max(0.0, dot(n, H)), 32.0) * wetSpec;
+        vec3 col = (alb * (sunLit + skyLit) + warmBounce + uSunColor * specGlint * 0.75) * darkScale;
 
         if (uLightning > 0.005) {
-          col += vec3(0.16, 0.26, 0.44) * uLightning * (0.25 + 0.75 * max(0.0, n.y));
+          col += vec3(0.24, 0.42, 0.62) * uLightning * (0.3 + 0.7 * max(0.0, n.y));
         }
 
-        // Dark moody atmospheric sea-mist wrapping island bases (matches dark ocean, zero grey floor!)
-        float hAboveSea = max(0.0, vWorldPos.y - uWaterY);
-        float seaFog = exp(-hAboveSea * 0.34) * 0.68 + layer * 0.28;
-        col = mix(col, uMistColor * darkScale * 0.44, clamp(seaFog, 0.0, 0.85));
+        // Gentle atmospheric depth cueing preserving rich foreground/midground rock & foliage colors!
+        float baseMist = exp(-hAboveWater * 0.42) * 0.18;
+        float aerial = clamp((baseMist + layer * layer * 0.40) * aerialScale, 0.0, 0.66);
+        col = mix(col, uMistColor * 0.86 * darkScale, aerial);
 
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
@@ -1000,7 +1796,782 @@ function createArchipelagoVistaMaterial(cloudPanoTex) {
   });
 }
 
-// Rolling 360-deg Horizon Sea-Fog Ring (zero-alpha at uWaterY -> ZERO Z-cut seam against Ocean!)
+// ============================================================================
+// 3D ANIMATED CLIFFSIDE WATERFALLS + FOAMING PLUNGE-POOL MIST (`waterfallGroup`)
+// ============================================================================
+
+function buildWaterfallsGeometry(specs) {
+  const pos = [];
+  const uvs = [];
+  const idx = [];
+  const segX = 16;
+  const segY = 24;
+
+  for (let wIdx = 0; wIdx < specs.length; wIdx++) {
+    const { ang, rTop, rBot, yTop, width, seed } = specs[wIdx];
+    const baseV = pos.length / 3;
+    for (let iy = 0; iy <= segY; iy++) {
+      const v = iy / segY; // 0 = plunge pool at waterY, 1 = cliff lip at yTop
+      const dropFrac = 1.0 - v;
+      // Smooth ballistic trajectory curving gracefully over cliff lip and flaring into plunge pool!
+      const lipCurve = Math.pow(dropFrac, 1.55);
+      const rCur = rTop + (rBot - rTop) * lipCurve;
+      const yCur = -0.25 + v * (yTop + 0.25);
+      const flareW = width * (0.92 + dropFrac * 0.78);
+
+      for (let ix = 0; ix <= segX; ix++) {
+        const u = ix / segX;
+        const a = ang + ((u - 0.5) * flareW) / Math.max(10.0, rCur);
+        const archOut = Math.sin(u * Math.PI) * (0.52 + dropFrac * 0.35);
+        const rad = rCur - archOut;
+        pos.push(Math.sin(a) * rad, yCur, Math.cos(a) * rad);
+        uvs.push(u, v, seed, 0.0); // w = 0 -> vertical waterfall curtain
+      }
+    }
+    for (let iy = 0; iy < segY; iy++) {
+      for (let ix = 0; ix < segX; ix++) {
+        const i0 = baseV + iy * (segX + 1) + ix;
+        const i1 = i0 + 1;
+        const i2 = i0 + (segX + 1);
+        const i3 = i2 + 1;
+        idx.push(i0, i2, i1, i1, i2, i3);
+      }
+    }
+
+    // 1. Horizontal Foaming Plunge-Pool Ring Disc at waterline (`y = 0.08`, `w = 1.0`)
+    const poolCx = Math.sin(ang) * (rBot - 0.45);
+    const poolCz = Math.cos(ang) * (rBot - 0.45);
+    const poolRx = width * 1.35;
+    const poolRz = width * 0.95;
+    const pBase = pos.length / 3;
+    pos.push(poolCx - poolRx, 0.08, poolCz - poolRz);
+    pos.push(poolCx + poolRx, 0.08, poolCz - poolRz);
+    pos.push(poolCx - poolRx, 0.08, poolCz + poolRz);
+    pos.push(poolCx + poolRx, 0.08, poolCz + poolRz);
+    uvs.push(0, 0, seed, 1.0, 1, 0, seed, 1.0, 0, 1, seed, 1.0, 1, 1, seed, 1.0);
+    idx.push(pBase, pBase + 2, pBase + 1, pBase + 1, pBase + 2, pBase + 3);
+
+    // 2. Soft Radial-Alpha Billowing Plunge Mist Cushion rising above waterline (`w = 2.0`, NEVER hard diamond/quad!)
+    const mistH = Math.min(5.2, yTop * 0.42);
+    const mistW = width * 1.45;
+    const tangX = Math.cos(ang);
+    const tangZ = -Math.sin(ang);
+    const mCx = Math.sin(ang) * (rBot - 0.75);
+    const mCz = Math.cos(ang) * (rBot - 0.75);
+    const mBase = pos.length / 3;
+    pos.push(mCx - tangX * mistW, -0.15, mCz - tangZ * mistW);
+    pos.push(mCx + tangX * mistW, -0.15, mCz + tangZ * mistW);
+    pos.push(mCx - tangX * mistW, mistH, mCz - tangZ * mistW);
+    pos.push(mCx + tangX * mistW, mistH, mCz + tangZ * mistW);
+    uvs.push(0, 0, seed, 2.0, 1, 0, seed, 2.0, 0, 1, seed, 2.0, 1, 1, seed, 2.0);
+    idx.push(mBase, mBase + 2, mBase + 1, mBase + 1, mBase + 2, mBase + 3);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('aFallUv', new THREE.Float32BufferAttribute(uvs, 4));
+  geo.setIndex(idx);
+  return geo;
+}
+
+function createWaterfallMaterial(cloudPanoTex) {
+  return new THREE.ShaderMaterial({
+    side: THREE.DoubleSide,
+    transparent: true,
+    depthWrite: false,
+    fog: false,
+    uniforms: {
+      uPanoTex: { value: cloudPanoTex },
+      uTime: { value: 0 },
+      uFoamColor: { value: new THREE.Color('#f8fdff') },
+      uTintColor: { value: new THREE.Color('#5eead4') },
+      uRainbowAmt: { value: 0.65 },
+    },
+    vertexShader: /* glsl */ `
+      attribute vec4 aFallUv;
+      varying vec4 vFuv;
+      void main() {
+        vFuv = aFallUv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D uPanoTex;
+      uniform float uTime;
+      uniform vec3 uFoamColor;
+      uniform vec3 uTintColor;
+      uniform float uRainbowAmt;
+      varying vec4 vFuv;
+
+      vec3 spectralRainbow(float t) {
+        return clamp(vec3(
+          abs(t * 6.0 - 3.0) - 1.0,
+          2.0 - abs(t * 6.0 - 2.0),
+          2.0 - abs(t * 6.0 - 4.0)
+        ), 0.0, 1.0);
+      }
+
+      void main() {
+        float u = vFuv.x;
+        float v = vFuv.y;
+        float seed = vFuv.z;
+        float kind = vFuv.w;
+
+        // Mode 1: Horizontal Foaming Plunge-Pool Ripple Ring at waterline!
+        if (kind > 0.5 && kind < 1.5) {
+          vec2 p = (vec2(u, v) - 0.5) * 2.0;
+          float r = length(p);
+          if (r >= 1.0) discard;
+          vec4 n = texture2D(uPanoTex, vec2(u * 1.4 + seed, v * 1.4 - uTime * 0.25));
+          float rings = 0.5 + 0.5 * sin(r * 16.0 - uTime * 4.2 + n.r * 3.5);
+          float coreFoam = exp(-r * r * 3.2);
+          float outerFade = pow(max(0.0, 1.0 - r), 1.65);
+          float alpha = clamp((coreFoam * 0.78 + rings * 0.42) * outerFade * (0.55 + 0.45 * n.g), 0.0, 0.85);
+          if (alpha < 0.01) discard;
+          vec3 col = mix(uTintColor * 0.80, uFoamColor, 0.55 + coreFoam * 0.45);
+          gl_FragColor = vec4(col, alpha);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+          return;
+        }
+
+        // Mode 2: Soft Radial-Alpha Billowing Plunge Mist Cushion (zero hard quad edges!)
+        if (kind >= 1.5) {
+          vec2 p = (vec2(u, v) - 0.5) * 2.0;
+          float r2 = dot(p, p);
+          if (r2 >= 1.0) discard;
+          float radialSoft = pow(max(0.0, 1.0 - sqrt(r2)), 2.1);
+          vec4 m1 = texture2D(uPanoTex, vec2(u * 0.85 + seed, fract(v * 0.85 - uTime * 0.14 + seed)));
+          float billow = 0.45 + 0.55 * m1.r;
+          vec3 col = mix(uTintColor * 0.85, uFoamColor, 0.72);
+          if (uRainbowAmt > 0.01) {
+            col += spectralRainbow(clamp(u * 0.9 + 0.05, 0.0, 1.0)) * radialSoft * uRainbowAmt * 0.35;
+          }
+          float alpha = clamp(radialSoft * billow * 0.62, 0.0, 0.68);
+          if (alpha < 0.008) discard;
+          gl_FragColor = vec4(col, alpha);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+          return;
+        }
+
+        // Mode 0: Feathered Cascading Waterfall Curtain (organic spray-eroded edges, ZERO zig-zag polygon silhouettes!)
+        vec4 s1 = texture2D(uPanoTex, vec2(u * 0.55 + seed * 0.17, fract(v * 0.85 + uTime * 0.74 + seed)));
+        vec4 s2 = texture2D(uPanoTex, vec2(u * 1.25 - seed * 0.31, fract(v * 1.75 + uTime * 1.18)));
+
+        // Organic spray-feathered side & bottom/top masks so silhouette is misty & fluid, never polygonal!
+        float rawSide = sin(clamp(u, 0.0, 1.0) * 3.14159265);
+        float sideFeather = pow(rawSide, 1.85) * smoothstep(0.08, 0.48, rawSide * (0.62 + 0.55 * s1.g));
+        float topFade = smoothstep(1.0, 0.86, v);
+        float botFade = smoothstep(0.0, 0.14, v);
+        float plungeBillow = smoothstep(0.0, 0.32, 1.0 - v);
+
+        float streaks = smoothstep(0.22, 0.78, s1.r * 0.58 + s2.b * 0.42 + plungeBillow * 0.24);
+        vec3 col = mix(uTintColor * 0.74, uFoamColor * 0.96, streaks);
+
+        if (v < 0.36 && uRainbowAmt > 0.01) {
+          float rMask = (1.0 - v / 0.36) * sideFeather * uRainbowAmt;
+          vec3 rb = spectralRainbow(clamp(u * 0.85 + 0.08, 0.0, 1.0));
+          col = mix(col, col * 0.80 + rb * 0.52, rMask * 0.62);
+        }
+
+        float alpha = clamp(sideFeather * topFade * botFade * (0.36 + 0.58 * streaks + plungeBillow * 0.24), 0.0, 0.90);
+        if (alpha < 0.008) discard;
+
+        gl_FragColor = vec4(col, alpha);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+}
+
+// ============================================================================
+// FOREGROUND / MIDGROUND WATER-WORLD & UNDERWATER CORAL REEF BUILDERS
+// ============================================================================
+
+function buildCoralReefShelfGeometry() {
+  const b = new WatershedGeometryBuilder();
+  let seed = 8082026;
+  const rnd = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+
+  // 1. Sculpted scalloped white-sand & turquoise coral shoals (`r = 5.2..34m`, `y = -0.68..-1.95m`)
+  const reefPatches = 28;
+  const coralPalette = [
+    ['#e11d48', '#fda4af'], // Vivid Coral-Rose Staghorn
+    ['#ea580c', '#fde047'], // Sunburst Brain Coral
+    ['#7c3aed', '#e9d5ff'], // Royal Sea-Fan
+    ['#0d9488', '#5eead4'], // Turquoise Table Acropora
+    ['#15803d', '#86efac'], // Emerald Reef Anemone
+  ];
+
+  for (let i = 0; i < reefPatches; i++) {
+    const ang = (i / reefPatches) * TWO_PI + rnd() * 0.14;
+    const rad = 5.4 + (i % 4) * 5.5 + rnd() * 2.8;
+    const shelfY = -0.76 - (i % 3) * 0.26;
+    const shelfW = 2.8 + rnd() * 2.4;
+
+    const cx = Math.sin(ang) * rad;
+    const cz = Math.cos(ang) * rad;
+
+    // Organic scalloped white-sand reef shelf (zero octagonal straight edges!)
+    const shelf = new THREE.CylinderGeometry(shelfW * 0.85, shelfW * 1.22, 0.55, 14, 1, false);
+    const sp = shelf.attributes.position;
+    for (let si = 0; si < sp.count; si++) {
+      const sx = sp.getX(si);
+      const sz = sp.getZ(si);
+      const uAng = (Math.atan2(sz, sx) + Math.PI) / TWO_PI;
+      const sc = 0.78 + 0.42 * fastPeriodicNoise(uAng, 0.4, 8, 4, PERM_A, (i * 17) & 255);
+      sp.setXYZ(si, sx * 1.2 * sc, sp.getY(si), sz * 0.92 * sc);
+    }
+    shelf.computeVertexNormals();
+    const mShelf = new THREE.Matrix4()
+      .makeTranslation(cx, shelfY - 0.28, cz)
+      .multiply(new THREE.Matrix4().makeRotationY(ang));
+    b._pushGeo(shelf, mShelf, 0.0, 2.0, 0, 0.0, '#7bd5d4', '#daf6f4');
+
+    const heads = 6;
+    for (let h = 0; h < heads; h++) {
+      const ha = rnd() * TWO_PI;
+      const hr = rnd() * shelfW * 0.68;
+      const hx = cx + Math.cos(ha) * hr;
+      const hz = cz + Math.sin(ha) * hr;
+      const pal = coralPalette[(i + h) % coralPalette.length];
+      const kind = (i + h) % 3;
+
+      if (kind === 0) {
+        // Ruffled Brain Coral Dome
+        const rDome = 0.36 + rnd() * 0.36;
+        const dome = new THREE.IcosahedronGeometry(rDome, 2);
+        const dp = dome.attributes.position;
+        for (let di = 0; di < dp.count; di++) {
+          const groove = 0.88 + 0.16 * Math.sin(dp.getX(di) * 18.0 + dp.getZ(di) * 18.0);
+          dp.setXYZ(di, dp.getX(di) * 1.2 * groove, dp.getY(di) * 0.75 * groove, dp.getZ(di) * 1.1 * groove);
+        }
+        dome.computeVertexNormals();
+        b._pushGeo(dome, new THREE.Matrix4().makeTranslation(hx, shelfY + rDome * 0.34, hz), 0.0, 1.5, 1, 0.0, pal[0], pal[1]);
+      } else if (kind === 1) {
+        // Scalloped Table / Sea-Fan Coral
+        const rTab = 0.48 + rnd() * 0.42;
+        const tab = new THREE.CylinderGeometry(rTab, rTab * 0.26, 0.24, 10, 1, false);
+        b._pushGeo(tab, new THREE.Matrix4().makeTranslation(hx, shelfY + 0.22, hz), 0.0, 1.5, 1, 0.0, pal[0], pal[1]);
+      } else {
+        // Multi-Branching Staghorn Antler Cluster
+        for (let br = 0; br < 4; br++) {
+          const bh = 0.52 + rnd() * 0.48;
+          const stag = new THREE.CylinderGeometry(0.045, 0.10, bh, 5, 1, false);
+          stag.translate(0, bh * 0.5, 0);
+          const mStag = new THREE.Matrix4()
+            .makeTranslation(hx + (br - 1.5) * 0.15, shelfY, hz + ((br % 2) - 0.5) * 0.15)
+            .multiply(new THREE.Matrix4().makeRotationY(br * 1.4))
+            .multiply(new THREE.Matrix4().makeRotationZ((br - 1.5) * 0.28));
+          b._pushGeo(stag, mStag, 0.0, 1.5, 1, 0.0, pal[0], pal[1]);
+        }
+      }
+    }
+  }
+
+  return b.build();
+}
+
+function buildMantaRayGeometry() {
+  // Sculpted 3D Manta Ray: sweeping diamond pectoral wings (`x = -1.6..+1.6`), cephalic horns & whip tail!
+  const b = new WatershedGeometryBuilder();
+  const idMat = new THREE.Matrix4();
+
+  // Central hydro-fuselage
+  const body = new THREE.SphereGeometry(0.42, 10, 8);
+  body.scale(0.85, 0.26, 1.65);
+  b._pushGeo(body, idMat, 0, 1, 0, 0, '#0c3b5e', '#1e7898');
+
+  // Sweeping left & right diamond pectoral wings
+  for (const side of [-1, 1]) {
+    const wing = new THREE.ConeGeometry(0.72, 1.55, 4, 3, false);
+    wing.rotateZ(-side * Math.PI * 0.5);
+    wing.scale(1.0, 0.10, 1.05);
+    wing.translate(side * 0.82, 0.0, -0.05);
+    b._pushGeo(wing, idMat, 0, 1, 0, 1, '#0e4870', '#5eead4');
+
+    // Forward cephalic horn lobe
+    const horn = new THREE.ConeGeometry(0.09, 0.42, 4, 1, false);
+    horn.rotateX(Math.PI * 0.5);
+    horn.translate(side * 0.22, 0.0, 0.78);
+    b._pushGeo(horn, idMat, 0, 1, 0, 0, '#166088', '#bae6fd');
+  }
+
+  // Trailing whip tail (extending toward -Z when swimming toward +Z)
+  const tail = new THREE.ConeGeometry(0.055, 1.45, 4, 1, false);
+  tail.rotateX(-Math.PI * 0.5);
+  tail.translate(0, 0, -1.25);
+  b._pushGeo(tail, idMat, 0, 1, 0, 0, '#0a2e4a', '#1b5e80');
+
+  return b.build();
+}
+
+function createUnderwaterReefMaterial() {
+  return new THREE.ShaderMaterial({
+    fog: false,
+    uniforms: {
+      uTime: { value: 0 },
+      uPurification: { value: 0 },
+      uWaterTint: { value: new THREE.Color('#0ea5b8') },
+      uSunDir: { value: new THREE.Vector3(0.32, 0.58, -0.75).normalize() },
+    },
+    vertexShader: /* glsl */ `
+      attribute vec3 aColor;
+      attribute vec4 aVista;
+      uniform float uTime;
+      varying vec3 vWorldPos;
+      varying vec3 vLocalPos;
+      varying vec3 vNormalW;
+      varying vec3 vCol;
+
+      void main() {
+        vCol = aColor;
+        vec3 p = position;
+        vLocalPos = p;
+        vec4 wp = modelMatrix * vec4(p, 1.0);
+        #ifdef USE_INSTANCING
+          // Graceful traveling pectoral wingbeat for instanced 3D Manta Rays!
+          float span = abs(p.x);
+          if (span > 0.15) {
+            p.y += sin(uTime * 3.6 - span * 1.9 + float(gl_InstanceID) * 1.3) * (span * 0.24);
+          }
+          wp = modelMatrix * instanceMatrix * vec4(p, 1.0);
+          vNormalW = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * normal);
+        #else
+          vNormalW = normalize(mat3(modelMatrix) * normal);
+        #endif
+        vWorldPos = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform float uPurification;
+      uniform vec3 uWaterTint;
+      uniform vec3 uSunDir;
+      varying vec3 vWorldPos;
+      varying vec3 vLocalPos;
+      varying vec3 vNormalW;
+      varying vec3 vCol;
+
+      float hash(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 15731.743); }
+      float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+                   mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+      }
+
+      void main() {
+        vec3 n = normalize(vNormalW);
+        float ndl = 0.42 + 0.58 * max(0.0, dot(n, normalize(uSunDir)));
+
+        // Bright dancing sunlit underwater caustic webs projected across reef & manta wings!
+        vec2 cp = vWorldPos.xz * 1.45;
+        float c1 = 1.0 - abs(noise(cp + vec2(uTime * 0.42, -uTime * 0.31)) * 2.0 - 1.0);
+        float c2 = 1.0 - abs(noise(cp * 1.65 - vec2(uTime * 0.35, uTime * 0.38)) * 2.0 - 1.0);
+        float caust = pow(clamp(c1 * 0.55 + c2 * 0.45, 0.0, 1.0), 3.0);
+
+        vec3 col = vCol * ndl * (1.05 + uPurification * 0.22);
+        col += vec3(0.45, 0.98, 0.96) * caust * 0.52;
+
+        // Subtle turquoise lagoon water absorption with distance
+        float dist = length(cameraPosition - vWorldPos);
+        col = mix(col, uWaterTint * 0.65, clamp(smoothstep(14.0, 48.0, dist), 0.0, 0.82));
+
+        gl_FragColor = vec4(col, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+}
+
+function buildRiverBouldersAndWakesGeometry() {
+  const boulderBuilder = new WatershedGeometryBuilder();
+  const wakePos = [];
+  const wakeUv = [];
+  const wakeIdx = [];
+
+  let seed = 44112026;
+  const rnd = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+
+  // Flow direction matches `water.js` canyon_river `[1.48, 0.36]`
+  const fx = 0.971;
+  const fz = 0.236;
+  const flowYaw = Math.atan2(fx, fz);
+
+  for (let i = 0; i < 20; i++) {
+    const ang = (i / 20) * TWO_PI + 0.14;
+    // Keep front camera sightline (`ang ~ 0`, `|x| < 3.2`) clear so boulders never block low floor-0 camera!
+    const rad = Math.abs(Math.sin(ang)) < 0.28 && Math.cos(ang) > 0 ? 22.0 + (i % 3) * 4.0 : 6.4 + (i % 4) * 5.2 + rnd() * 2.4;
+    const bx = Math.sin(ang) * rad;
+    const bz = Math.cos(ang) * rad;
+    const bw = 0.72 + rnd() * 0.85;
+    const bh = 0.65 + rnd() * 0.68;
+
+    const rock = new THREE.IcosahedronGeometry(bw, 3);
+    const rp = rock.attributes.position;
+    for (let ri = 0; ri < rp.count; ri++) {
+      const rx = rp.getX(ri);
+      const ry = rp.getY(ri);
+      const rz = rp.getZ(ri);
+      const u = (Math.atan2(rz, rx) + Math.PI) / TWO_PI;
+      const v = (ry / bw) * 0.5 + 0.5;
+      const n1 = fastPeriodicNoise(u, v, 8, 8, PERM_A, (i * 29 + 7) & 255);
+      const n2 = fastPeriodicNoise(u * 2.0, v * 2.0, 16, 16, PERM_B, (i * 13 + 3) & 255);
+      // River-rounded sandstone boulder with subtle horizontal sedimentary ledges
+      const shelf = 1.0 + 0.11 * Math.sin(v * Math.PI * 5.0 + n2 * 2.0);
+      const crag = (0.76 + (1.0 - Math.abs(2.0 * n1 - 1.0)) * 0.36 + (n2 - 0.5) * 0.14) * shelf;
+      // Flatten bottom slightly so boulder sits naturally in river bed with broad wet skirt
+      const ySculpt = ry < 0 ? ry * 0.68 : ry * (0.86 + 0.18 * n1);
+      rp.setXYZ(ri, rx * 1.32 * crag, ySculpt * (bh / bw) * crag, rz * 1.02 * crag);
+    }
+    rock.computeVertexNormals();
+    const mRock = new THREE.Matrix4()
+      .makeTranslation(bx, bh * 0.24 - 0.14, bz)
+      .multiply(new THREE.Matrix4().makeRotationY(rnd() * TWO_PI));
+    boulderBuilder._pushGeo(rock, mRock, 0.06, 2.0, 0, 0.82, '#42160c', '#df6d35');
+
+    // Multi-tuft emerald river-moss cushion on larger boulders
+    if (i % 2 === 0) {
+      for (let mIdx = 0; mIdx < 2; mIdx++) {
+        const moss = new THREE.IcosahedronGeometry(bw * (mIdx === 0 ? 0.54 : 0.38), 2);
+        moss.scale(1.18, 0.32, 0.96);
+        boulderBuilder._pushGeo(
+          moss,
+          new THREE.Matrix4().makeTranslation(bx + (mIdx - 0.5) * bw * 0.36, bh * (0.55 - mIdx * 0.06), bz),
+          0.06,
+          2.0,
+          1,
+          0.12,
+          '#184d28',
+          '#55b852'
+        );
+      }
+    }
+
+    // 3D V-Shaped Whitewater Rapids Wake Ribbon streaming downstream from each boulder!
+    const baseV = wakePos.length / 3;
+    const wakeLen = 2.6 + bw * 2.2;
+    const segs = 5;
+    for (let s = 0; s <= segs; s++) {
+      const t = s / segs;
+      const along = -bw * 0.35 + t * wakeLen;
+      const halfSpread = bw * 0.72 + t * bw * 1.45;
+      const px = -fz;
+      const pz = fx;
+      const cxW = bx + fx * along;
+      const czW = bz + fz * along;
+      wakePos.push(
+        cxW - px * halfSpread, 0.045, czW - pz * halfSpread,
+        cxW + px * halfSpread, 0.045, czW + pz * halfSpread
+      );
+      wakeUv.push(0, t, i * 0.37, 1, t, i * 0.37);
+    }
+    for (let s = 0; s < segs; s++) {
+      const a = baseV + s * 2;
+      wakeIdx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
+    }
+  }
+
+  const wakeGeo = new THREE.BufferGeometry();
+  wakeGeo.setAttribute('position', new THREE.Float32BufferAttribute(wakePos, 3));
+  wakeGeo.setAttribute('aWakeUv', new THREE.Float32BufferAttribute(wakeUv, 3));
+  wakeGeo.setIndex(wakeIdx);
+
+  return { boulderGeo: boulderBuilder.build(), wakeGeo, flowYaw };
+}
+
+function buildBayouLilyPadsAndLotusGeometry() {
+  const b = new WatershedGeometryBuilder();
+  let seed = 9928374;
+  const rnd = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+
+  // 46 Floating 3D Notched Emerald Lily Pads + 22 Glowing Pink/Gold Lotus Blossoms!
+  for (let i = 0; i < 46; i++) {
+    const ang = (i / 46) * TWO_PI + rnd() * 0.18;
+    const rad = 5.3 + (i % 5) * 4.4 + rnd() * 2.8;
+    const lx = Math.sin(ang) * rad;
+    const lz = Math.cos(ang) * rad;
+    const padR = 0.42 + rnd() * 0.44;
+
+    // Notched circular water-lily pad (`thetaLength = 1.86 * PI`)
+    const pad = new THREE.CylinderGeometry(padR, padR * 0.96, 0.035, 9, 1, false, 0, Math.PI * 1.86);
+    const mPad = new THREE.Matrix4()
+      .makeTranslation(lx, 0.035, lz)
+      .multiply(new THREE.Matrix4().makeRotationY(rnd() * TWO_PI));
+    b._pushGeo(pad, mPad, 0.05, 1.0, 1, 0.15, '#1d5935', '#4ead5b');
+
+    if (i % 2 === 0) {
+      // Sculpted Multi-Petal Lotus Blossom + Bioluminescent Golden Heart (`matKind = 4`)!
+      const mLotus = new THREE.Matrix4().makeTranslation(lx, 0.06, lz);
+      for (let p = 0; p < 6; p++) {
+        const pa = (p / 6) * TWO_PI;
+        const petal = new THREE.ConeGeometry(padR * 0.16, padR * 0.42, 4, 1, false);
+        petal.rotateZ(-0.58);
+        petal.translate(padR * 0.14, padR * 0.12, 0);
+        const mp = mLotus.clone().multiply(new THREE.Matrix4().makeRotationY(pa));
+        b._pushGeo(petal, mp, 0.05, 1.0, 1, 0.2, '#e05297', '#ffd6e7');
+      }
+      const heart = new THREE.OctahedronGeometry(padR * 0.13, 0);
+      heart.translate(0, padR * 0.18, 0);
+      b._pushGeo(heart, mLotus, 0.05, 1.0, 4, 1.0, '#ffd166', '#fff8d6');
+    }
+  }
+
+  return b.build();
+}
+
+function buildPolarIceFloesGeometry() {
+  const b = new WatershedGeometryBuilder();
+  let seed = 3141592;
+  const rnd = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  // Drifting turquoise sea-ice growlers outside the inner maelstrom funnel (`r = 12..34m`)
+  for (let i = 0; i < 18; i++) {
+    const ang = (i / 18) * TWO_PI + rnd() * 0.2;
+    const rad = 12.5 + (i % 4) * 5.2 + rnd() * 2.5;
+    const fx = Math.sin(ang) * rad;
+    const fz = Math.cos(ang) * rad;
+    const fw = 1.1 + rnd() * 1.4;
+    const fh = 0.45 + rnd() * 0.85;
+    const floe = new THREE.CylinderGeometry(fw * 0.85, fw * 1.12, fh, 6, 1, false);
+    const mFloe = new THREE.Matrix4()
+      .makeTranslation(fx, fh * 0.25 - 0.12, fz)
+      .multiply(new THREE.Matrix4().makeRotationY(rnd() * TWO_PI))
+      .multiply(new THREE.Matrix4().makeRotationZ((rnd() - 0.5) * 0.16));
+    b._pushGeo(floe, mFloe, 0.15, 2.0, 2, 1.0, '#14b8d4', '#f0fcff');
+  }
+  return b.build();
+}
+
+// ============================================================================
+// VOLUMETRIC GOLDEN GOD-RAYS, PRISMATIC RAINBOW ARC & SOARING 3D BIRDS
+// ============================================================================
+
+function buildGodRaysGeometry() {
+  const pos = [];
+  const uvs = [];
+  const idx = [];
+  const beams = [
+    { ang: Math.PI - 0.16, r: 58, wTop: 5.5, wBot: 14.5, yTop: 46, yBot: -1.0, slantX: -12.0, seed: 0.1 },
+    { ang: Math.PI - 0.30, r: 52, wTop: 4.8, wBot: 12.5, yTop: 44, yBot: -1.0, slantX: -10.5, seed: 0.4 },
+    { ang: Math.PI - 0.04, r: 64, wTop: 6.2, wBot: 16.0, yTop: 48, yBot: -1.0, slantX: -13.5, seed: 0.7 },
+    { ang: Math.PI + 0.14, r: 60, wTop: 4.5, wBot: 11.8, yTop: 44, yBot: -1.0, slantX: -9.8, seed: 0.9 },
+  ];
+
+  for (let i = 0; i < beams.length; i++) {
+    const bm = beams[i];
+    const baseV = pos.length / 3;
+    const cx = Math.sin(bm.ang) * bm.r;
+    const cz = Math.cos(bm.ang) * bm.r;
+    pos.push(
+      cx - bm.wTop * 0.5, bm.yTop, cz,
+      cx + bm.wTop * 0.5, bm.yTop, cz,
+      cx + bm.slantX - bm.wBot * 0.5, bm.yBot, cz + 4.0,
+      cx + bm.slantX + bm.wBot * 0.5, bm.yBot, cz + 4.0
+    );
+    uvs.push(0, 1, bm.seed, 1, 1, bm.seed, 0, 0, bm.seed, 1, 0, bm.seed);
+    idx.push(baseV, baseV + 2, baseV + 1, baseV + 1, baseV + 2, baseV + 3);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('aRayUv', new THREE.Float32BufferAttribute(uvs, 3));
+  geo.setIndex(idx);
+  return geo;
+}
+
+function createGodRaysMaterial() {
+  return new THREE.ShaderMaterial({
+    side: THREE.DoubleSide,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    fog: false,
+    uniforms: {
+      uTime: { value: 0 },
+      uStrength: { value: 0.0 },
+      uColor: { value: new THREE.Color('#ffe299') },
+    },
+    vertexShader: /* glsl */ `
+      attribute vec3 aRayUv;
+      varying vec3 vRuv;
+      void main() {
+        vRuv = aRayUv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform float uStrength;
+      uniform vec3 uColor;
+      varying vec3 vRuv;
+      void main() {
+        if (uStrength <= 0.01) discard;
+        float side = sin(clamp(vRuv.x, 0.0, 1.0) * 3.14159265);
+        float vert = smoothstep(0.0, 0.24, vRuv.y) * smoothstep(1.0, 0.35, vRuv.y);
+        float shimmer = 0.72 + 0.28 * sin(uTime * 0.55 + vRuv.z * 12.0 + vRuv.x * 5.0);
+        float a = pow(side, 1.6) * vert * shimmer * uStrength * 0.14;
+        if (a < 0.002) discard;
+        gl_FragColor = vec4(uColor * a, a);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+}
+
+function buildRainbowArcGeometry() {
+  // High-arching 3D spectral rainbow spanning proudly above the canyon walls & mountain peaks!
+  const geo = new THREE.RingGeometry(27.0, 34.0, 56, 1, 0.06 * Math.PI, 0.88 * Math.PI);
+  geo.translate(0, 6.5, -56.0);
+  return geo;
+}
+
+function createRainbowArcMaterial() {
+  return new THREE.ShaderMaterial({
+    side: THREE.DoubleSide,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    fog: false,
+    uniforms: {
+      uOpacity: { value: 0.0 },
+    },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      varying vec3 vLocal;
+      void main() {
+        vUv = uv;
+        vLocal = position;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uOpacity;
+      varying vec2 vUv;
+      varying vec3 vLocal;
+
+      vec3 rainbow(float t) {
+        return clamp(vec3(
+          abs(t * 6.0 - 3.0) - 1.0,
+          2.0 - abs(t * 6.0 - 2.0),
+          2.0 - abs(t * 6.0 - 4.0)
+        ), 0.0, 1.0);
+      }
+
+      void main() {
+        if (uOpacity <= 0.005) discard;
+        float rad = length(vec2(vLocal.x, vLocal.y - 6.5));
+        float bandT = clamp((rad - 27.0) / 7.0, 0.0, 1.0);
+        float radialEnv = sin(bandT * 3.14159265);
+        float footFade = smoothstep(4.0, 16.0, vLocal.y);
+        vec3 col = rainbow(1.0 - bandT);
+        float a = pow(radialEnv, 1.25) * footFade * uOpacity * 0.46;
+        if (a < 0.002) discard;
+        gl_FragColor = vec4(col * a, a);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+}
+
+function buildSoaringBirdGeometry() {
+  // Graceful 3D cambered gull / canyon hawk with swept elbow-jointed wings & fanned tail (`x` in `-1.05..+1.05`)
+  const pos = new Float32Array([
+    0.0, 0.01, 0.42,     // 0: beak tip
+    0.0, 0.06, 0.08,     // 1: chest / dorsal ridge
+    0.0, 0.02, -0.26,    // 2: tail root
+    -0.14, 0.03, -0.46,  // 3: tail left
+    0.14, 0.03, -0.46,   // 4: tail right
+    -0.46, 0.10, 0.06,   // 5: left wing elbow (forward camber)
+    -1.05, 0.04, -0.22,  // 6: left swept wingtip
+    0.46, 0.10, 0.06,    // 7: right wing elbow (forward camber)
+    1.05, 0.04, -0.22,   // 8: right swept wingtip
+  ]);
+  const idx = [
+    0, 1, 5,
+    1, 2, 5,
+    5, 2, 6,
+    0, 7, 1,
+    1, 7, 2,
+    7, 8, 2,
+    2, 3, 4,
+  ];
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function createSoaringBirdMaterial() {
+  return new THREE.ShaderMaterial({
+    side: THREE.DoubleSide,
+    fog: false,
+    uniforms: {
+      uTime: { value: 0 },
+      uBirdColor: { value: new THREE.Color('#f8fafc') },
+      uSunRimColor: { value: new THREE.Color('#fff1c2') },
+      uSunDir: { value: new THREE.Vector3(0.42, 0.36, -0.83).normalize() },
+    },
+    vertexShader: /* glsl */ `
+      uniform float uTime;
+      varying float vSpan;
+      varying vec3 vNormW;
+      void main() {
+        vec3 p = position;
+        float wingSpan = abs(p.x);
+        vSpan = wingSpan;
+        if (wingSpan > 0.08) {
+          float flap = sin(uTime * 4.8 + float(gl_InstanceID) * 1.9);
+          p.y += flap * pow(wingSpan, 1.35) * 0.28;
+        }
+        vec4 wp = modelMatrix * instanceMatrix * vec4(p, 1.0);
+        vNormW = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * normal);
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uBirdColor;
+      uniform vec3 uSunRimColor;
+      uniform vec3 uSunDir;
+      varying float vSpan;
+      varying vec3 vNormW;
+      void main() {
+        vec3 n = gl_FrontFacing ? normalize(vNormW) : -normalize(vNormW);
+        float sunLit = 0.55 + 0.45 * max(0.0, dot(n, normalize(uSunDir)));
+        // Warm golden sunlit plumage + bright translucent primary feather rim (NEVER stark black triangles!)
+        vec3 col = mix(uBirdColor * 0.88, uSunRimColor, clamp(sunLit * 0.52 + smoothstep(0.45, 1.0, vSpan) * 0.28, 0.0, 0.88));
+        gl_FragColor = vec4(col, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+}
+
+// ============================================================================
+// HORIZON MIST RING, POLAR AURORA CURTAINS & MULTI-BIOME SKY DOME SHADERS
+// ============================================================================
+
 function createHorizonMistRingMaterial(cloudPanoTex) {
   return new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
@@ -1010,11 +2581,11 @@ function createHorizonMistRingMaterial(cloudPanoTex) {
     uniforms: {
       uPanoTex: { value: cloudPanoTex },
       uTime: { value: 0 },
-      uWaterY: { value: -0.55 },
-      uMistColor: { value: new THREE.Color('#1f3b58') },
-      uRimColor: { value: new THREE.Color('#dceeff') },
-      uMoonDir: { value: new THREE.Vector3(0.42, 0.26, -0.87).normalize() },
-      uOpacity: { value: 0.34 },
+      uWaterY: { value: -0.82 },
+      uMistColor: { value: new THREE.Color('#fae0aa') },
+      uRimColor: { value: new THREE.Color('#fff3cc') },
+      uSunDir: { value: new THREE.Vector3(0.42, 0.36, -0.83).normalize() },
+      uOpacity: { value: 0.28 },
     },
     vertexShader: /* glsl */ `
       varying vec2 vUv;
@@ -1032,7 +2603,7 @@ function createHorizonMistRingMaterial(cloudPanoTex) {
       uniform float uWaterY;
       uniform vec3 uMistColor;
       uniform vec3 uRimColor;
-      uniform vec3 uMoonDir;
+      uniform vec3 uSunDir;
       uniform float uOpacity;
       varying vec2 vUv;
       varying vec3 vWorldPos;
@@ -1041,18 +2612,17 @@ function createHorizonMistRingMaterial(cloudPanoTex) {
         float hAboveWater = vWorldPos.y - uWaterY;
         if (hAboveWater <= 0.02) discard;
 
-        // Strictly 0.0 at waterline (zero intersection line with sea!) -> soft swell -> 0.0 at top!
-        float vertEnv = smoothstep(0.02, 2.4, hAboveWater) * smoothstep(1.0, 0.42, vUv.y);
+        float vertEnv = smoothstep(0.02, 2.8, hAboveWater) * smoothstep(1.0, 0.38, vUv.y);
         if (vertEnv <= 0.004) discard;
 
         vec4 n1 = texture2D(uPanoTex, vec2(vUv.x * 3.0 + uTime * 0.005, 0.18 + vUv.y * 0.22));
         vec4 n2 = texture2D(uPanoTex, vec2(vUv.x * 5.0 - uTime * 0.008, 0.42 + vUv.y * 0.18));
-        float billow = 0.35 + 0.65 * (n1.r * 0.6 + n2.b * 0.4);
+        float billow = 0.38 + 0.62 * (n1.r * 0.6 + n2.b * 0.4);
 
         vec3 rayDir = normalize(vWorldPos - cameraPosition);
-        float moonGlow = pow(max(0.0, dot(rayDir, normalize(uMoonDir))), 7.0);
-        vec3 col = mix(uMistColor * 0.38, uRimColor * 0.28, moonGlow * 0.55 + n1.g * 0.14);
-        float alpha = clamp(vertEnv * billow * uOpacity, 0.0, 0.52);
+        float sunGlow = pow(max(0.0, dot(rayDir, normalize(uSunDir))), 5.0);
+        vec3 col = mix(uMistColor * 0.82, uRimColor * 0.92, sunGlow * 0.55 + n1.g * 0.14);
+        float alpha = clamp(vertEnv * billow * uOpacity, 0.0, 0.46);
 
         gl_FragColor = vec4(col, alpha);
         #include <tonemapping_fragment>
@@ -1062,14 +2632,13 @@ function createHorizonMistRingMaterial(cloudPanoTex) {
   });
 }
 
-// 3D Shimmering Multi-Curtain Boreal Aurora Ribbons ('blizzard' / 'apex' / 'prism')
 function buildAuroraRibbonsGeometry() {
   const curtains = [
-    { r: 68, y0: 15, h: 20, span: 1.45, angCenter: Math.PI + 0.32, waveAmp: 4.5, layer: 0.0 },
-    { r: 78, y0: 19, h: 22, span: 1.65, angCenter: Math.PI - 0.18, waveAmp: 5.5, layer: 0.5 },
-    { r: 84, y0: 23, h: 18, span: 1.90, angCenter: Math.PI + 0.05, waveAmp: 6.2, layer: 1.0 },
+    { r: 66, y0: 15, h: 22, span: 1.65, angCenter: Math.PI + 0.32, waveAmp: 4.8, layer: 0.0 },
+    { r: 76, y0: 19, h: 24, span: 1.85, angCenter: Math.PI - 0.20, waveAmp: 5.8, layer: 0.5 },
+    { r: 84, y0: 23, h: 20, span: 2.10, angCenter: Math.PI + 0.04, waveAmp: 6.4, layer: 1.0 },
   ];
-  const segX = 32;
+  const segX = 36;
   const pos = [];
   const uvs = [];
   const idx = [];
@@ -1112,7 +2681,7 @@ function createAuroraRibbonMaterial(cloudPanoTex) {
       uTime: { value: 0 },
       uStrength: { value: 0.0 },
       uColorLow: { value: new THREE.Color('#00f5a0') },
-      uColorHigh: { value: new THREE.Color('#9333ea') },
+      uColorHigh: { value: new THREE.Color('#a855f7') },
     },
     vertexShader: /* glsl */ `
       attribute vec3 aAuroraUv;
@@ -1121,9 +2690,9 @@ function createAuroraRibbonMaterial(cloudPanoTex) {
       void main() {
         vAuv = aAuroraUv;
         vec3 p = position;
-        float sway = sin(uTime * 0.55 + aAuroraUv.x * 12.0 + aAuroraUv.z * 4.0) * (1.2 + aAuroraUv.y * 2.4);
+        float sway = sin(uTime * 0.58 + aAuroraUv.x * 12.0 + aAuroraUv.z * 4.0) * (1.4 + aAuroraUv.y * 2.6);
         p.x += sway;
-        p.z += cos(uTime * 0.42 + aAuroraUv.x * 9.0) * 1.1;
+        p.z += cos(uTime * 0.44 + aAuroraUv.x * 9.0) * 1.2;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
       }
     `,
@@ -1137,12 +2706,12 @@ function createAuroraRibbonMaterial(cloudPanoTex) {
       void main() {
         float u = vAuv.x;
         float v = vAuv.y;
-        float horizFade = smoothstep(0.0, 0.18, u) * smoothstep(1.0, 0.82, u);
-        float vertCurtain = smoothstep(0.0, 0.16, v) * exp(-max(0.0, v - 0.14) * 3.4);
-        vec4 streak = texture2D(uPanoTex, vec2(u * 4.0 + uTime * 0.015 + vAuv.z * 0.31, 0.35 + v * 0.15));
-        float rays = 0.35 + 0.65 * pow(streak.g, 1.6) * (0.65 + 0.35 * sin(u * 95.0 + uTime * 1.8));
-        vec3 col = mix(uColorLow, uColorHigh, smoothstep(0.12, 0.78, v));
-        float alpha = clamp(horizFade * vertCurtain * rays * uStrength * 0.68, 0.0, 0.85);
+        float horizFade = smoothstep(0.0, 0.16, u) * smoothstep(1.0, 0.84, u);
+        float vertCurtain = smoothstep(0.0, 0.15, v) * exp(-max(0.0, v - 0.14) * 3.1);
+        vec4 streak = texture2D(uPanoTex, vec2(u * 4.0 + uTime * 0.016 + vAuv.z * 0.31, 0.35 + v * 0.15));
+        float rays = 0.38 + 0.62 * pow(streak.g, 1.5) * (0.65 + 0.35 * sin(u * 92.0 + uTime * 1.9));
+        vec3 col = mix(uColorLow, uColorHigh, smoothstep(0.14, 0.78, v));
+        float alpha = clamp(horizFade * vertCurtain * rays * uStrength * 0.76, 0.0, 0.88);
         gl_FragColor = vec4(col, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -1151,11 +2720,7 @@ function createAuroraRibbonMaterial(cloudPanoTex) {
   });
 }
 
-// ============================================================================
-// HIGH-RES CUMULONIMBUS STORM SKY DOME & PHOTOGRAPHIC CRATERED MOON SHADER
-// ============================================================================
-
-function createStormSkyMaterial(cloudPanoTex, moonTex) {
+function createBiomeSkyMaterial(cloudPanoTex, celestialTex) {
   return new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
@@ -1163,48 +2728,46 @@ function createStormSkyMaterial(cloudPanoTex, moonTex) {
     fog: false,
     uniforms: {
       uPanoTex: { value: cloudPanoTex },
-      uMoonTex: { value: moonTex },
+      uCelestialTex: { value: celestialTex },
       uTime: { value: 0 },
       uYaw: { value: 0 },
-      uOrig: { value: 0 },
-      uZenithColor: { value: new THREE.Color('#030712') },
-      uMidSkyColor: { value: new THREE.Color('#0b182c') },
-      uHorizonColor: { value: new THREE.Color('#162b44') },
-      uHorizonMistColor: { value: new THREE.Color('#1f3b58') },
-      uCloudDark: { value: new THREE.Color('#050b16') },
-      uCloudMid: { value: new THREE.Color('#12243b') },
-      uCloudRim: { value: new THREE.Color('#dceeff') },
-      uMoonTint: { value: new THREE.Color('#eef6ff') },
-      uCoronaColor: { value: new THREE.Color('#8cc4ff') },
-      uBeaconColor: { value: new THREE.Color('#38bdf8') },
-      uMoonDir: { value: new THREE.Vector3(0.42, 0.26, -0.87).normalize() },
+      uSkyMode: { value: 0 },
+      uZenithColor: { value: new THREE.Color('#1a62b8') },
+      uMidSkyColor: { value: new THREE.Color('#4ea8e8') },
+      uHorizonColor: { value: new THREE.Color('#f7c278') },
+      uHorizonMistColor: { value: new THREE.Color('#fae0aa') },
+      uCloudDark: { value: new THREE.Color('#8ba8c7') },
+      uCloudMid: { value: new THREE.Color('#e8eff7') },
+      uCloudRim: { value: new THREE.Color('#fff3cc') },
+      uCelestialTint: { value: new THREE.Color('#fff6d6') },
+      uCoronaColor: { value: new THREE.Color('#ffcf6e') },
+      uSunGlowColor: { value: new THREE.Color('#ffb84d') },
+      uSunDir: { value: new THREE.Vector3(0.42, 0.36, -0.83).normalize() },
       uBoltDir: { value: new THREE.Vector3(-0.35, 0.32, -0.88).normalize() },
-      uMoonRadius: { value: 0.032 },
-      uMoonAmt: { value: 1.0 },
-      uCloudCover: { value: 0.82 },
+      uCelestialRadius: { value: 0.036 },
+      uCelestialAmt: { value: 1.25 },
+      uSunDisc: { value: 1.0 },
+      uCloudCover: { value: 0.48 },
+      uStarAmt: { value: 0.0 },
       uAuroraAmt: { value: 0.0 },
-      uNebulaAmt: { value: 0.0 },
-      uSmogAmt: { value: 0.0 },
-      uMaelstromAmt: { value: 0.0 },
-      uVirgaAmt: { value: 0.35 },
-      uAbyssMistAmt: { value: 0.28 },
       uBlackout: { value: 0.0 },
       uLightning: { value: 0.0 },
+      uPurification: { value: 0.0 },
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
       void main() {
         vDir = normalize(position);
-        vec3 worldPos = cameraPosition + vDir * 135.0;
+        vec3 worldPos = cameraPosition + vDir * 145.0;
         gl_Position = projectionMatrix * viewMatrix * vec4(worldPos, 1.0);
       }
     `,
     fragmentShader: /* glsl */ `
       uniform sampler2D uPanoTex;
-      uniform sampler2D uMoonTex;
+      uniform sampler2D uCelestialTex;
       uniform float uTime;
       uniform float uYaw;
-      uniform float uOrig;
+      uniform float uSkyMode;
       uniform vec3 uZenithColor;
       uniform vec3 uMidSkyColor;
       uniform vec3 uHorizonColor;
@@ -1212,22 +2775,20 @@ function createStormSkyMaterial(cloudPanoTex, moonTex) {
       uniform vec3 uCloudDark;
       uniform vec3 uCloudMid;
       uniform vec3 uCloudRim;
-      uniform vec3 uMoonTint;
+      uniform vec3 uCelestialTint;
       uniform vec3 uCoronaColor;
-      uniform vec3 uBeaconColor;
-      uniform vec3 uMoonDir;
+      uniform vec3 uSunGlowColor;
+      uniform vec3 uSunDir;
       uniform vec3 uBoltDir;
-      uniform float uMoonRadius;
-      uniform float uMoonAmt;
+      uniform float uCelestialRadius;
+      uniform float uCelestialAmt;
+      uniform float uSunDisc;
       uniform float uCloudCover;
+      uniform float uStarAmt;
       uniform float uAuroraAmt;
-      uniform float uNebulaAmt;
-      uniform float uSmogAmt;
-      uniform float uMaelstromAmt;
-      uniform float uVirgaAmt;
-      uniform float uAbyssMistAmt;
       uniform float uBlackout;
       uniform float uLightning;
+      uniform float uPurification;
 
       varying vec3 vDir;
 
@@ -1240,214 +2801,121 @@ function createStormSkyMaterial(cloudPanoTex, moonTex) {
       void main() {
         vec3 d = normalize(vDir);
         float h = d.y;
-        // Seamless normalized azimuth [0..1)
         float uAz = (atan(d.x, d.z) + uYaw) * 0.159154943;
+        float darkScale = mix(1.0, 0.28, clamp(uBlackout, 0.0, 1.0));
 
-        if (uOrig > 0.5) {
-          // ====================================================================
-          // ORIGINAL '87 ERA: Crisp 1024x512 Starfield + Colorful Space Nebula
-          // ====================================================================
-          float hb = clamp(h, 0.0, 1.0);
-          vec3 col = mix(vec3(0.014, 0.032, 0.098), vec3(0.002, 0.005, 0.022), smoothstep(0.0, 0.62, hb));
-
-          // Colorful cosmic space nebula across the starry sky (sampled from 1024x512 uPanoTex)
-          if (h > -0.02) {
-            vec4 neb1 = texture2D(uPanoTex, vec2(uAz * 3.0 + 0.18, clamp(h * 1.45 + 0.10, 0.02, 0.98)));
-            vec4 neb2 = texture2D(uPanoTex, vec2(uAz * 5.0 - 0.31 + uTime * 0.0015, clamp(h * 2.15 + 0.14, 0.02, 0.98)));
-            float nebMask = smoothstep(0.28, 0.78, neb1.a * 0.58 + neb2.b * 0.42) * smoothstep(-0.01, 0.14, h) * (1.0 - smoothstep(0.58, 0.94, h));
-            vec3 nebCol = mix(vec3(0.32, 0.04, 0.48), vec3(0.03, 0.28, 0.52), neb2.r);
-            nebCol = mix(nebCol, vec3(0.46, 0.10, 0.26), smoothstep(0.48, 0.85, neb1.g));
-            col += nebCol * nebMask * 0.88;
-          }
-
-          // Vibrant royal twilight horizon glow (subtle, letting crisp alien silhouettes stand out!)
-          float duskBand = exp(-max(0.0, h + 0.01) * 16.5) * step(-0.05, h);
-          col += mix(vec3(0.14, 0.04, 0.18), uBeaconColor * 0.24 + vec3(0.03, 0.08, 0.22), smoothstep(0.0, 0.12, hb)) * duskBand * 0.62;
-
-          // Multi-layer crisp HD diamond starfield (sharp under both 18-deg telephoto & 48-deg wide!)
-          if (h > 0.0) {
-            for (int layer = 0; layer < 2; layer++) {
-              float freq = layer == 0 ? 320.0 : 500.0;
-              vec2 sg = vec2(uAz * freq, h * (freq * 0.5));
-              vec2 si = floor(sg);
-              vec2 sf = fract(sg) - 0.5;
-              float rnd = hash21(si + float(layer) * 37.0);
-              float cutoff = layer == 0 ? 0.78 : 0.86;
-              if (rnd > cutoff) {
-                vec2 jitter = vec2(hash21(si + 13.1), hash21(si + 29.7)) - 0.5;
-                float dist = length(sf - jitter * 0.56);
-                float tw = 0.68 + 0.32 * sin(uTime * (2.0 + rnd * 4.2) + rnd * 43.0);
-                float sharpness = layer == 0 ? 380.0 : 540.0;
-                float star = exp(-dist * dist * sharpness) * tw * smoothstep(0.0, 0.07, h);
-                vec3 sCol = mix(vec3(0.95, 0.98, 1.0), vec3(0.45, 0.88, 1.0), step(0.89, rnd));
-                sCol = mix(sCol, vec3(1.0, 0.84, 0.42), step(0.95, rnd));
-                sCol = mix(sCol, vec3(0.98, 0.58, 0.92), step(0.982, rnd));
-                col += sCol * star * (layer == 0 ? 1.55 : 0.95);
-              }
-            }
-          }
-
-          if (h < 0.0) {
-            col = mix(col, vec3(0.004, 0.009, 0.028), smoothstep(0.0, -0.18, h));
-          }
-
-          gl_FragColor = vec4(col, 1.0);
-          #include <tonemapping_fragment>
-          #include <colorspace_fragment>
-          return;
-        }
-
-        // ======================================================================
-        // REBOOT ERA: 1024x512 Cumulonimbus Storm Sky & 512x512 Cratered Moon
-        // ======================================================================
-        float darkScale = mix(1.0, 0.25, clamp(uBlackout, 0.0, 1.0));
-
-        // 1. Deep midnight-indigo zenith -> storm-slate horizon (extending cleanly below h=0 so zero black horizon band!)
-        float tMid = smoothstep(-0.04, 0.30, h);
-        float tTop = smoothstep(0.18, 0.78, h);
+        // 1. Multi-Stop Rayleigh & Golden-Hour / Alpenglow / Sunset / Lagoon / Polar Gradient
+        float tMid = smoothstep(-0.04, 0.28, h);
+        float tTop = smoothstep(0.20, 0.80, h);
         vec3 col = mix(uHorizonColor, uMidSkyColor, tMid);
         col = mix(col, uZenithColor, tTop);
-        col *= darkScale;
+        col *= (1.0 + uPurification * 0.08) * darkScale;
 
-        // Soft rolling sea-haze cushion at waterline [-0.07..+0.05] (leaves sky above watchtowers rich with clouds!)
-        float shHaze = (h + 0.008) * 18.0;
-        float seaHaze = exp(-shHaze * shHaze);
-        col = mix(col, uHorizonMistColor * darkScale * 0.82, seaHaze * 0.44);
+        // Warm Mie forward-scattering solar glow across the sunward horizon!
+        vec3 sFwd = normalize(uSunDir);
+        float sunCos = max(0.0, dot(d, sFwd));
+        float mieWide = pow(sunCos, 4.5) * exp(-max(0.0, h) * 2.8);
+        col += uSunGlowColor * mieWide * (uSunDisc > 0.5 ? 0.34 : 0.14) * darkScale;
 
-        if (uAbyssMistAmt > 0.01) {
-          float abMist = exp(-max(0.0, h + 0.03) * 9.5) * step(-0.10, h);
-          col += vec3(0.008, 0.075, 0.072) * abMist * uAbyssMistAmt * darkScale;
-        }
-        if (uSmogAmt > 0.01) {
-          float smogGlow = exp(-max(0.0, h + 0.02) * 8.0) * step(-0.10, h);
-          col += vec3(0.18, 0.042, 0.008) * smogGlow * uSmogAmt;
-        }
+        // Soft horizon haze cushion right along waterline [-0.06..+0.05]
+        float shHaze = (h + 0.008) * 17.0;
+        col = mix(col, uHorizonMistColor * darkScale * 0.90, exp(-shHaze * shHaze) * 0.42);
 
-        // 2. Pinprick stars peeking ONLY through high clear-sky gaps
+        // 2. Twilight / Polar Pinprick Stars (ONLY in Mist Bayou zenith & Polar Storm Ocean!)
         vec3 starContrib = vec3(0.0);
-        if (h > 0.08) {
-          vec2 sg = vec2(uAz * 220.0, h * 110.0);
+        if (uStarAmt > 0.01 && h > 0.12) {
+          vec2 sg = vec2(uAz * 230.0, h * 115.0);
           vec2 si = floor(sg);
           vec2 sf = fract(sg) - 0.5;
           float sr = hash21(si + 5.3);
-          if (sr > 0.87) {
+          if (sr > 0.86) {
             vec2 sj = vec2(hash21(si + 19.1), hash21(si + 41.7)) - 0.5;
             float sd = length(sf - sj * 0.52);
-            float stw = 0.65 + 0.35 * sin(uTime * (1.7 + sr * 3.0) + sr * 31.0);
-            float sMask = exp(-sd * sd * 135.0) * stw * smoothstep(0.08, 0.26, h);
-            starContrib = vec3(0.62, 0.78, 0.98) * sMask * 0.55 * darkScale;
+            float stw = 0.65 + 0.35 * sin(uTime * (1.8 + sr * 2.8) + sr * 31.0);
+            float sMask = exp(-sd * sd * 145.0) * stw * smoothstep(0.14, 0.42, h);
+            starContrib = vec3(0.82, 0.90, 1.0) * sMask * uStarAmt * 0.72 * darkScale;
           }
         }
 
-        // 3. Twilight Crystal Nebula ('prism') & Colossal Maelstrom Vortex ('apex')
-        if (uNebulaAmt > 0.01 && h > 0.01) {
-          vec4 nebA = texture2D(uPanoTex, vec2(uAz * 2.0 + 0.12, clamp(h * 1.25 + 0.06, 0.02, 0.98)));
-          vec4 nebB = texture2D(uPanoTex, vec2(uAz * 4.0 - uTime * 0.003, clamp(h * 1.85 + 0.08, 0.02, 0.98)));
-          float rift = smoothstep(0.34, 0.82, nebA.a * 0.65 + nebB.b * 0.35) * smoothstep(0.01, 0.18, h) * (1.0 - smoothstep(0.55, 0.88, h));
-          vec3 nebCol = mix(vec3(0.24, 0.04, 0.40), vec3(0.04, 0.20, 0.38), nebB.r);
-          col += nebCol * rift * uNebulaAmt * 0.62;
-        }
-        if (uMaelstromAmt > 0.01 && h > 0.04) {
-          // Colossal spiraling abyssal cloud-vortex overhead in T8 Apex!
-          float twist = uAz * 3.0 + h * 1.8 - uTime * 0.022;
-          vec4 vor = texture2D(uPanoTex, vec2(twist, clamp(h * 1.3 + 0.1, 0.02, 0.98)));
-          float vBand = smoothstep(0.08, 0.35, h) * smoothstep(0.92, 0.45, h);
-          col += mix(vec3(0.18, 0.05, 0.26), vec3(0.28, 0.12, 0.04), vor.g) * vor.r * vBand * uMaelstromAmt * 0.42;
+        // 3. Sky-Dome Polar Aurora Glow Veil ('storm_ocean')
+        if (uAuroraAmt > 0.01 && h > 0.04) {
+          vec4 aurN = texture2D(uPanoTex, vec2(uAz * 3.0 + uTime * 0.012, clamp(h * 1.4, 0.02, 0.98)));
+          float aurBand = smoothstep(0.05, 0.28, h) * smoothstep(0.82, 0.38, h);
+          vec3 aurCol = mix(vec3(0.0, 0.88, 0.58), vec3(0.62, 0.24, 0.92), smoothstep(0.18, 0.62, h));
+          col += aurCol * pow(aurN.g, 1.6) * aurBand * uAuroraAmt * 0.42 * darkScale;
         }
 
-        // 4. Photographic 512x512 Cratered Full Moon & Cloud-Scattered Silver-Blue Corona
-        vec3 mFwd = normalize(uMoonDir);
-        vec3 mRight = normalize(cross(mFwd, vec3(0.0, 1.0, 0.0)));
-        vec3 mUp = cross(mRight, mFwd);
-        float mCos = dot(d, mFwd);
-        vec2 mUv = vec2(dot(d, mRight), dot(d, mUp)) / max(0.01, uMoonRadius);
-        float rNorm = mCos > 0.0 ? length(mUv) : 99.0;
-        float moonEff = uMoonAmt * mix(1.0, 0.35, uBlackout);
+        // 4. Radiant Volumetric Sun Disc (Daylight / Sunset Biomes) OR Polar Moon ('storm_ocean')
+        vec3 sRight = normalize(cross(sFwd, vec3(0.0, 1.0, 0.0)));
+        vec3 sUp = cross(sRight, sFwd);
+        vec2 sUv = vec2(dot(d, sRight), dot(d, sUp)) / max(0.01, uCelestialRadius);
+        float rNorm = dot(d, sFwd) > 0.0 ? length(sUv) : 99.0;
+        float celEff = uCelestialAmt * mix(1.0, 0.4, uBlackout);
 
-        float vCoord = clamp((h + 0.05) * 1.18, 0.01, 0.99);
-        vec4 p1 = texture2D(uPanoTex, vec2(uAz * 2.0 + uTime * 0.0028, vCoord));
-        vec4 p2 = texture2D(uPanoTex, vec2(uAz * 4.0 - uTime * 0.0046 + (p1.r - 0.5) * 0.035, clamp(vCoord * 1.35 - 0.04, 0.01, 0.99)));
-        vec4 pWisp = texture2D(uPanoTex, vec2(uAz * 5.0 + uTime * 0.0065, clamp(vCoord * 1.65 + 0.06, 0.01, 0.99)));
+        float vCoord = clamp((h + 0.05) * 1.16, 0.01, 0.99);
+        vec4 p1 = texture2D(uPanoTex, vec2(uAz * 2.0 + uTime * 0.0026, vCoord));
+        vec4 p2 = texture2D(uPanoTex, vec2(uAz * 4.0 - uTime * 0.0042 + (p1.r - 0.5) * 0.035, clamp(vCoord * 1.35 - 0.04, 0.01, 0.99)));
+        vec4 pWisp = texture2D(uPanoTex, vec2(uAz * 5.0 + uTime * 0.0060, clamp(vCoord * 1.65 + 0.06, 0.01, 0.99)));
 
-        float cInner = exp(-max(0.0, rNorm - 0.96) * 2.6) * (0.55 + 0.65 * pWisp.b);
-        float cMid = exp(-rNorm * 0.78) * (0.70 + 0.50 * p1.r);
-        float cOuter = exp(-rNorm * 0.32);
-        col += starContrib * (1.0 - clamp(cMid * 2.0, 0.0, 1.0));
-        col += uCoronaColor * (cInner * 0.22 + cMid * 0.12 + cOuter * 0.032) * moonEff;
+        col += starContrib * (1.0 - clamp(exp(-rNorm * 0.8) * 2.0, 0.0, 1.0));
 
-        // Sample 512x512 baked Lunar Maria & Ringed Impact Craters (uMoonTex is SRGB8_ALPHA8 -> already linear in WebGL2!)
-        if (rNorm < 1.03) {
-          vec2 moonTexUv = vec2(0.5 + mUv.x * 0.48, 0.5 + mUv.y * 0.48);
-          vec4 lunarSample = texture2D(uMoonTex, clamp(moonTexUv, 0.0, 1.0));
-          vec3 lunarLinear = lunarSample.rgb * uMoonTint * 1.04 * moonEff;
-          col = mix(col, lunarLinear, lunarSample.a);
+        if (uSunDisc > 0.5) {
+          // Physical Solar Disc + Warm Golden Aureole + Subtle Sunburst Rays!
+          float rayAng = atan(sUv.y, sUv.x);
+          float rays = 0.82 + 0.18 * sin(rayAng * 12.0 + uTime * 0.35) * cos(rayAng * 7.0 - uTime * 0.22);
+          float innerHalo = exp(-max(0.0, rNorm - 0.85) * 2.1) * rays;
+          float outerHalo = exp(-rNorm * 0.48);
+          col += uCoronaColor * (innerHalo * 0.48 + outerHalo * 0.16) * celEff;
+          if (rNorm < 1.15) {
+            float sunCore = smoothstep(1.08, 0.72, rNorm);
+            col = mix(col, uCelestialTint * 1.65 * celEff, sunCore);
+          }
+        } else {
+          // Polar Storm-Break Moon & Cyan-Emerald Corona
+          float cInner = exp(-max(0.0, rNorm - 0.95) * 2.5) * (0.55 + 0.65 * pWisp.b);
+          float cMid = exp(-rNorm * 0.75) * (0.70 + 0.50 * p1.r);
+          col += uCoronaColor * (cInner * 0.26 + cMid * 0.14) * celEff;
+          if (rNorm < 1.03) {
+            vec2 moonUv = vec2(0.5 + sUv.x * 0.48, 0.5 + sUv.y * 0.48);
+            vec4 lunar = texture2D(uCelestialTex, clamp(moonUv, 0.0, 1.0));
+            col = mix(col, lunar.rgb * uCelestialTint * 1.08 * celEff, lunar.a);
+          }
         }
 
-        // 5. High-Resolution 1024x512 Billowy Cumulonimbus Storm Panorama + Delicate Wispy Moon Filaments
-        if (h > -0.06) {
-          float vertMask = smoothstep(-0.06, 0.02, h) * (1.0 - smoothstep(0.52, 0.90, h));
-
+        // 5. Towering Billowy Sunlit Cumulus, Rose-Gold Alpenglow & Sunset Cloud Banks!
+        //    (Capped cleanly below postfx neutral-white bloom threshold so clouds stay crisp & puffy!)
+        if (h > -0.04) {
+          float vertMask = smoothstep(-0.04, 0.04, h) * (1.0 - smoothstep(0.55, 0.92, h));
           float rawCumulus = p1.r * 0.56 + p2.r * 0.32 + pWisp.b * 0.12;
           float turretNormal = clamp(p1.g * 0.58 + p2.g * 0.42, 0.0, 1.0);
 
-          // Carve deep midnight-indigo sky rifts between towering storm-cloud banks (never a wall-to-wall grey sheet!)
-          float moonWindow = smoothstep(0.60, 2.05, rNorm);
-          float thresh = mix(0.60, 0.35, clamp(uCloudCover, 0.0, 1.0));
-          float mainCloud = smoothstep(thresh, thresh + 0.25, rawCumulus) * vertMask * moonWindow;
-
-          // Delicate feathery wispy filaments drifting across both the moon and open sky rifts
-          float fineWisps = smoothstep(0.46, 0.82, pWisp.b * 0.64 + p2.b * 0.36) * vertMask * 0.42;
+          float sunWindow = smoothstep(0.75, 2.25, rNorm);
+          float thresh = mix(0.64, 0.36, clamp(uCloudCover, 0.0, 1.0));
+          float mainCloud = smoothstep(thresh, thresh + 0.26, rawCumulus) * vertMask * sunWindow;
+          float fineWisps = smoothstep(0.48, 0.84, pWisp.b * 0.64 + p2.b * 0.36) * vertMask * 0.36;
           float cloudDensity = clamp(mainCloud + fineWisps * (1.0 - mainCloud * 0.55), 0.0, 1.0);
 
-          // Diagonal virga rain shafts hanging subtly under storm cloud bases (h = 0.0..0.22)
-          if (uVirgaAmt > 0.01 && h > -0.02 && h < 0.24) {
-            float virgaBand = smoothstep(-0.02, 0.05, h) * smoothstep(0.24, 0.09, h);
-            float virga = smoothstep(0.54, 0.85, pWisp.b) * smoothstep(0.40, 0.74, p1.r) * virgaBand * uVirgaAmt;
-            col = mix(col, uMidSkyColor * 1.12 * darkScale, virga * 0.28);
-          }
+          float thinFringe = smoothstep(0.03, 0.30, cloudDensity) * exp(-cloudDensity * 3.4);
+          float crestLit = pow(smoothstep(0.38, 0.84, turretNormal), 1.35);
+          float sunProx = exp(-rNorm * 0.45) * 1.35 + 0.45;
+          float rimGlow = (thinFringe * 1.15 + crestLit * 0.88) * sunProx;
 
-          // Dramatic chiseled silver-blue moonlit cloud turret edges vs deep slate-charcoal storm bellies
-          float thinFringe = smoothstep(0.03, 0.28, cloudDensity) * exp(-cloudDensity * 3.6);
-          float crestLit = pow(smoothstep(0.46, 0.84, turretNormal), 1.60) * (1.0 - cloudDensity * 0.42);
-          float moonProx = exp(-rNorm * 0.55) * 1.85 + exp(-rNorm * 0.18) * 0.42 + 0.22;
-          float silverRim = (thinFringe * 1.28 + crestLit * 0.96) * moonProx * moonEff;
+          // Bright sunlit cloud tops vs soft atmospheric shadow bases (NEVER black in daytime!)
+          vec3 cBody = mix(uCloudDark, uCloudMid, smoothstep(0.12, 0.72, turretNormal)) * darkScale;
+          cBody = mix(cBody, uCloudRim * 0.94, clamp(rimGlow * 0.56, 0.0, 0.92));
 
-          vec3 cBody = mix(uCloudMid * 0.90, uCloudDark, smoothstep(0.10, 0.60, cloudDensity)) * darkScale;
-          cBody += uMidSkyColor * crestLit * 0.30 * darkScale;
-          cBody += uCloudRim * silverRim * 0.76;
-
-          // Across the lunar disc itself, feathery wispy cloud filaments veil the moon subtly in cool storm-slate!
-          if (rNorm < 1.35) {
-            float overMoon = 1.0 - smoothstep(0.85, 1.35, rNorm);
-            cBody = mix(cBody, uCloudMid * 1.05 + uCloudRim * 0.22 * moonEff, overMoon * 0.55);
-          }
-
-          // Foundry volcanic/furnace ember under-lit clouds
-          if (uSmogAmt > 0.01) {
-            float underSlope = 1.0 - turretNormal;
-            float underLit = underSlope * exp(-max(0.0, h) * 6.2) * uSmogAmt;
-            cBody += vec3(0.42, 0.10, 0.016) * underLit * (0.42 + 0.58 * cloudDensity);
-          }
-
-          // Internal thunderhead lightning scattering
           if (uLightning > 0.005) {
-            float boltProx = pow(max(dot(d, normalize(uBoltDir)), 0.0), 8.0);
-            cBody += vec3(0.34, 0.52, 0.86) * uLightning * (boltProx * 0.88 + 0.10) * (1.0 - cloudDensity * 0.45);
+            float boltProx = pow(max(dot(d, normalize(uBoltDir)), 0.0), 7.0);
+            cBody += vec3(0.36, 0.62, 0.92) * uLightning * (boltProx * 0.85 + 0.12);
           }
 
-          float moonLimbVeil = mix(0.24, 0.52, smoothstep(0.35, 0.98, rNorm));
-          float maxAlpha = rNorm < 1.15 ? moonLimbVeil : 0.95;
-          float cloudAlpha = clamp(cloudDensity * 0.95, 0.0, maxAlpha);
-          col = mix(col, cBody, cloudAlpha);
+          float maxAlpha = rNorm < 1.25 ? 0.35 : 0.92;
+          col = mix(col, min(cBody, vec3(1.02)), clamp(cloudDensity * 0.92, 0.0, maxAlpha));
         }
 
         if (h < -0.02) {
-          vec3 deepSea = mix(uHorizonMistColor * 0.55, uZenithColor * 0.75, smoothstep(-0.02, -0.22, h)) * darkScale;
-          col = mix(col, deepSea, smoothstep(-0.02, -0.14, h));
-        }
-
-        if (uLightning > 0.005) {
-          col += vec3(0.055, 0.09, 0.15) * uLightning * smoothstep(-0.02, 0.55, h);
+          vec3 waterRefl = mix(uHorizonMistColor * 0.78, uMidSkyColor * 0.65, smoothstep(-0.02, -0.24, h)) * darkScale;
+          col = mix(col, waterRefl, smoothstep(-0.02, -0.14, h));
         }
 
         gl_FragColor = vec4(col, 1.0);
@@ -1456,166 +2924,6 @@ function createStormSkyMaterial(cloudPanoTex, moonTex) {
       }
     `,
   });
-}
-
-// High-Detail Shaded Gas-Giant & Cassini Ring Shaders for Original '87 Mode
-function createOriginalPlanetMaterials(cloudPanoTex) {
-  const sunDir = new THREE.Vector3(-0.48, 0.44, 0.76).normalize();
-  const ringNormal = new THREE.Vector3(0.0, Math.sin(Math.PI * 0.36), Math.cos(Math.PI * 0.36)).normalize();
-
-  const planetMat = new THREE.ShaderMaterial({
-    fog: false,
-    uniforms: {
-      uPanoTex: { value: cloudPanoTex },
-      uSpin: { value: 0 },
-      uSunDir: { value: sunDir },
-      uRingNormal: { value: ringNormal },
-      uAtmosColor: { value: new THREE.Color('#38bdf8') },
-    },
-    vertexShader: /* glsl */ `
-      varying vec3 vNormalGroup;
-      varying vec3 vPosGroup;
-      varying vec3 vNormalView;
-      void main() {
-        vNormalGroup = normalize(normal);
-        vPosGroup = position;
-        vNormalView = normalize(normalMatrix * normal);
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform sampler2D uPanoTex;
-      uniform float uSpin;
-      uniform vec3 uSunDir;
-      uniform vec3 uRingNormal;
-      uniform vec3 uAtmosColor;
-      varying vec3 vNormalGroup;
-      varying vec3 vPosGroup;
-      varying vec3 vNormalView;
-
-      void main() {
-        // Infinite-resolution seamless 3D spherical gas-giant zonal belts + Kelvin-Helmholtz eddies!
-        vec3 P = normalize(vPosGroup);
-        float lon = atan(P.x, P.z) * 0.159154943 + 0.5 + uSpin;
-        float lat = clamp(P.y * 0.5 + 0.5, 0.01, 0.99);
-
-        vec4 turb1 = texture2D(uPanoTex, vec2(lon * 2.0, lat));
-        vec4 turb2 = texture2D(uPanoTex, vec2(lon * 5.0 - uSpin * 1.6, clamp(lat * 1.4 - 0.15, 0.02, 0.98)));
-        float eddy = (turb1.r - 0.5) * 0.065 + (turb2.b - 0.5) * 0.032 + sin(lon * 18.8495 + lat * 22.0) * 0.010;
-        float bLat = clamp(lat + eddy, 0.0, 1.0);
-
-        // Luminous multi-belt Nebulus / Saturn-Neptune cosmic palette (linear RGB)
-        vec3 cPolar   = vec3(0.025, 0.085, 0.34);
-        vec3 cCyan    = vec3(0.08,  0.48,  0.88);
-        vec3 cCream   = vec3(0.92,  0.78,  0.48);
-        vec3 cAmber   = vec3(0.76,  0.30,  0.10);
-        vec3 cIce     = vec3(0.38,  0.76,  0.96);
-
-        float zWave = sin(bLat * 25.0);
-        float dBand1 = (bLat - 0.54) / 0.11;
-        float dBand2 = (bLat - 0.41) / 0.065;
-        float dBand3 = (bLat - 0.29) / 0.055;
-        vec3 alb = mix(cPolar, cCyan, smoothstep(0.06, 0.24, bLat) * smoothstep(0.94, 0.76, bLat));
-        alb = mix(alb, cIce, smoothstep(0.15, 0.75, zWave) * 0.78);
-        alb = mix(alb, cCream, exp(-dBand1 * dBand1) * 0.88);
-        alb = mix(alb, cAmber, exp(-dBand2 * dBand2) * 0.85);
-        alb = mix(alb, cCream, exp(-dBand3 * dBand3) * 0.72);
-        alb *= (0.86 + 0.28 * turb2.g);
-
-        // Swirling Great Golden-Cyan Storm Vortex on sunlit front-left hemisphere!
-        float dLon = fract(lon - uSpin - 0.44 + 0.5) - 0.5;
-        float dLat = lat - 0.42;
-        float stormR2 = (dLon / 0.095) * (dLon / 0.095) + (dLat / 0.065) * (dLat / 0.065);
-        float stormEye = exp(-stormR2 * 1.5);
-        float dStormRing = stormR2 - 0.48;
-        float stormRing = exp(-dStormRing * dStormRing * 5.0);
-        alb = mix(alb, mix(vec3(0.98, 0.62, 0.26), vec3(0.75, 0.95, 1.0), stormRing), stormEye * 0.78);
-
-        vec3 L = normalize(uSunDir);
-        float ndl = dot(normalize(vNormalGroup), L);
-        float diff = smoothstep(-0.22, 0.76, ndl);
-
-        // Cast crisp Cassini-divided ring shadow across the planet's upper sunlit hemisphere!
-        float ringShadow = 1.0;
-        float denom = dot(L, uRingNormal);
-        if (abs(denom) > 0.02) {
-          float tHit = -dot(vPosGroup, uRingNormal) / denom;
-          if (tHit > 0.0) {
-            vec3 hitPt = vPosGroup + L * tHit;
-            float rHit = length(hitPt);
-            if (rHit > 1.30 && rHit < 2.12) {
-              float uRing = (rHit - 1.30) / (2.12 - 1.30);
-              float dCasS = (uRing - 0.58) / 0.05;
-              float cassini = 1.0 - 0.88 * exp(-dCasS * dCasS);
-              ringShadow = 1.0 - 0.58 * cassini;
-            }
-          }
-        }
-
-        // Rayleigh cyan atmospheric limb glow + subtle night-side rim
-        float viewZ = clamp(vNormalView.z, 0.0, 1.0);
-        float limb = pow(max(0.0, 1.0 - viewZ), 2.4) * (0.22 + 0.78 * smoothstep(-0.32, 0.55, ndl));
-
-        vec3 col = alb * (0.05 + 1.15 * diff * ringShadow) + uAtmosColor * limb * 0.78;
-        gl_FragColor = vec4(col, 1.0);
-        #include <tonemapping_fragment>
-        #include <colorspace_fragment>
-      }
-    `,
-  });
-
-  const ringMat = new THREE.ShaderMaterial({
-    side: THREE.DoubleSide,
-    transparent: true,
-    depthWrite: false,
-    fog: false,
-    uniforms: {
-      uSunDir: { value: sunDir },
-      uTint: { value: new THREE.Color('#e0f2fe') },
-    },
-    vertexShader: /* glsl */ `
-      varying vec3 vLocalPos;
-      void main() {
-        vLocalPos = position;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform vec3 uSunDir;
-      uniform vec3 uTint;
-      varying vec3 vLocalPos;
-      void main() {
-        float r = length(vLocalPos.xy);
-        float t = clamp((r - 1.30) / (2.12 - 1.30), 0.0, 1.0);
-        float edgeFade = smoothstep(0.0, 0.07, t) * smoothstep(1.0, 0.90, t);
-        if (edgeFade <= 0.004) discard;
-
-        // Multi-ring structure + crisp Cassini & Encke divisions (100% NaN-safe x*x!)
-        float dCas = (t - 0.58) / 0.038;
-        float dEnc = (t - 0.84) / 0.018;
-        float cassini = 1.0 - 0.92 * exp(-dCas * dCas);
-        float encke = 1.0 - 0.58 * exp(-dEnc * dEnc);
-        float ringlets = 0.74 + 0.26 * sin(t * 78.0) * cos(t * 31.0);
-
-        // Planet shadow cast onto back-right half of rings (matching ringMesh.rotation.x = -0.36 * PI)
-        vec3 wp = vec3(vLocalPos.x, vLocalPos.y * 0.4258, -vLocalPos.y * 0.9048);
-        vec3 L = normalize(uSunDir);
-        float proj = dot(wp, L);
-        float perp2 = dot(wp, wp) - proj * proj;
-        float planetShadow = proj < 0.0 ? smoothstep(0.88, 1.06, sqrt(max(0.0, perp2))) : 1.0;
-
-        vec3 innerGold = vec3(0.96, 0.84, 0.62);
-        vec3 outerIce = mix(vec3(0.45, 0.82, 1.0), uTint, 0.55);
-        vec3 col = mix(innerGold, outerIce, smoothstep(0.15, 0.72, t)) * ringlets * (0.14 + 0.95 * planetShadow);
-        float alpha = edgeFade * cassini * encke * (0.45 + 0.46 * ringlets);
-        gl_FragColor = vec4(col, alpha);
-        #include <tonemapping_fragment>
-        #include <colorspace_fragment>
-      }
-    `,
-  });
-
-  return { planetMat, ringMat };
 }
 
 function createFireflyMaterial() {
@@ -1626,18 +2934,18 @@ function createFireflyMaterial() {
     uniforms: {
       uTime: { value: 0 },
       uFocusY: { value: 2.0 },
-      uWaterY: { value: -0.55 },
+      uWaterY: { value: -0.82 },
       uCamYaw: { value: 0 },
       uWind: { value: 0 },
       uPixelRatio: { value: 2.0 },
-      uColorA: { value: new THREE.Color('#00f5c8') },
-      uColorB: { value: new THREE.Color('#0ee876') },
-      uColorC: { value: new THREE.Color('#00d4ff') },
+      uColorA: { value: new THREE.Color('#ffd147') },
+      uColorB: { value: new THREE.Color('#ffb703') },
+      uColorC: { value: new THREE.Color('#52ffb8') },
       uIntensity: { value: 1.0 },
     },
     vertexShader: /* glsl */ `
-      attribute vec4 aSeed;   // x: baseAngle, y: radius, z: ySpanOffset, w: phase
-      attribute vec4 aParams; // x: speed, y: sizeScale, z: colorMix, w: tier (0=flank, 1=waterSpore, 2=bokehOrb)
+      attribute vec4 aSeed;
+      attribute vec4 aParams;
 
       uniform float uTime;
       uniform float uFocusY;
@@ -1666,14 +2974,14 @@ function createFireflyMaterial() {
           + cos(uTime * spd * 0.61 + phase * 1.7) * 0.14
           + uWind * 0.08;
 
-        float rad = aSeed.y + sin(uTime * (spd * 1.3) + phase * 2.1) * 0.26;
+        float rad = aSeed.y + sin(uTime * (spd * 1.3) + phase * 2.1) * 0.28;
 
         float worldY;
         if (isSurf > 0.5) {
-          worldY = uWaterY + 0.14 + fract(aSeed.z + uTime * 0.055) * 2.25 + sin(uTime * 1.9 + phase) * 0.14;
+          worldY = uWaterY + 0.16 + fract(aSeed.z + uTime * 0.048) * 2.6 + sin(uTime * 1.8 + phase) * 0.16;
         } else {
-          float span = 14.8;
-          float localY = mod(aSeed.z * span + uTime * spd * 0.52 + sin(uTime * 1.4 + phase) * 0.32, span) - span * 0.47;
+          float span = 18.0;
+          float localY = mod(aSeed.z * span + uTime * spd * 0.50 + sin(uTime * 1.3 + phase) * 0.35, span) - span * 0.46;
           worldY = max(uWaterY + 0.24, uFocusY + localY);
         }
 
@@ -1681,14 +2989,14 @@ function createFireflyMaterial() {
         vec4 mvPosition = viewMatrix * vec4(worldPos, 1.0);
         float dist = max(1.5, -mvPosition.z);
 
-        float pulse1 = 0.5 + 0.5 * sin(uTime * (1.7 + spd * 2.3) + phase);
+        float pulse1 = 0.5 + 0.5 * sin(uTime * (1.7 + spd * 2.2) + phase);
         float pulse2 = 0.5 + 0.5 * cos(uTime * (0.9 + spd * 1.3) - phase * 1.6);
-        vTwinkle = 0.38 + 0.62 * pow(pulse1 * 0.65 + pulse2 * 0.35, 1.3);
+        vTwinkle = 0.36 + 0.64 * pow(pulse1 * 0.65 + pulse2 * 0.35, 1.3);
         vColorMix = aParams.z;
-        vDepthFade = smoothstep(38.0, 6.5, dist);
+        vDepthFade = smoothstep(46.0, 7.0, dist);
 
         float basePt = aParams.y * (0.84 + 0.34 * vTwinkle);
-        gl_PointSize = clamp(basePt * uPixelRatio * (235.0 / dist), 6.0, 74.0);
+        gl_PointSize = clamp(basePt * uPixelRatio * (245.0 / dist), 5.0, 72.0);
         gl_Position = projectionMatrix * mvPosition;
       }
     `,
@@ -1718,16 +3026,15 @@ function createFireflyMaterial() {
         if (vTier > 1.5) {
           float softBell = exp(-r2 * 3.4) * pow(max(0.0, 1.0 - r), 1.35);
           float warmCore = exp(-r2 * 14.0);
-          col = tint * (softBell * 0.88) + mix(tint, vec3(0.25, 1.05, 0.88), 0.4) * warmCore * 0.52;
-          alpha = clamp((softBell * 0.56 + warmCore * 0.34) * vTwinkle * vDepthFade * uIntensity, 0.0, 1.0);
+          col = tint * (softBell * 0.88) + mix(tint, vec3(1.0, 0.96, 0.82), 0.4) * warmCore * 0.52;
+          alpha = clamp((softBell * 0.54 + warmCore * 0.32) * vTwinkle * vDepthFade * uIntensity, 0.0, 1.0);
         } else {
-          float core = exp(-r2 * 46.0);
+          float core = exp(-r2 * 44.0);
           float innerHalo = exp(-r2 * 5.2);
-          float outerAura = pow(max(0.0, 1.0 - r), 2.3) * 0.64;
-
-          vec3 coreTint = mix(tint * 1.35, vec3(0.32, 1.18, 0.98), 0.55);
-          col = tint * (innerHalo * 0.96 + outerAura * 0.85) + coreTint * core * 1.15;
-          alpha = clamp((core * 0.95 + innerHalo * 0.82 + outerAura * 0.74) * vTwinkle * vDepthFade * uIntensity, 0.0, 1.0);
+          float outerAura = pow(max(0.0, 1.0 - r), 2.3) * 0.62;
+          vec3 coreTint = mix(tint * 1.35, vec3(1.0, 0.98, 0.88), 0.55);
+          col = tint * (innerHalo * 0.96 + outerAura * 0.84) + coreTint * core * 1.15;
+          alpha = clamp((core * 0.95 + innerHalo * 0.80 + outerAura * 0.72) * vTwinkle * vDepthFade * uIntensity, 0.0, 1.0);
         }
 
         gl_FragColor = vec4(col, alpha);
@@ -1746,17 +3053,15 @@ function createSeaSprayMaterial(wispTex) {
     uniforms: {
       uMap: { value: wispTex },
       uPixelRatio: { value: 2.0 },
-      uFoamColor: { value: new THREE.Color('#dceeff') },
-      uShadowColor: { value: new THREE.Color('#1d3852') },
+      uFoamColor: { value: new THREE.Color('#f4fbff') },
+      uShadowColor: { value: new THREE.Color('#4a8db8') },
       uGlobalOpacity: { value: 1.0 },
     },
     vertexShader: /* glsl */ `
       attribute float aAlpha;
       attribute float aSize;
       attribute float aRot;
-
       uniform float uPixelRatio;
-
       varying float vAlpha;
       varying float vRot;
 
@@ -1765,7 +3070,7 @@ function createSeaSprayMaterial(wispTex) {
         vRot = aRot;
         vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
         float dist = max(2.0, -mvPosition.z);
-        gl_PointSize = clamp(aSize * uPixelRatio * (210.0 / dist), 2.0, 110.0);
+        gl_PointSize = clamp(aSize * uPixelRatio * (225.0 / dist), 2.0, 110.0);
         gl_Position = projectionMatrix * mvPosition;
       }
     `,
@@ -1774,7 +3079,6 @@ function createSeaSprayMaterial(wispTex) {
       uniform vec3 uFoamColor;
       uniform vec3 uShadowColor;
       uniform float uGlobalOpacity;
-
       varying float vAlpha;
       varying float vRot;
 
@@ -1810,12 +3114,19 @@ export class StormAtmosphere {
     this.scene = scene || null;
     this.towerRadius = opts.towerRadius || DEFAULT_TOWER_RADIUS;
     this.floorHeight = opts.floorHeight || DEFAULT_FLOOR_HEIGHT;
+    this.cols = opts.cols || DEFAULT_COLS;
+    this.colAngle = TWO_PI / this.cols;
     this.era = 'reboot';
+    this.currentTheme = resolveBiomeKey(opts.theme || 'canyon_river');
+    this._forcedTheme = null;
+    this._purification = 0;
+    this._purificationTarget = 0;
     this._reflectionPass = false;
     this._disposed = false;
 
     // Pre-allocated scratch math objects (ZERO per-frame allocations!)
-    this.moonDirection = new THREE.Vector3(0.42, 0.26, -0.87).normalize();
+    this.moonDirection = new THREE.Vector3(0.42, 0.36, -0.83).normalize();
+    this.sunDirection = this.moonDirection;
     this._moonDirOut = new THREE.Vector3();
     this._camPos = new THREE.Vector3();
     this._camFwd = new THREE.Vector3(0, 0, -1);
@@ -1828,6 +3139,7 @@ export class StormAtmosphere {
     this._tmpPos = new THREE.Vector3();
     this._tmpQuat = new THREE.Quaternion();
     this._tmpScale = new THREE.Vector3();
+    this._yAxis = new THREE.Vector3(0, 1, 0);
 
     this._ownedTextures = [];
     this._ownedGeometries = [];
@@ -1839,16 +3151,18 @@ export class StormAtmosphere {
 
     this._buildSharedTextures();
     this._buildSkyDome();
-    this._buildArchipelagoVistasAndSeaFog();
+    this._buildWatershedVistasAndMist();
+    this._buildWaterfallsAndRainbows();
+    this._buildForegroundWaterEcosystems();
     this._buildAuroraRibbons();
-    this._buildRebootFlankMist();
+    this._buildSoaringBirds();
+    this._buildFlankMist();
     this._buildFireflies();
     this._buildSeaSprayPlumes();
     this._buildWeatherSystems();
     this._buildLightningBolts();
-    this._buildOriginalArcadeSkyExtras();
 
-    this.setEra('reboot');
+    this._setVistaKind(this.currentTheme);
     if (this.scene) {
       this.scene.add(this.root);
     }
@@ -1871,48 +3185,44 @@ export class StormAtmosphere {
 
   _buildSharedTextures() {
     this.cloudPanoTex = this._trackTex(createHighResCloudPanoramaTexture(1024, 512));
-    this.moonTex = this._trackTex(createDetailedMoonTexture(512));
+    this.celestialTex = this._trackTex(createCelestialDiscTexture(512));
     this.wispTex = this._trackTex(createSoftWispTexture());
     this.glowTex = this._trackTex(createRadialGlowTexture(64));
   }
 
   _buildSkyDome() {
-    // 24x16 sphere (720 tris vs 2,976 tris) — vDir is normalized per-fragment so 0px difference!
-    const skyGeo = this._trackGeo(new THREE.SphereGeometry(135, 24, 16));
-    this.skyMat = this._trackMat(createStormSkyMaterial(this.cloudPanoTex, this.moonTex));
+    const skyGeo = this._trackGeo(new THREE.SphereGeometry(145, 28, 18));
+    this.skyMat = this._trackMat(createBiomeSkyMaterial(this.cloudPanoTex, this.celestialTex));
     this.skyDome = new THREE.Mesh(skyGeo, this.skyMat);
     this.skyDome.renderOrder = -1000;
     this.skyDome.frustumCulled = false;
     this.root.add(this.skyDome);
   }
 
-  // 3D Archipelago Horizon Vistas (1 merged draw call active at a time!) + Rolling Horizon Sea-Fog Ring (1 draw call)
-  _buildArchipelagoVistasAndSeaFog() {
+  _buildWatershedVistasAndMist() {
     this.archipelagoGroup = new THREE.Group();
-    this.vistaMat = this._trackMat(createArchipelagoVistaMaterial(this.cloudPanoTex));
+    this.vistaMat = this._trackMat(createWatershedVistaMaterial(this.cloudPanoTex));
 
-    const vistaTypes = ['coastal', 'volcanic', 'glacial', 'maelstrom', 'alien_orig'];
     this.vistaMeshes = {};
-    for (let i = 0; i < vistaTypes.length; i++) {
-      const k = vistaTypes[i];
-      const geo = this._trackGeo(buildVistaGeometry(k));
+    for (let i = 0; i < BIOME_KEYS.length; i++) {
+      const k = BIOME_KEYS[i];
+      const geo = this._trackGeo(buildBiomeVistaGeometry(k));
       const mesh = new THREE.Mesh(geo, this.vistaMat);
       mesh.frustumCulled = false;
       mesh.renderOrder = -500;
-      mesh.visible = k === 'coastal';
+      mesh.visible = k === this.currentTheme;
       this.vistaMeshes[k] = mesh;
       this.archipelagoGroup.add(mesh);
     }
-    this._activeVistaKey = 'coastal';
+    this._activeVistaKey = this.currentTheme;
     this.root.add(this.archipelagoGroup);
 
-    // Concentric 2-shell rolling horizon sea-fog ring starting flush at waterY (28 radial segs = 112 tris, zero below-sea Z-cut!)
+    // 2-shell rolling horizon mist ring starting flush at waterY
     const innerCyl = new THREE.CylinderGeometry(64, 66, 9.5, 28, 1, true);
     innerCyl.translate(0, 4.75, 0);
-    const outerCyl = new THREE.CylinderGeometry(86, 88, 13.0, 28, 1, true);
-    outerCyl.translate(0, 6.5, 0);
+    const outerCyl = new THREE.CylinderGeometry(88, 90, 13.5, 28, 1, true);
+    outerCyl.translate(0, 6.75, 0);
 
-    // Merge both open cylinders into 1 single draw call
     const p1 = innerCyl.attributes.position.array;
     const u1 = innerCyl.attributes.uv.array;
     const i1 = innerCyl.index.array;
@@ -1946,6 +3256,176 @@ export class StormAtmosphere {
     this.root.add(this.horizonMistRing);
   }
 
+  _buildWaterfallsAndRainbows() {
+    this.waterfallGroup = new THREE.Group();
+    this.waterfallMat = this._trackMat(createWaterfallMaterial(this.cloudPanoTex));
+
+    // Canyon River: 6 thundering cliffside waterfalls positioned on the FRONT camera-facing
+    // sandstone cliff faces (`rTop = 31.5..43.0 -> rBot = 28.0..38.5`, 100% unoccluded on portrait & wide!)
+    const canyonFalls = this._trackGeo(
+      buildWaterfallsGeometry([
+        { ang: Math.PI + 0.21, rTop: 31.8, rBot: 28.4, yTop: 15.8, width: 3.4, seed: 0.11 },
+        { ang: Math.PI - 0.21, rTop: 33.4, rBot: 29.8, yTop: 16.5, width: 3.6, seed: 0.37 },
+        { ang: Math.PI + 0.42, rTop: 41.2, rBot: 36.8, yTop: 21.5, width: 4.8, seed: 0.61 },
+        { ang: Math.PI - 0.43, rTop: 42.8, rBot: 38.2, yTop: 22.2, width: 5.0, seed: 0.83 },
+        { ang: Math.PI + 1.15, rTop: 36.5, rBot: 32.5, yTop: 17.0, width: 3.8, seed: 0.49 },
+        { ang: Math.PI - 1.18, rTop: 37.5, rBot: 33.5, yTop: 17.5, width: 3.8, seed: 0.92 },
+      ])
+    );
+    this.canyonWaterfallMesh = new THREE.Mesh(canyonFalls, this.waterfallMat);
+    this.canyonWaterfallMesh.frustumCulled = false;
+    this.canyonWaterfallMesh.renderOrder = -380;
+
+    // Alpine Lake: 3 high-mountain snowmelt cascades on front granite spurs!
+    const alpineFalls = this._trackGeo(
+      buildWaterfallsGeometry([
+        { ang: Math.PI + 0.20, rTop: 45.2, rBot: 41.0, yTop: 19.5, width: 3.0, seed: 0.22 },
+        { ang: Math.PI - 0.19, rTop: 46.8, rBot: 42.5, yTop: 21.0, width: 3.2, seed: 0.55 },
+        { ang: Math.PI + 0.88, rTop: 47.0, rBot: 42.8, yTop: 18.0, width: 2.8, seed: 0.77 },
+      ])
+    );
+    this.alpineWaterfallMesh = new THREE.Mesh(alpineFalls, this.waterfallMat);
+    this.alpineWaterfallMesh.frustumCulled = false;
+    this.alpineWaterfallMesh.renderOrder = -380;
+
+    // Mist Bayou: Soft ancient mossy temple spillways aligned directly with sunken temple ruins!
+    const bayouFalls = this._trackGeo(
+      buildWaterfallsGeometry([
+        { ang: Math.PI + 0.33, rTop: 40.8, rBot: 38.8, yTop: 5.4, width: 1.9, seed: 0.19 },
+        { ang: Math.PI - 0.34, rTop: 42.6, rBot: 40.5, yTop: 5.8, width: 2.0, seed: 0.64 },
+      ])
+    );
+    this.bayouWaterfallMesh = new THREE.Mesh(bayouFalls, this.waterfallMat);
+    this.bayouWaterfallMesh.frustumCulled = false;
+    this.bayouWaterfallMesh.renderOrder = -380;
+
+    this.waterfallGroup.add(this.canyonWaterfallMesh, this.alpineWaterfallMesh, this.bayouWaterfallMesh);
+    this.root.add(this.waterfallGroup);
+
+    // Volumetric Golden Morning / Tropical God-Rays
+    const rayGeo = this._trackGeo(buildGodRaysGeometry());
+    this.godRaysMat = this._trackMat(createGodRaysMaterial());
+    this.godRaysMesh = new THREE.Mesh(rayGeo, this.godRaysMat);
+    this.godRaysMesh.frustumCulled = false;
+    this.godRaysMesh.renderOrder = -320;
+    this.root.add(this.godRaysMesh);
+
+    // 3D Spectral Mist & Ecosystem Purification Rainbow Arc
+    const rbGeo = this._trackGeo(buildRainbowArcGeometry());
+    this.rainbowMat = this._trackMat(createRainbowArcMaterial());
+    this.rainbowMesh = new THREE.Mesh(rbGeo, this.rainbowMat);
+    this.rainbowMesh.frustumCulled = false;
+    this.rainbowMesh.renderOrder = -340;
+    this.root.add(this.rainbowMesh);
+  }
+
+  _buildForegroundWaterEcosystems() {
+    // 1. Above-water / waterline props (`waterWorldGroup`): River Boulders + Wakes, Bayou Lily Pads + Lotus, Polar Floes
+    this.waterWorldGroup = new THREE.Group();
+
+    const { boulderGeo, wakeGeo } = buildRiverBouldersAndWakesGeometry();
+    this._trackGeo(boulderGeo);
+    this._trackGeo(wakeGeo);
+    this.riverBouldersMesh = new THREE.Mesh(boulderGeo, this.vistaMat);
+    this.riverBouldersMesh.frustumCulled = false;
+    this.riverBouldersMesh.renderOrder = -20;
+
+    this.boulderWakeMat = this._trackMat(
+      new THREE.ShaderMaterial({
+        side: THREE.DoubleSide,
+        transparent: true,
+        depthWrite: false,
+        fog: false,
+        uniforms: {
+          uPanoTex: { value: this.cloudPanoTex },
+          uTime: { value: 0 },
+        },
+        vertexShader: /* glsl */ `
+          attribute vec3 aWakeUv;
+          varying vec3 vWuv;
+          void main() {
+            vWuv = aWakeUv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: /* glsl */ `
+          uniform sampler2D uPanoTex;
+          uniform float uTime;
+          varying vec3 vWuv;
+          void main() {
+            float u = vWuv.x;
+            float t = vWuv.y;
+            float seed = vWuv.z;
+            // V-shaped standing Kelvin foam arms on left & right edges of wake!
+            float armL = exp(-pow((u - 0.16) / 0.16, 2.0));
+            float armR = exp(-pow((u - 0.84) / 0.16, 2.0));
+            float centerTurb = (1.0 - t) * sin(clamp(u, 0.0, 1.0) * 3.14159);
+            vec4 n = texture2D(uPanoTex, vec2(u * 1.2 + seed, fract(t * 1.4 - uTime * 0.85 + seed)));
+            float foam = (armL + armR + centerTurb * 0.55) * (0.45 + 0.65 * n.r) * (1.0 - t * 0.88) * smoothstep(0.0, 0.12, t);
+            float a = clamp(foam * 0.82, 0.0, 0.86);
+            if (a < 0.01) discard;
+            gl_FragColor = vec4(vec3(0.92, 0.98, 1.0), a);
+            #include <tonemapping_fragment>
+            #include <colorspace_fragment>
+          }
+        `,
+      })
+    );
+    this.boulderWakeMesh = new THREE.Mesh(wakeGeo, this.boulderWakeMat);
+    this.boulderWakeMesh.frustumCulled = false;
+    this.boulderWakeMesh.renderOrder = 5;
+
+    const lilyGeo = this._trackGeo(buildBayouLilyPadsAndLotusGeometry());
+    this.bayouLilyMesh = new THREE.Mesh(lilyGeo, this.vistaMat);
+    this.bayouLilyMesh.frustumCulled = false;
+    this.bayouLilyMesh.renderOrder = -18;
+
+    const floeGeo = this._trackGeo(buildPolarIceFloesGeometry());
+    this.polarFloesMesh = new THREE.Mesh(floeGeo, this.vistaMat);
+    this.polarFloesMesh.frustumCulled = false;
+    this.polarFloesMesh.renderOrder = -18;
+
+    this.waterWorldGroup.add(
+      this.riverBouldersMesh,
+      this.boulderWakeMesh,
+      this.bayouLilyMesh,
+      this.polarFloesMesh
+    );
+    this.root.add(this.waterWorldGroup);
+
+    // 2. Underwater Coral Reef Shelves & Gliding 3D Manta Rays (`underwaterGroup`, `y < waterY`, opaque!)
+    //    Rendered BEFORE transparent `OceanSurface` so reefs & manta rays shine right through `coral_sea` water!
+    this.underwaterGroup = new THREE.Group();
+    this.reefMat = this._trackMat(createUnderwaterReefMaterial());
+
+    const reefGeo = this._trackGeo(buildCoralReefShelfGeometry());
+    this.coralReefMesh = new THREE.Mesh(reefGeo, this.reefMat);
+    this.coralReefMesh.frustumCulled = false;
+    this.coralReefMesh.renderOrder = -25;
+
+    const mantaCount = 12;
+    this._mantaCount = mantaCount;
+    const mantaGeo = this._trackGeo(buildMantaRayGeometry());
+    this.mantaInstMesh = new THREE.InstancedMesh(mantaGeo, this.reefMat, mantaCount);
+    this.mantaInstMesh.frustumCulled = false;
+    this.mantaInstMesh.renderOrder = -24;
+
+    // Pre-allocated Manta Ray orbit parameters: [baseAng, orbitR, depthY, angSpeed, scale, dirSign]
+    this._mantaParams = new Float32Array(mantaCount * 6);
+    for (let i = 0; i < mantaCount; i++) {
+      const k = i * 6;
+      this._mantaParams[k] = (i / mantaCount) * TWO_PI + 0.22;
+      this._mantaParams[k + 1] = 6.2 + (i % 4) * 3.6;
+      this._mantaParams[k + 2] = -0.52 - (i % 3) * 0.22;
+      this._mantaParams[k + 3] = 0.12 + (i % 3) * 0.035;
+      this._mantaParams[k + 4] = 0.92 + (i % 3) * 0.26;
+      this._mantaParams[k + 5] = i % 2 === 0 ? 1 : -1;
+    }
+
+    this.underwaterGroup.add(this.coralReefMesh, this.mantaInstMesh);
+    this.root.add(this.underwaterGroup);
+  }
+
   _buildAuroraRibbons() {
     const geo = this._trackGeo(buildAuroraRibbonsGeometry());
     this.auroraMat = this._trackMat(createAuroraRibbonMaterial(this.cloudPanoTex));
@@ -1956,16 +3436,38 @@ export class StormAtmosphere {
     this.root.add(this.auroraMesh);
   }
 
-  _buildRebootFlankMist() {
-    const count = 22;
+  _buildSoaringBirds() {
+    const birdCount = 16;
+    this._birdCount = birdCount;
+    const birdGeo = this._trackGeo(buildSoaringBirdGeometry());
+    this.birdMat = this._trackMat(createSoaringBirdMaterial());
+    this.birdsMesh = new THREE.InstancedMesh(birdGeo, this.birdMat, birdCount);
+    this.birdsMesh.frustumCulled = false;
+    this.birdsMesh.renderOrder = -250;
+
+    // [baseAng, orbitR, altY, speed, scale]
+    this._birdParams = new Float32Array(birdCount * 5);
+    for (let i = 0; i < birdCount; i++) {
+      const k = i * 5;
+      this._birdParams[k] = Math.PI + ((i - 8) / 8) * 1.45;
+      this._birdParams[k + 1] = 28.0 + (i % 4) * 9.5;
+      this._birdParams[k + 2] = 9.0 + (i % 5) * 3.4;
+      this._birdParams[k + 3] = (0.14 + (i % 3) * 0.04) * (i % 2 === 0 ? 1 : -1);
+      this._birdParams[k + 4] = 0.55 + (i % 3) * 0.16;
+    }
+    this.root.add(this.birdsMesh);
+  }
+
+  _buildFlankMist() {
+    const count = 24;
     this._mistCount = count;
     const geo = this._trackGeo(new THREE.PlaneGeometry(1, 1));
     const mat = this._trackMat(
       new THREE.MeshBasicMaterial({
         map: this.wispTex,
-        color: '#8fb4dc',
+        color: '#dbeafe',
         transparent: true,
-        opacity: 0.14,
+        opacity: 0.12,
         depthWrite: false,
         fog: true,
       })
@@ -1975,7 +3477,7 @@ export class StormAtmosphere {
     this.flankMistMesh.renderOrder = -10;
 
     this._mistData = new Float32Array(count * 8);
-    let seed = 19872026;
+    let seed = 20260808;
     const rnd = () => {
       seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
       return seed / 4294967296;
@@ -1984,10 +3486,10 @@ export class StormAtmosphere {
       const k = i * 8;
       const side = i % 2 === 0 ? -1 : 1;
       this._mistData[k] = side;
-      this._mistData[k + 1] = side * (this.towerRadius + 0.85 + rnd() * 2.8);
-      this._mistData[k + 2] = -2.8 + rnd() * 2.2;
-      this._mistData[k + 3] = (i / count) * 12.0;
-      const w = 3.4 + rnd() * 2.6;
+      this._mistData[k + 1] = side * (this.towerRadius + 1.2 + rnd() * 3.8);
+      this._mistData[k + 2] = -3.4 + rnd() * 2.6;
+      this._mistData[k + 3] = (i / count) * 16.0;
+      const w = 4.2 + rnd() * 3.2;
       this._mistData[k + 4] = w;
       this._mistData[k + 5] = w * (0.42 + rnd() * 0.14);
       this._mistData[k + 6] = (0.14 + rnd() * 0.18) * (rnd() < 0.5 ? -1 : 1);
@@ -1997,7 +3499,7 @@ export class StormAtmosphere {
   }
 
   _buildFireflies() {
-    const count = 144;
+    const count = 220;
     this._fireflyCount = count;
     const dummyPos = new Float32Array(count * 3);
     const seeds = new Float32Array(count * 4);
@@ -2016,26 +3518,26 @@ export class StormAtmosphere {
       let radius;
       let worldScale;
 
-      if (i >= 116) {
-        tier = 1.0;
-        baseAng = (rnd() - 0.5) * 1.55;
-        radius = this.towerRadius + 0.28 + rnd() * 2.25;
-        worldScale = 0.36 + rnd() * 0.34;
-      } else if (i >= 94) {
-        tier = 2.0;
+      if (i >= 165) {
+        tier = 1.0; // Low water-surface fireflies hovering right above lily pads & ripples!
+        baseAng = (rnd() - 0.5) * TWO_PI;
+        radius = this.towerRadius + 0.45 + rnd() * 11.5;
+        worldScale = 0.38 + rnd() * 0.36;
+      } else if (i >= 130) {
+        tier = 2.0; // Soft sunlit bokeh orbs
         const side = i % 2 === 0 ? -1 : 1;
-        baseAng = side * (0.46 + rnd() * 0.96);
-        radius = this.towerRadius + 0.85 + rnd() * 3.8;
-        worldScale = 0.92 + rnd() * 0.72;
-      } else if (i < 68) {
+        baseAng = side * (0.42 + rnd() * 1.15);
+        radius = this.towerRadius + 1.1 + rnd() * 5.5;
+        worldScale = 0.90 + rnd() * 0.72;
+      } else if (i < 90) {
         const side = i % 2 === 0 ? -1 : 1;
-        baseAng = side * (0.40 + rnd() * 1.05);
-        radius = this.towerRadius + 0.42 + rnd() * 4.4;
-        worldScale = 0.48 + rnd() * 0.68;
+        baseAng = side * (0.36 + rnd() * 1.20);
+        radius = this.towerRadius + 0.55 + rnd() * 6.2;
+        worldScale = 0.46 + rnd() * 0.66;
       } else {
-        baseAng = ((i - 68) / 26) * TWO_PI + rnd() * 0.35;
-        radius = this.towerRadius + 0.45 + rnd() * 4.8;
-        worldScale = 0.46 + rnd() * 0.64;
+        baseAng = ((i - 90) / 40) * TWO_PI + rnd() * 0.35;
+        radius = this.towerRadius + 0.6 + rnd() * 6.8;
+        worldScale = 0.45 + rnd() * 0.62;
       }
 
       seeds[i4] = baseAng;
@@ -2043,7 +3545,7 @@ export class StormAtmosphere {
       seeds[i4 + 2] = rnd();
       seeds[i4 + 3] = rnd() * TWO_PI;
 
-      params[i4] = 0.20 + rnd() * 0.46;
+      params[i4] = 0.20 + rnd() * 0.44;
       params[i4 + 1] = worldScale;
       params[i4 + 2] = rnd();
       params[i4 + 3] = tier;
@@ -2062,7 +3564,7 @@ export class StormAtmosphere {
   }
 
   _buildSeaSprayPlumes() {
-    const count = 84;
+    const count = 88;
     this._sprayCount = count;
     this._sprayPos = new Float32Array(count * 3);
     this._sprayAlpha = new Float32Array(count);
@@ -2078,20 +3580,14 @@ export class StormAtmosphere {
 
     for (let i = 0; i < count; i++) {
       const k = i * 7;
-      let ang;
-      if (i < 58) {
-        const side = i % 2 === 0 ? -1 : 1;
-        ang = side * (0.46 + rnd() * 0.82);
-      } else {
-        ang = (rnd() - 0.5) * 1.15;
-      }
-      const isDroplet = i >= 60;
+      const ang = i < 60 ? (i % 2 === 0 ? -1 : 1) * (0.44 + rnd() * 0.88) : (rnd() - 0.5) * 1.25;
+      const isDroplet = i >= 62;
       this._sprayState[k] = ang;
-      this._sprayState[k + 1] = this.towerRadius + 0.16 + rnd() * (isDroplet ? 1.65 : 1.15);
+      this._sprayState[k + 1] = this.towerRadius + 0.20 + rnd() * (isDroplet ? 2.1 : 1.45);
       this._sprayState[k + 2] = 0.44 + rnd() * 0.36;
       this._sprayState[k + 3] = rnd();
-      this._sprayState[k + 4] = isDroplet ? 1.25 + rnd() * 1.35 : 0.92 + rnd() * 1.25;
-      this._sprayState[k + 5] = isDroplet ? 0.24 + rnd() * 0.24 : 1.15 + rnd() * 1.20;
+      this._sprayState[k + 4] = isDroplet ? 1.4 + rnd() * 1.5 : 1.05 + rnd() * 1.35;
+      this._sprayState[k + 5] = isDroplet ? 0.26 + rnd() * 0.26 : 1.25 + rnd() * 1.35;
       this._sprayState[k + 6] = (rnd() - 0.5) * 1.2;
     }
 
@@ -2113,7 +3609,8 @@ export class StormAtmosphere {
   }
 
   _buildWeatherSystems() {
-    const pCount = 240;
+    // Drifting Alpine Blossoms / Pine Needles ('alpine_lake') & Polar Ice Crystals ('storm_ocean')
+    const pCount = 220;
     this._weatherCount = pCount;
     this._weatherPos = new Float32Array(pCount * 3);
     this._weatherMeta = new Float32Array(pCount * 3);
@@ -2126,11 +3623,11 @@ export class StormAtmosphere {
 
     for (let i = 0; i < pCount; i++) {
       const i3 = i * 3;
-      this._weatherPos[i3] = (rnd() - 0.5) * 16.0;
-      this._weatherPos[i3 + 1] = (rnd() - 0.5) * 18.0;
-      this._weatherPos[i3 + 2] = -1.5 + rnd() * 7.2;
-      this._weatherMeta[i3] = 0.85 + rnd() * 1.45;
-      this._weatherMeta[i3 + 1] = 0.9 + rnd() * 1.6;
+      this._weatherPos[i3] = (rnd() - 0.5) * 20.0;
+      this._weatherPos[i3 + 1] = (rnd() - 0.5) * 20.0;
+      this._weatherPos[i3 + 2] = -2.5 + rnd() * 9.0;
+      this._weatherMeta[i3] = 0.75 + rnd() * 1.25;
+      this._weatherMeta[i3 + 1] = 0.85 + rnd() * 1.5;
       this._weatherMeta[i3 + 2] = rnd() * TWO_PI;
     }
 
@@ -2140,9 +3637,9 @@ export class StormAtmosphere {
 
     this.weatherMat = this._trackMat(
       new THREE.PointsMaterial({
-        size: 0.14,
+        size: 0.15,
         map: this.glowTex,
-        color: '#e0f2fe',
+        color: '#ffd6e7',
         transparent: true,
         opacity: 0.85,
         depthWrite: false,
@@ -2154,7 +3651,7 @@ export class StormAtmosphere {
     this.weatherPoints.visible = false;
     this.root.add(this.weatherPoints);
 
-    const rainN = 100;
+    const rainN = 96;
     const gustN = 44;
     this._rainN = rainN;
     this._gustN = gustN;
@@ -2167,18 +3664,18 @@ export class StormAtmosphere {
       const k5 = i * 5;
       const k6 = i * 6;
       const isGust = i >= rainN;
-      this._streakState[k5] = (rnd() - 0.5) * 17.0;
-      this._streakState[k5 + 1] = (rnd() - 0.5) * 17.0;
-      this._streakState[k5 + 2] = isGust ? this.towerRadius + 0.35 + rnd() * 2.8 : -1.5 + rnd() * 7.0;
-      this._streakState[k5 + 3] = isGust ? 0.95 + rnd() * 1.45 : 0.48 + rnd() * 0.34;
+      this._streakState[k5] = (rnd() - 0.5) * 20.0;
+      this._streakState[k5 + 1] = (rnd() - 0.5) * 20.0;
+      this._streakState[k5 + 2] = isGust ? this.towerRadius + 0.5 + rnd() * 3.4 : -2.0 + rnd() * 8.5;
+      this._streakState[k5 + 3] = isGust ? 1.05 + rnd() * 1.55 : 0.52 + rnd() * 0.36;
       this._streakState[k5 + 4] = isGust ? 8.5 + rnd() * 6.5 : 14.5 + rnd() * 5.0;
 
-      this._streakCol[k6] = isGust ? 0.78 : 0.58;
-      this._streakCol[k6 + 1] = isGust ? 0.92 : 0.74;
+      this._streakCol[k6] = isGust ? 0.82 : 0.62;
+      this._streakCol[k6 + 1] = isGust ? 0.94 : 0.82;
       this._streakCol[k6 + 2] = 1.0;
-      this._streakCol[k6 + 3] = 0.05;
-      this._streakCol[k6 + 4] = 0.09;
-      this._streakCol[k6 + 5] = 0.15;
+      this._streakCol[k6 + 3] = 0.08;
+      this._streakCol[k6 + 4] = 0.14;
+      this._streakCol[k6 + 5] = 0.20;
     }
 
     const sGeo = this._trackGeo(new THREE.BufferGeometry());
@@ -2203,7 +3700,6 @@ export class StormAtmosphere {
 
   _buildLightningBolts() {
     const maxSegs = 32;
-    this._boltMaxSegs = maxSegs;
     this._boltPos = new Float32Array(maxSegs * 4 * 3);
     this._boltUv = new Float32Array(maxSegs * 4 * 2);
     const indices = new Uint16Array(maxSegs * 6);
@@ -2243,7 +3739,7 @@ export class StormAtmosphere {
         uniforms: {
           uFlash: { value: 0 },
           uCoreColor: { value: new THREE.Color('#f8fafc') },
-          uGlowColor: { value: new THREE.Color('#7dd3fc') },
+          uGlowColor: { value: new THREE.Color('#5efce8') },
         },
         vertexShader: /* glsl */ `
           varying vec2 vUv;
@@ -2261,7 +3757,7 @@ export class StormAtmosphere {
             float d = abs(vUv.x - 0.5) * 2.0;
             float core = exp(-d * d * 16.0);
             float halo = pow(max(0.0, 1.0 - d), 2.2);
-            vec3 col = uGlowColor * halo * 1.1 + uCoreColor * core * 1.9;
+            vec3 col = uGlowColor * halo * 1.15 + uCoreColor * core * 1.9;
             float alpha = clamp((core + halo * 0.65) * uFlash, 0.0, 1.0);
             gl_FragColor = vec4(col * alpha, alpha);
             #include <tonemapping_fragment>
@@ -2280,7 +3776,7 @@ export class StormAtmosphere {
     this._boltSpine = new Float32Array(16 * 3);
     this._boltSeed = 13579;
     this._prevFlash = 0;
-    this._ambientBoltTimer = 1.8;
+    this._ambientBoltTimer = 2.4;
     this._ambientBoltFlash = 0;
   }
 
@@ -2297,34 +3793,30 @@ export class StormAtmosphere {
     const ny = dx / len;
     const o = segIdx * 12;
     const p = this._boltPos;
-
     p[o] = x0 - nx * halfW0;
     p[o + 1] = y0 - ny * halfW0;
     p[o + 2] = z0;
-
     p[o + 3] = x0 + nx * halfW0;
     p[o + 4] = y0 + ny * halfW0;
     p[o + 5] = z0;
-
     p[o + 6] = x1 - nx * halfW1;
     p[o + 7] = y1 - ny * halfW1;
     p[o + 8] = z1;
-
     p[o + 9] = x1 + nx * halfW1;
     p[o + 10] = y1 + ny * halfW1;
     p[o + 11] = z1;
   }
 
   _regenerateLightningGeometry(camX, camY, aspect) {
-    const side = -1;
-    const boltZ = -18.5 - this._nextBoltRand() * 4.5;
-    const minClearX = aspect < 0.72 ? 4.8 : 6.2;
-    const maxSpanX = Math.max(minClearX + 1.2, Math.min(13.5, aspect * 11.2));
+    const side = this._nextBoltRand() < 0.5 ? -1 : 1;
+    const boltZ = -24.0 - this._nextBoltRand() * 6.0;
+    const minClearX = aspect < 0.72 ? 6.2 : 8.0;
+    const maxSpanX = Math.max(minClearX + 1.5, Math.min(16.0, aspect * 13.5));
     const topX = camX + side * (minClearX + this._nextBoltRand() * (maxSpanX - minClearX) * 0.65);
-    const topY = camY + 12.0 + this._nextBoltRand() * 3.0;
-    const botY = camY - 1.5 - this._nextBoltRand() * 2.0;
+    const topY = camY + 15.0 + this._nextBoltRand() * 4.0;
+    const botY = camY - 2.0 - this._nextBoltRand() * 2.5;
 
-    this._boltDir.set(topX - camX, 7.5, boltZ).normalize();
+    this._boltDir.set(topX - camX, 8.5, boltZ).normalize();
     this.skyMat.uniforms.uBoltDir.value.copy(this._boltDir);
 
     const trunkSegs = 14;
@@ -2332,7 +3824,7 @@ export class StormAtmosphere {
     let curX = topX;
     for (let i = 0; i <= trunkSegs; i++) {
       const t = i / trunkSegs;
-      if (i > 0) curX += (this._nextBoltRand() - 0.48) * 1.05;
+      if (i > 0) curX += (this._nextBoltRand() - 0.48) * 1.15;
       sp[i * 3] = curX;
       sp[i * 3 + 1] = topY + (botY - topY) * t;
       sp[i * 3 + 2] = boltZ;
@@ -2342,18 +3834,13 @@ export class StormAtmosphere {
     for (let i = 0; i < trunkSegs; i++) {
       const t0 = i / trunkSegs;
       const t1 = (i + 1) / trunkSegs;
-      const w0 = 0.22 * (1 - t0 * 0.55);
-      const w1 = 0.22 * (1 - t1 * 0.55);
+      const w0 = 0.24 * (1 - t0 * 0.55);
+      const w1 = 0.24 * (1 - t1 * 0.55);
       this._writeRibbonSeg(
         segCursor++,
-        sp[i * 3],
-        sp[i * 3 + 1],
-        sp[i * 3 + 2],
-        sp[(i + 1) * 3],
-        sp[(i + 1) * 3 + 1],
-        sp[(i + 1) * 3 + 2],
-        w0,
-        w1
+        sp[i * 3], sp[i * 3 + 1], sp[i * 3 + 2],
+        sp[(i + 1) * 3], sp[(i + 1) * 3 + 1], sp[(i + 1) * 3 + 2],
+        w0, w1
       );
     }
 
@@ -2365,155 +3852,90 @@ export class StormAtmosphere {
       const fz = sp[nIdx * 3 + 2];
       const fDir = f % 2 === 0 ? 1 : -1;
       for (let s = 0; s < 6; s++) {
-        const nx = fx + fDir * (0.42 + this._nextBoltRand() * 0.58) + (this._nextBoltRand() - 0.5) * 0.35;
-        const ny = fy - (0.55 + this._nextBoltRand() * 0.52);
-        const w0 = 0.11 * (1 - s / 6);
-        const w1 = 0.11 * (1 - (s + 1) / 6);
-        this._writeRibbonSeg(segCursor++, fx, fy, fz, nx, ny, fz, w0, Math.max(0.012, w1));
+        const nx = fx + fDir * (0.45 + this._nextBoltRand() * 0.62) + (this._nextBoltRand() - 0.5) * 0.36;
+        const ny = fy - (0.60 + this._nextBoltRand() * 0.55);
+        const w0 = 0.12 * (1 - s / 6);
+        const w1 = 0.12 * (1 - (s + 1) / 6);
+        this._writeRibbonSeg(segCursor++, fx, fy, fz, nx, ny, fz, w0, Math.max(0.014, w1));
         fx = nx;
         fy = ny;
       }
     }
-
     this._boltPosAttr.needsUpdate = true;
   }
 
-  // Original '87 Mode: 240 Parallax Stars + High-Detail Shaded Ringed Gas-Giant Planet
-  _buildOriginalArcadeSkyExtras() {
-    this.origGroup = new THREE.Group();
-    this.origGroup.visible = false;
-
-    const sCount = 240;
-    const sPos = new Float32Array(sCount * 3);
-    const sCol = new Float32Array(sCount * 3);
-    let seed = 19870780;
-    const rnd = () => {
-      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-      return seed / 4294967296;
-    };
-
-    const cWhite = new THREE.Color('#f8fafc');
-    const cCyan = new THREE.Color('#67e8f9');
-    const cGold = new THREE.Color('#fde68a');
-
-    for (let i = 0; i < sCount; i++) {
-      const ang = rnd() * TWO_PI;
-      const dist = 34 + rnd() * 26;
-      sPos[i * 3] = Math.sin(ang) * dist;
-      sPos[i * 3 + 1] = -8 + rnd() * 40;
-      sPos[i * 3 + 2] = Math.cos(ang) * dist - 8;
-      const c = i % 5 === 0 ? cCyan : i % 11 === 0 ? cGold : cWhite;
-      sCol[i * 3] = c.r;
-      sCol[i * 3 + 1] = c.g;
-      sCol[i * 3 + 2] = c.b;
-    }
-
-    const starGeo = this._trackGeo(new THREE.BufferGeometry());
-    starGeo.setAttribute('position', new THREE.BufferAttribute(sPos, 3));
-    starGeo.setAttribute('color', new THREE.BufferAttribute(sCol, 3));
-    const starMat = this._trackMat(
-      new THREE.PointsMaterial({
-        size: 0.11,
-        map: this.glowTex,
-        vertexColors: true,
-        transparent: true,
-        opacity: 0.90,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      })
-    );
-    this.origStarPoints = new THREE.Points(starGeo, starMat);
-    this.origStarPoints.frustumCulled = false;
-    this.origGroup.add(this.origStarPoints);
-
-    // Unit-radius (r = 1.0) shaded Gas Giant + Cassini Rings (dynamically scaled for both 18-deg & 48-deg FOV!)
-    this.origPlanetGroup = new THREE.Group();
-    const { planetMat, ringMat } = createOriginalPlanetMaterials(this.cloudPanoTex);
-    this.origPlanetMat = this._trackMat(planetMat);
-    this.origRingMat = this._trackMat(ringMat);
-
-    const planetGeo = this._trackGeo(new THREE.SphereGeometry(1.0, 36, 28));
-    this.origPlanetMesh = new THREE.Mesh(planetGeo, this.origPlanetMat);
-
-    const ringGeo = this._trackGeo(new THREE.RingGeometry(1.30, 2.12, 72));
-    const ringMesh = new THREE.Mesh(ringGeo, this.origRingMat);
-    ringMesh.rotation.x = -Math.PI * 0.36;
-
-    const haloGeo = this._trackGeo(new THREE.PlaneGeometry(3.5, 3.5));
-    const haloMat = this._trackMat(
-      new THREE.MeshBasicMaterial({
-        map: this.glowTex,
-        color: '#38bdf8',
-        transparent: true,
-        opacity: 0.22,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-        fog: false,
-      })
-    );
-    this.origPlanetHalo = new THREE.Mesh(haloGeo, haloMat);
-    this.origPlanetHalo.position.set(0, 0, -0.2);
-
-    // Keep origPlanetGroup.renderOrder === 0 so its children share groupOrder 0 with skyDome (-1000)
-    // and render AFTER skyDome instead of being painted over by skyDome!
-    this.origPlanetGroup.add(this.origPlanetHalo, this.origPlanetMesh, ringMesh);
-    this.origPlanetHalo.renderOrder = -701;
-    this.origPlanetMesh.renderOrder = -700;
-    ringMesh.renderOrder = -699;
-    this.origGroup.add(this.origPlanetGroup);
-
-    this.root.add(this.origGroup);
-  }
-
   _setVistaKind(kind) {
-    if (this._activeVistaKey === kind) return;
-    const keys = Object.keys(this.vistaMeshes);
-    for (let i = 0; i < keys.length; i++) {
-      const k = keys[i];
-      this.vistaMeshes[k].visible = k === kind;
+    const resolved = resolveBiomeKey(kind);
+    for (let i = 0; i < BIOME_KEYS.length; i++) {
+      const k = BIOME_KEYS[i];
+      this.vistaMeshes[k].visible = k === resolved;
     }
-    this._activeVistaKey = kind;
+    this._activeVistaKey = resolved;
+
+    // Toggle biome-specific waterfalls & foreground water ecosystems!
+    this.canyonWaterfallMesh.visible = resolved === 'canyon_river';
+    this.alpineWaterfallMesh.visible = resolved === 'alpine_lake';
+    this.bayouWaterfallMesh.visible = resolved === 'mist_bayou';
+
+    this.riverBouldersMesh.visible = resolved === 'canyon_river';
+    this.boulderWakeMesh.visible = resolved === 'canyon_river';
+    this.bayouLilyMesh.visible = resolved === 'mist_bayou';
+    this.polarFloesMesh.visible = resolved === 'storm_ocean';
+    this.underwaterGroup.visible = resolved === 'coral_sea' && !this._reflectionPass;
   }
 
-  setEra(era) {
-    const isOrig = era === 'original' || era === true;
-    this.era = isOrig ? 'original' : 'reboot';
-    this.skyMat.uniforms.uOrig.value = isOrig ? 1.0 : 0.0;
-    this.vistaMat.uniforms.uOrig.value = isOrig ? 1.0 : 0.0;
-    this.origGroup.visible = isOrig;
-    this.flankMistMesh.visible = !isOrig;
-    this.fireflyPoints.visible = !isOrig;
-    if (isOrig) {
-      this._setVistaKind('alien_orig'); // Crisp chiseled alien spire peaks on Original '87 horizon
-      this.auroraMesh.visible = false;
-      this.weatherPoints.visible = false;
-      this.streakLines.visible = false;
-      this.lightningMesh.visible = false;
+  setTheme(theme = null) {
+    if (!theme) {
+      this._forcedTheme = null;
+      return this;
     }
+    const resolved = resolveBiomeKey(theme);
+    this._forcedTheme = resolved;
+    this.currentTheme = resolved;
+    this._setVistaKind(resolved);
+    return this;
+  }
+
+  setEra(_era) {
+    this.era = 'reboot';
+    return this;
+  }
+
+  setPurification(progress = 0) {
+    const p = Math.max(0, Math.min(1, Number(progress) || 0));
+    this._purificationTarget = p;
+    this._purification = p;
+    return this;
+  }
+
+  setRestored(restored = true) {
+    return this.setPurification(restored ? 1 : 0);
   }
 
   setReflectionPass(active) {
     const refl = Boolean(active);
     if (refl && !this._reflectionPass) {
-      this._savedAuroraVis = this.auroraMesh.visible;
       this._savedLightningVis = this.lightningMesh.visible;
+      this._savedBirdsVis = this.birdsMesh.visible;
     }
     this._reflectionPass = refl;
-    this.archipelagoGroup.visible = !refl;
+
+    // Keep `archipelagoGroup`, `waterfallGroup`, `auroraMesh`, & `rainbowMesh` VISIBLE during planar
+    // reflection so snow-capped alpine peaks, red-rock canyons, waterfalls, cypress trees, sea-arches
+    // & glacial icebergs cast crisp mirror reflections onto the lake, river, bayou & sea!
     this.horizonMistRing.visible = !refl;
-    if (this.era === 'reboot') {
-      this.flankMistMesh.visible = !refl;
-      if (refl) {
-        this.weatherPoints.visible = false;
-        this.streakLines.visible = false;
-        this.auroraMesh.visible = false;
-        this.lightningMesh.visible = false;
-      } else {
-        this.auroraMesh.visible = Boolean(this._savedAuroraVis);
-        this.lightningMesh.visible = Boolean(this._savedLightningVis);
-      }
-    } else if (this.origStarPoints) {
-      this.origStarPoints.visible = !refl;
+    this.flankMistMesh.visible = !refl;
+    this.underwaterGroup.visible = !refl && this._activeVistaKey === 'coral_sea';
+    this.boulderWakeMesh.visible = !refl && this._activeVistaKey === 'canyon_river';
+
+    if (refl) {
+      this.weatherPoints.visible = false;
+      this.streakLines.visible = false;
+      this.lightningMesh.visible = false;
+      this.birdsMesh.visible = false;
+    } else {
+      this.lightningMesh.visible = Boolean(this._savedLightningVis);
+      this.birdsMesh.visible = Boolean(this._savedBirdsVis);
     }
   }
 
@@ -2521,12 +3943,22 @@ export class StormAtmosphere {
     return out.copy(this.moonDirection);
   }
 
+  getSunDirection(out = this._moonDirOut) {
+    return out.copy(this.moonDirection);
+  }
+
+  getBiomeLighting(themeOrTower = null) {
+    const key = themeOrTower
+      ? typeof themeOrTower === 'string'
+        ? resolveBiomeKey(themeOrTower)
+        : resolveBiomeKey(themeOrTower.theme, themeOrTower.id)
+      : this.currentTheme;
+    return BIOME_LIGHTING_PRESETS[key] || BIOME_LIGHTING_PRESETS.canyon_river;
+  }
+
   _resolveThemeKey(tower) {
-    const raw = tower?.theme;
-    if (raw && THEME_ATMOSPHERE_PRESETS[raw]) return raw;
-    const keys = ['mist', 'sinking', 'foundry', 'blizzard', 'prism', 'piston', 'blackout', 'apex'];
-    const idx = Math.max(0, (Number(tower?.id) || 1) - 1) % keys.length;
-    return keys[idx];
+    if (this._forcedTheme) return this._forcedTheme;
+    return resolveBiomeKey(tower?.theme, tower?.id);
   }
 
   update(state, camera, time, dt) {
@@ -2535,16 +3967,32 @@ export class StormAtmosphere {
     const t = Number.isFinite(time) ? time : state?.time || 0;
     const frameDt = Number.isFinite(dt) ? Math.min(0.1, Math.max(0.0, dt)) : 1 / 60;
 
-    const nextEra = state?.era || (state?.original ? 'original' : this.era);
-    if (nextEra !== this.era) {
-      this.setEra(nextEra);
-    }
-    const isOrig = this.era === 'original';
-
     const tower = state?.tower || null;
-    const pal = tower?.palette || null;
-    const isRealOrig = isOrig && Boolean(tower?.real);
-    const fh = isRealOrig ? STEP_ORIGINAL : this.floorHeight;
+    if (tower?.cols && tower.cols !== this.cols) {
+      this.cols = tower.cols;
+      this.colAngle = TWO_PI / this.cols;
+    }
+    const fh = this.floorHeight;
+
+    // Resolve Ecosystem Healing / Spire Purification progress (`0..1`)
+    let targetPurify = this._purificationTarget;
+    if (state?.purificationProgress !== undefined) {
+      targetPurify = Number(state.purificationProgress) || 0;
+    } else if (tower?.purificationProgress !== undefined) {
+      targetPurify = Number(tower.purificationProgress) || 0;
+    } else if (state?.restored || tower?.restored || state?.mode === 'victory') {
+      targetPurify = 1.0;
+    } else if (state?.cutsceneCam?.active && (state.cutsceneCam.kind === 'purification' || state.cutsceneCam.kind === 'epilogue')) {
+      targetPurify = Math.max(0.35, Number(state.cutsceneCam.phase) || 0.75);
+    } else if (state?.watershedHealth !== undefined) {
+      const wh = Number(state.watershedHealth) || 0;
+      targetPurify = wh > 1.001 ? wh * 0.01 : wh;
+    } else if (state?.purificationProgress === undefined && tower && !tower.restored) {
+      targetPurify = 0.0;
+    }
+    targetPurify = Math.max(0, Math.min(1, targetPurify));
+    this._purification += (targetPurify - this._purification) * Math.min(1, frameDt * 2.5);
+    const purify = this._purification;
 
     let aspect = 0.66;
     let fovDeg = 48;
@@ -2556,7 +4004,7 @@ export class StormAtmosphere {
       aspect = camera.aspect || 0.66;
       fovDeg = camera.fov || 48;
     } else {
-      this._camPos.set(0, (state?.camFloor || 2) * fh + 1.15, 12);
+      this._camPos.set(0, (state?.camFloor || 2) * fh + 1.5, 17);
       this._camFwd.set(0, 0, -1);
       this._camRight.set(1, 0, 0);
       this._camUp.set(0, 1, 0);
@@ -2573,180 +4021,222 @@ export class StormAtmosphere {
     const wind = state?.windCurrent || 0;
     const blackout = Math.max(0, Math.min(1, state?.blackoutFactor || 0));
 
+    const themeKey = this._resolveThemeKey(tower);
+    this.currentTheme = themeKey;
+    const preset = CANONICAL_ATMOSPHERE_PRESETS[themeKey] || CANONICAL_ATMOSPHERE_PRESETS.canyon_river;
+    this._setVistaKind(themeKey);
+
+    // Sync scene background & atmospheric fog to the sunlit/twilight biome so zero dark #060a14 fog remains!
+    if (this.scene && !this._reflectionPass) {
+      if (this.scene.background && this.scene.background.isColor) {
+        this._tmpColorA.set(preset.bgColor);
+        if (blackout > 0.02) this._tmpColorA.multiplyScalar(1.0 - blackout * 0.68);
+        this.scene.background.copy(this._tmpColorA);
+      }
+      if (this.scene.fog && this.scene.fog.color) {
+        this._tmpColorB.set(preset.fogColor);
+        if (blackout > 0.02) this._tmpColorB.multiplyScalar(1.0 - blackout * 0.68);
+        this.scene.fog.color.copy(this._tmpColorB);
+      }
+    }
+
     const skyU = this.skyMat.uniforms;
     skyU.uTime.value = t;
-    skyU.uYaw.value = -camCol * COL_ANGLE * 0.22;
-
-    // Anchor 3D Archipelago Vistas & Rolling Sea-Fog Ring to live waterline & subtle camera-rotation parallax
-    this.archipelagoGroup.visible = !this._reflectionPass;
-    this.horizonMistRing.visible = !this._reflectionPass;
-    this.archipelagoGroup.position.set(0, waterY, 0);
-    this.archipelagoGroup.rotation.y = -camCol * COL_ANGLE * 0.34;
-    this.horizonMistRing.position.set(0, waterY, 0);
-    this.horizonMistRing.rotation.y = -camCol * COL_ANGLE * 0.18;
-
-    const vU = this.vistaMat.uniforms;
-    vU.uTime.value = t;
-    vU.uWaterY.value = waterY;
-
-    const mRingU = this.horizonMistMat.uniforms;
-    mRingU.uTime.value = t;
-    mRingU.uWaterY.value = waterY;
-
-    if (isOrig) {
-      this._setVistaKind('alien_orig');
-      skyU.uBeaconColor.value.set(pal?.glow || '#38bdf8');
-      vU.uBeaconB.value.set(pal?.glow || '#38bdf8');
-      vU.uBeaconA.value.set('#fbbf24');
-      mRingU.uMistColor.value.set('#08142e');
-      mRingU.uRimColor.value.set(pal?.glow || '#38bdf8');
-      mRingU.uOpacity.value = 0.14;
-
-      this.origStarPoints.rotation.y = -camCol * COL_ANGLE * 0.16;
-      this.origStarPoints.position.y = focusY - 12.0;
-
-      // Exact camera-basis ray framing so the Shaded Ringed Gas-Giant Planet sits majestically inside
-      // the upper-right sky corridor (behind distant r=84m alien peaks, well inside camera.far=220m)
-      // in BOTH 18-deg telephoto ('87 real, portrait & 16:9) AND 48-deg wide!
-      const halfTanY = Math.tan(THREE.MathUtils.degToRad(fovDeg * 0.5));
-      const halfTanX = halfTanY * aspect;
-      const camHorizDist = Math.max(9.6, Math.hypot(this._camPos.x, this._camPos.z));
-      const sinSil = Math.min(0.85, (this.towerRadius + 0.10) / camHorizDist);
-      const towerAngW = sinSil / Math.sqrt(Math.max(0.05, 1 - sinSil * sinSil));
-
-      const pDistAlongRay = 152.0;
-      const availRightSpan = Math.max(0.018, halfTanX - towerAngW);
-      const desiredRingHalfAng = aspect < 0.72
-        ? Math.min(halfTanY * 0.24, Math.max(availRightSpan * 1.26, halfTanX * 0.36))
-        : Math.min(halfTanY * 0.25, availRightSpan * 0.36);
-      const planetScale = Math.max(0.65, Math.min(6.2, (desiredRingHalfAng * pDistAlongRay) / 2.12));
-      this.origPlanetGroup.scale.setScalar(planetScale);
-
-      const centerTanX = aspect < 0.72
-        ? towerAngW + availRightSpan * 0.48
-        : towerAngW + availRightSpan * 0.45;
-      const centerTanY = halfTanY * (aspect < 0.72 ? 0.58 : 0.53);
-      this.origPlanetGroup.position
-        .copy(this._camPos)
-        .addScaledVector(this._camFwd, pDistAlongRay)
-        .addScaledVector(this._camRight, centerTanX * pDistAlongRay)
-        .addScaledVector(this._camUp, centerTanY * pDistAlongRay);
-      this.origPlanetGroup.lookAt(this._camPos);
-      this.origPlanetGroup.rotateZ(-0.22);
-      this.origPlanetMat.uniforms.uSpin.value = t * 0.025;
-      if (pal?.glow) {
-        this.origPlanetHalo.material.color.set(pal.glow);
-        this.origPlanetMat.uniforms.uAtmosColor.value.set(pal.glow);
-      }
-
-      this._updateSeaSpray(t, frameDt, waterY, focusY, camCol, 0.32);
-      return;
-    }
-
-    // ========================================================================
-    // REBOOT ERA ATMOSPHERE, 3D ARCHIPELAGO VISTA & WEATHER UPDATE
-    // ========================================================================
-    const themeKey = this._resolveThemeKey(tower);
-    const preset = THEME_ATMOSPHERE_PRESETS[themeKey];
-    this._setVistaKind(preset.vista);
-
+    skyU.uYaw.value = -camCol * this.colAngle * 0.25;
+    skyU.uSkyMode.value = preset.skyMode;
     skyU.uZenithColor.value.set(preset.zenith);
-    if (pal?.skyTop) {
-      this._tmpColorA.set(pal.skyTop);
-      skyU.uZenithColor.value.lerp(this._tmpColorA, 0.30);
-    }
     skyU.uMidSkyColor.value.set(preset.midSky);
-    if (pal?.skyMid) {
-      this._tmpColorA.set(pal.skyMid);
-      skyU.uMidSkyColor.value.lerp(this._tmpColorA, 0.30);
-    }
     skyU.uHorizonColor.value.set(preset.horizon);
     skyU.uHorizonMistColor.value.set(preset.horizonMist);
-    if (pal?.fog) {
-      this._tmpColorA.set(pal.fog);
-      skyU.uHorizonMistColor.value.lerp(this._tmpColorA, 0.25);
-    }
     skyU.uCloudDark.value.set(preset.cloudDark);
     skyU.uCloudMid.value.set(preset.cloudMid);
     skyU.uCloudRim.value.set(preset.cloudRim);
-    skyU.uMoonTint.value.set(preset.moonTint);
+    skyU.uCelestialTint.value.set(preset.celestialTint);
     skyU.uCoronaColor.value.set(preset.corona);
-    skyU.uBeaconColor.value.set(pal?.glow || preset.beacon);
-
-    skyU.uMoonAmt.value = preset.moonAmt;
-    skyU.uCloudCover.value = preset.cloudCover;
+    skyU.uSunGlowColor.value.set(preset.sunGlow);
+    skyU.uCelestialAmt.value = preset.celestialAmt;
+    skyU.uSunDisc.value = preset.sunDisc;
+    skyU.uCloudCover.value = preset.cloudCover * (1.0 - purify * 0.16);
+    skyU.uStarAmt.value = preset.starAmt;
     skyU.uAuroraAmt.value = preset.aurora;
-    skyU.uNebulaAmt.value = preset.nebula;
-    skyU.uSmogAmt.value = preset.smog;
-    skyU.uMaelstromAmt.value = preset.maelstrom;
-    skyU.uVirgaAmt.value = preset.virga;
-    skyU.uAbyssMistAmt.value = preset.abyssMist;
     skyU.uBlackout.value = blackout;
+    skyU.uPurification.value = purify;
 
-    // Frame the detailed 512x512 cratered moon cleanly in the upper-right sky
+    // Frame the bright Sun (or Polar Moon) cleanly in the upper-right sky corridor across all viewports
     const halfTanY = Math.tan(THREE.MathUtils.degToRad(fovDeg * 0.5));
     const halfTanX = halfTanY * aspect;
-    const camHorizDist = Math.max(6.5, Math.hypot(this._camPos.x, this._camPos.z));
-    const effTowerR = this.towerRadius + (aspect < 0.68 ? 0.14 : 0.05);
+    const camHorizDist = Math.max(8.5, Math.hypot(this._camPos.x, this._camPos.z));
+    const effTowerR = this.towerRadius + (aspect < 0.68 ? 0.18 : 0.08);
     const sinSil = Math.min(0.85, effTowerR / camHorizDist);
     const towerAngHalfW = sinSil / Math.sqrt(Math.max(0.05, 1 - sinSil * sinSil));
-    const moonRadiusAng = aspect < 0.68 ? 0.023 : aspect < 1.0 ? 0.032 : 0.044;
-    skyU.uMoonRadius.value = moonRadiusAng;
+    const celRadiusAng = aspect < 0.68 ? 0.025 : aspect < 1.0 ? 0.034 : 0.045;
+    skyU.uCelestialRadius.value = celRadiusAng;
 
-    const minRightClear = towerAngHalfW + moonRadiusAng * 0.90;
-    const maxRightInside = Math.max(minRightClear, halfTanX - moonRadiusAng * 1.12);
-    const desiredTanX = Math.min(maxRightInside, Math.max(minRightClear, halfTanX * 0.72));
-    const isTitleShowcase = Boolean(state?.titleShowcase);
-    const desiredTanY = halfTanY * (isTitleShowcase ? 0.52 : aspect < 0.68 ? 0.62 : 0.58);
-    const subtleParallaxX = Math.sin(-camCol * COL_ANGLE * 0.5) * (aspect < 0.68 ? 0.002 : 0.008);
+    const minRightClear = towerAngHalfW + celRadiusAng * 0.92;
+    const maxRightInside = Math.max(minRightClear, halfTanX - celRadiusAng * 1.12);
+    const desiredTanX = themeKey === 'canyon_river'
+      ? Math.min(maxRightInside, Math.max(minRightClear, halfTanX * 0.42))
+      : Math.min(maxRightInside, Math.max(minRightClear, halfTanX * 0.70));
+    const elevFactor = themeKey === 'mist_bayou' ? 0.38 : themeKey === 'canyon_river' ? 0.72 : themeKey === 'coral_sea' ? 0.66 : 0.56;
+    const desiredTanY = halfTanY * elevFactor;
+    const subtleParallaxX = Math.sin(-camCol * this.colAngle * 0.5) * (aspect < 0.68 ? 0.003 : 0.010);
 
     this.moonDirection
       .copy(this._camFwd)
       .addScaledVector(this._camRight, desiredTanX + subtleParallaxX)
       .addScaledVector(this._camUp, desiredTanY)
       .normalize();
-    if (this.moonDirection.y < 0.14) {
-      this.moonDirection.y = 0.14;
+    if (this.moonDirection.y < 0.15) {
+      this.moonDirection.y = 0.15;
       this.moonDirection.normalize();
     }
-    skyU.uMoonDir.value.copy(this.moonDirection);
+    skyU.uSunDir.value.copy(this.moonDirection);
 
-    // Sync 3D Archipelago Vistas & Rolling Sea-Fog Ring uniforms
-    vU.uNearColor.value.set(preset.mountNear);
-    vU.uFarColor.value.set(preset.mountFar);
-    vU.uMistColor.value.copy(skyU.uHorizonMistColor.value);
-    vU.uRimColor.value.set(preset.cloudRim);
+    // Anchor 3D Watershed Vistas, Waterfalls, God-Rays, Rainbow & Water-World to `waterY` + parallax!
+    const vistaYaw = -camCol * this.colAngle * 0.36;
+    this.archipelagoGroup.position.set(0, waterY, 0);
+    this.archipelagoGroup.rotation.y = vistaYaw;
+    this.waterfallGroup.position.set(0, waterY, 0);
+    this.waterfallGroup.rotation.y = vistaYaw;
+    this.horizonMistRing.position.set(0, waterY, 0);
+    this.horizonMistRing.rotation.y = -camCol * this.colAngle * 0.18;
+
+    const waterWorldYaw = -camCol * this.colAngle * 0.85;
+    this.waterWorldGroup.position.set(0, waterY, 0);
+    this.waterWorldGroup.rotation.y = waterWorldYaw;
+    this.underwaterGroup.position.set(0, waterY, 0);
+    this.underwaterGroup.rotation.y = waterWorldYaw;
+
+    const vU = this.vistaMat.uniforms;
+    vU.uTime.value = t;
+    vU.uWaterY.value = waterY;
+    vU.uSunDir.value.copy(this.moonDirection);
+    vU.uSunColor.value.set(preset.celestialTint);
+    vU.uSkyFillColor.value.set(preset.midSky);
+    vU.uMistColor.value.set(preset.horizonMist);
+    vU.uAlpenglowColor.value.set(preset.alpenglow);
     vU.uBeaconA.value.set(preset.beacon);
     vU.uBeaconB.value.set(preset.beaconAlt);
-    vU.uVentColor.value.set(themeKey === 'foundry' ? '#ff5500' : themeKey === 'prism' ? '#e879f9' : '#fbbf24');
-    vU.uMoonDir.value.copy(this.moonDirection);
     vU.uBlackout.value = blackout;
+    vU.uPurification.value = purify;
 
-    mRingU.uMistColor.value.copy(skyU.uHorizonMistColor.value);
-    mRingU.uRimColor.value.set(preset.cloudRim);
-    mRingU.uMoonDir.value.copy(this.moonDirection);
-    mRingU.uOpacity.value = (0.32 + preset.abyssMist * 0.16) * (1.0 - blackout * 0.55);
+    // Waterfall shader & boulder wake updates
+    this.waterfallMat.uniforms.uTime.value = t;
+    this.waterfallMat.uniforms.uRainbowAmt.value = Math.min(1.0, (themeKey === 'canyon_river' ? 0.65 : 0.25) + purify * 0.55);
+    this.waterfallMat.uniforms.uTintColor.value.set(themeKey === 'mist_bayou' ? '#52b788' : '#5eead4');
+    this.boulderWakeMat.uniforms.uTime.value = t;
 
-    // 3D Multi-Curtain Boreal Aurora Ribbons ('blizzard', 'apex', 'prism')
-    const wantAurora = preset.aurora > 0.02;
-    this._savedAuroraVis = wantAurora;
-    this.auroraMesh.visible = wantAurora && !this._reflectionPass;
-    if (wantAurora) {
-      this.auroraMesh.position.set(0, Math.max(waterY, focusY * 0.45), 0);
-      this.auroraMesh.rotation.y = -camCol * COL_ANGLE * 0.25;
-      this.auroraMat.uniforms.uTime.value = t;
-      this.auroraMat.uniforms.uStrength.value = preset.aurora * (1.0 - blackout * 0.5);
-      this.auroraMat.uniforms.uColorLow.value.set(themeKey === 'apex' ? '#c084fc' : '#00f5a0');
-      this.auroraMat.uniforms.uColorHigh.value.set(themeKey === 'apex' ? '#fbbf24' : '#9333ea');
+    // Volumetric Golden God-Rays & Ecosystem Purification Rainbow Arc
+    const rayStrength = (preset.godRays + purify * 0.38) * (1.0 - blackout * 0.7);
+    this.godRaysMesh.visible = rayStrength > 0.04;
+    if (this.godRaysMesh.visible) {
+      this.godRaysMesh.position.set(0, waterY, 0);
+      this.godRaysMesh.rotation.y = vistaYaw * 0.5;
+      this.godRaysMat.uniforms.uTime.value = t;
+      this.godRaysMat.uniforms.uStrength.value = rayStrength;
+      this.godRaysMat.uniforms.uColor.value.set(preset.godRayColor);
     }
 
-    // Lightning Bolts & Supercell Flash
-    let extFlash = Math.max(0, Math.min(1.5, state?.lightningFlash || 0));
-    if (preset.ambientBolts && extFlash < 0.05) {
+    const rainbowOpacity = Math.min(0.88, preset.rainbowBase + purify * 0.68) * (1.0 - blackout * 0.8);
+    this.rainbowMesh.visible = rainbowOpacity > 0.02;
+    if (this.rainbowMesh.visible) {
+      this.rainbowMesh.position.set(0, Math.max(waterY, focusY * 0.35), 0);
+      this.rainbowMat.uniforms.uOpacity.value = rainbowOpacity;
+    }
+
+    // Animate 10 Gliding 3D Underwater Manta Rays in `'coral_sea'`!
+    if (themeKey === 'coral_sea' && !this._reflectionPass) {
+      this.reefMat.uniforms.uTime.value = t;
+      this.reefMat.uniforms.uPurification.value = purify;
+      this.reefMat.uniforms.uSunDir.value.copy(this.moonDirection);
+
+      for (let i = 0; i < this._mantaCount; i++) {
+        const k = i * 6;
+        const baseA = this._mantaParams[k];
+        const rad = this._mantaParams[k + 1] + Math.sin(t * 0.32 + i) * 1.1;
+        const dy = this._mantaParams[k + 2] + Math.sin(t * 0.75 + i * 1.7) * 0.14;
+        const spd = this._mantaParams[k + 3] * (1.0 + purify * 0.25);
+        const sc = this._mantaParams[k + 4];
+        const dir = this._mantaParams[k + 5];
+
+        const curA = baseA + t * spd * dir;
+        const mx = Math.sin(curA) * rad;
+        const mz = Math.cos(curA) * rad;
+        // Tangent heading along circle: d/dA (sin A, cos A) = (cos A, -sin A) * dir
+        const headingYaw = Math.atan2(Math.cos(curA) * dir, -Math.sin(curA) * dir);
+
+        this._tmpPos.set(mx, dy, mz);
+        this._tmpQuat.setFromAxisAngle(this._yAxis, headingYaw);
+        this._tmpScale.setScalar(sc);
+        this._tmpMat4.compose(this._tmpPos, this._tmpQuat, this._tmpScale);
+        this.mantaInstMesh.setMatrixAt(i, this._tmpMat4);
+      }
+      this.mantaInstMesh.instanceMatrix.needsUpdate = true;
+    }
+
+    // Animate 16 Soaring 3D Seabirds / Canyon Hawks / Bayou Egrets!
+    const wantBirds = preset.birds > 0 || purify > 0.35;
+    this._savedBirdsVis = wantBirds;
+    this.birdsMesh.visible = wantBirds && !this._reflectionPass;
+    if (this.birdsMesh.visible) {
+      this.birdMat.uniforms.uTime.value = t;
+      this.birdMat.uniforms.uSunDir.value.copy(this.moonDirection);
+      this.birdMat.uniforms.uBirdColor.value.set(
+        themeKey === 'canyon_river' ? '#b86f42' : themeKey === 'mist_bayou' ? '#fff3d6' : '#f8fafc'
+      );
+      this.birdMat.uniforms.uSunRimColor.value.set(
+        themeKey === 'canyon_river' ? '#ffedc2' : themeKey === 'mist_bayou' ? '#ffd28a' : '#ffffff'
+      );
+      for (let i = 0; i < this._birdCount; i++) {
+        const k = i * 5;
+        const baseA = this._birdParams[k];
+        const rad = this._birdParams[k + 1];
+        const altY = waterY + this._birdParams[k + 2] + Math.sin(t * 0.6 + i) * 1.2;
+        const spd = this._birdParams[k + 3];
+        const sc = this._birdParams[k + 4];
+
+        const curA = baseA + t * spd;
+        const bx = Math.sin(curA) * rad;
+        const bz = Math.cos(curA) * rad;
+        const dir = spd >= 0 ? 1 : -1;
+        const yaw = Math.atan2(Math.cos(curA) * dir, -Math.sin(curA) * dir);
+
+        this._tmpPos.set(bx, altY, bz);
+        this._tmpQuat.setFromAxisAngle(this._yAxis, yaw);
+        this._tmpScale.setScalar(sc);
+        this._tmpMat4.compose(this._tmpPos, this._tmpQuat, this._tmpScale);
+        this.birdsMesh.setMatrixAt(i, this._tmpMat4);
+      }
+      this.birdsMesh.instanceMatrix.needsUpdate = true;
+    }
+
+    const mRingU = this.horizonMistMat.uniforms;
+    mRingU.uTime.value = t;
+    mRingU.uWaterY.value = waterY;
+    mRingU.uMistColor.value.set(preset.horizonMist);
+    mRingU.uRimColor.value.set(preset.cloudRim);
+    mRingU.uSunDir.value.copy(this.moonDirection);
+    mRingU.uOpacity.value = (0.24 + preset.abyssMist * 0.18) * (1.0 - blackout * 0.55);
+
+    // 3D Multi-Curtain Polar Aurora Ribbons ('storm_ocean')
+    const wantAurora = preset.aurora > 0.02;
+    this.auroraMesh.visible = wantAurora;
+    if (wantAurora) {
+      this.auroraMesh.position.set(0, Math.max(waterY, focusY * 0.42), 0);
+      this.auroraMesh.rotation.y = -camCol * this.colAngle * 0.25;
+      this.auroraMat.uniforms.uTime.value = t;
+      this.auroraMat.uniforms.uStrength.value = (preset.aurora + purify * 0.25) * (1.0 - blackout * 0.45);
+      this.auroraMat.uniforms.uColorLow.value.set('#00f5a0');
+      this.auroraMat.uniforms.uColorHigh.value.set('#a855f7');
+    }
+
+    // Forked Lightning Bolts ('storm_ocean')
+    const extFlash = Math.max(0, Math.min(1.5, state?.lightningFlash || 0));
+    if (preset.ambientBolts && extFlash < 0.05 && purify < 0.85) {
       this._ambientBoltTimer -= frameDt;
       if (this._ambientBoltTimer <= 0) {
-        this._ambientBoltTimer = 3.2 + this._nextBoltRand() * 3.8;
-        this._ambientBoltFlash = 0.92;
+        this._ambientBoltTimer = 3.4 + this._nextBoltRand() * 4.0;
+        this._ambientBoltFlash = 0.90;
         this._regenerateLightningGeometry(this._camPos.x, focusY, aspect);
       }
     }
@@ -2766,13 +4256,12 @@ export class StormAtmosphere {
     this.lightningMesh.visible = wantLightning && !this._reflectionPass;
     if (wantLightning) {
       this.boltMat.uniforms.uFlash.value = Math.min(1.25, totalFlash * 1.15);
-      this.boltMat.uniforms.uGlowColor.value.set(themeKey === 'apex' ? '#c084fc' : '#7dd3fc');
     }
 
-    // 3D Tower-Shoulder Mist Wisps
+    // 3D Spire-Flank Mist Wisps
     this.flankMistMesh.visible = !this._reflectionPass;
-    this.flankMistMesh.material.color.copy(skyU.uMidSkyColor.value).lerp(skyU.uCloudRim.value, 0.34);
-    this.flankMistMesh.material.opacity = (0.125 + preset.abyssMist * 0.05) * (1 - blackout * 0.55);
+    this.flankMistMesh.material.color.set(preset.horizonMist).lerp(skyU.uCloudRim.value, 0.35);
+    this.flankMistMesh.material.opacity = (0.09 + preset.abyssMist * 0.08) * (1 - blackout * 0.55);
     const md = this._mistData;
     for (let i = 0; i < this._mistCount; i++) {
       const k = i * 8;
@@ -2785,9 +4274,9 @@ export class StormAtmosphere {
       const spd = md[k + 6];
       const ph = md[k + 7];
 
-      const swayX = Math.sin(t * 0.28 + ph) * 0.85 + wind * 0.35;
-      const wrappedY = ((ySlot - focusY * 0.3 + t * spd * 0.35) % 12.0 + 12.0) % 12.0 - 3.2;
-      const wy = Math.max(waterY + 2.35, focusY + wrappedY);
+      const swayX = Math.sin(t * 0.28 + ph) * 0.95 + wind * 0.38;
+      const wrappedY = ((ySlot - focusY * 0.3 + t * spd * 0.35) % 18.0 + 18.0) % 18.0 - 4.5;
+      const wy = Math.max(waterY + 2.5, focusY + wrappedY);
 
       this._tmpPos.set(this._camPos.x + baseLatX + swayX, wy, depthZ);
       this._tmpQuat.setFromAxisAngle(this._camFwd, side * 0.04 * Math.sin(t * 0.4 + ph));
@@ -2797,61 +4286,57 @@ export class StormAtmosphere {
     }
     this.flankMistMesh.instanceMatrix.needsUpdate = true;
 
-    // 144 Bioluminescent Fireflies & Basal Water Spores
+    // 220 Warm Golden Fireflies ('mist_bayou'), Sunlit Pollen ('canyon_river') & Lagoon Sparkles
     const ffU = this.fireflyMat.uniforms;
     ffU.uTime.value = t;
     ffU.uFocusY.value = focusY;
     ffU.uWaterY.value = waterY;
-    ffU.uCamYaw.value = camCol * COL_ANGLE;
+    ffU.uCamYaw.value = camCol * this.colAngle;
     ffU.uWind.value = wind;
     ffU.uColorA.value.set(preset.moteA);
     ffU.uColorB.value.set(preset.moteB);
     ffU.uColorC.value.set(preset.moteC);
-    ffU.uIntensity.value = themeKey === 'blizzard' ? 0.68 : 1.0;
+    ffU.uIntensity.value = preset.fireflyBoost + purify * 0.35;
 
-    // Crashing White Sea-Spray Mist Plumes at `waterFloor`
-    this._updateSeaSpray(t, frameDt, waterY, focusY, camCol, 1.0 - blackout * 0.5);
+    // Waterline Spray Plumes
+    const sprayScale = themeKey === 'alpine_lake' || themeKey === 'mist_bayou' ? 0.38 : 1.0;
+    this._updateSeaSpray(t, frameDt, waterY, focusY, camCol, sprayScale * (1.0 - blackout * 0.5));
 
     if (this._reflectionPass) return;
 
-    // Particulate Weather (Blizzard Snow Squalls or Foundry Furnace Embers)
-    const showParticulates = preset.snow > 0 || preset.embers > 0;
+    // Drifting Alpine Blossoms / Pine Needles ('alpine_lake') or Polar Ice Crystals ('storm_ocean')
+    const showParticulates = preset.blossoms > 0 || preset.iceCrystals > 0;
     this.weatherPoints.visible = showParticulates;
     if (showParticulates) {
-      const isEmbers = preset.embers > 0;
-      this.weatherMat.color.set(isEmbers ? '#fb923c' : '#e0f2fe');
-      this.weatherMat.size = isEmbers ? 0.12 : 0.15;
-      this.weatherMat.opacity = isEmbers ? 0.88 : 0.82;
+      const isBlossoms = preset.blossoms > 0;
+      this.weatherMat.color.set(isBlossoms ? '#ffd6e7' : '#e0f2fe');
+      this.weatherMat.size = isBlossoms ? 0.16 : 0.14;
+      this.weatherMat.opacity = isBlossoms ? 0.78 : 0.84;
       const wp = this._weatherPos;
       const wm = this._weatherMeta;
-      const gustPush = wind * 5.2;
+      const gustPush = wind * 4.8 + (isBlossoms ? 0.65 : 0.0);
       for (let i = 0; i < this._weatherCount; i++) {
         const i3 = i * 3;
         const spdY = wm[i3];
         const freq = wm[i3 + 1];
         const ph = wm[i3 + 2];
 
-        if (isEmbers) {
-          wp[i3 + 1] += spdY * 1.35 * frameDt;
-          wp[i3] += (Math.sin(t * freq + ph) * 0.65 + gustPush * 0.5) * frameDt;
-        } else {
-          wp[i3 + 1] -= spdY * 1.85 * frameDt;
-          wp[i3] += (Math.sin(t * freq + ph) * 0.55 + gustPush) * frameDt;
-        }
-        if (wp[i3 + 1] < -9.0) wp[i3 + 1] += 18.0;
-        if (wp[i3 + 1] > 9.0) wp[i3 + 1] -= 18.0;
-        if (wp[i3] < -8.0) wp[i3] += 16.0;
-        if (wp[i3] > 8.0) wp[i3] -= 16.0;
+        wp[i3 + 1] -= spdY * (isBlossoms ? 0.95 : 1.75) * frameDt;
+        wp[i3] += (Math.sin(t * freq + ph) * (isBlossoms ? 0.95 : 0.55) + gustPush) * frameDt;
+        if (wp[i3 + 1] < -10.0) wp[i3 + 1] += 20.0;
+        if (wp[i3 + 1] > 10.0) wp[i3 + 1] -= 20.0;
+        if (wp[i3] < -10.0) wp[i3] += 20.0;
+        if (wp[i3] > 10.0) wp[i3] -= 20.0;
       }
       this._weatherPosAttr.needsUpdate = true;
       this.weatherPoints.position.set(this._camPos.x, focusY, 0);
     }
 
-    // Slanted Storm Rain & Crosswind Gust Ribbons
+    // Tempest Rain & Wind Gust Streaks
     const absWind = Math.abs(wind);
-    const rainStrength = preset.rain;
-    const gustStrength = absWind > 0.06 ? Math.min(1, absWind / 1.1) : 0;
-    const targetStreakOpacity = Math.max(rainStrength * 0.36, gustStrength * 0.52);
+    const rainStrength = preset.rain * (1.0 - purify * 0.75);
+    const gustStrength = absWind > 0.08 ? Math.min(1, absWind / 1.1) : 0;
+    const targetStreakOpacity = Math.max(rainStrength * 0.34, gustStrength * 0.46);
 
     this.streakMat.opacity += (targetStreakOpacity - this.streakMat.opacity) * Math.min(1, frameDt * 8.0);
     this.streakLines.visible = this.streakMat.opacity > 0.012;
@@ -2879,9 +4364,9 @@ export class StormAtmosphere {
           }
           sy -= speed * frameDt;
           sx += wind * 3.8 * frameDt;
-          if (sy < -8.5) sy += 17.0;
-          if (sx < -8.5) sx += 17.0;
-          if (sx > 8.5) sx -= 17.0;
+          if (sy < -10.0) sy += 20.0;
+          if (sx < -10.0) sx += 20.0;
+          if (sx > 10.0) sx -= 20.0;
           ss[k5] = sx;
           ss[k5 + 1] = sy;
 
@@ -2898,10 +4383,9 @@ export class StormAtmosphere {
             sp[k6 + 2] = sp[k6 + 5] = 0;
             continue;
           }
-          const v = windDir * speed * (0.45 + gustStrength * 0.85);
-          sx += v * frameDt;
-          if (sx > 8.5) sx -= 17.0;
-          if (sx < -8.5) sx += 17.0;
+          sx += windDir * speed * (0.45 + gustStrength * 0.85) * frameDt;
+          if (sx > 10.0) sx -= 20.0;
+          if (sx < -10.0) sx += 20.0;
           ss[k5] = sx;
 
           const effLen = len * (0.4 + gustStrength * 0.75);
@@ -2918,28 +4402,28 @@ export class StormAtmosphere {
     }
   }
 
-  _updateSeaSpray(time, dt, waterY, focusY, camCol, eraScale) {
+  _updateSeaSpray(time, dt, waterY, focusY, camCol, scaleAmt) {
     const distAboveWater = focusY - waterY;
-    const altFade = 1.0 - Math.max(0, Math.min(1, (distAboveWater - 9.0) / 8.0));
-    if (altFade <= 0.01 || eraScale <= 0.01) {
+    const altFade = 1.0 - Math.max(0, Math.min(1, (distAboveWater - 12.0) / 10.0));
+    if (altFade <= 0.01 || scaleAmt <= 0.01) {
       this.seaSprayPoints.visible = false;
       return;
     }
     this.seaSprayPoints.visible = true;
-    this.seaSprayMat.uniforms.uGlobalOpacity.value = altFade * eraScale;
+    this.seaSprayMat.uniforms.uGlobalOpacity.value = altFade * scaleAmt;
 
     const pos = this._sprayPos;
     const alpha = this._sprayAlpha;
     const size = this._spraySize;
     const rot = this._sprayRot;
     const st = this._sprayState;
-    const camYaw = camCol * COL_ANGLE;
+    const camYaw = camCol * this.colAngle;
 
     for (let i = 0; i < this._sprayCount; i++) {
       const k = i * 7;
       const i3 = i * 3;
       const baseAng = st[k];
-      const baseRad = st[k + 1];
+      const baseRad = Math.max(this.towerRadius + 0.18, st[k + 1]);
       const cycSpd = st[k + 2];
       let phase = st[k + 3] + cycSpd * dt;
       if (phase >= 1.0) phase -= Math.floor(phase);
@@ -2948,22 +4432,22 @@ export class StormAtmosphere {
       const peakH = st[k + 4];
       const baseSize = st[k + 5];
       const rotSpd = st[k + 6];
-      const isDroplet = i >= 60;
+      const isDroplet = i >= 62;
 
       const swellGate = 0.55 + 0.45 * Math.sin(time * 1.65 + baseAng * 3.0);
       const ang = baseAng + Math.sin(time * 0.45 + i) * 0.08 - camYaw * 0.12;
-      const expandR = baseRad + phase * (isDroplet ? 0.72 : 0.48);
+      const expandR = baseRad + phase * (isDroplet ? 0.85 : 0.56);
 
       const arcY = isDroplet
         ? Math.sin(phase * Math.PI) * peakH - phase * phase * 0.18
         : Math.pow(phase, 0.62) * peakH;
 
       pos[i3] = Math.sin(ang) * expandR;
-      pos[i3 + 1] = waterY + 0.04 + arcY * swellGate;
+      pos[i3 + 1] = waterY + 0.05 + arcY * swellGate;
       pos[i3 + 2] = Math.cos(ang) * expandR;
 
       const lifeCurve = Math.sin(phase * Math.PI);
-      alpha[i] = lifeCurve * swellGate * (isDroplet ? 0.68 : 0.48);
+      alpha[i] = lifeCurve * swellGate * (isDroplet ? 0.66 : 0.46);
       size[i] = baseSize * (0.78 + phase * 0.72);
       rot[i] = phase * rotSpd * 3.0 + i * 0.7;
     }
