@@ -8,17 +8,33 @@ const MODE_ALIASES = {
   buttons: 'dpad',
 };
 
-// Strict Precision Gesture Tuning Constants (Real-Device Playtest Calibrated — #270)
-const GESTURE_HORIZ_DEADZONE_PX = 15;
-const GESTURE_SECONDARY_HORIZ_DEADZONE_PX = 22;
-const GESTURE_HORIZ_FULL_SPAN_PX = 40;
-const GESTURE_HORIZ_MAX_LEASH_PX = 54;
+// Strict Precision Gesture Tuning Constants (Round 4 Buttonless & Calibrated Physics)
+const GESTURE_HORIZ_DEADZONE_PX = 11;
+const GESTURE_SECONDARY_HORIZ_DEADZONE_PX = 20;
+const GESTURE_HORIZ_FULL_SPAN_PX = 44; // 11px deadzone + 44px span = 55px full run (smoothstep walk 14..26px -> run 55px+)
+const GESTURE_HORIZ_MAX_LEASH_PX = 62;
 const GESTURE_RECOIL_STOP_PX = 5; // pulling thumb back >= 5px brakes horizDir -> 0 immediately
 const GESTURE_REVERSAL_PX = 16; // continuing past brake zone reverses direction cleanly
 const GESTURE_STOP_SPEED_PX = 45; // px/s — mid-air post-flick horizontal stop threshold
 const GESTURE_MIDAIR_STOP_IDLE_MS = 32;
 // Natural human thumb horizontal sweep arcs ±25° (~tan 25.2° = 0.47)
 const GESTURE_HORIZ_ARC_SLOPE = 0.47;
+
+// Buttonless Tail-Whip Gesture Thresholds ('gesture' mode)
+const GESTURE_WHIP_SLASH_MAX_MOVE_MS = 125;
+const GESTURE_WHIP_SLASH_MAX_LIFT_MS = 135;
+const GESTURE_WHIP_SLASH_MIN_DX_PX = 32;
+const GESTURE_WHIP_SLASH_MIN_VX = 720; // px/s
+const GESTURE_WHIP_SLASH_DOMINANCE = 1.45;
+const GESTURE_TWO_FINGER_TAP_MAX_MS = 210;
+const GESTURE_TWO_FINGER_TAP_MAX_MOVE_PX = 22;
+
+// Buttonless Horizontal Slash Tail-Whip Thresholds ('tilt' mode)
+const TILT_SLASH_MIN_DX_PX = 26;
+const TILT_SLASH_MIN_VX = 420; // px/s
+const TILT_SLASH_DOMINANCE = 1.25;
+const TILT_SLASH_REARM_MS = 240;
+const TILT_SLASH_REARM_REV_PX = 18;
 
 // Context-aware doorway / lift interaction thresholds
 const GESTURE_INTERACT_UP_PX = -16;
@@ -54,10 +70,9 @@ const GESTURE_FLICK_STD_MS = 185; // Normal flick (20..45px) -> 185ms standard j
 const GESTURE_FLICK_LONG_DY_PX = 46; // >= 46px -> full 245ms jump
 const GESTURE_FLICK_LONG_MS = 245;
 
-// Proportional post-flick ballistic horizontal commit targets (measured from lastFlickTime; paired with isLiveHorizHeld=false & Smart Island Brake!)
-const GESTURE_FLICK_COMMIT_STD_MS = 565;
-const GESTURE_FLICK_COMMIT_LONG_MS = 620;
-const GESTURE_HORIZ_CARRY_MS = 36;
+// Zero runaway post-release sprint carry: 0ms on grounded release, <=45ms takeoff bridge on diagonal jump flick
+const GESTURE_FLICK_TAKEOFF_BRIDGE_MS = 45;
+const GESTURE_HORIZ_CARRY_MS = 0;
 const GESTURE_FLICK_REARM_PX = 14;
 const GESTURE_FLICK_REARM_MS = 145;
 
@@ -66,14 +81,29 @@ const GESTURE_TAP_MAX_MS = 210;
 const GESTURE_TAP_MAX_MOVE_PX = 16;
 const GESTURE_FIRE_PULSE_MS = 110;
 
-// Tilt Constants
-const TILT_DEADZONE_DEG = 2.5;
+// Tilt & Motion-Sensor Constants (Round 4 Progressive Curve + Wrist-Flick Tail-Whip)
+const TILT_DEADZONE_DEG = 2.8;
 const TILT_BASE_FULL_DEG = 16.0;
+const TILT_ROLL_EXPONENT = 1.35;
+const TILT_MIN_ACTIVE_ANALOG = 0.26;
 const TILT_EMA_ALPHA = 0.55;
+
+const MOTION_WHIP_LIN_ACCEL_THRESHOLD = 9.5; // m/s^2 linear accel hypot(ax, ay)
+const MOTION_WHIP_GRAV_DELTA_THRESHOLD = 10.5; // m/s^2 high-pass delta of accelIncludingGravity
+const MOTION_WHIP_GYRO_THRESHOLD = 215; // deg/s sharp wrist twist
+const MOTION_WHIP_GYRO_JERK_ACCEL = 3.0; // m/s^2 accompanying linear/gravity jerk
+const MOTION_WHIP_GYRO_ANG_ACCEL = 950; // deg/s^2 sharp angular snap acceleration
+const MOTION_WHIP_COOLDOWN_MS = 300;
+const SLASH_VFX_DURATION_MS = 220;
 
 // Standard Gamepad Constants (W3C Standard Mapping)
 const GAMEPAD_STICK_DEADZONE = 0.18;
 const GAMEPAD_TRIGGER_THRESHOLD = 0.35;
+
+function smoothstep01(t) {
+  const x = Math.max(0, Math.min(1, t));
+  return x * x * (3 - 2 * x);
+}
 
 export class InputController {
   /** @param {{ mode?: string, controlMode?: string, hapticsEnabled?: boolean, tiltSensitivity?: number }} [options] */
@@ -110,6 +140,11 @@ export class InputController {
       this.tiltSupported &&
       typeof window.DeviceOrientationEvent?.requestPermission !== 'function'
     );
+    this.motionSupported = typeof window !== 'undefined' && 'DeviceMotionEvent' in window;
+    this.motionPermissionGranted = Boolean(
+      this.motionSupported &&
+      typeof window.DeviceMotionEvent?.requestPermission !== 'function'
+    );
     this.tiltNeutralGamma = 0;
 
     // Context-aware interaction & active game-mode state (synced via game.js / main.js / #app[data-game-mode])
@@ -121,8 +156,9 @@ export class InputController {
     this.gameMode = 'tower';
     this.isLiveHorizHeld = false;
 
-    // Internal Tilt Tracking
+    // Internal Tilt & Motion-Sensor Tracking
     this._tiltListenerAttached = false;
+    this._motionListenerAttached = false;
     this._hasTiltSample = false;
     this._lastRawRoll = 0;
     this._smoothedRoll = 0;
@@ -130,6 +166,13 @@ export class InputController {
     this._tiltRight = false;
     this._tiltAnalogX = 0;
     this._lastCalibrateMs = -1000;
+    this._lastMotionWhipMs = -10000;
+    this._prevGravSample = null;
+    this._prevGyroSample = null;
+    this._lastWhipSource = '';
+    this._slashArcs = [];
+    this._slashVfxRaf = null;
+    this._lastSlashVfx = null;
 
     // Internal Multi-Source Input Tracking
     this._activePointers = new Map();
@@ -351,7 +394,7 @@ export class InputController {
     return true;
   }
 
-  /** Switches active touch control scheme and sets document.getElementById('app').dataset.controlMode = mode. */
+  /** Switches active touch control scheme and syncs data-control-mode across #app, #touch-controls & document.body. */
   setControlMode(mode) {
     const mapped = MODE_ALIASES[mode] || mode;
     const validMode = CONTROL_MODES.includes(mapped) ? mapped : 'gesture';
@@ -366,6 +409,34 @@ export class InputController {
       const appEl = document.getElementById('app');
       if (appEl) {
         appEl.dataset.controlMode = validMode;
+      }
+      const touchRoot = document.getElementById('touch-controls');
+      if (touchRoot) {
+        touchRoot.dataset.controlMode = validMode;
+      }
+      if (document.body) {
+        document.body.dataset.controlMode = validMode;
+      }
+
+      // 100% Buttonless Glass in 'gesture' & 'tilt' modes; buttons shown ONLY in 'dpad' & 'joystick'
+      const buttonless = validMode === 'gesture' || validMode === 'tilt';
+      const clusterEl =
+        document.getElementById('action-cluster') ||
+        (typeof document.querySelector === 'function'
+          ? document.querySelector('#touch-controls .touch-right')
+          : null);
+      if (clusterEl && clusterEl.style) {
+        clusterEl.style.display = buttonless ? 'none' : '';
+        clusterEl.style.pointerEvents = buttonless ? 'none' : '';
+        clusterEl.setAttribute?.('aria-hidden', buttonless ? 'true' : 'false');
+      }
+      for (const btnId of ['btn-whip', 'btn-fire', 'btn-jump']) {
+        const btnEl = document.getElementById(btnId);
+        if (btnEl && btnEl.style) {
+          btnEl.style.display = buttonless ? 'none' : '';
+          btnEl.style.pointerEvents = buttonless ? 'none' : '';
+          btnEl.setAttribute?.('aria-hidden', buttonless ? 'true' : 'false');
+        }
       }
     }
 
@@ -395,7 +466,7 @@ export class InputController {
     return this.tiltSensitivity;
   }
 
-  /** Requests iOS DeviceOrientationEvent permission if required; resolves true when active. */
+  /** Requests iOS DeviceOrientationEvent + DeviceMotionEvent permissions if required; resolves true when active. */
   async requestTiltPermission() {
     if (typeof window === 'undefined' || !('DeviceOrientationEvent' in window)) {
       this.tiltSupported = false;
@@ -404,21 +475,34 @@ export class InputController {
     }
 
     this.tiltSupported = true;
+    this.motionSupported = 'DeviceMotionEvent' in window;
     const DOE = window.DeviceOrientationEvent;
+    const DME = window.DeviceMotionEvent;
+    let orientationGranted = true;
+
     if (DOE && typeof DOE.requestPermission === 'function') {
       try {
         const result = await DOE.requestPermission();
-        if (result === 'granted') {
-          this.tiltPermissionGranted = true;
-          this._attachTiltListener();
-          return true;
-        }
-        this.tiltPermissionGranted = false;
-        return false;
+        orientationGranted = result === 'granted';
       } catch (_) {
-        this.tiltPermissionGranted = false;
-        return false;
+        orientationGranted = false;
       }
+    }
+
+    if (DME && typeof DME.requestPermission === 'function') {
+      try {
+        const mResult = await DME.requestPermission();
+        this.motionPermissionGranted = mResult === 'granted';
+      } catch (_) {
+        this.motionPermissionGranted = false;
+      }
+    } else {
+      this.motionPermissionGranted = this.motionSupported;
+    }
+
+    if (!orientationGranted) {
+      this.tiltPermissionGranted = false;
+      return false;
     }
 
     this.tiltPermissionGranted = true;
@@ -434,6 +518,8 @@ export class InputController {
     this._tiltLeft = false;
     this._tiltRight = false;
     this._tiltAnalogX = 0;
+    this._prevGravSample = null;
+    this._prevGyroSample = null;
     this._updateTiltPuck(0, false);
     this._recomputeState();
     if (now - this._lastCalibrateMs > 60) {
@@ -524,6 +610,8 @@ export class InputController {
     this._tiltLeft = false;
     this._tiltRight = false;
     this._tiltAnalogX = 0;
+    this._prevGravSample = null;
+    this._prevGyroSample = null;
 
     if (typeof document !== 'undefined') {
       document
@@ -568,6 +656,15 @@ export class InputController {
   _hasPointerOfType(type) {
     for (const entry of this._activePointers.values()) {
       if (entry.type === type) return true;
+    }
+    return false;
+  }
+
+  _hasOtherGesturePointer(excludeEntry = null) {
+    for (const entry of this._activePointers.values()) {
+      if (entry !== excludeEntry && entry.type === 'gesture') {
+        return true;
+      }
     }
     return false;
   }
@@ -997,13 +1094,16 @@ export class InputController {
     }, durationMs);
   }
 
-  _triggerWhipPulse(durationMs = 125) {
+  _triggerWhipPulse(durationMs = 125, opts = null) {
     if (this._whipPulseTimer !== null) {
       clearTimeout(this._whipPulseTimer);
     }
     this._whipPulseActive = true;
     this.justPressed.whip = true;
-    this.haptic(16);
+    this.haptic(opts && opts.hapticPattern ? opts.hapticPattern : 16);
+    if (opts && opts.vfx) {
+      this._spawnSlashVfx(opts.vfx);
+    }
     this._recomputeState(true);
 
     this._whipPulseTimer = setTimeout(() => {
@@ -1123,7 +1223,11 @@ export class InputController {
   // ===========================================================================
 
   _isActionBtnVisible(btn) {
+    if (this.controlMode === 'gesture' || this.controlMode === 'tilt') return false;
     if (!btn || typeof btn.getBoundingClientRect !== 'function') return false;
+    if (btn.style && (btn.style.display === 'none' || btn.style.pointerEvents === 'none')) {
+      return false;
+    }
     if (typeof window !== 'undefined' && window.getComputedStyle) {
       const cs = window.getComputedStyle(btn);
       if (cs.display === 'none' || cs.visibility === 'hidden' || cs.pointerEvents === 'none') {
@@ -1135,6 +1239,7 @@ export class InputController {
   }
 
   _findActionButtonHalo(clientX, clientY, padPx = 12) {
+    if (this.controlMode === 'gesture' || this.controlMode === 'tilt') return null;
     if (typeof document === 'undefined') return null;
 
     const touchRoot = document.getElementById('touch-controls');
@@ -1291,6 +1396,12 @@ export class InputController {
       jumpTimer: null,
       upHoldTimer: null,
       midAirStopTimer: null,
+
+      // Buttonless Tail-Whip gesture tracking (quick horizontal slash & 2-finger tap)
+      isSecondaryFinger: false,
+      twoFingerWhipConsumed: false,
+      peakSlashVx: 0,
+      slashCandidate: false,
 
       samples: [{ x, y, t: ts.now }],
     };
@@ -1463,6 +1574,29 @@ export class InputController {
       dx = 0;
     }
 
+    // Track peak horizontal slash velocity during first 125ms for crisp buttonless Tail-Whip slash detection
+    const elapsedSinceDownMs = Math.max(0, now - entry.startTime);
+    if (
+      !entry.flickLatched &&
+      entry.vertDir === null &&
+      elapsedSinceDownMs <= GESTURE_WHIP_SLASH_MAX_MOVE_MS
+    ) {
+      const { vx: slashVx } = this._computeSlashVelocity(entry, x, y, now, entry.startX, entry.startY, entry.startTime);
+      const bestVx = Math.abs(instVx) > Math.abs(slashVx) ? instVx : slashVx;
+      if (Math.abs(bestVx) > Math.abs(entry.peakSlashVx || 0)) {
+        entry.peakSlashVx = bestVx;
+      }
+      const totalDxNow = x - entry.startX;
+      const totalDyNow = y - entry.startY;
+      if (
+        Math.abs(totalDxNow) >= GESTURE_WHIP_SLASH_MIN_DX_PX &&
+        Math.abs(entry.peakSlashVx) >= GESTURE_WHIP_SLASH_MIN_VX &&
+        Math.abs(totalDxNow) > Math.abs(totalDyNow) * GESTURE_WHIP_SLASH_DOMINANCE
+      ) {
+        entry.slashCandidate = true;
+      }
+    }
+
     if (Math.abs(dx) > activeHorizDeadzone) {
       this._clearHorizCarry();
       const nextHorizDir = dx < 0 ? -1 : 1;
@@ -1471,7 +1605,7 @@ export class InputController {
       }
       entry.horizDir = nextHorizDir;
       const rawMag = Math.min(1, (Math.abs(dx) - activeHorizDeadzone) / GESTURE_HORIZ_FULL_SPAN_PX);
-      const baseMag = 0.28 + 0.72 * rawMag;
+      const baseMag = 0.28 + 0.72 * smoothstep01(rawMag);
       const mag = entry.flickLatched || entry.postFlickActive ? Math.max(0.98, baseMag) : baseMag;
       entry.analogX = entry.horizDir * mag;
       entry.left = entry.horizDir < 0;
@@ -2065,10 +2199,41 @@ export class InputController {
     return { vx: vxChord, vy: vyChord };
   }
 
+  _computeSlashVelocity(entry, x, y, now, onsetX, onsetY, onsetTime) {
+    const dtOnsetSec = Math.max(4, now - onsetTime) / 1000;
+    const vxChord = (x - onsetX) / dtOnsetSec;
+    const vyChord = (y - onsetY) / dtOnsetSec;
+
+    let ref = null;
+    for (let i = entry.samples.length - 2; i >= 0; i--) {
+      const s = entry.samples[i];
+      const dt = now - s.t;
+      if (dt >= 12 && (Math.abs(x - s.x) >= 12 || dt >= 24)) {
+        ref = s;
+        if (dt >= 40) break;
+      }
+    }
+
+    if (!ref) {
+      return { vx: vxChord, vy: vyChord };
+    }
+
+    const dtWinSec = Math.max(0.004, (now - ref.t) / 1000);
+    const vxWin = (x - ref.x) / dtWinSec;
+    const vyWin = (y - ref.y) / dtWinSec;
+
+    if (Math.abs(vxWin) > Math.abs(vxChord)) {
+      return { vx: vxWin, vy: vyWin };
+    }
+    return { vx: vxChord, vy: vyChord };
+  }
+
   _finishGesturePointer(entry, e, isCancel) {
     const now = this._resolveTimestampMs(e, entry);
+    const finalX = e && typeof e.clientX === 'number' ? e.clientX : entry.lastX;
+    const finalY = e && typeof e.clientY === 'number' ? e.clientY : entry.lastY;
     if (e && typeof e.clientX === 'number' && typeof e.clientY === 'number') {
-      const finalDist = Math.hypot(e.clientX - entry.startX, e.clientY - entry.startY);
+      const finalDist = Math.hypot(finalX - entry.startX, finalY - entry.startY);
       if (finalDist > entry.maxDist) entry.maxDist = finalDist;
     }
     const duration = Math.max(0, now - entry.startTime);
@@ -2090,8 +2255,8 @@ export class InputController {
       return;
     }
 
-    // Confident remaining ballistic horizontal commit from lastFlickTime (#323: 430ms normal / 485ms long;
-    // paired with input.isLiveHorizHeld = false so Smart Descending Island Brake settles cleanly onto 1-col & 2-col islands!)
+    // Minimal takeoff bridge (<= 45ms) ONLY on diagonal jump-flick release so real 120Hz physics governs the arc & landing!
+    // Grounded releases ALWAYS have 0ms carry (instant crisp stop via game.js GROUND_FRICTION).
     if (
       !isCancel &&
       gmode === 'tower' &&
@@ -2099,13 +2264,9 @@ export class InputController {
       entry.horizDir !== 0 &&
       (entry.idleHorizSec || 0) < GESTURE_MIDAIR_STOP_IDLE_MS / 1000
     ) {
-      const holdMs = entry.lastFlickHoldMs || entry.flickHoldMs || GESTURE_FLICK_STD_MS;
-      const baseCommitMs =
-        holdMs >= GESTURE_FLICK_LONG_MS ? GESTURE_FLICK_COMMIT_LONG_MS : GESTURE_FLICK_COMMIT_STD_MS;
-      const targetCommitMs = entry.wasRunningBeforeFlick ? baseCommitMs - 70 : baseCommitMs;
       const elapsedSinceFlick = Math.max(0, now - (entry.lastFlickTime || entry.flickLatchTime || now));
-      const carryMs = Math.round(Math.max(0, targetCommitMs - elapsedSinceFlick));
-      const carryAnalogX = entry.horizDir * Math.max(0.98, Math.abs(entry.analogX || 1));
+      const carryMs = Math.round(Math.max(0, GESTURE_FLICK_TAKEOFF_BRIDGE_MS - elapsedSinceFlick));
+      const carryAnalogX = entry.horizDir * Math.max(0.95, Math.abs(entry.analogX || 1));
       if (carryMs > 0) this._latchHorizCarry(entry.horizDir, carryAnalogX, carryMs);
       else this._clearHorizCarry();
       return;
@@ -2113,15 +2274,92 @@ export class InputController {
 
     this._clearHorizCarry();
 
-    // 5. Quick Stationary TAP:
-    //    - If _canInteract && inside middle 36%x50% Gateway/doorway zone (<=14px move) -> triggerInteract!
-    //    - Otherwise (<=16px capacitive wobble) -> 110ms Fire Pulse!
+    if (isCancel) {
+      return;
+    }
+
+    // 5A. Buttonless Two-Finger Tap Anywhere -> 360° Tail-Whip!
+    //     Works while holding/sliding thumb 1 to walk (never interrupts thumb 1!) OR simultaneous 2-finger tap!
+    const otherGestureActive = this._hasOtherGesturePointer(entry);
     if (
-      !isCancel &&
       !entry.flickLatched &&
       !entry.postFlickActive &&
       entry.vertDir === null &&
       !entry.puzzleSwipeDir &&
+      !entry.twoFingerWhipConsumed &&
+      (entry.isSecondaryFinger || otherGestureActive) &&
+      duration < GESTURE_TWO_FINGER_TAP_MAX_MS &&
+      entry.maxDist < GESTURE_TWO_FINGER_TAP_MAX_MOVE_PX
+    ) {
+      // If another pointer is ALSO a fresh simultaneous stationary tap, consume it so lifting it won't fire stray Hydro-Pulse
+      for (const other of this._activePointers.values()) {
+        if (
+          other !== entry &&
+          other.type === 'gesture' &&
+          other.horizDir === 0 &&
+          other.vertDir === null &&
+          !other.flickLatched &&
+          other.maxDist < GESTURE_TWO_FINGER_TAP_MAX_MOVE_PX &&
+          now - other.startTime < GESTURE_TWO_FINGER_TAP_MAX_MS
+        ) {
+          other.twoFingerWhipConsumed = true;
+        }
+      }
+      this._lastWhipSource = 'gesture_two_finger_tap';
+      this._triggerWhipPulse(135, {
+        hapticPattern: [14, 22],
+        vfx: {
+          kind: 'ring',
+          x1: entry.startX,
+          y1: entry.startY,
+          x2: finalX,
+          y2: finalY,
+          dir: 1,
+        },
+      });
+      return;
+    }
+
+    // 5B. Buttonless Quick Horizontal Whip-Slash (crisp <=135ms swipe-and-lift) -> 360° Tail-Whip!
+    //     Holding thumb > 135ms walks/runs smoothly with zero conflict!
+    const totalDx = finalX - entry.startX;
+    const totalDy = finalY - entry.startY;
+    const avgVx = totalDx / Math.max(0.004, duration / 1000);
+    const effVx = Math.abs(entry.peakSlashVx || 0) > Math.abs(avgVx) ? entry.peakSlashVx : avgVx;
+    if (
+      !entry.flickLatched &&
+      !entry.postFlickActive &&
+      entry.vertDir === null &&
+      !entry.puzzleSwipeDir &&
+      !entry.twoFingerWhipConsumed &&
+      duration <= GESTURE_WHIP_SLASH_MAX_LIFT_MS &&
+      Math.abs(totalDx) >= GESTURE_WHIP_SLASH_MIN_DX_PX &&
+      Math.abs(effVx) >= GESTURE_WHIP_SLASH_MIN_VX &&
+      Math.abs(totalDx) > Math.abs(totalDy) * GESTURE_WHIP_SLASH_DOMINANCE
+    ) {
+      this._clearHorizCarry();
+      this._lastWhipSource = 'gesture_slash';
+      this._triggerWhipPulse(135, {
+        hapticPattern: [14, 22],
+        vfx: {
+          kind: 'slash',
+          x1: entry.startX,
+          y1: entry.startY,
+          x2: finalX,
+          y2: finalY,
+          dir: totalDx < 0 ? -1 : 1,
+        },
+      });
+      return;
+    }
+
+    // 5C. Quick Stationary Single-Tap (100% reliable for rapid-fire Hydro-Pulse, or Context Interact at Door/Valve):
+    if (
+      !entry.flickLatched &&
+      !entry.postFlickActive &&
+      entry.vertDir === null &&
+      !entry.puzzleSwipeDir &&
+      !entry.twoFingerWhipConsumed &&
       duration <= GESTURE_TAP_MAX_MS &&
       entry.maxDist <= GESTURE_TAP_MAX_MOVE_PX
     ) {
@@ -2343,19 +2581,164 @@ export class InputController {
   // ===========================================================================
 
   _attachTiltListener() {
-    if (this._tiltListenerAttached || typeof window === 'undefined') return;
-    this._tiltListenerAttached = true;
-    this._onDeviceOrientation = (e) => {
-      const rawRoll = this._extractRollDeg(e);
-      if (rawRoll === null) return;
-      this._lastRawRoll = rawRoll;
-      if (this.controlMode === 'tilt') {
-        this._applyTiltRoll(rawRoll, false);
-      } else {
-        this._hasTiltSample = true;
+    if (typeof window === 'undefined') return;
+    if (!this._tiltListenerAttached) {
+      this._tiltListenerAttached = true;
+      this._onDeviceOrientation = (e) => {
+        const rawRoll = this._extractRollDeg(e);
+        if (rawRoll === null) return;
+        this._lastRawRoll = rawRoll;
+        if (this.controlMode === 'tilt') {
+          this._applyTiltRoll(rawRoll, false);
+        } else {
+          this._hasTiltSample = true;
+        }
+      };
+      window.addEventListener('deviceorientation', this._onDeviceOrientation, { passive: true });
+    }
+
+    if (!this._motionListenerAttached) {
+      this._motionListenerAttached = true;
+      this._onDeviceMotion = (e) => {
+        if (!e) return;
+        const acc = e.acceleration;
+        const accG = e.accelerationIncludingGravity;
+        const rot = e.rotationRate;
+        const nowMs =
+          typeof e.timeStamp === 'number' && Number.isFinite(e.timeStamp) && e.timeStamp > 0
+            ? e.timeStamp
+            : typeof performance !== 'undefined'
+            ? performance.now()
+            : Date.now();
+        this._handleDeviceMotionSample({
+          ax: acc && typeof acc.x === 'number' && Number.isFinite(acc.x) ? acc.x : null,
+          ay: acc && typeof acc.y === 'number' && Number.isFinite(acc.y) ? acc.y : null,
+          az: acc && typeof acc.z === 'number' && Number.isFinite(acc.z) ? acc.z : null,
+          agx: accG && typeof accG.x === 'number' && Number.isFinite(accG.x) ? accG.x : null,
+          agy: accG && typeof accG.y === 'number' && Number.isFinite(accG.y) ? accG.y : null,
+          agz: accG && typeof accG.z === 'number' && Number.isFinite(accG.z) ? accG.z : null,
+          rAlpha: rot && typeof rot.alpha === 'number' && Number.isFinite(rot.alpha) ? rot.alpha : null,
+          rBeta: rot && typeof rot.beta === 'number' && Number.isFinite(rot.beta) ? rot.beta : null,
+          rGamma: rot && typeof rot.gamma === 'number' && Number.isFinite(rot.gamma) ? rot.gamma : null,
+          nowMs,
+        });
+      };
+      window.addEventListener('devicemotion', this._onDeviceMotion, { passive: true });
+    }
+  }
+
+  /**
+   * Public deterministic motion-sensor processor for physical Wrist-Flick / Phone-Snap 360° Tail-Whip in 'tilt' mode.
+   * Triggers on:
+   *  - Linear acceleration spike hypot(ax, ay) >= 9.5 m/s², OR
+   *  - High-pass delta of accelerationIncludingGravity >= 10.5 m/s² (when linear accel is unavailable), OR
+   *  - Sharp rotational wrist-snap |rAlpha| >= 215 or |rGamma| >= 215 deg/s accompanied by jerk.
+   * Enforces 300ms cooldown and guarantees 0 false triggers on smooth 0..30° tilting.
+   */
+  _handleDeviceMotionSample({
+    ax = null,
+    ay = null,
+    az = null,
+    agx = null,
+    agy = null,
+    agz = null,
+    rAlpha = null,
+    rBeta = null,
+    rGamma = null,
+    nowMs = null,
+  } = {}) {
+    const now =
+      typeof nowMs === 'number' && Number.isFinite(nowMs)
+        ? nowMs
+        : typeof performance !== 'undefined'
+        ? performance.now()
+        : Date.now();
+
+    const hasLin =
+      (typeof ax === 'number' && Number.isFinite(ax)) ||
+      (typeof ay === 'number' && Number.isFinite(ay));
+    const linX = typeof ax === 'number' && Number.isFinite(ax) ? ax : 0;
+    const linY = typeof ay === 'number' && Number.isFinite(ay) ? ay : 0;
+    const linMag = hasLin ? Math.hypot(linX, linY) : 0;
+
+    const hasGrav =
+      (typeof agx === 'number' && Number.isFinite(agx)) ||
+      (typeof agy === 'number' && Number.isFinite(agy)) ||
+      (typeof agz === 'number' && Number.isFinite(agz));
+    let gravDelta = 0;
+    if (hasGrav) {
+      const gx = typeof agx === 'number' && Number.isFinite(agx) ? agx : 0;
+      const gy = typeof agy === 'number' && Number.isFinite(agy) ? agy : 0;
+      const gz = typeof agz === 'number' && Number.isFinite(agz) ? agz : 0;
+      if (this._prevGravSample && now - this._prevGravSample.t <= 240 && now >= this._prevGravSample.t) {
+        gravDelta = Math.hypot(
+          gx - this._prevGravSample.agx,
+          gy - this._prevGravSample.agy,
+          gz - this._prevGravSample.agz
+        );
       }
-    };
-    window.addEventListener('deviceorientation', this._onDeviceOrientation, { passive: true });
+      this._prevGravSample = { agx: gx, agy: gy, agz: gz, t: now };
+    }
+
+    const hasGyro =
+      (typeof rAlpha === 'number' && Number.isFinite(rAlpha)) ||
+      (typeof rBeta === 'number' && Number.isFinite(rBeta)) ||
+      (typeof rGamma === 'number' && Number.isFinite(rGamma));
+    let gyroSnap = false;
+    const ra = typeof rAlpha === 'number' && Number.isFinite(rAlpha) ? rAlpha : 0;
+    const rb = typeof rBeta === 'number' && Number.isFinite(rBeta) ? rBeta : 0;
+    const rg = typeof rGamma === 'number' && Number.isFinite(rGamma) ? rGamma : 0;
+    if (hasGyro) {
+      const peakRot = Math.max(Math.abs(ra), Math.abs(rg));
+      let angAccel = 0;
+      if (this._prevGyroSample && now > this._prevGyroSample.t && now - this._prevGyroSample.t <= 240) {
+        const dtSec = Math.max(0.008, (now - this._prevGyroSample.t) / 1000);
+        angAccel = Math.max(
+          Math.abs(ra - this._prevGyroSample.rAlpha) / dtSec,
+          Math.abs(rg - this._prevGyroSample.rGamma) / dtSec
+        );
+      }
+      if (
+        peakRot >= MOTION_WHIP_GYRO_THRESHOLD &&
+        (linMag >= MOTION_WHIP_GYRO_JERK_ACCEL ||
+          gravDelta >= MOTION_WHIP_GYRO_JERK_ACCEL ||
+          angAccel >= MOTION_WHIP_GYRO_ANG_ACCEL)
+      ) {
+        gyroSnap = true;
+      }
+      this._prevGyroSample = { rAlpha: ra, rBeta: rb, rGamma: rg, t: now };
+    }
+
+    if (this.controlMode !== 'tilt') {
+      return false;
+    }
+
+    const linSpike = hasLin && linMag >= MOTION_WHIP_LIN_ACCEL_THRESHOLD;
+    const gravSpike = !hasLin && hasGrav && gravDelta >= MOTION_WHIP_GRAV_DELTA_THRESHOLD;
+    const triggered = linSpike || gravSpike || gyroSnap;
+
+    if (!triggered || now - this._lastMotionWhipMs < MOTION_WHIP_COOLDOWN_MS) {
+      return false;
+    }
+
+    this._lastMotionWhipMs = now;
+    this._lastWhipSource = 'motion';
+    const whipDir =
+      Math.abs(linX) > 1
+        ? Math.sign(linX)
+        : Math.abs(rg) > 20
+        ? Math.sign(rg)
+        : Math.abs(ra) > 20
+        ? Math.sign(ra)
+        : 1;
+    this._triggerWhipPulse(135, {
+      hapticPattern: [14, 24],
+      vfx: {
+        kind: 'wrist',
+        dir: whipDir || 1,
+      },
+    });
+    return true;
   }
 
   _extractRollDeg(e) {
@@ -2402,7 +2785,8 @@ export class InputController {
     } else {
       const span = Math.max(2.0, fullDeg - TILT_DEADZONE_DEG);
       const norm = Math.min(1, (absRoll - TILT_DEADZONE_DEG) / span);
-      this._tiltAnalogX = Math.sign(this._smoothedRoll) * norm;
+      const curved = Math.max(TILT_MIN_ACTIVE_ANALOG, Math.pow(norm, TILT_ROLL_EXPONENT));
+      this._tiltAnalogX = Math.sign(this._smoothedRoll) * Math.min(1, curved);
       this._tiltLeft = this._tiltAnalogX < -0.04;
       this._tiltRight = this._tiltAnalogX > 0.04;
     }
@@ -2425,12 +2809,21 @@ export class InputController {
       startPerfTs: ts.startPerfTs,
       lastX: x,
       lastY: y,
+      lastMoveTime: ts.now,
       maxDist: 0,
       anchorY: y,
       extremeY: y,
       upOnsetX: x,
       upOnsetY: y,
       upOnsetTime: ts.now,
+      slashOnsetX: x,
+      slashOnsetY: y,
+      slashOnsetTime: ts.now,
+      whipLatched: false,
+      whipLatchTime: 0,
+      whipPeakX: x,
+      whipDir: 0,
+      everWhipped: false,
       vertDir: null,
       analogY: 0,
       flickLatched: false,
@@ -2448,15 +2841,44 @@ export class InputController {
     const now = this._resolveTimestampMs(e, entry);
     const x = e.clientX;
     const y = e.clientY;
-    const dyStep = y - entry.lastY;
+    const prevX = entry.lastX;
+    const prevY = entry.lastY;
+    const gapMs = Math.max(0, now - (entry.lastMoveTime ?? entry.startTime));
+    const dxStep = x - prevX;
+    const dyStep = y - prevY;
     entry.lastX = x;
     entry.lastY = y;
+    entry.lastMoveTime = now;
     const dist = Math.hypot(x - entry.startX, y - entry.startY);
     if (dist > entry.maxDist) entry.maxDist = dist;
+
+    if (!entry.whipLatched && gapMs > 60 && Math.abs(x - entry.slashOnsetX) < 6) {
+      entry.slashOnsetX = prevX;
+      entry.slashOnsetY = prevY;
+      entry.slashOnsetTime = now - Math.min(18, gapMs);
+    }
 
     entry.samples.push({ x, y, t: now });
     while (entry.samples.length > 10 || (entry.samples.length > 2 && now - entry.samples[0].t > 130)) {
       entry.samples.shift();
+    }
+
+    // Re-arm horizontal whip slash after 240ms OR >= 18px directional reversal
+    if (entry.whipLatched) {
+      if (entry.whipDir > 0 && x > entry.whipPeakX) entry.whipPeakX = x;
+      else if (entry.whipDir < 0 && x < entry.whipPeakX) entry.whipPeakX = x;
+      const revDist = entry.whipDir > 0 ? entry.whipPeakX - x : x - entry.whipPeakX;
+      if (now - entry.whipLatchTime >= TILT_SLASH_REARM_MS || revDist >= TILT_SLASH_REARM_REV_PX) {
+        entry.whipLatched = false;
+        entry.whipDir = 0;
+        entry.slashOnsetX = x;
+        entry.slashOnsetY = y;
+        entry.slashOnsetTime = now;
+      }
+    } else if (Math.abs(x - entry.slashOnsetX) < 5 && now - entry.slashOnsetTime > 120) {
+      entry.slashOnsetX = x;
+      entry.slashOnsetY = y;
+      entry.slashOnsetTime = now;
     }
 
     if (entry.flickLatched) {
@@ -2489,6 +2911,51 @@ export class InputController {
     }
 
     const { vx, vy } = this._computeGestureVelocity(entry, x, y, now);
+    const { vx: slashVx } = this._computeSlashVelocity(
+      entry,
+      x,
+      y,
+      now,
+      entry.slashOnsetX,
+      entry.slashOnsetY,
+      entry.slashOnsetTime
+    );
+    const instVx = dxStep / Math.max(0.004, gapMs / 1000);
+    const effSlashVx = Math.abs(instVx) > Math.abs(slashVx) ? instVx : slashVx;
+    const dxSlash = x - entry.slashOnsetX;
+    const dySlash = y - entry.slashOnsetY;
+
+    // Buttonless Horizontal Slash Swipe Anywhere on Glass in 'tilt' mode -> 360° Tail-Whip!
+    if (
+      entry.type === 'tiltTouch' &&
+      !entry.whipLatched &&
+      !entry.flickLatched &&
+      Math.abs(dxSlash) >= TILT_SLASH_MIN_DX_PX &&
+      Math.abs(effSlashVx) >= TILT_SLASH_MIN_VX &&
+      Math.abs(dxSlash) > Math.abs(dySlash) * TILT_SLASH_DOMINANCE
+    ) {
+      entry.whipLatched = true;
+      entry.whipLatchTime = now;
+      entry.whipPeakX = x;
+      entry.whipDir = dxSlash < 0 ? -1 : 1;
+      entry.everWhipped = true;
+      entry.vertDir = null;
+      entry.analogY = 0;
+      this._lastWhipSource = 'tilt_slash';
+      this._triggerWhipPulse(135, {
+        hapticPattern: [14, 22],
+        vfx: {
+          kind: 'slash',
+          x1: entry.slashOnsetX,
+          y1: entry.slashOnsetY,
+          x2: x,
+          y2: y,
+          dir: entry.whipDir,
+        },
+      });
+      return;
+    }
+
     const dxUp = x - entry.upOnsetX;
     const dyUp = y - entry.upOnsetY;
     const dtUpMs = Math.max(0, now - entry.upOnsetTime);
@@ -2636,6 +3103,8 @@ export class InputController {
     if (
       !isCancel &&
       !entry.flickLatched &&
+      !entry.whipLatched &&
+      !entry.everWhipped &&
       entry.vertDir === null &&
       duration <= GESTURE_TAP_MAX_MS &&
       entry.maxDist <= GESTURE_TAP_MAX_MOVE_PX
@@ -2652,16 +3121,186 @@ export class InputController {
             ? 'fire'
             : 'up'
         );
-      } else if (entry.type === 'rightPad') {
-        this._triggerFirePulse(GESTURE_FIRE_PULSE_MS);
       } else {
-        const vw = typeof window !== 'undefined' && window.innerWidth ? window.innerWidth : 400;
-        if (entry.startX < vw * 0.5) {
-          this._triggerFirePulse(GESTURE_FIRE_PULSE_MS);
-        } else {
-          this._triggerJumpPulse(GESTURE_FLICK_STD_MS);
+        // Consistent Single Tap ANYWHERE -> Hydro-Pulse (Upward Flick handles Jump!)
+        this._triggerFirePulse(GESTURE_FIRE_PULSE_MS);
+      }
+    }
+  }
+
+  // ===========================================================================
+  // Aqua Water-Arc Slash Ribbon & Wrist-Whip VFX Overlay (Zero-Idle-Cost Canvas)
+  // ===========================================================================
+
+  _spawnSlashVfx(spec = {}) {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const arc = {
+      kind: spec.kind || 'slash',
+      x1: Number(spec.x1) || 0,
+      y1: Number(spec.y1) || 0,
+      x2: Number(spec.x2) || 0,
+      y2: Number(spec.y2) || 0,
+      dir: spec.dir < 0 ? -1 : 1,
+      startMs: now,
+      durationMs: SLASH_VFX_DURATION_MS,
+    };
+    this._lastSlashVfx = arc;
+    if (typeof document === 'undefined' || typeof window === 'undefined') return;
+    this._slashArcs.push(arc);
+    if (this._slashArcs.length > 6) {
+      this._slashArcs.shift();
+    }
+    if (this._slashVfxRaf === null && typeof requestAnimationFrame === 'function') {
+      this._slashVfxRaf = requestAnimationFrame(() => this._renderSlashVfx());
+    }
+  }
+
+  _renderSlashVfx() {
+    this._slashVfxRaf = null;
+    if (typeof document === 'undefined' || typeof window === 'undefined') {
+      this._slashArcs.length = 0;
+      return;
+    }
+    const canvas = document.getElementById('slash-vfx-canvas');
+    if (!canvas || typeof canvas.getContext !== 'function') {
+      this._slashArcs.length = 0;
+      return;
+    }
+    let ctx;
+    try {
+      ctx = canvas.getContext('2d');
+    } catch (_) {
+      ctx = null;
+    }
+    if (!ctx) {
+      this._slashArcs.length = 0;
+      return;
+    }
+
+    const vw = window.innerWidth || 430;
+    const vh = window.innerHeight || 932;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const targetW = Math.max(1, Math.round(vw * dpr));
+    const targetH = Math.max(1, Math.round(vh * dpr));
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+      canvas.width = targetW;
+      canvas.height = targetH;
+    }
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, vw, vh);
+
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const alive = [];
+
+    for (let i = 0; i < this._slashArcs.length; i++) {
+      const a = this._slashArcs[i];
+      const t = (now - a.startMs) / a.durationMs;
+      if (t >= 1) continue;
+      alive.push(a);
+
+      const alpha = Math.pow(1 - Math.max(0, t), 1.45);
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      if (a.kind === 'wrist') {
+        // Twin glowing sea-glass cyan edge ripple arcs confirming physical phone wrist-whip
+        const edgeInset = 18 + t * 54;
+        const primaryLeft = a.dir < 0;
+        const sides = [
+          { x: edgeInset, bow: 44 + t * 28, boost: primaryLeft ? 1.0 : 0.65 },
+          { x: vw - edgeInset, bow: -(44 + t * 28), boost: primaryLeft ? 0.65 : 1.0 },
+        ];
+        for (const s of sides) {
+          const yTop = vh * 0.24;
+          const yBot = vh * 0.76;
+          const midY = vh * 0.5;
+          ctx.beginPath();
+          ctx.moveTo(s.x, yTop);
+          ctx.quadraticCurveTo(s.x + s.bow, midY, s.x, yBot);
+          ctx.strokeStyle = `rgba(94, 252, 232, ${(alpha * 0.42 * s.boost).toFixed(3)})`;
+          ctx.lineWidth = 14 * (1 - t * 0.5);
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.moveTo(s.x, yTop + 18);
+          ctx.quadraticCurveTo(s.x + s.bow * 0.92, midY, s.x, yBot - 18);
+          ctx.strokeStyle = `rgba(224, 254, 255, ${(alpha * 0.9 * s.boost).toFixed(3)})`;
+          ctx.lineWidth = 4.2 * (1 - t * 0.45);
+          ctx.stroke();
+        }
+      } else if (a.kind === 'ring') {
+        // Expanding 360° sea-glass water-whip ripple ring for 2-finger tap
+        const cx = a.x1 || vw * 0.5;
+        const cy = a.y1 || vh * 0.55;
+        const r = 18 + t * 76;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(94, 252, 232, ${(alpha * 0.55).toFixed(3)})`;
+        ctx.lineWidth = 8 * (1 - t * 0.6);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, r * 0.88, -0.8 + t * 2.4, 1.9 + t * 2.4);
+        ctx.strokeStyle = `rgba(232, 255, 255, ${(alpha * 0.92).toFixed(3)})`;
+        ctx.lineWidth = 3.5 * (1 - t * 0.5);
+        ctx.stroke();
+      } else {
+        // Tapered curved aqua water-arc slash ribbon along finger swipe path
+        const dx = a.x2 - a.x1;
+        const dy = a.y2 - a.y1;
+        const len = Math.max(48, Math.hypot(dx, dy));
+        const extend = 22 + t * 26;
+        const ux = (dx || a.dir) / Math.max(1, Math.hypot(dx, dy));
+        const uy = dy / Math.max(1, Math.hypot(dx, dy));
+        const sx = a.x1 - ux * 10;
+        const sy = a.y1 - uy * 10;
+        const ex = a.x2 + ux * extend;
+        const ey = a.y2 + uy * extend;
+        const bow = Math.min(44, len * 0.32) * (a.dir >= 0 ? -1 : 1);
+        const mx = (sx + ex) * 0.5 - uy * bow;
+        const my = (sy + ey) * 0.5 + ux * bow;
+
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.quadraticCurveTo(mx, my, ex, ey);
+        ctx.strokeStyle = `rgba(56, 238, 224, ${(alpha * 0.45).toFixed(3)})`;
+        ctx.lineWidth = 18 * (1 - t * 0.55);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.quadraticCurveTo(mx, my, ex, ey);
+        ctx.strokeStyle = `rgba(165, 248, 255, ${(alpha * 0.82).toFixed(3)})`;
+        ctx.lineWidth = 8.5 * (1 - t * 0.5);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(sx + (ex - sx) * 0.14, sy + (ey - sy) * 0.14);
+        ctx.quadraticCurveTo(mx, my, ex, ey);
+        ctx.strokeStyle = `rgba(255, 255, 255, ${(alpha * 0.96).toFixed(3)})`;
+        ctx.lineWidth = 3.2 * (1 - t * 0.45);
+        ctx.stroke();
+
+        // Trailing sea-glass water droplets
+        for (let d = 1; d <= 4; d++) {
+          const u = d / 5;
+          const qx = (1 - u) * (1 - u) * sx + 2 * (1 - u) * u * mx + u * u * ex + ux * t * 18;
+          const qy = (1 - u) * (1 - u) * sy + 2 * (1 - u) * u * my + u * u * ey + (d % 2 === 0 ? -1 : 1) * t * 14;
+          ctx.beginPath();
+          ctx.arc(qx, qy, Math.max(1.2, (4.2 - d * 0.6) * (1 - t * 0.5)), 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(210, 255, 252, ${(alpha * 0.85).toFixed(3)})`;
+          ctx.fill();
         }
       }
+
+      ctx.restore();
+    }
+
+    this._slashArcs = alive;
+    if (alive.length > 0 && typeof requestAnimationFrame === 'function') {
+      this._slashVfxRaf = requestAnimationFrame(() => this._renderSlashVfx());
     }
   }
 
@@ -2703,12 +3342,19 @@ export class InputController {
       // Never intercept HUD chrome buttons/controls
       if (target.closest('#hud button, #hud a, #hud select, #hud input')) return;
 
-      // 1. Direct Action Buttons (#btn-jump, #btn-fire, #btn-whip active across ALL 4 modes, multi-touch + slide + 12px halo)
-      //    Checked BEFORE clearing horizontal carry so tapping JUMP/WHIP/PULSE never kills slide momentum!
-      let jumpBtn = target.closest('#btn-jump');
-      let fireBtn = target.closest('#btn-fire');
-      let whipBtn = target.closest('#btn-whip');
-      if (!jumpBtn && !fireBtn && !whipBtn && !target.closest('button, select, input, a, #dpad, #joystick-zone')) {
+      // 1. Direct Action Buttons (#btn-jump, #btn-fire, #btn-whip ONLY in 'dpad' and 'joystick' modes!)
+      //    Strictly bypassed in buttonless 'gesture' & 'tilt' modes so hidden rects NEVER hijack screen touches!
+      const buttonsEnabled = this.controlMode === 'dpad' || this.controlMode === 'joystick';
+      let jumpBtn = buttonsEnabled ? target.closest('#btn-jump') : null;
+      let fireBtn = buttonsEnabled ? target.closest('#btn-fire') : null;
+      let whipBtn = buttonsEnabled ? target.closest('#btn-whip') : null;
+      if (
+        buttonsEnabled &&
+        !jumpBtn &&
+        !fireBtn &&
+        !whipBtn &&
+        !target.closest('button, select, input, a, #dpad, #joystick-zone')
+      ) {
         const nearActionBtn = this._findActionButtonHalo(e.clientX, e.clientY, 12);
         if (nearActionBtn?.id === 'btn-jump') jumpBtn = nearActionBtn;
         else if (nearActionBtn?.id === 'btn-fire') fireBtn = nearActionBtn;
@@ -2771,6 +3417,9 @@ export class InputController {
       if (this.controlMode === 'gesture') {
         if (e.cancelable) e.preventDefault();
         const entry = this._createGestureEntry(e);
+        if (this._hasOtherGesturePointer(null)) {
+          entry.isSecondaryFinger = true;
+        }
         this._activePointers.set(e.pointerId, entry);
         this._tryPointerCapture(target, e.pointerId);
         this._recomputeState();

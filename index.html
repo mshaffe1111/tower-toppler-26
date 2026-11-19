@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="./assets/fonts/fonts.css" />
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body>
+<body data-control-mode="gesture">
   <!-- Shared Bespoke Vector Symbol Definitions (Zero External Assets, Zero Emojis) -->
   <svg width="0" height="0" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
     <defs>
@@ -114,6 +114,8 @@
     <!-- Full-Bleed 100vw x 100dvh Sunlit 3D Stage -->
     <main id="stage-wrap">
       <canvas id="game-canvas"></canvas>
+      <!-- Full-Screen Pointer-Passthrough Aqua Water-Arc Slash Ribbon VFX Overlay -->
+      <canvas id="slash-vfx-canvas" class="slash-vfx-canvas" aria-hidden="true"></canvas>
       <!-- Startup Asset Pre-Warm Veil (dismisses smoothly once WebGL + Story Art are decoded) -->
       <div id="stage-transition-veil" class="stage-transition-veil" aria-hidden="true"></div>
 
@@ -248,18 +250,18 @@
       </div>
     </header>
 
-    <!-- Ergonomic Hydro-Glass Touch Controls (Gesture / Stick / D-Pad / Tilt + Tail-Whip + Hydro-Pulse + Jump) -->
-    <footer id="touch-controls" aria-label="Touch Controls">
+    <!-- Ergonomic Hydro-Glass Touch Controls (100% Buttonless Glass in Gesture & Tilt; Buttons ONLY in Stick & D-Pad) -->
+    <footer id="touch-controls" data-control-mode="gesture" aria-label="Touch Controls">
       <div class="corner-bracket corner-bl" aria-hidden="true"></div>
       <div class="corner-bracket corner-br" aria-hidden="true"></div>
 
       <div class="touch-left">
-        <div class="gesture-hint" aria-hidden="true">
+        <div id="hud-ctrl-hint" class="gesture-hint" aria-hidden="true">
           <svg class="gesture-reticle-svg" viewBox="0 0 28 28">
             <circle cx="14" cy="14" r="11.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="4 3"/>
             <path d="M9 14h10M14 9v10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
           </svg>
-          <span class="gesture-glyph">SLIDE • FLICK • TAP</span>
+          <span id="hud-ctrl-hint-text" class="gesture-glyph">Slide &amp; Hold: Walk/Run • Quick Side-Slash or 2-Finger Tap: Tail-Whip • Flick Up: Jump • Tap: Hydro-Pulse</span>
         </div>
 
         <div id="joystick-zone" class="joystick-zone" role="group" aria-label="Virtual Joystick">
@@ -292,16 +294,19 @@
         </div>
 
         <div class="tilt-cluster">
-          <div id="tilt-bar" class="tilt-bar" aria-label="Tilt Roll Indicator">
-            <span class="tilt-center-mark"></span>
-            <div id="tilt-puck" class="tilt-puck"></div>
+          <div class="tilt-bar-row">
+            <div id="tilt-bar" class="tilt-bar" aria-label="Tilt Roll Indicator">
+              <span class="tilt-center-mark"></span>
+              <div id="tilt-puck" class="tilt-puck"></div>
+            </div>
+            <button id="btn-calibrate-tilt" class="tilt-cal-btn" type="button">CALIBRATE</button>
           </div>
-          <button id="btn-calibrate-tilt" class="tilt-cal-btn" type="button">CALIBRATE</button>
+          <span id="tilt-ctrl-hint" class="tilt-ctrl-hint">Tilt: Walk/Run • Wrist-Flick or Swipe Sideways: Tail-Whip • Flick Up: Jump • Tap: Hydro-Pulse</span>
         </div>
       </div>
 
-      <!-- Right-Corner Ergonomic 3-Action Arc: Tail-Whip + Hydro-Pulse + Frill Jump -->
-      <div class="touch-right">
+      <!-- Right-Corner Ergonomic 3-Action Arc: Visible ONLY in D-Pad & Virtual Stick Modes -->
+      <div id="action-cluster" class="touch-right">
         <button id="btn-whip" class="action-btn action-whip" type="button" aria-label="Lizard Tail-Whip">
           <svg class="reticle-svg" viewBox="0 0 44 44" aria-hidden="true">
             <circle cx="22" cy="22" r="18.5" fill="none" stroke="currentColor" stroke-width="1.4" />
@@ -420,6 +425,7 @@
                 <span>TILT</span>
               </button>
             </div>
+            <p id="title-ctrl-guide" class="ctrl-guide-copy">Slide &amp; Hold: Walk/Run • Quick Side-Slash or 2-Finger Tap: Tail-Whip • Flick Up: Jump • Tap: Hydro-Pulse</p>
           </div>
         </div>
       </div>
@@ -861,6 +867,7 @@
               <span>TILT</span>
             </button>
           </div>
+          <p id="pause-ctrl-guide" class="ctrl-guide-copy">Slide &amp; Hold: Walk/Run • Quick Side-Slash or 2-Finger Tap: Tail-Whip • Flick Up: Jump • Tap: Hydro-Pulse</p>
 
           <span class="config-lbl" style="margin-top:4px;">3-CHANNEL AUDIO MIXER</span>
           <div class="audio-mixer-box">

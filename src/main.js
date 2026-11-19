@@ -93,6 +93,11 @@ const trophyToastIconEl = trophyToastEl?.querySelector('.trophy-toast-icon');
 // Touch Controls
 const btnCalibrateTilt = document.getElementById('btn-calibrate-tilt');
 const btnWhip = document.getElementById('btn-whip');
+const hudCtrlHintEl = document.getElementById('hud-ctrl-hint');
+const hudCtrlHintTextEl = document.getElementById('hud-ctrl-hint-text');
+const tiltCtrlHintEl = document.getElementById('tilt-ctrl-hint');
+const titleCtrlGuideEl = document.getElementById('title-ctrl-guide');
+const pauseCtrlGuideEl = document.getElementById('pause-ctrl-guide');
 
 // Overlays
 const overlayTitle = document.getElementById('overlay-title');
@@ -334,6 +339,13 @@ const CTRL_SHORT_CODES = {
   joystick: 'STICK',
   dpad: 'D-PAD',
   tilt: 'TILT',
+};
+
+const CTRL_GUIDE_TEXT = {
+  gesture: 'Slide & Hold: Walk/Run • Quick Side-Slash or 2-Finger Tap: Tail-Whip • Flick Up: Jump • Tap: Hydro-Pulse',
+  tilt: 'Tilt: Walk/Run • Wrist-Flick or Swipe Sideways: Tail-Whip • Flick Up: Jump • Tap: Hydro-Pulse',
+  joystick: 'Thumb Stick: Walk/Run • Right Buttons: Tail-Whip, Hydro-Pulse & Jump',
+  dpad: 'Classic D-Pad: 4-Way Move • Right Buttons: Tail-Whip, Hydro-Pulse & Jump',
 };
 
 const DIR_CHEVRON_SVGS = {
@@ -2301,6 +2313,8 @@ function refreshTitleMeta() {
 }
 
 // ================= CONTROL SCHEME SWITCHING =================
+let ctrlHintFreshTimer = null;
+
 async function applyControlMode(mode, fromUserGesture = false) {
   const validMode = CONTROL_MODES.includes(mode) ? mode : 'gesture';
   if (validMode === 'tilt' && fromUserGesture) {
@@ -2312,6 +2326,8 @@ async function applyControlMode(mode, fromUserGesture = false) {
 
   input.setControlMode(validMode);
   if (appEl) appEl.dataset.controlMode = validMode;
+  if (touchControlsEl) touchControlsEl.dataset.controlMode = validMode;
+  if (document.body) document.body.dataset.controlMode = validMode;
   progression.updateSettings?.({ controlMode: validMode });
   game.applySettings?.(progression.getSettings?.() || {});
 
@@ -2320,6 +2336,23 @@ async function applyControlMode(mode, fromUserGesture = false) {
   if (btnCtrlMode) btnCtrlMode.innerHTML = CTRL_SVGS[validMode] || CTRL_SVGS.gesture;
   if (titleCtrlGlyphEl) titleCtrlGlyphEl.innerHTML = CTRL_SVGS[validMode] || CTRL_SVGS.gesture;
   if (titleCtrlCodeEl) titleCtrlCodeEl.textContent = CTRL_SHORT_CODES[validMode] || 'GESTURE';
+
+  const guideCopy = CTRL_GUIDE_TEXT[validMode] || CTRL_GUIDE_TEXT.gesture;
+  if (titleCtrlGuideEl) titleCtrlGuideEl.textContent = guideCopy;
+  if (pauseCtrlGuideEl) pauseCtrlGuideEl.textContent = guideCopy;
+  if (hudCtrlHintTextEl) hudCtrlHintTextEl.textContent = CTRL_GUIDE_TEXT.gesture;
+  if (tiltCtrlHintEl) tiltCtrlHintEl.textContent = CTRL_GUIDE_TEXT.tilt;
+
+  if (fromUserGesture) {
+    if (ctrlHintFreshTimer) clearTimeout(ctrlHintFreshTimer);
+    hudCtrlHintEl?.classList.toggle('is-fresh', validMode === 'gesture');
+    tiltCtrlHintEl?.classList.toggle('is-fresh', validMode === 'tilt');
+    ctrlHintFreshTimer = setTimeout(() => {
+      ctrlHintFreshTimer = null;
+      hudCtrlHintEl?.classList.remove('is-fresh');
+      tiltCtrlHintEl?.classList.remove('is-fresh');
+    }, 3200);
+  }
 
   titleCtrlPickBtns.forEach((btn) => {
     const active = btn.dataset.ctrlPick === validMode;
@@ -3179,6 +3212,7 @@ function triggerTailWhipPulse() {
 }
 
 btnWhip?.addEventListener('pointerdown', (e) => {
+  if (input.controlMode === 'gesture' || input.controlMode === 'tilt') return;
   e.preventDefault();
   btnWhip.classList.add('active');
   triggerTailWhipPulse();
@@ -3430,7 +3464,8 @@ btnCtrlMode?.addEventListener('click', () => {
   const idx = CONTROL_MODES.indexOf(cur);
   const next = CONTROL_MODES[(idx + 1) % CONTROL_MODES.length];
   applyControlMode(next, true);
-  showBanner('CONTROLS', `${next.toUpperCase()} MODE`);
+  const modeLabel = next === 'tilt' ? 'MOTION (TILT)' : next === 'gesture' ? 'TOUCH (GESTURE)' : `${next.toUpperCase()} MODE`;
+  showBanner(modeLabel, CTRL_GUIDE_TEXT[next] || `${next.toUpperCase()} MODE`);
 });
 
 const handleCalibrate = () => {
