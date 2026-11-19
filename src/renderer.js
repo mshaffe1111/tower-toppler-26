@@ -1189,6 +1189,16 @@ export class GameRenderer {
   prewarmTowerGroup(tower, compileScene = false) {
     if (!tower) return null;
     const cached = this._getOrBuildTowerGroup(tower);
+    if (!this._oceanVfxJitWarmed && this.oceanVfx) {
+      this._oceanVfxJitWarmed = true;
+      try {
+        this.oceanVfx.rebuildForTower(tower, FLOOR_HEIGHT, TOWER_RADIUS);
+        if (this.currentTowerGroup) {
+          this.towerScene?.remove(this.currentTowerGroup);
+          this.currentTowerGroup = null;
+        }
+      } catch {}
+    }
     if (this.webgl && typeof this.webgl.initTexture === 'function') {
       if (cached?.wallAoTex && !cached.wallAoTex.userData?._gpuUploaded) {
         cached.wallAoTex.userData = cached.wallAoTex.userData || {};
