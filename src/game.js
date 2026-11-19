@@ -174,6 +174,7 @@ export class ToweringWatersGame {
     this.towerStarCollected = false;
     this.lastCoreCrystalsSmashed = 0;
     this.maxFloorReached = 0;
+    this.consecutiveRespawnFalls = 0;
     this.visitedElevators = new Set();
     this.stallFloor = 0;
     this.stallTimer = 0;
@@ -388,6 +389,8 @@ export class ToweringWatersGame {
       tunnelTarget: null,
       safeCol: col,
       safeFloor: floor,
+      lastSafeSpanKey: '',
+      consecutiveRespawnFalls: 0,
       fireCooldown: 0,
       fireBuffer: 0,
       whipBuffer: 0,
@@ -464,7 +467,11 @@ export class ToweringWatersGame {
   }
 
   hasMutation(id) {
-    return this.runType === 'expedition' && Array.isArray(this.activeMutations) && this.activeMutations.includes(id);
+    if (this.runType !== 'expedition' || !Array.isArray(this.activeMutations)) return false;
+    if (id === 'hydro_double_jump' || id === 'hydro_jet') {
+      return this.activeMutations.includes('hydro_double_jump') || this.activeMutations.includes('hydro_jet');
+    }
+    return this.activeMutations.includes(id);
   }
 
   /**
@@ -638,7 +645,7 @@ export class ToweringWatersGame {
     return this.startCampaign({ startTowerIdx, zenMode: false, masterWatershed: true });
   }
 
-  startWardenGauntletMode({ startActIdx = 0 } = {}) {
+  startWardenGauntletMode({ startActIdx, startTowerIdx = 0 } = {}) {
     this.masterWatershed = false;
     this.zenMode = false;
     this.gameMode = 'warden_gauntlet';
@@ -653,7 +660,8 @@ export class ToweringWatersGame {
 
     this._prepareRunAudioAndVisuals(false);
     this.towers = createWardenGauntletTowers();
-    this.towerIndex = Math.max(0, Math.min(this.towers.length - 1, Number(startActIdx) || 0));
+    const initAct = startActIdx !== undefined ? startActIdx : startTowerIdx;
+    this.towerIndex = Math.max(0, Math.min(this.towers.length - 1, Number(initAct) || 0));
 
     this._resetRunStats();
     this.lives = 3;
@@ -752,7 +760,9 @@ export class ToweringWatersGame {
     this.vaultReturnState = null;
     this.endlessDepth = 0;
     this.endlessSeed = (Number(seed) || Date.now()) >>> 0;
-    this.activeMutations = initialMutation ? [String(initialMutation)] : [];
+    const normInitMut =
+      initialMutation === 'hydro_jet' ? 'hydro_double_jump' : initialMutation ? String(initialMutation) : null;
+    this.activeMutations = normInitMut ? [normInitMut] : [];
     this.pendingMutationChoices = [];
 
     this._prepareRunAudioAndVisuals(false);
@@ -878,6 +888,8 @@ export class ToweringWatersGame {
     this.descent = null;
     this.critterPods = [];
     this._aquaStepCooldown = 0;
+    this.waterSurgeDelay = 0;
+    this.consecutiveRespawnFalls = 0;
     this.blasterFxId = this.prog?.getEquippedBlasterFx?.() || this.blasterFxId || 'tidal_pearl';
     this.hiScore = this.prog?.getHighScore?.(this._scoreBucket()) || 0;
     this.input?.resetState?.();
@@ -1036,12 +1048,17 @@ export class ToweringWatersGame {
     this.waterFloor = (mech.waterBaseFloor ?? -0.55) - (hasSurge ? 0.55 : 0);
     this.targetWaterFloor = this.waterFloor;
     this.waterPurified = Boolean(mech.waterPurified);
-    this.waterSurgeDelay = hasSurge ? (this.runType === 'flood_rush' ? 2.0 : 3.2) : 0;
+    if (this.runType === 'flood_rush') {
+      this.waterSurgeDelay = Math.max(this.waterSurgeDelay || 0, 3.5);
+    } else {
+      this.waterSurgeDelay = hasSurge ? 3.2 : 0;
+    }
     this.windCurrent = 0;
     this.blackoutFactor = 0;
     this.lightningFlash = 0;
     this._lightningTimer = mech.lightningInterval > 0 ? mech.lightningInterval * 0.65 : 0;
     this._physicsAccum = 0;
+    this.consecutiveRespawnFalls = 0;
     this.switchStates = {
       red: false,
       cyan: false,
@@ -1076,9 +1093,11 @@ export class ToweringWatersGame {
       type: l.type || 'solid',
       switchGroup: l.switchGroup || null,
       pipeGroup: l.pipeGroup || null,
-      stairDir: l.stairDir || 0,
+      stairDir: l.stairDir !== undefined ? l.stairDir : undefined,
       stairDownDir: l.stairDownDir || 0,
       isStair: Boolean(l.isStair),
+      isExplicitStair: l.isExplicitStair !== undefined ? Boolean(l.isExplicitStair) : undefined,
+      explicitStairDir: l.explicitStairDir !== undefined ? l.explicitStairDir : undefined,
       inverted: Boolean(l.inverted),
       phasePeriod: l.phasePeriod || 3.2,
       phaseOffset: l.phaseOffset || 0,
@@ -1121,6 +1140,7 @@ export class ToweringWatersGame {
       valveAngle: 0,
       targetValveAngle: 0,
       cooldown: 0,
+      _stepDebounce: 0,
       _playerInside: false,
     }));
 
@@ -1199,6 +1219,13 @@ export class ToweringWatersGame {
     }
 
     const hero = this._createDefaultGateway(spawnCol, spawnFloor);
+    hero.facing = this._resolveSpawnFacing(t, spawnCol, spawnFloor);
+    const spawnSafe = this._computeSafeSpanAnchor(Math.floor(wrapCol(spawnCol)), Math.round(spawnFloor));
+    if (spawnSafe) {
+      hero.safeCol = spawnSafe.safeCol;
+      hero.safeFloor = spawnSafe.safeFloor;
+      hero.lastSafeSpanKey = spawnSafe.spanKey;
+    }
     hero.invuln = this.mode === 'title' ? 0 : 2.0;
     hero.shield = grantShield;
     hero.landingFloor = this._computeLandingFloor(hero.col, hero.floor);
@@ -1689,7 +1716,20 @@ export class ToweringWatersGame {
       return `CURIOS ${this.curiosCollectedHere}/${req}`;
     }
     if (mType === 'puzzle_architect') {
-      if (this.towerVaultCleared || this.vaultCrackedThisTower) {
+      const cm = typeof this.tower?.casualMission === 'object' ? this.tower.casualMission : null;
+      const hasRuneDoor = Boolean(this.tower?.doors?.some((d) => d.isRune));
+      const hasVaultDoor = Boolean(this.tower?.doors?.some((d) => d.isVault));
+      const isVaultTrial = Boolean(cm?.requiresVault || (hasVaultDoor && !hasRuneDoor));
+      if (isVaultTrial) {
+        if (this.towerVaultCleared || this.vaultCrackedThisTower) {
+          return 'VAULT UNLOCKED -> CROWN VALVE';
+        }
+        return 'SANCTUM TRIAL -> UNLOCK HARMONIC VAULT';
+      }
+      const allRunesSolved = hasRuneDoor
+        ? this.tower.doors.filter((d) => d.isRune).every((d) => d.solved)
+        : Boolean(this.towerVaultCleared || this.vaultCrackedThisTower);
+      if (allRunesSolved || this.towerVaultCleared || this.vaultCrackedThisTower) {
         return 'SANCTUM SOLVED -> CROWN VALVE';
       }
       return 'SANCTUM TRIAL -> SOLVE AQUEDUCT SANCTUM';
@@ -1860,7 +1900,7 @@ export class ToweringWatersGame {
       return { canInteract: true, kind: 'fire' };
     }
 
-    if (p.onElevator || p.wallScamper) {
+    if ((p.onElevator && p.onElevator.powered !== false) || p.wallScamper) {
       return { canInteract: true, kind: 'lift' };
     }
     const restingLift = this.elevators?.find(
@@ -1952,6 +1992,242 @@ export class ToweringWatersGame {
     this._syncHud();
   }
 
+  _resolveSpawnFacing(t, spawnCol, spawnFloor) {
+    if (Number(t?.spawnDir) === 1 || Number(t?.spawnDir) === -1) {
+      return Math.sign(Number(t.spawnDir));
+    }
+
+    const f0 = Math.round(spawnFloor);
+    let bestDir = 0;
+    let bestScore = Infinity;
+
+    // 1. Prefer nearest canonical ascending stair on spawnFloor..spawnFloor+1
+    for (const l of this.ledges) {
+      if (l.floor < f0 - 0.2 || l.floor > f0 + 1.2) continue;
+      for (const upDir of [1, -1]) {
+        if (!this.isPhysicsStairFlight(l, upDir)) continue;
+        const dc = colDist(spawnCol, l.col + 0.5);
+        const score = Math.abs(l.floor - f0) * 8 + Math.abs(dc);
+        if (score < bestScore) {
+          bestScore = score;
+          bestDir = Math.abs(dc) >= 0.6 ? Math.sign(dc) : upDir;
+        }
+      }
+    }
+
+    // 2. Fallback: nearest +1F..+3F walkable ledge, upward tunnel door, wallStrip, or elevator near spawn
+    if (bestDir === 0) {
+      for (const d of t?.doors || []) {
+        if (!d.targetId || Math.abs(d.floor - f0) > 0.35) continue;
+        const dst = (t.doors || []).find((od) => od.id === d.targetId);
+        if (dst && dst.floor > f0 + 0.5) {
+          const dc = colDist(spawnCol, d.col + 0.5);
+          if (Math.abs(dc) >= 0.25 && Math.abs(dc) < bestScore) {
+            bestScore = Math.abs(dc);
+            bestDir = Math.sign(dc);
+          }
+        }
+      }
+      for (const l of this.ledges) {
+        if (!this._isWalkableLedge(l)) continue;
+        const df = l.floor - f0;
+        if (df < 0.75 || df > 3.3) continue;
+        const dc = colDist(spawnCol, l.col + 0.5);
+        if (Math.abs(dc) < 0.25) continue;
+        const score = df * 4 + Math.abs(dc);
+        if (score < bestScore) {
+          bestScore = score;
+          bestDir = Math.sign(dc);
+        }
+      }
+      for (const ws of this.wallStrips || []) {
+        if (ws.minFloor <= f0 + 1.2 && ws.maxFloor > f0 + 0.5) {
+          const dc = colDist(spawnCol, ws.col + 0.5);
+          if (Math.abs(dc) >= 0.25 && Math.abs(dc) < bestScore) {
+            bestScore = Math.abs(dc);
+            bestDir = Math.sign(dc);
+          }
+        }
+      }
+    }
+
+    let chosen = bestDir || 1;
+
+    // 3. Open-cliff safety check: never orient into a dead-end sea drop if the opposite side has ascent/ground!
+    const spawnTile = Math.floor(wrapCol(spawnCol));
+    const hasWalkableOrClimbInDir = (dirSign) => {
+      for (let step = 1; step <= 4; step++) {
+        const tc = wrapCol(spawnTile + dirSign * step);
+        const hasUpper =
+          this.ledges.some((l) => this._isWalkableLedge(l) && wrapCol(l.col) === tc && l.floor >= f0 + 0.8 && l.floor <= f0 + 2.2) ||
+          this.wallStrips?.some((ws) => wrapCol(ws.col) === tc && ws.minFloor <= f0 + 1.2 && ws.maxFloor > f0 + 0.5) ||
+          this.elevators?.some((el) => wrapCol(el.col) === tc && el.minFloor <= f0 + 1.2) ||
+          (t?.doors || []).some((d) => {
+            if (!d.targetId || wrapCol(d.col) !== tc || Math.abs(d.floor - f0) > 0.35) return false;
+            const dst = (t.doors || []).find((od) => od.id === d.targetId);
+            return Boolean(dst && dst.floor > f0 + 0.5);
+          });
+        if (hasUpper) return true;
+        const hasGround =
+          this.ledges.some((l) => this._isWalkableLedge(l) && wrapCol(l.col) === tc && Math.abs(l.floor - f0) < 0.25) ||
+          this.elevators?.some((el) => wrapCol(el.col) === tc && Math.abs(el.floor - f0) < 0.3);
+        if (!hasGround) return false;
+      }
+      return true;
+    };
+
+    if (!hasWalkableOrClimbInDir(chosen) && hasWalkableOrClimbInDir(-chosen)) {
+      chosen = -chosen;
+    }
+    return chosen;
+  }
+
+  _computeObjectiveDirHint(p, exitDoor, crownLocked) {
+    if (!this.tower || !p) return '▲';
+
+    const spawnFloor = this.tower.spawn?.floor ?? 0;
+
+    // 1. On Floor 0..1 of procedural spires with explicit spawnDir (when near spawn quay), guide along ascent route!
+    if (
+      (Number(this.tower.spawnDir) === 1 || Number(this.tower.spawnDir) === -1) &&
+      p.floor <= spawnFloor + 0.85 &&
+      !crownLocked
+    ) {
+      return Number(this.tower.spawnDir) > 0 ? '▶' : '◀';
+    }
+
+    let targetCol = null;
+    let targetFloor = null;
+    const setTargetIfCloser = (colVal, floorVal, weightFloor = 2.2) => {
+      const dF = Math.abs(floorVal - p.floor);
+      const dC = Math.abs(colDist(p.col, colVal));
+      const metric = dF * weightFloor + dC;
+      if (targetCol === null || metric < bestMetric) {
+        bestMetric = metric;
+        targetCol = colVal;
+        targetFloor = floorVal;
+      }
+    };
+    let bestMetric = Infinity;
+
+    // 2. Mandatory 3-Seal Campaign / NG+ Active Objective
+    if (crownLocked) {
+      const nextSeal = this._getLockedSeals()[0];
+      if (nextSeal) {
+        if (nextSeal.kind === 'pipe_valves' || nextSeal.pipeGroup) {
+          for (const sw of this.switches) {
+            if (
+              !sw.active &&
+              sw.mode === 'pipeValve' &&
+              (!nextSeal.pipeGroup || (sw.pipeGroup || sw.group) === nextSeal.pipeGroup)
+            ) {
+              setTargetIfCloser(sw.col + 0.5, sw.floor);
+            }
+          }
+        } else if (nextSeal.kind === 'sanctum' || nextSeal.doorId) {
+          for (const d of this.tower.doors || []) {
+            if (d.isRune && !d.solved && (!nextSeal.doorId || d.id === nextSeal.doorId)) {
+              setTargetIfCloser(d.col + 0.5, d.floor);
+            }
+          }
+        } else if (nextSeal.kind === 'upper_sluice' || nextSeal.switchId) {
+          const sluiceSw = this.switches.find(
+            (sw) => !sw.active && (sw.mode === 'sluiceSeal' || (nextSeal.switchId && sw.id === nextSeal.switchId))
+          );
+          const liveKeeper =
+            sluiceSw?.requiresLockKeeper &&
+            this.enemies.find((e) => !e.dead && (e.isLockKeeper || e.type === 'siphon_warden'));
+          if (liveKeeper) {
+            setTargetIfCloser(liveKeeper.col, liveKeeper.floor);
+          } else if (sluiceSw) {
+            setTargetIfCloser(sluiceSw.col + 0.5, sluiceSw.floor);
+          }
+        }
+      }
+    }
+
+    // 3. Sanctum Trials Mission Objective
+    if (targetCol === null && (this.runType === 'sanctum_trials' || this.tower.casual)) {
+      const mType = this._getCasualMissionType(this.tower);
+      if (mType === 'tower_repair' && !this.dynamoCrafted && !this.tower.workbench?.crafted) {
+        const req = Math.max(1, this.salvagePartsTotal || 3);
+        if (this.salvagePartsCollected < req) {
+          for (const c of this.collectibles) {
+            if (!c.collected && c.type === 'salvage_part') setTargetIfCloser(c.col + 0.5, c.floor);
+          }
+        } else if (this.tower.workbench) {
+          setTargetIfCloser(this.tower.workbench.col + 0.5, this.tower.workbench.floor);
+        }
+      } else if (mType === 'treasure_hunt' && !this.treasureChestOpened && !this.tower.treasureChest?.opened) {
+        const req = Math.max(1, this.compassKeysTotal || 3);
+        if (this.compassKeysCollected < req) {
+          for (const c of this.collectibles) {
+            if (!c.collected && c.type === 'compass_key') setTargetIfCloser(c.col + 0.5, c.floor);
+          }
+        } else if (this.tower.treasureChest) {
+          setTargetIfCloser(this.tower.treasureChest.col + 0.5, this.tower.treasureChest.floor);
+        }
+      } else if (mType === 'curio_survey' && this.curiosCollectedHere < Math.max(1, this.curiosTotalHere || 4)) {
+        for (const c of this.collectibles) {
+          if (!c.collected && c.type === 'curio') setTargetIfCloser(c.col + 0.5, c.floor);
+        }
+      } else if (mType === 'puzzle_architect' && !this.towerVaultCleared && !this.vaultCrackedThisTower) {
+        for (const d of this.tower.doors || []) {
+          if ((d.isRune && !d.solved) || d.isVault) setTargetIfCloser(d.col + 0.5, d.floor);
+        }
+      }
+    }
+
+    // 4. Nearby unpowered lift -> point toward its unspun pipeValve
+    if (targetCol === null) {
+      const nearUnpowered = this.elevators.find(
+        (el) =>
+          el.powered === false &&
+          el.pipeGroup &&
+          Math.abs(el.floor - p.floor) < 1.3 &&
+          Math.abs(colDist(p.col, el.col + 0.5)) < 1.8
+      );
+      if (nearUnpowered) {
+        for (const sw of this.switches) {
+          if (!sw.active && sw.mode === 'pipeValve' && (sw.pipeGroup || sw.group) === nearUnpowered.pipeGroup) {
+            setTargetIfCloser(sw.col + 0.5, sw.floor);
+          }
+        }
+      }
+    }
+
+    // 5. Local floor ascent stair hint when far below the target/exit
+    const destCol = targetCol ?? (exitDoor ? exitDoor.col + 0.5 : null);
+    const destFloor = targetFloor ?? (exitDoor ? exitDoor.floor : p.floor + 4);
+    if (destFloor > p.floor + 2.5) {
+      let nearestStair = null;
+      let nearestDist = Infinity;
+      const curF = Math.round(p.floor);
+      for (const l of this.ledges) {
+        if (Math.abs(l.floor - curF) > 0.35) continue;
+        for (const upDir of [1, -1]) {
+          if (!this.isPhysicsStairFlight(l, upDir)) continue;
+          const dc = colDist(p.col, l.col + 0.5);
+          if (Math.abs(dc) < nearestDist) {
+            nearestDist = Math.abs(dc);
+            nearestStair = { dc, upDir };
+          }
+        }
+      }
+      if (nearestStair && nearestDist <= 6.5) {
+        if (nearestDist < 0.65) return nearestStair.upDir > 0 ? '▶' : '◀';
+        return nearestStair.dc > 0 ? '▶' : '◀';
+      }
+    }
+
+    if (destCol !== null) {
+      const d = colDist(p.col, destCol);
+      if (Math.abs(d) < 0.75) return destFloor < p.floor - 1.0 ? '▼' : '▲';
+      return d > 0 ? '▶' : '◀';
+    }
+    return '▲';
+  }
+
   _buildHudPayload() {
     const activeMode = this.mode === 'paused' ? this.pausedFrom || 'tower' : this.mode;
     const interactCtx = this._evaluateInteractContext();
@@ -1975,11 +2251,7 @@ export class ToweringWatersGame {
     const crownLocked = this._isCrownLocked();
 
     if (activeMode === 'tower' && this.tower) {
-      if (exitDoor) {
-        const d = colDist(p.col, exitDoor.col + 0.5);
-        if (Math.abs(d) < 0.75) dirHint = '▲';
-        else dirHint = d > 0 ? '▶' : '◀';
-      }
+      dirHint = this._computeObjectiveDirHint(p, exitDoor, crownLocked);
       if (!p.hidden && this.mode === 'tower') {
         const missionType = this._getCasualMissionType(this.tower);
         const wb = this.tower.workbench;
@@ -1993,9 +2265,14 @@ export class ToweringWatersGame {
           this.tower.doors?.find(
             (d) => Math.abs(d.floor - p.floor) < 0.62 && Math.abs(colDist(p.col, d.col + 0.5)) < 0.84
           );
-        const unpoweredLift = this.elevators.find(
-          (el) => el.powered === false && Math.abs(colDist(p.col, el.col + 0.5)) < 1.15 && Math.abs(el.minFloor - p.floor) < 1.2
-        );
+        const unpoweredLift =
+          (p.onElevator && p.onElevator.powered === false ? p.onElevator : null) ||
+          this.elevators.find(
+            (el) =>
+              el.powered === false &&
+              Math.abs(colDist(p.col, el.col + 0.5)) < 1.25 &&
+              (Math.abs(el.floor - p.floor) < 1.2 || Math.abs(el.minFloor - p.floor) < 1.2)
+          );
 
         if (nearDoor) {
           if (nearDoor.isExit) {
@@ -2033,7 +2310,7 @@ export class ToweringWatersGame {
                 : '◎ WHIP / PULSE • SPIN PIPE-VALVE';
           }
         } else if (unpoweredLift) {
-          actionPrompt = 'SPIN BOTH PIPE-VALVES TO POWER LIFT';
+          actionPrompt = 'SPIN PIPE-VALVES TO PRESSURIZE LIFT';
         } else if (nearWb) {
           const req = Math.max(1, this.salvagePartsTotal || 3);
           actionPrompt =
@@ -2050,7 +2327,7 @@ export class ToweringWatersGame {
           actionPrompt = '▲▼ GECKO WALL-SCAMPER • JUMP LEAP';
         } else if (p.isSwimming) {
           actionPrompt = '≈ SURFACE SWIM • JUMP LEAP OUT';
-        } else if (p.onElevator) {
+        } else if (p.onElevator && p.onElevator.powered !== false) {
           actionPrompt = '▲▼ MECHANICAL ELEVATOR';
         } else {
           const nearEl = this.elevators.find((el) => el.powered !== false && Math.abs(colDist(p.col, el.col + 0.5)) < 1.2);
@@ -2414,16 +2691,35 @@ export class ToweringWatersGame {
     }
   }
 
-  _triggerSwitch(sw) {
-    if (!sw || sw.cooldown > 0) return;
+  _isSinglePolarityBridgeGroup(grp) {
+    if (!grp) return false;
+    let hasControlled = false;
+    for (const l of this.ledges) {
+      const isGateOrPhase =
+        l.origType === 'phaseBlock' ||
+        l.origType === 'laserGate' ||
+        l.type === 'phaseBlock' ||
+        l.type === 'laserGate';
+      if (!isGateOrPhase) continue;
+      if (l.pipeGroup !== grp && l.switchGroup !== grp) continue;
+      hasControlled = true;
+      if (l.inverted) return false;
+    }
+    return hasControlled;
+  }
+
+  _triggerSwitch(sw, source = 'attack') {
+    if (!sw || sw.cooldown > 0) return false;
+    if (source === 'step' && (sw._stepDebounce || 0) > 0) return false;
 
     // Upper Sluice Seal Lever (`sluiceSeal`): requires defeating the spire's Lock-Keeper/Warden first!
     if (sw.mode === 'sluiceSeal') {
-      if (sw.active) return;
+      if (sw.active) return false;
       if (sw.requiresLockKeeper) {
         const liveKeeper = this.enemies.find((e) => !e.dead && (e.isLockKeeper || e.type === 'siphon_warden'));
         if (liveKeeper) {
           sw.cooldown = 0.7;
+          sw._playerInside = false;
           if (typeof sound?.hitBlock === 'function') sound.hitBlock();
           sound?.vaultTick?.(false);
           this.addShake(3.2);
@@ -2437,7 +2733,7 @@ export class ToweringWatersGame {
             color: '#fb7185',
             maxLife: 1.45,
           });
-          return;
+          return false;
         }
       }
       sw.cooldown = 0.8;
@@ -2461,7 +2757,23 @@ export class ToweringWatersGame {
       }
       this._emitProgEvent('switch_trigger', { mode: 'sluiceSeal', group: sId, poweredLift: false });
       this._syncDynamicLedges(0, true);
-      return;
+      return true;
+    }
+
+    // Never re-fire already-completed one-way valves or shut an already-open single-polarity phase bridge!
+    if ((sw.mode === 'pipeValve' || sw.mode === 'floodValve') && sw.active) {
+      return false;
+    }
+    const isStandardToggle = !sw.mode || sw.mode === 'toggle';
+    if (isStandardToggle) {
+      const grp = sw.group || 'red';
+      if (this._isSinglePolarityBridgeGroup(grp) && this.switchStates[grp]) {
+        return false;
+      }
+    }
+
+    if (source !== 'step' && (isStandardToggle || sw.mode === 'conveyorFlip')) {
+      sw._stepDebounce = 1.2;
     }
 
     sw.cooldown = sw.mode === 'drainValve' ? 2.8 : 0.55;
@@ -2578,6 +2890,7 @@ export class ToweringWatersGame {
       poweredLift,
     });
     this._syncDynamicLedges(0, true);
+    return true;
   }
 
   // ===========================================================================
@@ -2728,7 +3041,7 @@ export class ToweringWatersGame {
     // 1. Spin adjacent Pipe-Valves & Switches!
     for (const sw of this.switches) {
       if (sw.cooldown <= 0 && Math.abs(sw.floor - p.floor) <= reachFloors && Math.abs(colDist(p.col, sw.col + 0.5)) <= reachCols) {
-        this._triggerSwitch(sw);
+        this._triggerSwitch(sw, 'whip');
       }
     }
 
@@ -2880,6 +3193,12 @@ export class ToweringWatersGame {
         en.velFloor = 0;
         en.deathTimer = 0.45;
         this.bossHazards = [];
+        for (const sw of this.switches) {
+          if (sw.mode === 'sluiceSeal') {
+            sw._playerInside = false;
+            sw.cooldown = 0;
+          }
+        }
         this.towerEnemiesDestroyed += 1;
         this._awardGears(8);
         this._scoreActionHit(1500 + breakerRank * 150, { col: en.col, floor: en.floor + 0.9 }, '#fde047');
@@ -3195,6 +3514,7 @@ export class ToweringWatersGame {
     }
     for (const sw of this.switches) {
       if (sw.cooldown > 0) sw.cooldown = Math.max(0, sw.cooldown - dt);
+      if (sw._stepDebounce > 0) sw._stepDebounce = Math.max(0, sw._stepDebounce - dt);
       if (sw.valveAngle !== sw.targetValveAngle) {
         sw.valveAngle = approach(sw.valveAngle || 0, sw.targetValveAngle || 0, 9.5 * dt);
       }
@@ -3242,9 +3562,8 @@ export class ToweringWatersGame {
         p.tunnelTarget = null;
         p.invuln = Math.max(p.invuln || 0, 1.5);
         this._upDoorLatch = true;
-        if (exitSupport && p.floor > this.waterFloor + 0.25) {
-          p.safeCol = p.col;
-          p.safeFloor = p.floor;
+        if (exitSupport) {
+          this._registerLedgeStand(exitSupport);
         }
         p.landingFloor = this._computeLandingFloor(p.col, p.floor);
         sound?.door?.();
@@ -3588,6 +3907,10 @@ export class ToweringWatersGame {
     if (!p.wallScamper) {
       const wasOnStairs = Boolean(p.onStairs);
       const effectiveMoveIntent = descendingIslandBrake ? 0 : moveIntent;
+      // Static dry-stone claw grip: idle Gateway never drifts horizontally off narrow dry-stone ledges in wind!
+      if (p.onGround && !isIce && !p.isSwimming && Math.abs(effectiveMoveIntent) <= 0.05 && convPush === 0) {
+        windPush = 0;
+      }
       let effSpeed = p.isSwimming ? walkSpeed * 0.88 : walkSpeed;
       // Real staircase slope physics: uphill resistance (0.86x), downhill gravity-assisted stride (1.12x)!
       if (wasOnStairs && p.onGround && !p.onElevator && !p.isSwimming && p.stairDir !== 0) {
@@ -3695,15 +4018,20 @@ export class ToweringWatersGame {
       // -----------------------------------------------------------------------
       p.onStairs = false;
       p.stairSlope = 0;
+      p.stairDir = 0;
       if (p.onGround && !p.onElevator && !p.isSwimming) {
         const stepDir = Math.abs(p.vx) > 0.08 ? Math.sign(p.vx) : Math.sign(moveIntent);
         const stairSample = this._sampleStairSurface(p.col, p.floor, 0.56);
         if (stairSample) {
           p.floor = stairSample.floor;
+          p.vy = 0;
+          p.onGround = true;
           p.onStairs = stairSample.onRamp;
           const upDir = stairSample.upDir;
-          p.stairSlope = stepDir !== 0 ? (stepDir === upDir ? 1 : -1) : 1;
-          p.stairDir = upDir;
+          if (stairSample.onRamp) {
+            p.stairSlope = stepDir !== 0 ? (stepDir === upDir ? 1 : -1) : 1;
+            p.stairDir = upDir;
+          }
           if (Math.abs(p.vx) > 0.05) {
             p.stairPhase = (p.stairPhase + Math.abs(p.vx) * dt * 2.4) % 1;
           }
@@ -3717,8 +4045,14 @@ export class ToweringWatersGame {
           this._registerLedgeStand(stairSample.supportLedge);
         } else if (wasOnStairs) {
           p.stairStepIndex = -1;
-          // Stepping off the open side of a staircase immediately hands p.vx into GRAV_FALL = 74.0 freefall!
-          if (!this._findLedgeAt(p.col, p.floor)) {
+          const nearLanding = this._findLedgeAt(p.col, Math.round(p.floor));
+          if (nearLanding && Math.abs(nearLanding.floor - p.floor) <= 0.32) {
+            p.floor = nearLanding.floor;
+            p.vy = 0;
+            p.onGround = true;
+            this._registerLedgeStand(nearLanding);
+          } else if (!this._findLedgeAt(p.col, p.floor)) {
+            // Stepping off the open side of a staircase immediately hands p.vx into GRAV_FALL freefall!
             p.onGround = false;
             p.vy = Math.min(p.vy, -0.4);
           }
@@ -3752,7 +4086,15 @@ export class ToweringWatersGame {
     for (const sw of this.switches) {
       const inside = Math.abs(sw.floor - p.floor) < 0.68 && Math.abs(colDist(p.col, sw.col + 0.5)) < 0.58;
       if (inside && !sw._playerInside) {
-        this._triggerSwitch(sw);
+        this._triggerSwitch(sw, 'step');
+      } else if (
+        inside &&
+        sw.mode === 'sluiceSeal' &&
+        !sw.active &&
+        sw.cooldown <= 0 &&
+        (!sw.requiresLockKeeper || !this.enemies.some((e) => !e.dead && (e.isLockKeeper || e.type === 'siphon_warden')))
+      ) {
+        this._triggerSwitch(sw, 'step');
       }
       sw._playerInside = inside;
     }
@@ -3854,14 +4196,20 @@ export class ToweringWatersGame {
             return;
           }
           const isSanctumRun = Boolean(this.runType === 'sanctum_trials' || this.tower?.casual);
+          const cm = typeof this.tower?.casualMission === 'object' ? this.tower.casualMission : null;
+          const hasRuneDoor = Boolean(this.tower?.doors?.some((d) => d.isRune));
+          const hasVaultDoor = Boolean(this.tower?.doors?.some((d) => d.isVault));
+          const needsVault = Boolean(cm?.requiresVault || (hasVaultDoor && !hasRuneDoor));
+          const needsRune = Boolean((cm?.requiresRune ?? hasRuneDoor) && hasRuneDoor);
+          const puzzleIncomplete =
+            missionType === 'puzzle_architect' &&
+            ((needsVault && !this.towerVaultCleared && !this.vaultCrackedThisTower) ||
+              (needsRune && this.tower?.doors?.some((d) => d.isRune && !d.solved)));
           const optionalIncomplete =
             isSanctumRun &&
             ((missionType === 'treasure_hunt' && !this.treasureChestOpened && !this.tower?.treasureChest?.opened) ||
               (missionType === 'curio_survey' && this.curiosCollectedHere < Math.max(1, this.curiosTotalHere || 4)) ||
-              (missionType === 'puzzle_architect' &&
-                !this.towerVaultCleared &&
-                !this.vaultCrackedThisTower &&
-                this.tower?.doors?.some((d) => (d.isRune && !d.solved) || d.isVault)));
+              puzzleIncomplete);
           if (optionalIncomplete && (this._casualSkipConfirmTimer || 0) <= 0) {
             this._casualSkipConfirmTimer = 3.5;
             sound?.vaultTick?.(false);
@@ -3918,6 +4266,7 @@ export class ToweringWatersGame {
             p.enteringDoor = 0.1;
             p.tunnelTimer = 0.14;
             p.tunnelTarget = target;
+            p.invuln = Math.max(p.invuln || 0, 1.0);
             p.vx = 0;
             p.vy = 0;
             sound?.door?.();
@@ -3927,6 +4276,24 @@ export class ToweringWatersGame {
             return;
           }
         }
+      }
+      // Also allow UP interact to pull an unlocked sluiceSeal or spin an adjacent pipe/flood/drain valve within 0.85 cols!
+      const nearUpSwitch = this.switches?.find(
+        (sw) =>
+          !sw.active &&
+          sw.cooldown <= 0 &&
+          (sw.mode === 'sluiceSeal' ||
+            sw.mode === 'pipeValve' ||
+            sw.mode === 'floodValve' ||
+            sw.mode === 'drainValve') &&
+          Math.abs(sw.floor - p.floor) < 0.72 &&
+          Math.abs(colDist(p.col, sw.col + 0.5)) <= 0.85
+      );
+      if (nearUpSwitch) {
+        this._upDoorLatch = true;
+        p.jumpBufferTimer = 0;
+        this._triggerSwitch(nearUpSwitch, 'up');
+        return;
       }
     }
 
@@ -4118,11 +4485,15 @@ export class ToweringWatersGame {
       this._emitProgEvent('snowball_fire', { recalledLift });
     }
 
-    // Level-walk onto resting powered Mechanical Elevator
+    // Level-walk onto any Mechanical Elevator cab deck (both powered & stationary unpowered bronze cabs!)
     if (p.onGround && !p.onElevator && !p.wallScamper && !p.isSwimming) {
-      const levelEl = this.elevators.find(
-        (el) => el.powered !== false && Math.abs(el.floor - p.floor) < 0.22 && Math.abs(colDist(p.col, el.col + 0.5)) < 0.46
-      );
+      const levelEl = this.elevators.find((el) => {
+        if (Math.abs(el.floor - p.floor) >= 0.22) return false;
+        const dc = Math.abs(colDist(p.col, el.col + 0.5));
+        if (dc < 0.46) return true;
+        if (dc <= 0.62 && !this._findLedgeAt(p.col, p.floor)) return true;
+        return false;
+      });
       if (levelEl) {
         p.onElevator = levelEl;
         p.floor = levelEl.floor;
@@ -4139,14 +4510,51 @@ export class ToweringWatersGame {
       p.jumpCutEligible = false;
       p.steamBoostActive = false;
       const el = p.onElevator;
-      if (el.powered === false || Math.abs(colDist(p.col, el.col + 0.5)) > 0.66) {
+      const dcFromCab = Math.abs(colDist(p.col, el.col + 0.5));
+      if (el.powered === false) {
+        // Stationary unpowered cab deck: solid support up to 0.62 cols, ZERO center-lock magnetization, ZERO manual lift travel!
+        const adjLedge = dcFromCab > 0.48 ? this._findLedgeAt(p.col, el.floor) : null;
+        const steppedOntoAdjLedge =
+          Boolean(adjLedge && wrapCol(adjLedge.col) !== wrapCol(el.col)) &&
+          (dcFromCab > 0.52 || colDist(el.col + 0.5, p.col) * p.vx >= 0);
+        if (steppedOntoAdjLedge) {
+          p.onElevator = null;
+          p.floor = adjLedge.floor;
+          p.vy = 0;
+          p.onGround = true;
+          this._registerLedgeStand(adjLedge);
+        } else if (dcFromCab > 0.62) {
+          p.onElevator = null;
+          const fallbackLedge = this._findLedgeAt(p.col, p.floor);
+          if (fallbackLedge) {
+            p.floor = fallbackLedge.floor;
+            p.vy = 0;
+            p.onGround = true;
+            this._registerLedgeStand(fallbackLedge);
+          } else {
+            p.onGround = false;
+          }
+        } else {
+          p.floor = el.floor;
+          p.vy = 0;
+          p.onGround = true;
+        }
+      } else if (dcFromCab > 0.66) {
         p.onElevator = null;
-        p.onGround = false;
+        const stepOffLedge = this._findLedgeAt(p.col, p.floor);
+        if (stepOffLedge) {
+          p.floor = stepOffLedge.floor;
+          p.vy = 0;
+          p.onGround = true;
+          this._registerLedgeStand(stepOffLedge);
+        } else {
+          p.onGround = false;
+        }
         if (this.runType !== 'purist') {
           p.invuln = Math.max(p.invuln || 0, 0.65);
         }
       } else {
-        // Hands-free cab centering so wind/drift never pulls Gateway off a moving elevator (#411 Fix #6)
+        // Hands-free cab centering so wind/drift never pulls Gateway off a moving powered elevator (#411 Fix #6)
         if (Math.abs(moveIntent) <= 0.08) {
           const dCab = colDist(p.col, el.col + 0.5);
           p.col = wrapCol(p.col + dCab * Math.min(1, dt * 10));
@@ -4196,22 +4604,22 @@ export class ToweringWatersGame {
       p.floor += p.vy * dt;
       p.onGround = false;
 
-      // Overhead ceiling check (ignores stairs & diagonal destination ledges)
+      // Overhead ceiling check: hard `pillar` bulkheads always block; `steamBoostActive` shatters overhead `box` crates & passes through exterior terraces!
       if (p.vy > 0) {
         const head = p.floor + 0.76;
         const prevHead = prevFloor + 0.76;
-        const startCol = p.jumpStartCol ?? p.col;
         const startFloor = p.jumpStartFloor ?? prevFloor;
-        const diagFloorReach = p.steamBoostActive ? 3.45 : 1.35;
         for (const l of this.ledges) {
           if (l.gone || !l.active || l.type === 'laserGate') continue;
           if (Math.abs(colDist(p.col, l.col + 0.5)) >= 0.34) continue;
+          if (l.type === 'box' && p.steamBoostActive) {
+            if (prevHead <= l.floor + 0.08 && head >= l.floor - 0.05) {
+              this._shatterSiphonBox(l, p.facing, 75);
+            }
+            continue;
+          }
           const isWallBlock = l.type === 'box' || l.type === 'pillar';
-          if (
-            !isWallBlock &&
-            l.floor <= startFloor + diagFloorReach &&
-            Math.abs(colDist(startCol, l.col + 0.5)) >= 0.42
-          ) {
+          if (!isWallBlock && (p.steamBoostActive || l.floor >= startFloor + 0.9)) {
             continue;
           }
           const bottom = isWallBlock ? l.floor : l.floor - 0.14;
@@ -4237,9 +4645,9 @@ export class ToweringWatersGame {
         } else {
           for (let ei = 0; ei < this.elevators.length; ei++) {
             const el = this.elevators[ei];
+            const hitTol = el.powered === false ? 0.62 : 0.64;
             if (
-              el.powered !== false &&
-              Math.abs(colDist(p.col, el.col + 0.5)) < 0.64 &&
+              Math.abs(colDist(p.col, el.col + 0.5)) <= hitTol &&
               prevFloor >= el.floor - 0.45 &&
               p.floor <= el.floor + 0.35
             ) {
@@ -4335,6 +4743,8 @@ export class ToweringWatersGame {
     if (curWholeFloor > this.maxFloorReached) {
       const gained = curWholeFloor - this.maxFloorReached;
       this.maxFloorReached = curWholeFloor;
+      this.consecutiveRespawnFalls = 0;
+      p.consecutiveRespawnFalls = 0;
       if (this.runType === 'flood_rush') {
         this.floodAltitudeMeters += Math.round(gained * 2.5);
       }
@@ -4617,16 +5027,155 @@ export class ToweringWatersGame {
     }
   }
 
+  _isSafeSolidTile(tileCol, floorInt) {
+    const wc = wrapCol(tileCol);
+    const hasSolid = this.ledges.some(
+      (l) =>
+        !l.gone &&
+        l.active &&
+        !l.crumbling &&
+        l.type === 'solid' &&
+        wrapCol(l.col) === wc &&
+        Math.abs(l.floor - floorInt) < 0.22
+    );
+    if (!hasSolid) return false;
+    const hasBlocker = this.ledges.some(
+      (b) =>
+        !b.gone &&
+        b.active &&
+        (b.type === 'box' || b.type === 'pillar' || b.type === 'laserGate') &&
+        wrapCol(b.col) === wc &&
+        (b.h ? b.floor < floorInt + 1.2 && b.floor + b.h > floorInt + 0.1 : Math.abs(b.floor - floorInt) < 0.65)
+    );
+    return !hasBlocker;
+  }
+
+  _computeSafeSpanAnchor(tileCol, floorInt) {
+    const startTile = wrapCol(Math.round(tileCol));
+    if (!this._isSafeSolidTile(startTile, floorInt)) return null;
+
+    let leftSteps = 0;
+    while (leftSteps < COLS - 1 && this._isSafeSolidTile(startTile - leftSteps - 1, floorInt)) leftSteps++;
+    let rightSteps = 0;
+    while (rightSteps < COLS - 1 - leftSteps && this._isSafeSolidTile(startTile + rightSteps + 1, floorInt)) rightSteps++;
+
+    const spanStart = wrapCol(startTile - leftSteps);
+    const len = leftSteps + 1 + rightSteps;
+    const spanKey = `${spanStart}:${len}:${floorInt}`;
+
+    let safeCol = startTile + 0.5;
+    if (len >= COLS) {
+      safeCol = startTile + 0.5;
+    } else if (len >= 3) {
+      // Strictly prefer interior tiles [1 .. len-2] over a 1-tile cliff edge!
+      const clampedIdx = Math.max(1, Math.min(len - 2, leftSteps));
+      safeCol = wrapCol(spanStart + clampedIdx) + 0.5;
+    } else if (len === 2) {
+      const cA = spanStart;
+      const cB = wrapCol(spanStart + 1);
+      const adjLeft = this.ledges.some(
+        (n) => this._isWalkableLedge(n) && wrapCol(n.col) === wrapCol(cA - 1) && Math.abs(n.floor - floorInt) <= 1.05
+      );
+      const adjRight = this.ledges.some(
+        (n) => this._isWalkableLedge(n) && wrapCol(n.col) === wrapCol(cB + 1) && Math.abs(n.floor - floorInt) <= 1.05
+      );
+      if (adjLeft && !adjRight) safeCol = cA + 0.5;
+      else if (adjRight && !adjLeft) safeCol = cB + 0.5;
+      else safeCol = wrapCol(cA + 1.0); // Dead-center seam of a 2-col solid stone island!
+    }
+    const centerCol = len >= COLS ? startTile + 0.5 : wrapCol(spanStart + len * 0.5);
+    return {
+      safeCol,
+      centerCol,
+      safeFloor: floorInt,
+      spanStart,
+      len,
+      spanKey,
+    };
+  }
+
+  _resolveLoopProofSafePoint(preferredFloor, forceSpawn = false) {
+    const spawnTile = Math.round(this.tower?.spawn?.col ?? 0);
+    const spawnFloor = Math.round(this.tower?.spawn?.floor ?? 0);
+    const pickBestSpanOnFloor = (fl) => {
+      let best = null;
+      const seen = new Set();
+      for (let c = 0; c < COLS; c++) {
+        if (!this._isSafeSolidTile(c, fl)) continue;
+        const info = this._computeSafeSpanAnchor(c, fl);
+        if (!info || seen.has(info.spanKey)) continue;
+        seen.add(info.spanKey);
+        if (!best || info.len > best.len) {
+          best = info;
+        }
+      }
+      return best;
+    };
+
+    if (!forceSpawn) {
+      const targetFl = Math.round(preferredFloor);
+      if (targetFl > this.waterFloor + 0.45) {
+        const onTarget = pickBestSpanOnFloor(targetFl);
+        if (onTarget && onTarget.len >= 2) {
+          return { col: onTarget.centerCol, floor: onTarget.safeFloor, spanKey: onTarget.spanKey };
+        }
+      }
+      // Search nearby dry floors at or below preferredFloor for a stable multi-tile solid terrace
+      for (let fl = Math.round(preferredFloor); fl >= spawnFloor; fl--) {
+        if (fl <= this.waterFloor + 0.45) continue;
+        const cand = pickBestSpanOnFloor(fl);
+        if (cand && cand.len >= 2) {
+          return { col: cand.centerCol, floor: cand.safeFloor, spanKey: cand.spanKey };
+        }
+      }
+    }
+
+    // Ultimate fallback: Spire Spawn Quay (lowering water safely if needed)
+    const mech = this.tower?.mechanics || {};
+    const baseWater = (mech.waterBaseFloor ?? -0.55) - ((mech.waterRiseRate || 0) > 0 ? 0.55 : 0);
+    if (!this.waterPurified && this.waterFloor >= spawnFloor - 0.6) {
+      this.waterFloor = Math.min(this.waterFloor, baseWater);
+      this.targetWaterFloor = this.waterFloor;
+    }
+    const spawnSpan = this._computeSafeSpanAnchor(spawnTile, spawnFloor);
+    return {
+      col: spawnSpan ? spawnSpan.centerCol : wrapCol(spawnTile) + 0.5,
+      floor: spawnFloor,
+      spanKey: spawnSpan ? spawnSpan.spanKey : `spawn:${spawnTile}:${spawnFloor}`,
+    };
+  }
+
   _registerLedgeStand(ledge) {
     const p = this.gateway;
     if (
-      (ledge.type === 'solid' || ledge.type === 'ice' || ledge.type === 'steamVent') &&
-      ledge.floor > this.waterFloor + 0.35
+      ledge &&
+      !ledge.gone &&
+      ledge.active &&
+      !ledge.crumbling &&
+      ledge.type === 'solid' &&
+      ledge.floor > this.waterFloor + 0.45
     ) {
-      p.safeCol = ledge.col + 0.5;
-      p.safeFloor = ledge.floor;
+      const floorInt = Math.round(ledge.floor);
+      const anchor = this._computeSafeSpanAnchor(ledge.col, floorInt);
+      if (anchor) {
+        // Only save on a 1-tile cliff stone if we haven't already saved a wider span on the same floor
+        const keepExistingWiderSameFloor =
+          anchor.len === 1 &&
+          Math.round(p.safeFloor) === floorInt &&
+          p.lastSafeSpanKey &&
+          Number(p.lastSafeSpanKey.split(':')[1] || 1) >= 2;
+        if (!keepExistingWiderSameFloor) {
+          p.safeCol = anchor.safeCol;
+          p.safeFloor = ledge.floor;
+        }
+        if (anchor.spanKey !== p.lastSafeSpanKey) {
+          p.lastSafeSpanKey = anchor.spanKey;
+          this.consecutiveRespawnFalls = 0;
+          p.consecutiveRespawnFalls = 0;
+        }
+      }
     }
-    if (ledge.type === 'crumble' && !ledge.crumbling) {
+    if (ledge && ledge.type === 'crumble' && !ledge.crumbling) {
       ledge.crumbling = true;
       ledge.shake = true;
       ledge.crumbleTimer = 0.52;
@@ -4732,8 +5281,7 @@ export class ToweringWatersGame {
       const hitSw = this.switches.find(
         (sw) => sw.cooldown <= 0 && Math.abs(sw.floor - sb.floor) < 0.8 && Math.abs(colDist(sb.col, sw.col + 0.5)) < 0.65
       );
-      if (hitSw) {
-        this._triggerSwitch(hitSw);
+      if (hitSw && this._triggerSwitch(hitSw, 'pulse')) {
         if ((sb.pierce || 1) <= 1) {
           this.hydroPulses.splice(i, 1);
           continue;
@@ -4844,7 +5392,7 @@ export class ToweringWatersGame {
         if (
           p.invuln <= 0 &&
           !p.hidden &&
-          !p.onElevator &&
+          !(p.onElevator && p.onElevator.powered !== false) &&
           Math.abs(pr.floor - (p.floor + 0.35)) < 0.62 &&
           Math.abs(colDist(pr.col, p.col)) < 0.54
         ) {
@@ -5627,7 +6175,7 @@ export class ToweringWatersGame {
 
       // Contact & Signature Aura Hazard Check (harmless training crabs & elevator cabs never hurt Gateway!)
       if (en.harmless) continue;
-      const shieldedInLift = Boolean(p.onElevator);
+      const shieldedInLift = Boolean(p.onElevator && p.onElevator.powered !== false);
       if (p.invuln <= 0 && !shieldedInLift && !p.hidden) {
         const hitFloorTol = en.type === 'siphon_warden' ? 0.95 : en.shockActive ? 0.92 : 0.76;
         const hitColTol = en.type === 'siphon_warden' ? 0.90 : en.shockActive ? 1.02 : 0.72;
@@ -5712,7 +6260,7 @@ export class ToweringWatersGame {
         if (hz.kind === 'hydro_beam' && hz.sweepSpeed) {
           hz.col = wrapCol(hz.col + hz.dir * hz.sweepSpeed * dt);
         }
-        if (p && p.invuln <= 0 && !p.hidden && !p.onElevator) {
+        if (p && p.invuln <= 0 && !p.hidden && !(p.onElevator && p.onElevator.powered !== false)) {
           const halfCol = (hz.spanCols || 1.6) * 0.42;
           const inCol = Math.abs(colDist(hz.col, p.col)) <= halfCol;
           const inFloor =
@@ -5834,45 +6382,108 @@ export class ToweringWatersGame {
     p.vx = (colDist(sourceCol, p.col) >= 0 ? 1 : -1) * 3.5;
   }
 
+  isPhysicsStairFlight(lowLedge, upDir) {
+    if (!lowLedge || (upDir !== 1 && upDir !== -1)) return false;
+    const isStairMasonry = (l) =>
+      this._isWalkableLedge(l) &&
+      (l.type === 'solid' || l.type === 'stair' || l.type === 'stairR' || l.type === 'stairL');
+    if (!isStairMasonry(lowLedge)) return false;
+
+    const explicitTypeMatch = lowLedge.type === (upDir === 1 ? 'stairR' : 'stairL');
+    if (lowLedge.stairDir !== undefined) {
+      if (lowLedge.stairDir !== upDir && !explicitTypeMatch) return false;
+    }
+
+    const lowCol = wrapCol(lowLedge.col);
+    const lowFloor = Math.round(lowLedge.floor);
+    const highCol = wrapCol(lowCol + upDir);
+    const highFloor = lowFloor + 1;
+
+    const highLedge = this.ledges.find(
+      (l) => isStairMasonry(l) && wrapCol(l.col) === highCol && Math.abs(l.floor - highFloor) < 0.2
+    );
+    if (!highLedge) return false;
+
+    // 1. No walkable flat bridge of ANY type at (highCol, lowFloor)
+    const isAnyArchWalkable = (b) =>
+      Boolean(b) &&
+      b.origType !== 'box' &&
+      b.origType !== 'pillar' &&
+      b.origType !== 'laserGate' &&
+      b.type !== 'box' &&
+      b.type !== 'pillar' &&
+      b.type !== 'laserGate';
+    const hasFlatBridge = this.ledges.some(
+      (b) => isAnyArchWalkable(b) && wrapCol(b.col) === highCol && Math.abs(b.floor - lowFloor) < 0.2
+    );
+    if (hasFlatBridge) return false;
+
+    // 2. No solid/walkable ceiling at (lowCol, lowFloor + 1) and no hard blocker at (lowCol, highFloor) or (highCol, highFloor)
+    const hasCeilingAboveLow = this.ledges.some(
+      (b) => isAnyArchWalkable(b) && wrapCol(b.col) === lowCol && Math.abs(b.floor - highFloor) < 0.25
+    );
+    if (hasCeilingAboveLow) return false;
+
+    const blockerAt = (tc, tf) =>
+      this.ledges.some((b) => {
+        if (b.gone || !b.active) return false;
+        if (b.type !== 'box' && b.type !== 'pillar' && b.type !== 'laserGate') return false;
+        if (wrapCol(b.col) !== tc) return false;
+        const topH = Math.max(1, Math.round(Number(b.h) || 1));
+        const bf = Math.round(b.floor);
+        return tf >= bf && tf < bf + topH;
+      });
+    if (blockerAt(lowCol, highFloor) || blockerAt(highCol, highFloor)) return false;
+
+    // 3. No elevator shaft occupying (lowCol, lowFloor + 1) or (highCol, highFloor)
+    const elevShaftAt = (tc, tf) =>
+      this.elevators?.some(
+        (el) => wrapCol(el.col) === tc && tf >= Math.round(el.minFloor) && tf <= Math.round(el.maxFloor)
+      );
+    if (elevShaftAt(lowCol, highFloor) || elevShaftAt(highCol, highFloor)) return false;
+
+    return true;
+  }
+
   _sampleStairSurface(col, refFloor, maxTol = 0.56) {
     const s = wrapCol(col) - 0.5;
     const c0 = wrapCol(Math.floor(s));
     const c1 = wrapCol(c0 + 1);
     const t = s - Math.floor(s); // 0..1 between (c0+0.5) and (c1+0.5)
     const rampT = Math.max(0, Math.min(1, (t - 0.14) / 0.72));
-    // Restrict smooth stair ramps strictly to real 3D 5-riser staircase masonry (`solid`/`stair*`) (#411 Fix #8)
     const isStairMasonry = (l) =>
-      this._isWalkableLedge(l) && (l.type === 'solid' || l.type === 'stairR' || l.type === 'stairL');
+      this._isWalkableLedge(l) &&
+      (l.type === 'solid' || l.type === 'stair' || l.type === 'stairR' || l.type === 'stairL');
 
     let best = null;
     let bestErr = maxTol;
 
     for (const l0 of this.ledges) {
-      if (!isStairMasonry(l0) || l0.col !== c0) continue;
+      if (!isStairMasonry(l0) || wrapCol(l0.col) !== c0) continue;
       if (Math.abs(l0.floor - refFloor) > 1.35) continue;
       for (const l1 of this.ledges) {
-        if (!isStairMasonry(l1) || l1.col !== c1) continue;
+        if (!isStairMasonry(l1) || wrapCol(l1.col) !== c1) continue;
         const df = l1.floor - l0.floor;
         if (Math.abs(df) !== 1) continue;
-        const lowCol = df > 0 ? c0 : c1;
-        const lowFloor = Math.min(l0.floor, l1.floor);
-        // Must be a real staircase step (no flat terrace bridging across lowFloor on the destination column, and no ceiling block above lowCol)
-        const hasFlatBridge = this.ledges.some(
-          (b) => this._isWalkableLedge(b) && b.col === (df > 0 ? c1 : c0) && Math.abs(b.floor - lowFloor) < 0.2
-        );
-        if (hasFlatBridge) continue;
-        const blockedOverhead = this.ledges.some(
-          (b) => !b.gone && b.active && b.col === lowCol && Math.abs(b.floor - (lowFloor + 1)) < 0.25
-        );
-        if (blockedOverhead) continue;
+
+        const lowLedge = df > 0 ? l0 : l1;
+        const upDir = df > 0 ? 1 : -1;
+        if (!this.isPhysicsStairFlight(lowLedge, upDir)) continue;
 
         const linearFloor = l0.floor + df * rampT;
-        // 5-riser physical tread quantization blended with smooth step climb so feet push up each stone riser!
+        // 5-riser physical tread quantization blended with smooth step climb + exact landing snap at t<=0.12 & t>=0.88!
         const treadPos = Math.max(0, Math.min(4.999, rampT * 5));
         const treadIndex = Math.floor(treadPos);
         const treadFrac = treadPos - treadIndex;
         const steppedRamp = (treadIndex + Math.min(1, treadFrac * 1.45)) / 5;
-        const surfFloor = l0.floor + df * (rampT * 0.55 + steppedRamp * 0.45);
+        let surfFloor;
+        if (t <= 0.12) {
+          surfFloor = l0.floor;
+        } else if (t >= 0.88) {
+          surfFloor = l1.floor;
+        } else {
+          surfFloor = l0.floor + df * (rampT * 0.55 + steppedRamp * 0.45);
+        }
         const err = Math.abs(linearFloor - refFloor);
         if (err <= bestErr) {
           bestErr = err;
@@ -5881,7 +6492,7 @@ export class ToweringWatersGame {
             linearFloor,
             treadIndex,
             rampT,
-            upDir: df > 0 ? 1 : -1,
+            upDir,
             onRamp: t > 0.12 && t < 0.88,
             supportLedge: t < 0.5 ? l0 : l1,
           };
@@ -5937,7 +6548,7 @@ export class ToweringWatersGame {
       }
     }
     for (const el of this.elevators) {
-      if (el.powered !== false && el.floor <= floor + 0.18 && Math.abs(colDist(col, el.col + 0.5)) < 0.64) {
+      if (el.floor <= floor + 0.18 && Math.abs(colDist(col, el.col + 0.5)) <= 0.64) {
         if (el.floor > best) best = el.floor;
       }
     }
@@ -5966,24 +6577,26 @@ export class ToweringWatersGame {
 
   _zenBuoyantRescue() {
     const p = this.gateway;
+    this.consecutiveRespawnFalls = (this.consecutiveRespawnFalls || 0) + 1;
+    p.consecutiveRespawnFalls = this.consecutiveRespawnFalls;
+
     let rescueCol = p.safeCol;
     let rescueFloor = p.safeFloor;
-    if (rescueFloor <= this.waterFloor + 0.4) {
-      const dryLedges = this.ledges
-        .filter((l) => this._isWalkableLedge(l) && l.floor > this.waterFloor + 0.8)
-        .sort((a, b) => a.floor - b.floor);
-      if (dryLedges.length > 0) {
-        rescueCol = dryLedges[0].col + 0.5;
-        rescueFloor = dryLedges[0].floor;
-      } else {
-        const baseWater = this.tower?.mechanics?.waterBaseFloor ?? -0.55;
-        this.waterFloor = baseWater;
-        rescueCol = (this.tower?.spawn?.col ?? 0) + 0.5;
-        rescueFloor = this.tower?.spawn?.floor ?? 0;
+    let rescueInvuln = 2.0;
+
+    if (this.consecutiveRespawnFalls >= 2 || rescueFloor <= this.waterFloor + 0.45) {
+      const safePt = this._resolveLoopProofSafePoint(rescueFloor, this.consecutiveRespawnFalls >= 3);
+      rescueCol = safePt.col;
+      rescueFloor = safePt.floor;
+      p.safeCol = rescueCol;
+      p.safeFloor = rescueFloor;
+      p.lastSafeSpanKey = safePt.spanKey;
+      if (this.consecutiveRespawnFalls >= 2) {
+        rescueInvuln = 2.5;
       }
     }
     if ((this.tower?.mechanics?.waterRiseRate || 0) > 0) {
-      this.waterSurgeDelay = 3.2;
+      this.waterSurgeDelay = this.runType === 'flood_rush' ? 3.5 : 3.2;
     }
     p.col = rescueCol;
     p.floor = rescueFloor;
@@ -5994,7 +6607,7 @@ export class ToweringWatersGame {
     p.isSwimming = false;
     p.onGround = true;
     p.onElevator = null;
-    p.invuln = 2.0;
+    p.invuln = rescueInvuln;
     p.landingFloor = this._computeLandingFloor(p.col, p.floor);
     this.cb.onBanner?.('BUOYANT RESCUE', 'HARMONIC ASSIST ACTIVE');
     this._syncHud();
@@ -6005,6 +6618,13 @@ export class ToweringWatersGame {
     this.towerDeathsHere += 1;
     this.runDeathsTotal += 1;
     this.input?.haptic?.(60);
+
+    const p = this.gateway;
+    const isFallDeath = Boolean(reason === 'SIPHON SURGE!' || (p && p.floor <= this.waterFloor + 0.12));
+    if (isFallDeath) {
+      this.consecutiveRespawnFalls = (this.consecutiveRespawnFalls || 0) + 1;
+      if (p) p.consecutiveRespawnFalls = this.consecutiveRespawnFalls;
+    }
 
     if (this.lives <= 0) {
       this.mode = 'gameover';
@@ -6052,7 +6672,6 @@ export class ToweringWatersGame {
 
     this.cb.onBanner?.(reason, `${this.lives} ${this.lives === 1 ? 'LIFE' : 'LIVES'} LEFT`);
 
-    const p = this.gateway;
     if (this.runType === 'purist') {
       // Purist Arcade Rule: zero mid-spire checkpoints -> full spire reset to Floor 0!
       const prevDeathsHere = this.towerDeathsHere;
@@ -6068,10 +6687,22 @@ export class ToweringWatersGame {
     const mech = this.tower?.mechanics || {};
     const hasSurge = (mech.waterRiseRate || 0) > 0;
     const minWater = (mech.waterBaseFloor ?? -0.55) - (hasSurge ? 0.55 : 0);
-    if (hasSurge) this.waterSurgeDelay = 3.2;
+    if (hasSurge || this.runType === 'flood_rush') {
+      this.waterSurgeDelay = this.runType === 'flood_rush' ? 3.5 : 3.2;
+    }
     if (!this.waterPurified && this.waterFloor >= p.safeFloor - 1.0) {
       this.waterFloor = Math.max(minWater, p.safeFloor - 2.4);
     }
+
+    let respawnInvuln = 2.0;
+    if (this.consecutiveRespawnFalls >= 2) {
+      const safePt = this._resolveLoopProofSafePoint(p.safeFloor, this.consecutiveRespawnFalls >= 3);
+      p.safeCol = safePt.col;
+      p.safeFloor = safePt.floor;
+      p.lastSafeSpanKey = safePt.spanKey;
+      respawnInvuln = 2.5;
+    }
+
     p.col = p.safeCol;
     p.floor = p.safeFloor;
     p.vx = 0;
@@ -6084,7 +6715,7 @@ export class ToweringWatersGame {
     p.hidden = false;
     p.onGround = true;
     p.onElevator = null;
-    p.invuln = 2.0;
+    p.invuln = respawnInvuln;
     p.squashX = 1;
     p.squashY = 1;
     p.landImpact = 0;
@@ -6115,6 +6746,7 @@ export class ToweringWatersGame {
         this.cb.onBanner?.('CROWN SEALED BY WARDEN!', `DEFEAT ${liveWarden.bossTitle || 'SIPHON WARDEN'} FIRST`);
         return;
       }
+      this.gauntletBossesDefeated = Math.max(this.gauntletBossesDefeated || 0, (this.towerIndex || 0) + 1);
       this.lastCoreCrystalsSmashed = 3;
       this._triggerSpirePurification();
       return;
@@ -6674,6 +7306,7 @@ export class ToweringWatersGame {
     }
 
     if (this.runType === 'flood_rush') {
+      this.waterSurgeDelay = 0;
       const nextT = generateProceduralTower({
         seed: (this.endlessSeed + (this.endlessDepth + 1) * 7919) >>> 0,
         index: this.endlessDepth + 1,
@@ -6730,13 +7363,19 @@ export class ToweringWatersGame {
   }
 
   selectBioMutation(mutationId) {
+    const canonicalId = mutationId === 'hydro_jet' ? 'hydro_double_jump' : mutationId;
     const picked =
-      BIO_MUTATIONS.find((m) => m.id === mutationId) ||
+      BIO_MUTATIONS.find((m) => m.id === canonicalId) ||
       this.pendingMutationChoices[0] ||
       BIO_MUTATIONS[0];
     if (picked && !this.activeMutations.includes(picked.id)) {
       this.activeMutations.push(picked.id);
-      if (this.gateway) this.gateway.mutations = [...this.activeMutations];
+      if (this.gateway) {
+        this.gateway.mutations = [...this.activeMutations];
+        if (picked.id === 'hydro_double_jump') {
+          this.gateway.airJumpsLeft = 1;
+        }
+      }
       this._emitProgEvent('mutation_draft', { mutationId: picked.id, count: this.activeMutations.length });
     }
     this.pendingMutationChoices = [];
@@ -7612,9 +8251,12 @@ export class ToweringWatersGame {
         } else {
           this.mode = 'tower';
           this._upDoorLatch = true;
+          this.input?.consumeJustPressed?.('jump');
+          this.input?.consumeJustPressed?.('up');
           const p = this.gateway;
           p.col = this.vaultReturnState.col;
           p.floor = this.vaultReturnState.floor;
+          p.onGround = true;
           p.vx = 0;
           p.vy = 0;
           p.invuln = 2.0;
