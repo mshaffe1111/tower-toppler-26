@@ -27,6 +27,9 @@ import { TowerFluidAndSparkVFX } from './oceanVfx.js';
 import {
   buildDetailedTowerGroup,
   buildArchShaderWarmupGroup,
+  prewarmArchSurfaces,
+  getLoadedArchTextures,
+  getBakedArchWebpVersion,
   updateTowerArchitecture,
   disposeTowerArchitecture,
   resolveRebootTheme as resolveArchTheme,
@@ -1144,6 +1147,8 @@ export class GameRenderer {
   }
 
   prewarm() {
+    prewarmArchSurfaces();
+    this._uploadAllReadyTextures();
     if (!this._towerSceneCompiled) {
       this._compileAllTowerShaders();
       this._towerSceneCompiled = true;
@@ -1152,11 +1157,93 @@ export class GameRenderer {
     }
   }
 
+  _uploadAllReadyTextures() {
+    if (!this.webgl || typeof this.webgl.initTexture !== 'function') return;
+    const archTexList = getLoadedArchTextures();
+    for (let i = 0; i < archTexList.length; i++) {
+      const t = archTexList[i];
+      if (t && !t.userData?._gpuUploaded && (t.image || t.source?.data)) {
+        t.userData = t.userData || {};
+        t.userData._gpuUploaded = true;
+        try {
+          this.webgl.initTexture(t);
+        } catch {}
+      }
+    }
+    const skyTexList = this.stormSky?._ownedTextures;
+    if (Array.isArray(skyTexList)) {
+      for (let i = 0; i < skyTexList.length; i++) {
+        const t = skyTexList[i];
+        if (t && !t.userData?._gpuUploaded && (t.image || t.source?.data)) {
+          t.userData = t.userData || {};
+          t.userData._gpuUploaded = true;
+          try {
+            this.webgl.initTexture(t);
+          } catch {}
+        }
+      }
+    }
+    this._lastUploadedWebpVer = getBakedArchWebpVersion();
+  }
+
+  prewarmTowerGroup(tower, compileScene = false) {
+    if (!tower) return null;
+    const cached = this._getOrBuildTowerGroup(tower);
+    if (this.webgl && typeof this.webgl.initTexture === 'function') {
+      if (cached?.wallAoTex && !cached.wallAoTex.userData?._gpuUploaded) {
+        cached.wallAoTex.userData = cached.wallAoTex.userData || {};
+        cached.wallAoTex.userData._gpuUploaded = true;
+        try {
+          this.webgl.initTexture(cached.wallAoTex);
+        } catch {}
+      }
+      if (Array.isArray(cached?.ownedTextures)) {
+        for (let i = 0; i < cached.ownedTextures.length; i++) {
+          const ot = cached.ownedTextures[i];
+          if (ot && !ot.userData?._gpuUploaded && (ot.image || ot.source?.data)) {
+            ot.userData = ot.userData || {};
+            ot.userData._gpuUploaded = true;
+            try {
+              this.webgl.initTexture(ot);
+            } catch {}
+          }
+        }
+      }
+      this._uploadAllReadyTextures();
+      if (compileScene && cached?.group && this.towerScene && this.towerCam) {
+        this.compileTowerGroups([cached.group]);
+      }
+    }
+    return cached;
+  }
+
+  compileTowerGroups(groups = []) {
+    if (!this.webgl || !this.towerScene || !this.towerCam || !Array.isArray(groups) || !groups.length) return;
+    const added = [];
+    try {
+      for (let i = 0; i < groups.length; i++) {
+        const g = groups[i];
+        if (g && g.parent !== this.towerScene) {
+          this.towerScene.add(g);
+          added.push(g);
+        }
+      }
+      this._compileAllTowerShaders();
+    } finally {
+      for (let i = 0; i < added.length; i++) {
+        if (added[i].parent === this.towerScene) {
+          this.towerScene.remove(added[i]);
+        }
+      }
+    }
+  }
+
   /**
    * Pre-compiles EVERY WebGL / ANGLE D3D11 shader permutation used by the Spire, all 4 Arch GLBs,
-   * all 7 Enemy GLBs, collectibles, oceanVfx, telegraphs, sparks & instanced particles in ONE fast
-   * startup pass WITH `keyLight.castShadow = true` (matching exact live `USE_SHADOWMAP` shader keys!)
-   * -> ZERO mid-climb ANGLE D3D11 HLSL compile freezes!
+   * all 7 Enemy GLBs, collectibles, oceanVfx, stormSky (aurora, mantas, skyboxes), telegraphs, sparks &
+   * instanced particles in ONE fast startup pass for BOTH `postfx.composer.readBuffer` (`HalfFloatType`
+   * + `LinearSRGB` + `NoToneMapping`) AND `null` screen backbuffer (`ACES` + `sRGB`), WITH
+   * `keyLight.castShadow = true` -> ZERO mode-launch or mid-climb ANGLE D3D11 HLSL compile freezes!
    */
   _compileAllTowerShaders() {
     if (!this.webgl || !this.towerScene || !this.towerCam) return;
@@ -1165,6 +1252,7 @@ export class GameRenderer {
     const prevPartCount = this.particleInst ? this.particleInst.count : 0;
 
     try {
+      this._uploadAllReadyTextures();
       this.enemyVisuals?.prewarmAllRigs?.();
       this._trimEnemyShadows(true);
     } catch {}
@@ -1179,11 +1267,15 @@ export class GameRenderer {
     this.webgl.getViewport(prevViewport);
     this.webgl.getScissor(prevScissor);
 
+    const composerRt =
+      this.usePostFX && this.postfx && this.postfx.composer?.readBuffer
+        ? this.postfx.composer.readBuffer
+        : null;
+    const savedRtVp = composerRt ? composerRt.viewport.clone() : null;
+    const savedRtSc = composerRt ? composerRt.scissor.clone() : null;
+    const savedRtScTest = composerRt ? Boolean(composerRt.scissorTest) : false;
+
     try {
-      // Render directly to the real MSAA screen backbuffer (`setRenderTarget(null)`) inside a tiny
-      // 16x16 scissor box with `ACESFilmicToneMapping` + `keyLight.castShadow = true` so Three.js
-      // compiles the EXACT live shader keys (`USE_SHADOWMAP` + `ACES_FILMIC_TONE_MAPPING` + `sRGB`)
-      // & ANGLE D3D11 PSOs upfront in ONE pass (NO double compile, ZERO mid-climb HLSL stalls!).
       this.webgl.setRenderTarget(null);
       this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
       this.webgl.setScissorTest(true);
@@ -1198,9 +1290,10 @@ export class GameRenderer {
         this.webgl.render(this.towerScene, this.towerCam);
       }
 
-      // Step 2: Force every scene node visible & unculled and render ONE 16x16 frame with
-      // `shadowMap.needsUpdate = false` (reusing the shadow map!) so ANGLE D3D11 compiles every
-      // exact live shader permutation & uploads every GPU texture upfront at minimal raster cost.
+      // Step 2: Force every scene node visible & unculled and render 16x16 warmup passes with
+      // `shadowMap.needsUpdate = false` (reusing the shadow map!) into BOTH `composer.readBuffer`
+      // (`HalfFloatType` + `LinearSRGB`) AND `null` (`ACES` + `sRGB`) so ANGLE D3D11 compiles every
+      // exact live PSO upfront at minimal raster cost.
       if (!this._archWarmupGroup) {
         this._archWarmupGroup = buildArchShaderWarmupGroup();
       }
@@ -1221,10 +1314,35 @@ export class GameRenderer {
       });
       this.webgl.shadowMap.autoUpdate = false;
       this.webgl.shadowMap.needsUpdate = false;
+
+      if (composerRt) {
+        composerRt.viewport.set(0, 0, 16, 16);
+        composerRt.scissor.set(0, 0, 16, 16);
+        composerRt.scissorTest = true;
+        this.webgl.setRenderTarget(composerRt);
+        this.webgl.render(this.towerScene, this.towerCam);
+      }
+
+      this.webgl.setRenderTarget(null);
+      this.webgl.setScissorTest(true);
+      this.webgl.setScissor(0, 0, 16, 16);
+      this.webgl.setViewport(0, 0, 16, 16);
       this.webgl.render(this.towerScene, this.towerCam);
+
+      if (!this._postfxPassesCompiled && this.usePostFX && this.postfx?.composer && this.postfx?.renderPass) {
+        this._postfxPassesCompiled = true;
+        this.postfx.renderPass.scene = this.postfx._dummyScene;
+        this.postfx.renderPass.camera = this.postfx._dummyCamera;
+        this.postfx.composer.render(0.0166667);
+      }
     } catch {
       // Ignore driver fallback
     } finally {
+      if (composerRt && savedRtVp && savedRtSc) {
+        composerRt.viewport.copy(savedRtVp);
+        composerRt.scissor.copy(savedRtSc);
+        composerRt.scissorTest = savedRtScTest;
+      }
       if (this._archWarmupGroup?.parent) {
         this._archWarmupGroup.parent.remove(this._archWarmupGroup);
       }
@@ -1310,16 +1428,29 @@ export class GameRenderer {
       { key: 'pipe_valve', url: 'assets/models/pipe_valve.glb' },
     ];
 
+    let settled = 0;
+    const onOneSettled = () => {
+      settled++;
+      if (settled >= specs.length) {
+        this._archPropsVersion++;
+        this._archGlbsSettled = true;
+        this.onArchGlbsReady?.();
+      }
+    };
+
     for (const sp of specs) {
       loader.load(
         sp.url,
         (gltf) => {
-          if (!gltf || !gltf.scene) return;
-          this.glbModels[sp.key] = this._prepareGlbScene(gltf.scene);
-          this._archPropsVersion++;
+          if (gltf && gltf.scene) {
+            this.glbModels[sp.key] = this._prepareGlbScene(gltf.scene);
+          }
+          onOneSettled();
         },
         undefined,
-        () => {}
+        () => {
+          onOneSettled();
+        }
       );
     }
   }
@@ -2698,7 +2829,7 @@ export class GameRenderer {
   }
 
   _getOrBuildTowerGroup(tower) {
-    const MAX_TOWER_CACHE = 6;
+    const MAX_TOWER_CACHE = 16;
     const rbTheme = resolveArchTheme(tower);
     const propVer = this._archPropsVersion;
     const clue = tower.clue;
@@ -2745,6 +2876,7 @@ export class GameRenderer {
       hydro_turbine: this.glbModels.hydro_turbine || null,
       pipe_valve: this.glbModels.pipe_valve || null,
       useOceanVfx: true,
+      _skipInternalGlbLoad: true,
     });
     this.towerCache.set(cacheKey, cached);
     return cached;
@@ -3314,6 +3446,10 @@ export class GameRenderer {
       if (this.oceanVfx) {
         this.oceanVfx.rebuildForTower(tower, fh, TOWER_RADIUS);
       }
+      if (this.postfx) {
+        this.postfx._lastFrameNow = 0;
+        this.postfx._slowFrames = 0;
+      }
       cached.compiled = true;
     }
 
@@ -3868,6 +4004,9 @@ export class GameRenderer {
 
     // Pre-compile all exact live shaders ONCE after collectibles, enemies, oceanVfx & arch GLBs are attached,
     // and incrementally re-warm once when async Arch or Enemy GLBs finish loading -> ZERO mid-climb freezes!
+    if (this._lastUploadedWebpVer !== getBakedArchWebpVersion() || isTitleShowcase) {
+      this._uploadAllReadyTextures();
+    }
     const enemiesNowReady = Boolean(this.enemyVisuals?.isReady?.());
     if (
       !this._towerSceneCompiled ||
