@@ -914,6 +914,7 @@ export class GameRenderer {
     this.subRenderer.resize?.(this.width, this.height);
     this.subRenderer.setSkin?.(this.skinId);
     this.subRenderer.setBlasterFx?.(this.blasterFxId);
+    this.subRenderer.prewarm?.();
     return this.subRenderer;
   }
 
@@ -1159,6 +1160,7 @@ export class GameRenderer {
   _compileAllTowerShaders() {
     if (!this.webgl || !this.towerScene || !this.towerCam) return;
     const saved = [];
+    const savedCounts = [];
     const prevPartCount = this.particleInst ? this.particleInst.count : 0;
 
     try {
@@ -1205,6 +1207,10 @@ export class GameRenderer {
         saved.push(obj, obj.visible, obj.frustumCulled);
         obj.visible = true;
         obj.frustumCulled = false;
+        if (obj.isInstancedMesh && obj.count === 0) {
+          savedCounts.push(obj, obj.count);
+          obj.count = 1;
+        }
       });
       this.webgl.shadowMap.autoUpdate = false;
       this.webgl.shadowMap.needsUpdate = false;
@@ -1215,6 +1221,9 @@ export class GameRenderer {
       for (let i = 0; i < saved.length; i += 3) {
         saved[i].visible = saved[i + 1];
         saved[i].frustumCulled = saved[i + 2];
+      }
+      for (let i = 0; i < savedCounts.length; i += 2) {
+        savedCounts[i].count = savedCounts[i + 1];
       }
       if (this.particleInst) {
         this.particleInst.count = prevPartCount;
@@ -1670,6 +1679,13 @@ export class GameRenderer {
     });
     this.enemyTellSparkInst = new THREE.InstancedMesh(this.enemyTellSparkGeo, this.enemyTellSparkMat, 96);
     this.enemyTellSparkInst.frustumCulled = false;
+    // Pre-allocate `instanceColor` & matrix slot 0 upfront so D3D11 never recompiles shaders mid-climb!
+    this._wwCol.set('#ffffff');
+    this._wwMat.identity();
+    this.enemyTellSparkInst.setMatrixAt(0, this._wwMat);
+    this.enemyTellSparkInst.setColorAt(0, this._wwCol);
+    this.enemyTellSparkInst.instanceMatrix.needsUpdate = true;
+    if (this.enemyTellSparkInst.instanceColor) this.enemyTellSparkInst.instanceColor.needsUpdate = true;
     this.enemyTellSparkInst.visible = false;
     this.enemyTellSparkInst.count = 0;
     this.towerScene.add(this.enemyTellSparkInst);
@@ -1685,6 +1701,10 @@ export class GameRenderer {
     });
     this.enemyTellSteamInst = new THREE.InstancedMesh(this.enemyTellSteamGeo, this.enemyTellSteamMat, 64);
     this.enemyTellSteamInst.frustumCulled = false;
+    this.enemyTellSteamInst.setMatrixAt(0, this._wwMat);
+    this.enemyTellSteamInst.setColorAt(0, this._wwCol);
+    this.enemyTellSteamInst.instanceMatrix.needsUpdate = true;
+    if (this.enemyTellSteamInst.instanceColor) this.enemyTellSteamInst.instanceColor.needsUpdate = true;
     this.enemyTellSteamInst.visible = false;
     this.enemyTellSteamInst.count = 0;
     this.towerScene.add(this.enemyTellSteamInst);
@@ -2650,6 +2670,8 @@ export class GameRenderer {
       opacity: 0.86,
     });
     const inst = new THREE.InstancedMesh(geo, mat, 48);
+    inst.setColorAt(0, this._tempColor.set('#ffffff'));
+    if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
     inst.visible = false;
     const meta = [];
     for (let i = 0; i < 48; i++) {

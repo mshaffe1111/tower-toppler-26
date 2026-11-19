@@ -1246,18 +1246,47 @@ export class GlideRenderer {
   }
 
   prewarm() {
+    if (this._disposed || !this.webgl || !this.scene || !this.camera) return;
+    const saved = [];
+    const savedCounts = [];
+    const prevRt = this.webgl.getRenderTarget();
+    const prevTone = this.webgl.toneMapping;
+    const prevScissorTest = this.webgl.getScissorTest();
+    const prevViewport = new THREE.Vector4();
+    const prevScissor = new THREE.Vector4();
+    this.webgl.getViewport(prevViewport);
+    this.webgl.getScissor(prevScissor);
     try {
-      const savedVis = [];
       this.scene.traverse((o) => {
-        if (!o.visible) {
-          savedVis.push(o);
-          o.visible = true;
+        saved.push(o, o.visible, o.frustumCulled);
+        o.visible = true;
+        o.frustumCulled = false;
+        if (o.isInstancedMesh && o.count === 0) {
+          savedCounts.push(o, o.count);
+          o.count = 1;
         }
       });
-      this.webgl?.compile?.(this.scene, this.camera);
-      for (const o of savedVis) o.visible = false;
+      this.webgl.setRenderTarget(null);
+      this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
+      this.webgl.setScissorTest(true);
+      this.webgl.setScissor(0, 0, 16, 16);
+      this.webgl.setViewport(0, 0, 16, 16);
+      this.webgl.render(this.scene, this.camera);
     } catch {
       // Ignore
+    } finally {
+      for (let i = 0; i < saved.length; i += 3) {
+        saved[i].visible = saved[i + 1];
+        saved[i].frustumCulled = saved[i + 2];
+      }
+      for (let i = 0; i < savedCounts.length; i += 2) {
+        savedCounts[i].count = savedCounts[i + 1];
+      }
+      this.webgl.toneMapping = prevTone;
+      this.webgl.setViewport(prevViewport);
+      this.webgl.setScissor(prevScissor);
+      this.webgl.setScissorTest(prevScissorTest);
+      this.webgl.setRenderTarget(prevRt);
     }
   }
 
@@ -1748,6 +1777,21 @@ export class GlideRenderer {
     this._glidePitchSmooth = 0;
     this._whiteCol = new THREE.Color('#ffffff');
     this._mistCol = new THREE.Color('#e0f7ff');
+
+    // Pre-allocate `instanceColor` & slot 0 upfront on all colored InstancedMeshes to prevent mid-flight D3D11 stalls!
+    this._dummy.position.set(0, 0, 0);
+    this._dummy.rotation.set(0, 0, 0);
+    this._dummy.scale.setScalar(1);
+    this._dummy.updateMatrix();
+    for (const im of [this.thermalSpiralInst, this.dewInst, this.ringInst, this.partInst]) {
+      if (!im) continue;
+      im.setMatrixAt(0, this._dummy.matrix);
+      im.setColorAt(0, this._whiteCol);
+      im.instanceMatrix.needsUpdate = true;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    }
+    this.windStreakInst.setMatrixAt(0, this._dummy.matrix);
+    this.windStreakInst.instanceMatrix.needsUpdate = true;
 
     this.popupPool = [];
     for (let i = 0; i < MAX_POPUPS; i++) {

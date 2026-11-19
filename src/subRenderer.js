@@ -1306,6 +1306,61 @@ export class SubRenderer {
     this.blasterFxId = fxId || 'standard_cryo';
   }
 
+  prewarm() {
+    if (this._disposed || !this.webgl) return;
+    const prevRt = this.webgl.getRenderTarget();
+    const prevTone = this.webgl.toneMapping;
+    const prevScissorTest = this.webgl.getScissorTest();
+    const prevViewport = new THREE.Vector4();
+    const prevScissor = new THREE.Vector4();
+    this.webgl.getViewport(prevViewport);
+    this.webgl.getScissor(prevScissor);
+
+    const warmScene = (scene, cam) => {
+      if (!scene || !cam) return;
+      const saved = [];
+      const savedCounts = [];
+      try {
+        scene.traverse((o) => {
+          saved.push(o, o.visible, o.frustumCulled);
+          o.visible = true;
+          o.frustumCulled = false;
+          if (o.isInstancedMesh && o.count === 0) {
+            savedCounts.push(o, o.count);
+            o.count = 1;
+          }
+        });
+        this.webgl.render(scene, cam);
+      } catch {
+        // Ignore driver fallback
+      } finally {
+        for (let i = 0; i < saved.length; i += 3) {
+          saved[i].visible = saved[i + 1];
+          saved[i].frustumCulled = saved[i + 2];
+        }
+        for (let i = 0; i < savedCounts.length; i += 2) {
+          savedCounts[i].count = savedCounts[i + 1];
+        }
+      }
+    };
+
+    try {
+      this.webgl.setRenderTarget(null);
+      this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
+      this.webgl.setScissorTest(true);
+      this.webgl.setScissor(0, 0, 16, 16);
+      this.webgl.setViewport(0, 0, 16, 16);
+      warmScene(this.reefScene, this.reefCam);
+      warmScene(this.coreScene, this.coreCam);
+    } finally {
+      this.webgl.toneMapping = prevTone;
+      this.webgl.setViewport(prevViewport);
+      this.webgl.setScissor(prevScissor);
+      this.webgl.setScissorTest(prevScissorTest);
+      this.webgl.setRenderTarget(prevRt);
+    }
+  }
+
   _updateReefCamMetrics() {
     const aspect = this.width / Math.max(1, this.height);
     const portrait = aspect < 0.85;
@@ -1998,6 +2053,30 @@ export class SubRenderer {
       this.reefScene.add(sp);
       this.popupPool.push({ sprite: sp, key: '' });
     }
+
+    // Pre-allocate `instanceColor` & matrix slot 0 upfront on all colored InstancedMeshes
+    // so ANGLE D3D11 never triggers a mid-run shader recompile on first `setColorAt()`!
+    this._col.set('#ffffff');
+    this._dummy.position.set(0, 0, 0);
+    this._dummy.rotation.set(0, 0, 0);
+    this._dummy.scale.setScalar(1);
+    this._dummy.updateMatrix();
+    for (const im of [
+      this.rayInst,
+      this.currentStreakInst,
+      this.slipRingInst,
+      this.fishInst1,
+      this.fishInst2,
+      this.ambFishInst,
+      this.ringInst,
+      this.particleInst,
+    ]) {
+      if (!im) continue;
+      im.setMatrixAt(0, this._dummy.matrix);
+      im.setColorAt(0, this._col);
+      im.instanceMatrix.needsUpdate = true;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    }
   }
 
   _createCageSlot() {
@@ -2619,6 +2698,7 @@ export class SubRenderer {
         this.seedAnchorGroup.add(cl);
       }
     }
+    this.prewarm();
   }
 
   // ============================================================================
