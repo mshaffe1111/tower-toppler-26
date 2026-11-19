@@ -4104,10 +4104,41 @@ function prewarmStartupAssets() {
     return Promise.resolve();
   });
 
-  // 2. Pre-warm renderer shaders, all 6 mode starting spires, Sanctum puzzle renderer, & initial tower render during startup fade
+  // 2. Pre-warm renderer shaders, all 6 mode starting spires, DOM HUD Flexbox/font shaping, & Sanctum puzzle renderer under boot veil
   try {
+    const hudLayoutWarmEls = [
+      hudEl,
+      touchControlsEl,
+      bannerEl,
+      trophyToastEl,
+      crownSealsPillEl,
+      missionStatusPillEl,
+      altMeterEl,
+      actionPromptEl,
+    ].filter(Boolean);
+    const wasHidden = hudLayoutWarmEls.map((el) => el.classList.contains('hidden'));
+    hudLayoutWarmEls.forEach((el) => {
+      el.style.visibility = 'hidden';
+      el.classList.remove('hidden');
+    });
+    // Force one-time Chromium Flexbox layout & HarfBuzz font shaping while covered by startup veil
+    void hudEl?.offsetHeight;
+    void touchControlsEl?.offsetHeight;
+    void bannerEl?.offsetHeight;
+    void trophyToastEl?.offsetHeight;
+    void actionPromptEl?.offsetHeight;
+    hudLayoutWarmEls.forEach((el, idx) => {
+      if (wasHidden[idx]) el.classList.add('hidden');
+      el.style.visibility = '';
+    });
+    syncTitleShowcaseState();
+
     renderer.prewarm?.();
     prewarmAllModeSpiresSync();
+    // Second V8 JIT pass on createDailyTower so Click #1 (`daily_tide`) runs TurboFan-optimized code
+    if (typeof createDailyTower === 'function') {
+      createDailyTower(prestagedModeRuns.dailyDate || new Date());
+    }
     renderer._ensurePuzzleRenderer?.();
     game.render();
   } catch (_) {}
