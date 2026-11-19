@@ -49,7 +49,7 @@ export const ENEMY_FAMILIES = [
   'siphon_warden',
 ];
 
-// Calibrated readable world-space scales for up-close 9.85m camera (1.42x–1.55x standard, 1.95x colossal Boss!)
+// Calibrated readable world-space scales for up-close 9.85m camera (1.42x–1.55x standard, ~1.55x hero height Boss!)
 const FAMILY_WORLD_SCALES = [
   1.50, // 0: snap_crab — chunky waist-to-chest height armored dredger
   1.42, // 1: gulp_hopper — bold glass-belly amphibian mech (clears 1.50m ceiling cleanly!)
@@ -57,7 +57,7 @@ const FAMILY_WORLD_SCALES = [
   1.48, // 3: rail_skater — sleek manta hydro-strider drone
   1.44, // 4: barnacle_mortar — formidable 5-petal reef mortar turret
   1.55, // 5: vent_stalker — prowling dorsal-vent cryo/steam salamander
-  1.95, // 6: siphon_warden — towering Leviathan Act Boss
+  1.02, // 6: siphon_warden — imposing ~1.55x Gateway height Leviathan Act Boss (clears top HUD cleanly!)
 ];
 
 // Primary hull mesh substrings allowed to cast shadows (keeps shadow pass < 2ms at 60fps!)
@@ -262,6 +262,8 @@ export function resolveEnemyFamilyId(en) {
     tl === 'mortar' ||
     tl === 'turret' ||
     tl === 'geyser_mortar' ||
+    tl === 'tide_weaver' ||
+    tl === 'tideweaver' ||
     kl === 'mortar'
   ) {
     return FAM_BARNACLE_MORTAR;
@@ -281,13 +283,15 @@ export function resolveEnemyFamilyId(en) {
     tl === 'siphon_warden' ||
     tl === 'siphonwarden' ||
     tl === 'warden' ||
+    tl === 'lock_keeper' ||
+    tl === 'lockkeeper' ||
     tl === 'leviathan' ||
     tl === 'boss' ||
     tl === 'act_boss' ||
     tl === 'molecule' ||
     tl === 'bonker' ||
     kl === 'bonker' ||
-    Boolean(typeof en === 'object' && en.isBoss)
+    Boolean(typeof en === 'object' && (en.isBoss || en.isLockKeeper))
   ) {
     return FAM_SIPHON_WARDEN;
   }
@@ -403,21 +407,236 @@ function buildContactShadowNode(width, depth, yOff = 0.008) {
   return m;
 }
 
+/**
+ * Etched Pelagian Warning Rune Ring Texture (feathered transparent center + crisp dual outer
+ * warning arcs & carved directional chevrons so stone decks remain 100% legible underneath!).
+ */
+function getTelegraphRuneTex() {
+  return cached('tex:pelagianTelegraphRune', () =>
+    makeCanvasTex(256, 256, (ctx, w, h) => {
+      const cx = w * 0.5;
+      const cy = h * 0.5;
+      ctx.clearRect(0, 0, w, h);
+
+      // Subtle feathered outer perimeter band only (center r < 0.28 is 100% clear!)
+      const rimGrad = ctx.createRadialGradient(cx, cy, w * 0.26, cx, cy, w * 0.49);
+      rimGrad.addColorStop(0.0, 'rgba(255, 255, 255, 0.0)');
+      rimGrad.addColorStop(0.48, 'rgba(255, 255, 255, 0.06)');
+      rimGrad.addColorStop(0.76, 'rgba(255, 255, 255, 0.24)');
+      rimGrad.addColorStop(0.89, 'rgba(255, 255, 255, 0.14)');
+      rimGrad.addColorStop(1.0, 'rgba(255, 255, 255, 0.0)');
+      ctx.fillStyle = rimGrad;
+      ctx.fillRect(0, 0, w, h);
+
+      // Dark bronze-slate etched contrast backing under outer ring (keeps crisp against sunlit stone!)
+      ctx.strokeStyle = 'rgba(20, 10, 8, 0.58)';
+      ctx.lineWidth = 9.0;
+      ctx.beginPath();
+      ctx.arc(cx, cy, w * 0.435, 0, TWO_PI);
+      ctx.stroke();
+
+      // Crisp etched outer Pelagian warning ring
+      ctx.strokeStyle = 'rgba(255, 244, 224, 0.98)';
+      ctx.lineWidth = 4.4;
+      ctx.beginPath();
+      ctx.arc(cx, cy, w * 0.435, 0, TWO_PI);
+      ctx.stroke();
+
+      // Inner segmented Pelagian conduit arc (8 carved arcs with clean gaps)
+      ctx.strokeStyle = 'rgba(20, 12, 10, 0.46)';
+      ctx.lineWidth = 6.2;
+      for (let i = 0; i < 8; i++) {
+        const a0 = (i / 8) * TWO_PI + 0.09;
+        const a1 = ((i + 1) / 8) * TWO_PI - 0.09;
+        ctx.beginPath();
+        ctx.arc(cx, cy, w * 0.368, a0, a1);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = 'rgba(255, 248, 232, 0.88)';
+      ctx.lineWidth = 2.6;
+      for (let i = 0; i < 8; i++) {
+        const a0 = (i / 8) * TWO_PI + 0.09;
+        const a1 = ((i + 1) / 8) * TWO_PI - 0.09;
+        ctx.beginPath();
+        ctx.arc(cx, cy, w * 0.368, a0, a1);
+        ctx.stroke();
+      }
+
+      // 8 Etched Pelagian compass diamond/chevron runes between inner & outer rings
+      ctx.fillStyle = 'rgba(255, 248, 236, 0.92)';
+      ctx.strokeStyle = 'rgba(18, 12, 10, 0.45)';
+      ctx.lineWidth = 1.4;
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * TWO_PI;
+        const rMid = w * 0.402;
+        const rx = cx + Math.cos(a) * rMid;
+        const ry = cy + Math.sin(a) * rMid;
+        ctx.save();
+        ctx.translate(rx, ry);
+        ctx.rotate(a);
+        ctx.beginPath();
+        ctx.moveTo(6.5, 0);
+        ctx.lineTo(0, 3.8);
+        ctx.lineTo(-5.5, 0);
+        ctx.lineTo(0, -3.8);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // 24 Fine astrolabe graduation ticks along outer bevel
+      ctx.strokeStyle = 'rgba(255, 245, 228, 0.68)';
+      ctx.lineWidth = 1.4;
+      for (let i = 0; i < 24; i++) {
+        if (i % 3 === 0) continue;
+        const a = (i / 24) * TWO_PI;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a) * w * 0.414, cy + Math.sin(a) * w * 0.414);
+        ctx.lineTo(cx + Math.cos(a) * w * 0.452, cy + Math.sin(a) * w * 0.452);
+        ctx.stroke();
+      }
+    })
+  );
+}
+
+/**
+ * Swirling Pressurized Pelagian Hydro-Orb Texture (rich depth, spiral caustic currents,
+ * specular foam filaments — eliminates flat matte sticker balls on projectiles & water cores!).
+ */
+function getPressurizedOrbTex() {
+  return cached('tex:pressurizedHydroOrb', () =>
+    makeCanvasTex(
+      256,
+      256,
+      (ctx, W, H) => {
+        const bg = ctx.createLinearGradient(0, 0, 0, H);
+        bg.addColorStop(0.0, '#0c4a6e');
+        bg.addColorStop(0.28, '#0284c7');
+        bg.addColorStop(0.55, '#0891b2');
+        bg.addColorStop(0.82, '#0369a1');
+        bg.addColorStop(1.0, '#082f49');
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, W, H);
+
+        // Deep swirling hydrodynamic pressure ribbons
+        const rand = seededRng(541);
+        for (let i = 0; i < 12; i++) {
+          const y0 = (i / 12) * H;
+          ctx.strokeStyle =
+            i % 3 === 0 ? 'rgba(186, 230, 253, 0.72)' : i % 3 === 1 ? 'rgba(56, 189, 248, 0.56)' : 'rgba(6, 78, 114, 0.55)';
+          ctx.lineWidth = i % 3 === 2 ? 7.0 : 3.2;
+          ctx.beginPath();
+          for (let x = 0; x <= W; x += 8) {
+            const u = x / W;
+            const y = (y0 + u * 86 + Math.sin(u * TWO_PI * 2 + i * 1.1) * 14) % H;
+            if (x === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        }
+
+        // Crisp sparkling micro-bubbles & caustic foam pearls
+        for (let i = 0; i < 42; i++) {
+          const bx = rand() * W;
+          const by = rand() * H;
+          const br = 1.8 + rand() * 4.6;
+          ctx.fillStyle = 'rgba(224, 247, 255, 0.35)';
+          ctx.beginPath();
+          ctx.arc(bx, by, br, 0, TWO_PI);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.72)';
+          ctx.lineWidth = 1.1;
+          ctx.stroke();
+        }
+      },
+      { repeat: true }
+    )
+  );
+}
+
+/**
+ * Molten Hydrothermal Amber-Copper Swirl Texture for `barnacle_mortar` pressurized magma-geyser core.
+ */
+function getMoltenCoreTex() {
+  return cached('tex:moltenPressureCore', () =>
+    makeCanvasTex(
+      128,
+      128,
+      (ctx, W, H) => {
+        const bg = ctx.createLinearGradient(0, 0, 0, H);
+        bg.addColorStop(0.0, '#7c2d12');
+        bg.addColorStop(0.32, '#ea580c');
+        bg.addColorStop(0.58, '#f59e0b');
+        bg.addColorStop(0.85, '#c2410c');
+        bg.addColorStop(1.0, '#431407');
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, W, H);
+
+        for (let i = 0; i < 8; i++) {
+          const y0 = (i / 8) * H;
+          ctx.strokeStyle = i % 2 === 0 ? 'rgba(254, 243, 199, 0.72)' : 'rgba(251, 146, 60, 0.62)';
+          ctx.lineWidth = 2.6;
+          ctx.beginPath();
+          for (let x = 0; x <= W; x += 6) {
+            const u = x / W;
+            const y = (y0 + u * 44 + Math.sin(u * TWO_PI * 2 + i) * 9) % H;
+            if (x === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        }
+      },
+      { repeat: true }
+    )
+  );
+}
+
+/**
+ * Soft curling hydrothermal steam / cryo-frost wisp texture for `vent_stalker` dorsal vents.
+ */
+function getSteamWispTex() {
+  return cached('tex:steamWisp', () =>
+    makeCanvasTex(128, 128, (ctx, w, h) => {
+      ctx.clearRect(0, 0, w, h);
+      const puffs = [
+        [0.50, 0.50, 0.42, 0.62],
+        [0.38, 0.44, 0.28, 0.48],
+        [0.62, 0.46, 0.26, 0.46],
+        [0.48, 0.34, 0.24, 0.44],
+      ];
+      for (const [px, py, pr, a] of puffs) {
+        const g = ctx.createRadialGradient(w * px, h * py, 0, w * px, h * py, w * pr);
+        g.addColorStop(0.0, `rgba(240, 250, 255, ${a})`);
+        g.addColorStop(0.55, `rgba(186, 230, 253, ${a * 0.42})`);
+        g.addColorStop(1.0, 'rgba(186, 230, 253, 0.0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, h);
+      }
+    })
+  );
+}
+
 function getTelegraphRingGeo() {
-  return cached('geo:enemyTelegraphRing', () => {
-    const g = new THREE.TorusGeometry(0.44, 0.032, 8, 28);
-    g.rotateX(Math.PI * 0.5);
+  return cached('geo:enemyTelegraphRunePlane', () => {
+    const g = new THREE.PlaneGeometry(1.18, 1.18);
+    g.rotateX(-Math.PI * 0.5);
     return g;
   });
 }
 
-function buildTelegraphRingNode(colorHex = '#ff6b2b', yOff = 0.06, baseScale = 1.0) {
+function buildTelegraphRingNode(colorHex = '#e85d22', yOff = 0.015, baseScale = 1.0) {
   const mat = new THREE.MeshBasicMaterial({
+    map: getTelegraphRuneTex(),
     color: colorHex,
     transparent: true,
     opacity: 0,
-    blending: THREE.AdditiveBlending,
+    blending: THREE.NormalBlending,
     depthWrite: false,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -3,
+    polygonOffsetUnits: -3,
   });
   const ring = new THREE.Mesh(getTelegraphRingGeo(), mat);
   ring.name = 'enemy_telegraph_ring';
@@ -426,7 +645,7 @@ function buildTelegraphRingNode(colorHex = '#ff6b2b', yOff = 0.06, baseScale = 1
   ring.castShadow = false;
   ring.receiveShadow = false;
   ring.visible = false;
-  ring.renderOrder = 5;
+  ring.renderOrder = 4;
   return ring;
 }
 
@@ -666,30 +885,37 @@ let _glbLoadStarted = false;
 let _glbReadyMask = 0;
 let _glbReadyPromise = null;
 
-function upgradeLoadedGlbTemplate(_famId, rootScene, chromeEnv) {
+function upgradeLoadedGlbTemplate(famId, rootScene, chromeEnv) {
+  const orbTex = getPressurizedOrbTex();
+  const moltenTex = getMoltenCoreTex();
+  const swirlTex = getHydroSwirlTex(false);
   rootScene.traverse((obj) => {
     if (!obj.isMesh || !obj.material) return;
+    const objName = (obj.name || '').toLowerCase();
     const enhanceMat = (m) => {
       if (!m) return m;
-      const nm = m.name || '';
+      const nm = (m.name || '').toLowerCase();
       if (nm.includes('glass')) {
-        return new THREE.MeshStandardMaterial({
-          name: nm,
+        const gMat = new THREE.MeshStandardMaterial({
+          name: m.name || nm,
           color: '#bae6fd',
           roughness: 0.06,
-          metalness: 0.12,
+          metalness: 0.14,
           transparent: true,
-          opacity: 0.36,
+          opacity: 0.30,
           depthWrite: false,
           envMap: chromeEnv || null,
-          envMapIntensity: 1.45,
+          envMapIntensity: 1.55,
         });
+        if (m.dispose) m.dispose();
+        return gMat;
       }
       // Convert KHR_materials_clearcoat MeshPhysicalMaterial -> fast MeshStandardMaterial
       // to eliminate 400-600ms lazy ANGLE D3D11 physical HLSL shader compiles mid-climb!
+      let out = m;
       if (m.isMeshPhysicalMaterial) {
-        const std = new THREE.MeshStandardMaterial({
-          name: nm,
+        out = new THREE.MeshStandardMaterial({
+          name: m.name || nm,
           color: m.color ? m.color.clone() : new THREE.Color('#ffffff'),
           map: m.map || null,
           normalMap: m.normalMap || null,
@@ -711,22 +937,114 @@ function upgradeLoadedGlbTemplate(_famId, rootScene, chromeEnv) {
           envMapIntensity: 0.95,
         });
         m.dispose();
-        return std;
+      } else {
+        if (chromeEnv && !out.envMap) {
+          out.envMap = chromeEnv;
+          out.envMapIntensity = 0.92;
+        }
+        if (out.roughnessMap && !out.aoMap) {
+          out.aoMap = out.roughnessMap;
+          out.aoMapIntensity = 0.88;
+        }
+        if (nm.includes('water') || nm.includes('bubble') || nm.includes('shield')) {
+          out.transparent = true;
+          out.depthWrite = false;
+        }
       }
-      if (chromeEnv && !m.envMap) {
-        m.envMap = chromeEnv;
-        m.envMapIntensity = 0.92;
+
+      // Per-family 200%-zoom close-up PBR refinements (eliminating flat plastic sub-meshes & white blowouts!)
+      if (famId === FAM_SNAP_CRAB && (nm.includes('spark') || objName.includes('claw_spark'))) {
+        out.color.set('#0ea5e9');
+        out.emissive.set('#06b6d4');
+        out.emissiveIntensity = 0.72;
+        out.roughness = 0.14;
+        out.metalness = 0.24;
+      } else if (famId === FAM_GULP_HOPPER && (nm.includes('water') || nm.includes('foam') || objName.includes('water_core'))) {
+        out.color.set('#38bdf8');
+        out.map = orbTex;
+        out.emissive.set('#0891b2');
+        out.emissiveMap = orbTex;
+        out.emissiveIntensity = 0.56;
+        out.roughness = 0.12;
+        out.metalness = 0.14;
+        out.transparent = true;
+        out.opacity = 0.90;
+        out.depthWrite = true;
+        out.envMapIntensity = 1.45;
+      } else if (famId === FAM_VOLT_EEL && (nm.includes('fin') || nm.includes('arc') || nm.includes('volt') || objName.includes('fin') || objName.includes('arc'))) {
+        out.color.set('#0284c7');
+        out.map = swirlTex;
+        out.emissive.set('#06b6d4');
+        out.emissiveIntensity = 0.62;
+        out.roughness = 0.16;
+        out.metalness = 0.28;
+        out.envMapIntensity = 1.45;
+      } else if (famId === FAM_BARNACLE_MORTAR) {
+        if (nm.includes('bubble') || objName.includes('mortar_bubble')) {
+          out.color.set('#38bdf8');
+          out.map = orbTex;
+          out.emissive.set('#0891b2');
+          out.emissiveMap = orbTex;
+          out.emissiveIntensity = 0.50;
+          out.roughness = 0.10;
+          out.metalness = 0.20;
+          out.transparent = true;
+          out.opacity = 0.88;
+          out.depthWrite = true;
+          out.envMapIntensity = 1.55;
+        } else if (nm.includes('core') || nm.includes('glow') || nm.includes('pressure') || objName.includes('pressure_core')) {
+          out.color.set('#f97316');
+          out.map = moltenTex;
+          out.emissive.set('#fb923c');
+          out.emissiveMap = moltenTex;
+          out.emissiveIntensity = 0.85;
+          out.roughness = 0.22;
+          out.metalness = 0.24;
+          out.envMapIntensity = 1.25;
+        }
+      } else if (famId === FAM_SIPHON_WARDEN) {
+        if (nm.includes('singularity') || objName.includes('singularity')) {
+          out.color.set('#9333ea');
+          out.map = orbTex;
+          out.emissive.set('#c026d3');
+          out.emissiveMap = orbTex;
+          out.emissiveIntensity = 0.84;
+          out.roughness = 0.12;
+          out.metalness = 0.28;
+          out.envMapIntensity = 1.45;
+        } else if (nm.includes('lance')) {
+          // Replace flat unshaded white paper finger-claws with gleaming forged sapphire-crystal talons!
+          out.color.set('#38bdf8');
+          out.map = swirlTex;
+          out.emissive.set('#0284c7');
+          out.emissiveIntensity = 0.35;
+          out.metalness = 0.55;
+          out.roughness = 0.20;
+          out.transparent = false;
+          out.opacity = 1.0;
+          out.depthWrite = true;
+          out.envMapIntensity = 1.55;
+        } else if (
+          nm.includes('shield') ||
+          nm.includes('blade') ||
+          nm.includes('crystal') ||
+          nm.includes('energy')
+        ) {
+          out.color.set('#0284c7');
+          out.map = swirlTex;
+          out.emissive.set('#0891b2');
+          out.emissiveIntensity = 0.36;
+          out.roughness = 0.14;
+          out.metalness = 0.38;
+          out.transparent = true;
+          out.opacity = 0.90;
+          out.depthWrite = true;
+          out.envMapIntensity = 1.55;
+        }
       }
-      if (m.roughnessMap && !m.aoMap) {
-        m.aoMap = m.roughnessMap;
-        m.aoMapIntensity = 0.88;
-      }
-      if (nm.includes('water') || nm.includes('bubble') || nm.includes('shield')) {
-        m.transparent = true;
-        m.depthWrite = false;
-      }
-      m.needsUpdate = true;
-      return m;
+
+      out.needsUpdate = true;
+      return out;
     };
     if (Array.isArray(obj.material)) {
       obj.material = obj.material.map(enhanceMat);
@@ -807,29 +1125,31 @@ function buildSnapCrabRig(chromeEnv) {
 
   const hydroCage = buildHydroPrismCageNode(chromeEnv);
   const contactShadow = buildContactShadowNode(1.06, 0.90, 0.007);
-  const telegraphRing = buildTelegraphRingNode('#ff9f1c', 0.04, 1.05);
+  const telegraphRing = buildTelegraphRingNode('#e85d22', 0.015, 1.04);
   root.add(contactShadow, telegraphRing, hydroCage);
 
   // Holographic Hydro-Bounce Springboard Ring (visible above upturned belly when flipped!)
   const bounceRing = new THREE.Mesh(
     cached('geo:crabBounceRing', () => {
-      const g = new THREE.TorusGeometry(0.36, 0.022, 8, 28);
-      g.rotateX(Math.PI * 0.5);
+      const g = new THREE.PlaneGeometry(0.86, 0.86);
+      g.rotateX(-Math.PI * 0.5);
       return g;
     }),
     cached(
       'mat:crabBounceRing',
       () =>
         new THREE.MeshBasicMaterial({
-          color: '#22f0e8',
+          map: getTelegraphRuneTex(),
+          color: '#14f1d9',
           transparent: true,
-          opacity: 0.85,
-          blending: THREE.AdditiveBlending,
+          opacity: 0.62,
+          blending: THREE.NormalBlending,
           depthWrite: false,
+          side: THREE.DoubleSide,
         })
     )
   );
-  bounceRing.position.y = 0.58;
+  bounceRing.position.y = 0.56;
   bounceRing.visible = false;
   body.add(bounceRing);
 
@@ -843,8 +1163,8 @@ function buildSnapCrabRig(chromeEnv) {
       depthWrite: false,
     })
   );
-  sparkSprite.position.set(0, 0.24, 0.46);
-  sparkSprite.scale.set(0.55, 0.55, 1);
+  sparkSprite.position.set(0, 0.24, 0.52);
+  sparkSprite.scale.set(0.32, 0.32, 1);
   sparkSprite.visible = false;
   localFrame.add(sparkSprite);
 
@@ -966,21 +1286,23 @@ function buildGulpHopperRig(chromeEnv) {
 
   const hydroCage = buildHydroPrismCageNode(chromeEnv);
   const contactShadow = buildContactShadowNode(0.88, 0.76, 0.007);
-  const telegraphRing = buildTelegraphRingNode('#38bdf8', 0.04, 0.92);
+  const telegraphRing = buildTelegraphRingNode('#0ea5e9', 0.015, 0.92);
   root.add(contactShadow, telegraphRing, hydroCage);
 
-  // Intake water-suction vortex ring outside mouth during inhale telegraph!
+  // Soft etched aqua intake suction vortex outside mouth during inhale telegraph!
   const inhaleRing = new THREE.Mesh(
-    cached('geo:hopperInhaleRing', () => new THREE.TorusGeometry(0.16, 0.014, 6, 20)),
+    cached('geo:hopperInhalePlane', () => new THREE.PlaneGeometry(0.38, 0.38)),
     cached(
       'mat:hopperInhaleRing',
       () =>
         new THREE.MeshBasicMaterial({
-          color: '#5efce8',
+          map: getWaterRippleRingTex(),
+          color: '#38bdf8',
           transparent: true,
           opacity: 0,
-          blending: THREE.AdditiveBlending,
+          blending: THREE.NormalBlending,
           depthWrite: false,
+          side: THREE.DoubleSide,
         })
     )
   );
@@ -1087,21 +1409,21 @@ function buildVoltEelRig(chromeEnv) {
 
   const hydroCage = buildHydroPrismCageNode(chromeEnv);
   hydroCage.scale.set(1.35, 1.0, 1.15);
-  const telegraphRing = buildTelegraphRingNode('#00f5ff', 0.0, 0.92);
+  const telegraphRing = buildTelegraphRingNode('#0ea5e9', 0.0, 0.56);
   telegraphRing.rotation.x = Math.PI * 0.5;
   root.add(telegraphRing, hydroCage);
 
   const arcFlash = new THREE.Sprite(
     new THREE.SpriteMaterial({
       map: getElectricSparkTex(),
-      color: '#00f5ff',
+      color: '#38bdf8',
       transparent: true,
-      opacity: 0.7,
+      opacity: 0.58,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     })
   );
-  arcFlash.scale.set(0.52, 0.52, 1);
+  arcFlash.scale.set(0.36, 0.36, 1);
 
   const ud = {
     family: 'volt_eel',
@@ -1171,7 +1493,7 @@ function buildRailSkaterRig(chromeEnv) {
   const hydroCage = buildHydroPrismCageNode(chromeEnv);
   // Projected onto stone terrace directly below skimming hover height (`-0.06 / 1.48`)
   const contactShadow = buildContactShadowNode(1.04, 0.78, -0.036);
-  const telegraphRing = buildTelegraphRingNode('#38bdf8', 0.24, 1.02);
+  const telegraphRing = buildTelegraphRingNode('#e11d48', -0.028, 0.98);
   root.add(contactShadow, telegraphRing, hydroCage);
 
   const wakeTrail = new THREE.Sprite(
@@ -1269,21 +1591,21 @@ function buildBarnacleMortarRig(chromeEnv) {
 
   const hydroCage = buildHydroPrismCageNode(chromeEnv);
   const contactShadow = buildContactShadowNode(1.04, 1.04, 0.007);
-  const telegraphRing = buildTelegraphRingNode('#ff7b00', 0.06, 1.02);
+  const telegraphRing = buildTelegraphRingNode('#dc4a1a', 0.015, 1.02);
   root.add(contactShadow, telegraphRing, hydroCage);
 
   const pressureHalo = new THREE.Sprite(
     new THREE.SpriteMaterial({
       map: getSoftGlowTex(),
-      color: '#ff8a1f',
+      color: '#f97316',
       transparent: true,
-      opacity: 0.45,
+      opacity: 0.22,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     })
   );
-  pressureHalo.position.set(0, 0.52, 0.12);
-  pressureHalo.scale.set(0.95, 0.95, 1);
+  pressureHalo.position.set(0, 0.52, 0.10);
+  pressureHalo.scale.set(0.62, 0.62, 1);
   body.add(pressureHalo);
 
   const ud = {
@@ -1366,20 +1688,20 @@ function buildVentStalkerRig(chromeEnv) {
 
   const hydroCage = buildHydroPrismCageNode(chromeEnv);
   const contactShadow = buildContactShadowNode(0.86, 1.24, 0.007);
-  const telegraphRing = buildTelegraphRingNode('#fb923c', 0.05, 0.96);
+  const telegraphRing = buildTelegraphRingNode('#ea580c', 0.015, 0.96);
   root.add(contactShadow, telegraphRing, hydroCage);
 
   // 3 Rising Cryo-Frost / Thermal Steam Plume Puffs above dorsal chimneys!
   const plumes = [];
-  const glowTex = getSoftGlowTex();
+  const wispTex = getSteamWispTex();
   for (let i = 0; i < 3; i++) {
     const sp = new THREE.Sprite(
       new THREE.SpriteMaterial({
-        map: glowTex,
-        color: i % 2 === 0 ? '#67e8f9' : '#fdba74',
+        map: wispTex,
+        color: i % 2 === 0 ? '#a5f3fc' : '#fed7aa',
         transparent: true,
-        opacity: 0.45,
-        blending: THREE.AdditiveBlending,
+        opacity: 0.52,
+        blending: THREE.NormalBlending,
         depthWrite: false,
       })
     );
@@ -1460,30 +1782,31 @@ function buildSiphonWardenRig(chromeEnv) {
 
   const hydroCage = buildHydroPrismCageNode(chromeEnv);
   hydroCage.scale.setScalar(1.75);
-  root.add(hydroCage);
+  const contactShadow = buildContactShadowNode(1.32, 1.12, -0.66);
+  root.add(contactShadow, hydroCage);
 
   const coreHalo = new THREE.Sprite(
     new THREE.SpriteMaterial({
       map: getSoftGlowTex(),
-      color: '#e879f9',
+      color: '#c026d3',
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.32,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     })
   );
-  coreHalo.position.set(0, 0.12, 0.28);
-  coreHalo.scale.set(1.25, 1.25, 1);
+  coreHalo.position.set(0, 0.12, 0.24);
+  coreHalo.scale.set(0.84, 0.84, 1);
   body.add(coreHalo);
 
   // Wave 4: Weak-Point Core Exposure Target Reticle (`en.coreExposed`)
   const exposedRingOuter = new THREE.Mesh(
-    cached('geo:wardenExposedOuter', () => new THREE.TorusGeometry(0.38, 0.022, 8, 32)),
+    cached('geo:wardenExposedOuter', () => new THREE.TorusGeometry(0.38, 0.018, 8, 32)),
     new THREE.MeshBasicMaterial({
-      color: '#5efce8',
+      color: '#14f1d9',
       transparent: true,
       opacity: 0,
-      blending: THREE.AdditiveBlending,
+      blending: THREE.NormalBlending,
       depthWrite: false,
     })
   );
@@ -1491,30 +1814,37 @@ function buildSiphonWardenRig(chromeEnv) {
   exposedRingOuter.visible = false;
 
   const exposedRingInner = new THREE.Mesh(
-    cached('geo:wardenExposedInner', () => new THREE.TorusGeometry(0.24, 0.018, 6, 24)),
+    cached('geo:wardenExposedInner', () => new THREE.TorusGeometry(0.24, 0.015, 6, 24)),
     new THREE.MeshBasicMaterial({
-      color: '#fde047',
+      color: '#f59e0b',
       transparent: true,
       opacity: 0,
-      blending: THREE.AdditiveBlending,
+      blending: THREE.NormalBlending,
       depthWrite: false,
     })
   );
   exposedRingInner.position.set(0, 0.10, 0.32);
   exposedRingInner.visible = false;
 
-  // Wave 4: Hydro-Beam Charge Emitter + Phase 2/3 Overdrive Arc Flare
+  // Wave 4: Hydro-Beam Swirling Vortex Charge Emitter + Phase 2/3 Overdrive Arc Flare
   const beamChargeOrb = new THREE.Mesh(
-    cached('geo:wardenBeamOrb', () => new THREE.IcosahedronGeometry(0.16, 1)),
-    new THREE.MeshBasicMaterial({
-      color: '#ff4d8d',
+    cached('geo:wardenBeamOrb', () => new THREE.IcosahedronGeometry(0.16, 2)),
+    new THREE.MeshStandardMaterial({
+      map: getPressurizedOrbTex(),
+      color: '#d946ef',
+      emissive: new THREE.Color('#c026d3'),
+      emissiveMap: getPressurizedOrbTex(),
+      emissiveIntensity: 0.85,
+      roughness: 0.14,
+      metalness: 0.22,
       transparent: true,
       opacity: 0,
-      blending: THREE.AdditiveBlending,
       depthWrite: false,
+      envMap: chromeEnv || null,
+      envMapIntensity: 1.4,
     })
   );
-  beamChargeOrb.position.set(0, 0.10, 0.36);
+  beamChargeOrb.position.set(0, 0.10, 0.34);
   beamChargeOrb.visible = false;
 
   const bossArcSprite = new THREE.Sprite(
@@ -1538,6 +1868,7 @@ function buildSiphonWardenRig(chromeEnv) {
     familyId: FAM_SIPHON_WARDEN,
     v3Calibrated: true,
     body,
+    contactShadow,
     hydroCage,
     cryoIce: hydroCage,
     coreHalo,
@@ -1569,10 +1900,49 @@ function buildSiphonWardenRig(chromeEnv) {
       const sh = clone.getObjectByName(`shield_${i}`);
       if (sh) ud.shields.push(sh);
       const tn = clone.getObjectByName(`tentacle_${i}`);
-      if (tn) ud.tentacles.push(tn);
+      if (tn) {
+        // Tuck upper & especially lower tentacle roots deep into the tapered V-hull (ZERO floating air gap!)
+        const sx = i % 2 === 0 ? -1 : 1;
+        if (i < 2) {
+          tn.position.set(sx * 0.34, 0.22, -0.04);
+        } else {
+          tn.position.set(sx * 0.14, -0.18, -0.04);
+        }
+        ud.tentacles.push(tn);
+      }
       const tp = clone.getObjectByName(`tentacle_tip_${i}`);
       if (tp) ud.tentacleTips.push(tp);
     }
+    // Single merged forged antique-bronze shoulder socket collar mesh (1 draw call!) anchoring all 4 arm joints into the hull
+    const socketGeo = cached('geo:wardenArmSocketCollars', () => {
+      const parts = [];
+      const sockets = [
+        [-0.35, 0.22, -0.02, -0.45],
+        [0.35, 0.22, -0.02, 0.45],
+        [-0.17, -0.18, -0.02, -0.58],
+        [0.17, -0.18, -0.02, 0.58],
+      ];
+      for (const [x, y, z, rz] of sockets) {
+        const cyl = new THREE.CylinderGeometry(0.095, 0.118, 0.14, 12);
+        cyl.rotateZ(Math.PI * 0.5 + rz);
+        cyl.translate(x, y, z);
+        parts.push(stripPosNormal(cyl));
+        const rim = new THREE.TorusGeometry(0.098, 0.022, 8, 16);
+        rim.rotateY(Math.PI * 0.5);
+        rim.rotateZ(rz);
+        rim.translate(x + (x < 0 ? -0.04 : 0.04), y, z);
+        parts.push(stripPosNormal(rim));
+      }
+      return mergePartsClean(parts, false);
+    });
+    const socketMat = getSharedPbrMat(
+      'wardenSocketBronze',
+      { color: '#b58432', roughness: 0.30, metalness: 0.88, envMapIntensity: 1.2 },
+      chromeEnv
+    );
+    const socketMesh = new THREE.Mesh(socketGeo, socketMat);
+    socketMesh.name = 'warden_shoulder_sockets';
+    (ud.wardenBody || clone).add(socketMesh);
   } else {
     const armorMat = getSharedPbrMat(
       'wardenArmor',
@@ -1753,22 +2123,26 @@ export class EnemyVisualPool {
     }
     this._splashCursor = 0;
 
-    // Pooled 3D Deflectable Barnacle Mortar Water/Sludge Bubbles (`state.enemyProjectiles`)
+    // Pooled 3D Deflectable Barnacle Mortar Pressurized Hydro-Orbs (`state.enemyProjectiles`)
     this._projectileMeshes = [];
-    const projGeo = cached('geo:mortarProjBubble', () => new THREE.SphereGeometry(0.22, 16, 12));
+    const projGeo = cached('geo:mortarProjBubble', () => new THREE.SphereGeometry(0.21, 20, 14));
+    const projOrbTex = getPressurizedOrbTex();
     const projMat = cached(
       'mat:mortarProjBubble',
       () =>
         new THREE.MeshStandardMaterial({
           color: '#38bdf8',
-          emissive: new THREE.Color('#14f1d9'),
-          emissiveIntensity: 1.4,
-          roughness: 0.08,
-          metalness: 0.1,
+          map: projOrbTex,
+          emissive: new THREE.Color('#0891b2'),
+          emissiveMap: projOrbTex,
+          emissiveIntensity: 0.62,
+          roughness: 0.10,
+          metalness: 0.22,
           transparent: true,
-          opacity: 0.84,
-          depthWrite: false,
+          opacity: 0.92,
+          depthWrite: true,
           envMap: this.chromeEnv || null,
+          envMapIntensity: 1.65,
         })
     );
     for (let i = 0; i < PROJECTILE_SLOTS; i++) {
@@ -1779,6 +2153,7 @@ export class EnemyVisualPool {
     }
 
     this._lastTime = null;
+    this._bestiaryLastTime = null;
     this._inReflection = false;
     this._heroAnchor = null;
 
@@ -1801,38 +2176,44 @@ export class EnemyVisualPool {
     this._showcaseGroup = new THREE.Group();
     this._showcaseGroup.name = 'EnemyBestiaryShowcase';
     this._showcaseGroup.visible = false;
+    const runeTex = getTelegraphRuneTex();
     const plinthRing = new THREE.Mesh(
-      cached('geo:bestiaryPlinth', () => {
-        const g = new THREE.TorusGeometry(0.68, 0.022, 8, 40);
-        g.rotateX(Math.PI * 0.5);
-        return g;
-      }),
-      new THREE.MeshBasicMaterial({
-        color: '#22f0e8',
-        transparent: true,
-        opacity: 0.65,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      })
-    );
-    plinthRing.position.y = 0.02;
-    const plinthDisc = new THREE.Mesh(
-      cached('geo:bestiaryDisc', () => {
-        const g = new THREE.CircleGeometry(0.66, 36);
+      cached('geo:bestiaryPlinthRune', () => {
+        const g = new THREE.PlaneGeometry(1.52, 1.52);
         g.rotateX(-Math.PI * 0.5);
         return g;
       }),
       new THREE.MeshBasicMaterial({
-        map: rippleTex,
-        color: '#38bdf8',
+        map: runeTex,
+        color: '#22f0e8',
         transparent: true,
-        opacity: 0.28,
-        blending: THREE.AdditiveBlending,
+        opacity: 0.46,
+        blending: THREE.NormalBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+      })
+    );
+    plinthRing.position.y = 0.018;
+    const plinthDisc = new THREE.Mesh(
+      cached('geo:bestiaryDisc', () => {
+        const g = new THREE.CircleGeometry(0.68, 36);
+        g.rotateX(-Math.PI * 0.5);
+        return g;
+      }),
+      new THREE.MeshBasicMaterial({
+        map: getContactShadowTex(),
+        color: '#0f172a',
+        transparent: true,
+        opacity: 0.55,
+        blending: THREE.NormalBlending,
         depthWrite: false,
         side: THREE.DoubleSide,
       })
     );
-    plinthDisc.position.y = 0.015;
+    plinthDisc.position.y = 0.012;
     this._showcasePlinthRing = plinthRing;
     this._showcasePlinthDisc = plinthDisc;
     this._showcaseRigHolder = new THREE.Group();
@@ -1895,6 +2276,10 @@ export class EnemyVisualPool {
    * pre-compiles all enemy shaders under the fade veil (zero mid-climb ANGLE D3D11 stalls!).
    */
   prewarmAllRigs() {
+    getTelegraphRuneTex();
+    getPressurizedOrbTex();
+    getMoltenCoreTex();
+    getSteamWispTex();
     for (let f = 0; f < FAMILY_COUNT; f++) {
       const bucket = this._buckets[f];
       const wantMask = _glbReadyMask & (1 << f);
@@ -1956,6 +2341,7 @@ export class EnemyVisualPool {
     const b = this._bestiary;
     if (!opts || opts.active === false) {
       b.active = false;
+      this._bestiaryLastTime = null;
       this._showcaseGroup.visible = false;
       return;
     }
@@ -1971,19 +2357,38 @@ export class EnemyVisualPool {
     if (typeof opts.pitch === 'number') b.pitch = clamp(opts.pitch, -0.45, 0.45);
     if (typeof opts.zoom === 'number') b.zoom = clamp(opts.zoom, 0.55, 2.2);
     if (typeof opts.x === 'number') b.x = opts.x;
-    if (typeof opts.y === 'number') b.y = opts.y;
+    // Align with renderer.js Bestiary camera (`(hero?.floor || 2) * fh` = 3.0m when hero is on Floor 0!)
+    if (typeof opts.y === 'number') b.y = opts.y === 0 ? 3.0 : opts.y;
     if (typeof opts.z === 'number') b.z = opts.z;
     if (typeof opts.scale === 'number') b.scale = clamp(opts.scale, 0.4, 2.5);
     if (changedFamily) {
       b.autoClock = 0;
       b.flourishTimer = 1.65;
-      b.flourishKind = opts.flourish || 'taunt';
+      b.flourishKind = opts.flourish || opts.anim || 'taunt';
       this._showcaseAnimState.flipProgress = 0;
       this._showcaseAnimState.slamTriggered = false;
     }
-    if (opts.taunt || opts.flourish) {
-      this.triggerBestiaryFlourish(opts.flourish || 'taunt');
+    if (opts.taunt || opts.flourish || (opts.anim && opts.anim !== b.flourishKind)) {
+      this.triggerBestiaryFlourish(opts.flourish || opts.anim || 'taunt');
     }
+
+    // Hide live tower enemy buckets & projectiles while Bestiary Turntable is active
+    for (let i = 0; i < FAMILY_COUNT; i++) {
+      const bucket = this._buckets[i];
+      for (let j = 0; j < bucket.length; j++) {
+        if (bucket[j].visible) bucket[j].visible = false;
+      }
+    }
+    for (let j = 0; j < PROJECTILE_SLOTS; j++) {
+      if (this._projectileMeshes[j].visible) this._projectileMeshes[j].visible = false;
+    }
+
+    // Drive turntable rig directly (renderer.js calls setBestiaryShowcase each frame without syncEnemies!)
+    const t = typeof opts.time === 'number' ? opts.time : this._lastTime || 0;
+    let dt = this._bestiaryLastTime !== null ? t - this._bestiaryLastTime : 1 / 60;
+    this._bestiaryLastTime = t;
+    if (!(dt > 0) || dt > 0.1) dt = 1 / 60;
+    this.updateBestiaryShowcase(t, dt);
   }
 
   /** Triggers an immediate expressive taunt / signature combat flourish on the Bestiary Turntable. */
@@ -2027,15 +2432,16 @@ export class EnemyVisualPool {
     this._showcaseGroup.visible = true;
     this._showcaseGroup.position.set(b.x, b.y, b.z);
     this._showcaseGroup.rotation.set(b.pitch, b.yaw, 0);
-    const totalScale = (meta.showcaseScale || 1.0) * b.scale * b.zoom;
+    // Keep scale cohesive with renderer.js Bestiary camera zoom (avoid double-scaling when camera also zooms!)
+    const totalScale = (meta.showcaseScale || 1.0) * b.scale;
     this._showcaseGroup.scale.setScalar(totalScale);
 
-    // Subtle pulsing Pelagian turntable ring
-    const ringPulse = 1 + 0.04 * Math.sin(t * 3.2);
+    // Subtle rotating etched Pelagian turntable rune ring
+    const ringPulse = 1 + 0.03 * Math.sin(t * 2.8);
     this._showcasePlinthRing.scale.setScalar(famId === FAM_SIPHON_WARDEN ? 1.48 * ringPulse : ringPulse);
+    this._showcasePlinthRing.rotation.y = t * 0.35;
     this._showcasePlinthDisc.scale.setScalar(famId === FAM_SIPHON_WARDEN ? 1.48 : 1.0);
     this._showcasePlinthRing.material.color.set(meta.accentHex || '#22f0e8');
-    this._showcasePlinthDisc.rotation.z = t * 0.45;
 
     b.autoClock += stepDt;
     if (b.flourishTimer > 0) {
@@ -2048,7 +2454,7 @@ export class EnemyVisualPool {
 
     const rig = this._acquireShowcaseRig(famId);
     const ud = rig.userData;
-    rig.position.set(0, famId === FAM_SIPHON_WARDEN ? 0.64 : famId === FAM_VOLT_EEL ? 0.44 : famId === FAM_RAIL_SKATER ? 0.18 : 0.02, 0);
+    rig.position.set(0, famId === FAM_SIPHON_WARDEN ? 0.92 : famId === FAM_VOLT_EEL ? 0.50 : famId === FAM_RAIL_SKATER ? 0.14 : 0.01, 0);
     rig.rotation.set(0, 0, 0);
     rig.scale.setScalar(1);
     ud.body.scale.setScalar(1);
@@ -2061,7 +2467,7 @@ export class EnemyVisualPool {
     en.dir = 1;
     en.stunTimer = 0;
     en.flipped = famId === FAM_SNAP_CRAB && b.flourishKind === 'flip' && b.flourishTimer > 0.2;
-    en.telegraph = famId === FAM_SNAP_CRAB ? flK * 0.92 : famId === FAM_SIPHON_WARDEN ? flK * 0.85 : 0;
+    en.telegraph = famId === FAM_SNAP_CRAB ? flK * 0.65 : famId === FAM_SIPHON_WARDEN ? flK * 0.55 : 0;
     en.inflatePhase = famId === FAM_GULP_HOPPER ? clamp(0.32 + flK * 0.68, 0, 1) : 0.35;
     en.floor = famId === FAM_GULP_HOPPER && b.flourishTimer > 0 && b.flourishTimer < 0.72 ? Math.sin((b.flourishTimer / 0.72) * Math.PI) * 0.48 : 0;
     en.baseFloor = 0;
@@ -2290,12 +2696,12 @@ export class EnemyVisualPool {
           Boolean(en.isBoss) ||
           (Number(en.maxHp) || 0) >= 3);
 
-      // Calibrated readable world-space scale (1.42x–1.55x standard enemies, 1.95x colossal Act Bosses!)
+      // Calibrated readable world-space scale (1.42x–1.55x standard enemies, ~1.55x hero height Boss!)
       const famMul =
         famId === FAM_SIPHON_WARDEN
           ? isTrueBoss
             ? FAMILY_WORLD_SCALES[FAM_SIPHON_WARDEN]
-            : 1.28
+            : 0.90
           : FAMILY_WORLD_SCALES[famId] || 1.48;
       const famScale = worldScale * famMul;
 
@@ -2303,14 +2709,14 @@ export class EnemyVisualPool {
       let baseRadOff = 0.46;
       if (famId === FAM_VOLT_EEL) baseRadOff = 0.48;
       else if (famId === FAM_RAIL_SKATER) baseRadOff = 0.50;
-      else if (famId === FAM_SIPHON_WARDEN) baseRadOff = isTrueBoss ? 0.82 : 0.64;
+      else if (famId === FAM_SIPHON_WARDEN) baseRadOff = isTrueBoss ? 0.62 : 0.56;
       const er = baseRadius + baseRadOff * radialScale;
 
       // 100% FLUSH stone grounding (`0.00m` air-gap for all grounded enemies!)
       let yLocalOff = 0.0;
       if (famId === FAM_VOLT_EEL) yLocalOff = 0.48 * worldScale;
       else if (famId === FAM_RAIL_SKATER) yLocalOff = 0.06 * worldScale;
-      else if (famId === FAM_SIPHON_WARDEN) yLocalOff = (isTrueBoss ? 1.36 : 0.88) * worldScale;
+      else if (famId === FAM_SIPHON_WARDEN) yLocalOff = (isTrueBoss ? 0.78 : 0.68) * worldScale;
 
       const wx = er * Math.sin(eTheta);
       const wy = en.floor * floorH + yLocalOff + dropY;
@@ -2658,10 +3064,11 @@ export class EnemyVisualPool {
     // Glowing Hydro-Bounce Springboard Ring above upturned belly!
     ud.bounceRing.visible = st.flipProgress > 0.55;
     if (ud.bounceRing.visible) {
-      const pulse = (t * 2.2 + st.seed) % 1;
-      ud.bounceRing.position.y = 0.44 + pulse * 0.22;
-      ud.bounceRing.scale.setScalar(0.85 + pulse * 0.38);
-      ud.bounceRing.material.opacity = (1 - pulse) * 0.9;
+      const pulse = (t * 2.0 + st.seed) % 1;
+      ud.bounceRing.position.y = 0.44 + pulse * 0.20;
+      ud.bounceRing.rotation.y = t * 1.8;
+      ud.bounceRing.scale.setScalar(0.84 + pulse * 0.30);
+      ud.bounceRing.material.opacity = (1 - pulse) * 0.58;
     }
 
     // True 6-Leg Alternating Tripod Crustacean Gait (or frantic upside-down leg kicking!)
@@ -2714,25 +3121,32 @@ export class EnemyVisualPool {
       ud.pincerLoR.rotation.x = openClaw * 0.8;
     }
 
-    const sparkActive = !isFlipped && snapCycle > 0.42;
+    const sparkActive = !isFlipped && snapCycle > 0.48;
     ud.sparkSprite.visible = sparkActive;
     if (ud.clawSparkMesh) ud.clawSparkMesh.visible = sparkActive;
     if (sparkActive) {
-      ud.sparkSprite.material.opacity = 0.65 + 0.35 * Math.sin(t * 38);
+      ud.sparkSprite.material.opacity = 0.36 + 0.26 * Math.sin(t * 36);
       ud.sparkSprite.material.rotation = t * 14;
-      const sc = 0.48 + snapCycle * 0.52;
+      const sc = 0.24 + snapCycle * 0.22;
       ud.sparkSprite.scale.set(sc, sc, 1);
     }
 
-    // Bold glowing attack wind-up telegraph ring around snapping pincers!
+    // Refined etched crimson-amber & aqua Pelagian warning rune ring (opacity <= 0.56, stone deck clearly visible!)
     if (ud.telegraphRing) {
       const showTele = !isFlipped && snapCycle > 0.32;
       ud.telegraphRing.visible = showTele;
       if (showTele) {
-        const pulse = 0.96 + snapCycle * 0.36 + Math.sin(t * 24) * 0.06;
+        const k = clamp((snapCycle - 0.32) / 0.68, 0, 1);
+        const pulse = 0.96 + k * 0.22 + Math.sin(t * 16) * 0.03;
         ud.telegraphRing.scale.setScalar(pulse);
-        ud.telegraphRing.material.color.setHex(snapCycle > 0.72 ? 0x22f0e8 : 0xff9f1c);
-        ud.telegraphRing.material.opacity = 0.35 + snapCycle * 0.58;
+        ud.telegraphRing.rotation.y = t * (0.95 + k * 0.85);
+        // Smooth crimson-amber windup -> crisp pelagic aqua snap flash (zero white blowout!)
+        ud.telegraphRing.material.color.setRGB(
+          mix(0.92, 0.10, smooth(0.68, 0.96, snapCycle)),
+          mix(0.32, 0.80, smooth(0.68, 0.96, snapCycle)),
+          mix(0.14, 0.78, smooth(0.68, 0.96, snapCycle))
+        );
+        ud.telegraphRing.material.opacity = clamp(0.24 + k * 0.32, 0, 0.56);
       }
     }
   }
@@ -2784,10 +3198,11 @@ export class EnemyVisualPool {
     }
     ud.inhaleRing.visible = inhaling;
     if (inhaling) {
-      const suck = 1 - ((t * 3.8 + st.seed) % 1);
-      ud.inhaleRing.position.z = 0.28 + suck * 0.22;
-      ud.inhaleRing.scale.setScalar(0.45 + suck * 0.85);
-      ud.inhaleRing.material.opacity = (1 - suck) * 0.85;
+      const suck = 1 - ((t * 3.2 + st.seed) % 1);
+      ud.inhaleRing.position.z = 0.28 + suck * 0.20;
+      ud.inhaleRing.rotation.z = t * 2.8;
+      ud.inhaleRing.scale.setScalar(0.55 + suck * 0.65);
+      ud.inhaleRing.material.opacity = (1 - suck) * 0.46;
     }
 
     if (!isStunned) {
@@ -2817,15 +3232,16 @@ export class EnemyVisualPool {
       ud.contactShadow.scale.set(0.88 * hopShrink, 1, 0.76 * hopShrink);
     }
 
-    // Bold glowing pre-leap belly-inflation telegraph ring!
+    // Refined etched pre-leap Pelagian warning rune ring (flush on stone, opacity <= 0.54!)
     if (ud.telegraphRing) {
       const showTele = !isStunned && !airborne && st.inflateSmooth > 0.54;
       ud.telegraphRing.visible = showTele;
       if (showTele) {
         const k = clamp((st.inflateSmooth - 0.54) / 0.46, 0, 1);
-        ud.telegraphRing.scale.setScalar(0.86 + k * 0.42 + Math.sin(t * 22) * 0.05);
-        ud.telegraphRing.material.color.setHex(k > 0.65 ? 0xfbbf24 : 0x38bdf8);
-        ud.telegraphRing.material.opacity = 0.32 + k * 0.58;
+        ud.telegraphRing.scale.setScalar(0.86 + k * 0.26 + Math.sin(t * 16) * 0.03);
+        ud.telegraphRing.rotation.y = -t * (0.9 + k * 0.7);
+        ud.telegraphRing.material.color.setHex(k > 0.65 ? 0xea7a1a : 0x0ea5e9);
+        ud.telegraphRing.material.opacity = clamp(0.22 + k * 0.32, 0, 0.54);
       }
     }
   }
@@ -2920,18 +3336,20 @@ export class EnemyVisualPool {
       }
     }
 
-    // Bold crackling electric discharge telegraph ring around Volt-Eel head!
+    // Compact etched electric-aqua Pelagian warning halo behind Volt-Eel head (zero blinding white hoop!)
     if (ud.telegraphRing) {
       const prox = smooth(0.85, 0.16, Math.abs(eTheta));
       const rawTele = typeof en.telegraph === 'number' ? en.telegraph : prox;
-      const showTele = !isStunned && rawTele > 0.34;
+      const showTele = !isStunned && rawTele > 0.38;
       ud.telegraphRing.visible = showTele;
       if (showTele && segs[0]) {
-        ud.telegraphRing.position.copy(segs[0].position);
-        const pulse = 0.62 + rawTele * 0.45 + Math.sin(t * 28) * 0.08;
+        ud.telegraphRing.position.set(segs[0].position.x, segs[0].position.y, segs[0].position.z - 0.06);
+        const k = clamp((rawTele - 0.38) / 0.62, 0, 1);
+        const pulse = 0.46 + k * 0.18 + Math.sin(t * 20) * 0.03;
         ud.telegraphRing.scale.setScalar(pulse);
-        ud.telegraphRing.material.color.setHex(rawTele > 0.72 ? 0xe0f2fe : 0x00f5ff);
-        ud.telegraphRing.material.opacity = 0.34 + rawTele * 0.56;
+        ud.telegraphRing.rotation.set(Math.PI * 0.5, 0, t * 1.4);
+        ud.telegraphRing.material.color.setHex(rawTele > 0.72 ? 0x14b8a6 : 0x0284c7);
+        ud.telegraphRing.material.opacity = clamp(0.20 + k * 0.26, 0, 0.46);
       }
     }
   }
@@ -2995,9 +3413,11 @@ export class EnemyVisualPool {
         const showTele = tele > 0.38;
         ud.telegraphRing.visible = showTele;
         if (showTele) {
-          ud.telegraphRing.scale.setScalar(0.92 + tele * 0.38 + Math.sin(t * 24) * 0.06);
-          ud.telegraphRing.material.color.setHex(tele > 0.7 ? 0xff4d6d : 0x38bdf8);
-          ud.telegraphRing.material.opacity = 0.30 + tele * 0.55;
+          const k = clamp((tele - 0.38) / 0.62, 0, 1);
+          ud.telegraphRing.scale.setScalar(0.92 + k * 0.24 + Math.sin(t * 16) * 0.03);
+          ud.telegraphRing.rotation.y = t * (1.1 + k * 0.9);
+          ud.telegraphRing.material.color.setHex(tele > 0.7 ? 0xdc2646 : 0x0ea5e9);
+          ud.telegraphRing.material.opacity = clamp(0.22 + k * 0.30, 0, 0.52);
         }
       }
     } else {
@@ -3050,44 +3470,47 @@ export class EnemyVisualPool {
       ud.petals[i].rotation.x = -(peelRad + flutter);
     }
 
-    // Inflate water/sludge bubble out of the glowing orange-cyan maw!
+    // Inflate swirling pressurized water bubble out of the glowing molten-amber maw!
     if (ud.mortarBubble) {
       const bubVis = openAmt > 0.16 && !isStunned;
       ud.mortarBubble.visible = bubVis;
       if (bubVis) {
-        const bSc = 0.28 + openAmt * 0.96;
-        const wob = 1 + Math.sin(t * 18) * 0.08 * openAmt;
+        const bSc = 0.28 + openAmt * 0.92;
+        const wob = 1 + Math.sin(t * 16) * 0.07 * openAmt;
         ud.mortarBubble.scale.set(bSc * wob, bSc * (2 - wob), bSc * wob);
-        ud.mortarBubble.position.y = 0.44 + openAmt * 0.22;
+        ud.mortarBubble.position.y = 0.44 + openAmt * 0.20;
+        ud.mortarBubble.rotation.set(t * 1.4, t * 2.2, 0);
       }
     }
     if (ud.pressureCore) {
-      ud.pressureCore.scale.setScalar(0.85 + openAmt * 0.35);
+      ud.pressureCore.scale.setScalar(0.85 + openAmt * 0.32);
+      ud.pressureCore.rotation.y = t * 1.6;
     }
 
-    // Shift pressure halo from volcanic orange (`#ff7b00`) to blinding geyser cyan (`#22f0e8`) at peak!
+    // Subtle atmospheric pressure glow (never washes out the sculpted barnacle valves or bubble!)
     ud.pressureHalo.material.color.setRGB(
-      mix(1.0, 0.15, openAmt),
-      mix(0.48, 0.95, openAmt),
-      mix(0.08, 0.98, openAmt)
+      mix(0.92, 0.08, openAmt),
+      mix(0.42, 0.78, openAmt),
+      mix(0.10, 0.82, openAmt)
     );
-    ud.pressureHalo.material.opacity = isStunned ? 0.15 : 0.32 + openAmt * 0.58;
-    const hSc = 0.72 + openAmt * 0.55;
+    ud.pressureHalo.material.opacity = isStunned ? 0.08 : 0.12 + openAmt * 0.22;
+    const hSc = 0.52 + openAmt * 0.28;
     ud.pressureHalo.scale.set(hSc, hSc, 1);
 
-    // Bold ground pressure warning ring shifting volcanic orange -> blinding cyan before bubble pop!
+    // Refined etched crimson-amber -> pelagic aqua warning rune ring on stone deck (opacity <= 0.55!)
     if (ud.telegraphRing) {
       const showTele = !isStunned && openAmt > 0.28;
       ud.telegraphRing.visible = showTele;
       if (showTele) {
         const k = clamp((openAmt - 0.28) / 0.72, 0, 1);
-        ud.telegraphRing.scale.setScalar(0.95 + k * 0.48 + Math.sin(t * 26) * 0.05);
+        ud.telegraphRing.scale.setScalar(0.95 + k * 0.28 + Math.sin(t * 16) * 0.03);
+        ud.telegraphRing.rotation.y = t * (0.8 + k * 0.9);
         ud.telegraphRing.material.color.setRGB(
-          mix(1.0, 0.15, k),
-          mix(0.45, 0.95, k),
-          mix(0.06, 0.98, k)
+          mix(0.88, 0.08, k),
+          mix(0.32, 0.76, k),
+          mix(0.12, 0.74, k)
         );
-        ud.telegraphRing.material.opacity = 0.34 + k * 0.62;
+        ud.telegraphRing.material.opacity = clamp(0.22 + k * 0.33, 0, 0.55);
       }
     }
   }
@@ -3134,24 +3557,27 @@ export class EnemyVisualPool {
       const life = (t * 0.95 + st.seed + i / 3) % 1;
       sp.position.set(
         Math.sin(t * 3.5 + i * 2.1) * 0.08,
-        0.42 + life * 0.52,
-        (i - 1) * 0.09
+        0.44 + life * 0.48,
+        (i - 1) * 0.11
       );
-      const pSc = 0.18 + life * 0.38;
+      const pSc = 0.22 + life * 0.36;
       sp.scale.set(pSc, pSc, 1);
-      sp.material.opacity = Math.sin(life * Math.PI) * 0.55;
+      sp.material.rotation = life * 1.4 + i;
+      sp.material.opacity = Math.sin(life * Math.PI) * 0.62;
     }
 
-    // Bold cryo/thermal vent surge telegraph ring around dorsal stalker!
+    // Refined etched thermal-amber -> cryo-aqua Pelagian warning rune ring (opacity <= 0.54!)
     if (ud.telegraphRing) {
       const prox = smooth(0.82, 0.15, Math.abs(eTheta));
       const surge = typeof en.telegraph === 'number' ? en.telegraph : prox * (0.5 + 0.5 * Math.sin(t * 4.5 + st.seed * 6));
       const showTele = !isStunned && surge > 0.34;
       ud.telegraphRing.visible = showTele;
       if (showTele) {
-        ud.telegraphRing.scale.setScalar(0.92 + surge * 0.42 + Math.sin(t * 20) * 0.05);
-        ud.telegraphRing.material.color.setHex(surge > 0.68 ? 0x67e8f9 : 0xfb923c);
-        ud.telegraphRing.material.opacity = 0.32 + surge * 0.58;
+        const k = clamp((surge - 0.34) / 0.66, 0, 1);
+        ud.telegraphRing.scale.setScalar(0.92 + k * 0.24 + Math.sin(t * 16) * 0.03);
+        ud.telegraphRing.rotation.y = -t * (0.85 + k * 0.75);
+        ud.telegraphRing.material.color.setHex(surge > 0.68 ? 0x06b6d4 : 0xea580c);
+        ud.telegraphRing.material.opacity = clamp(0.22 + k * 0.32, 0, 0.54);
       }
     }
   }
@@ -3293,17 +3719,19 @@ export class EnemyVisualPool {
       }
     }
 
-    // Hydro-Beam Charge Emitter (`beamChargeOrb`)
+    // Hydro-Beam Swirling Vortex Charge Emitter (`beamChargeOrb` — zero solid-white blowout!)
     if (ud.beamChargeOrb) {
       const showBeam = (beamAmt > 0.08 || (rawTele > 0.35 && !coreExposed)) && !isStunned;
       ud.beamChargeOrb.visible = showBeam;
       if (showBeam) {
         const bMag = Math.max(beamAmt, rawTele);
-        const bSc = 0.45 + bMag * 1.45 + Math.sin(t * 36) * 0.12;
+        const bSc = 0.42 + bMag * 0.66 + Math.sin(t * 24) * 0.06;
         ud.beamChargeOrb.scale.setScalar(bSc);
-        ud.beamChargeOrb.rotation.set(t * 7, t * 9, 0);
-        ud.beamChargeOrb.material.color.setHex(phase >= 3 ? 0xff2a5f : 0x38bdf8);
-        ud.beamChargeOrb.material.opacity = 0.45 + bMag * 0.48;
+        ud.beamChargeOrb.rotation.set(t * 5, t * 7, 0);
+        const orbHex = phase >= 3 ? 0xe11d48 : phase === 2 ? 0xd946ef : 0x0ea5e9;
+        ud.beamChargeOrb.material.color.setHex(orbHex);
+        ud.beamChargeOrb.material.emissive.setHex(orbHex);
+        ud.beamChargeOrb.material.opacity = clamp(0.28 + bMag * 0.36, 0, 0.64);
       }
     }
 
@@ -3313,29 +3741,29 @@ export class EnemyVisualPool {
       const flicker = showArc && Math.sin(t * (28 + phase * 11) + st.seed * 7) > (phase >= 3 ? -0.45 : 0.15);
       ud.bossArcSprite.visible = flicker;
       if (flicker) {
-        ud.bossArcSprite.material.color.setHex(phase >= 3 ? 0xff3b6b : phase === 2 ? 0xfbbf24 : 0x38bdf8);
+        ud.bossArcSprite.material.color.setHex(phase >= 3 ? 0xff3b6b : phase === 2 ? 0xf59e0b : 0x38bdf8);
         ud.bossArcSprite.material.rotation = t * 18;
-        ud.bossArcSprite.material.opacity = 0.62 + 0.32 * Math.sin(t * 42);
-        const aSc = 0.95 + phase * 0.22;
+        ud.bossArcSprite.material.opacity = 0.38 + 0.22 * Math.sin(t * 42);
+        const aSc = 0.72 + phase * 0.14;
         ud.bossArcSprite.scale.set(aSc, aSc, 1);
       }
     }
 
     // Core halo shifts distinctly across Phase 1 (violet), Phase 2 (amber-magenta), Phase 3 (crimson), Exposed (cyan-gold), & Hit (white)!
     if (hitJolt > 0.05) {
-      ud.coreHalo.material.color.setHex(0xffffff);
+      ud.coreHalo.material.color.setHex(0xffe4e6);
     } else if (coreExposed) {
-      ud.coreHalo.material.color.setHex(0x22f0e8);
+      ud.coreHalo.material.color.setHex(0x14f1d9);
     } else if (phase >= 3 || beamAmt > 0.45) {
-      ud.coreHalo.material.color.setHex(0xff2a5f);
+      ud.coreHalo.material.color.setHex(0xe11d48);
     } else if (phase === 2 || rawTele > 0.35) {
-      ud.coreHalo.material.color.setHex(0xf97316);
+      ud.coreHalo.material.color.setHex(0xd946ef);
     } else {
-      ud.coreHalo.material.color.setHex(0xe879f9);
+      ud.coreHalo.material.color.setHex(0xa855f7);
     }
     ud.coreHalo.material.opacity = isStunned
-      ? 0.22
-      : (coreExposed ? 0.95 : 0.68) + 0.22 * Math.sin(t * (8.5 + phase * 2)) + rawTele * 0.22;
+      ? 0.12
+      : clamp((coreExposed ? 0.42 : 0.26) + 0.10 * Math.sin(t * (8.5 + phase * 2)) + rawTele * 0.10, 0, 0.46);
   }
 
   /**

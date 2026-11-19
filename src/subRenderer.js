@@ -367,11 +367,18 @@ class AdaptiveGatewaySwimmer {
 
 function mergeBufferGeos(geos) {
   if (BufferGeometryUtils && typeof BufferGeometryUtils.mergeGeometries === 'function') {
+    const anyColor = geos.some((g) => Boolean(g.attributes.color));
     const normalized = geos.map((g) => {
       const ng = g.index ? g.toNonIndexed() : g;
+      if (!ng.attributes.normal) ng.computeVertexNormals();
+      const cnt = ng.attributes.position.count;
       if (!ng.attributes.uv) {
-        const cnt = ng.attributes.position.count;
         ng.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(cnt * 2), 2));
+      }
+      if (anyColor && !ng.attributes.color) {
+        const cols = new Float32Array(cnt * 3);
+        cols.fill(1.0);
+        ng.setAttribute('color', new THREE.BufferAttribute(cols, 3));
       }
       return ng;
     });
@@ -550,11 +557,423 @@ function createRedwoodBarkTexture(size = 128) {
   return tex;
 }
 
+function createPorousCoralPbrTextures(size = 256) {
+  // Seamless procedural porous calcareous coral albedo + tangent-space normal map (fine organic polyps & ridges)
+  const heightField = new Float32Array(size * size);
+  const albedoData = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    const v = y / size;
+    for (let x = 0; x < size; x++) {
+      const u = x / size;
+      const wU = u + (valueNoiseTile(u, v, 4) - 0.5) * 0.16;
+      const wV = v + (valueNoiseTile(u + 0.41, v + 0.27, 4) - 0.5) * 0.16;
+      const macro = valueNoiseTile(wU, wV, 8) * 0.48 + valueNoiseTile(wU, wV, 16) * 0.30;
+      const micro = valueNoiseTile(u, v, 32) * 0.22;
+      // Fine coral calyx dimples (multi-harmonic porous indentations)
+      const p1 = Math.sin((wU * 14 + wV * 6) * TAU) * Math.sin((wV * 14 - wU * 5) * TAU);
+      const p2 = Math.cos((u * 24 - v * 10) * TAU) * Math.cos((v * 22 + u * 9) * TAU);
+      const pore = clamp(0.5 + p1 * 0.28 + p2 * 0.18, 0, 1);
+      const h = clamp(macro * 0.55 + micro * 0.25 + pore * 0.32, 0, 1);
+      heightField[y * size + x] = h;
+
+      // Bright calcareous neutral-warm base so instanceColor tints cleanly without muddying!
+      const shade = lerp(0.76, 1.0, h);
+      const rim = pore > 0.72 ? (pore - 0.72) * 0.28 : 0;
+      const idx = (y * size + x) * 4;
+      albedoData[idx] = clamp(Math.round(shade * 246 + rim * 28), 0, 255);
+      albedoData[idx + 1] = clamp(Math.round(shade * 238 + rim * 22), 0, 255);
+      albedoData[idx + 2] = clamp(Math.round(shade * 234 + rim * 18), 0, 255);
+      albedoData[idx + 3] = 255;
+    }
+  }
+
+  const normalData = new Uint8Array(size * size * 4);
+  const strength = 3.2;
+  for (let y = 0; y < size; y++) {
+    const ym = (y - 1 + size) % size;
+    const yp = (y + 1) % size;
+    for (let x = 0; x < size; x++) {
+      const xm = (x - 1 + size) % size;
+      const xp = (x + 1) % size;
+      const dx = (heightField[y * size + xp] - heightField[y * size + xm]) * strength;
+      const dy = (heightField[yp * size + x] - heightField[ym * size + x]) * strength;
+      const inv = 1 / Math.hypot(-dx, -dy, 1.0);
+      const idx = (y * size + x) * 4;
+      normalData[idx] = clamp(Math.round((-dx * inv * 0.5 + 0.5) * 255), 0, 255);
+      normalData[idx + 1] = clamp(Math.round((-dy * inv * 0.5 + 0.5) * 255), 0, 255);
+      normalData[idx + 2] = clamp(Math.round((inv * 0.5 + 0.5) * 255), 0, 255);
+      normalData[idx + 3] = 255;
+    }
+  }
+
+  const albedo = new THREE.DataTexture(albedoData, size, size, THREE.RGBAFormat);
+  albedo.wrapS = THREE.RepeatWrapping;
+  albedo.wrapT = THREE.RepeatWrapping;
+  albedo.repeat.set(2.5, 2.5);
+  albedo.colorSpace = THREE.SRGBColorSpace;
+  albedo.needsUpdate = true;
+
+  const normal = new THREE.DataTexture(normalData, size, size, THREE.RGBAFormat);
+  normal.wrapS = THREE.RepeatWrapping;
+  normal.wrapT = THREE.RepeatWrapping;
+  normal.repeat.set(2.5, 2.5);
+  normal.needsUpdate = true;
+
+  return { albedo, normal };
+}
+
+function bakeCoralVertexColors(geo, minY, maxY, opts = {}) {
+  const pos = geo.attributes.position;
+  const cols = new Float32Array(pos.count * 3);
+  const span = Math.max(0.001, maxY - minY);
+  const baseR = opts.baseR ?? 0.52;
+  const baseG = opts.baseG ?? 0.48;
+  const baseB = opts.baseB ?? 0.55;
+  const tipR = opts.tipR ?? 1.24;
+  const tipG = opts.tipG ?? 1.18;
+  const tipB = opts.tipB ?? 1.12;
+  const radialBoost = opts.radialBoost ?? 0.16;
+  const maxR = Math.max(0.1, opts.maxR ?? 1.0);
+
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    const ty = smooth01((y - minY) / span);
+    const tr = clamp(Math.hypot(x, z) / maxR, 0, 1);
+    const rim = ty * 0.72 + tr * radialBoost;
+    const r = lerp(baseR, tipR, Math.pow(clamp(rim, 0, 1), 0.85));
+    const g = lerp(baseG, tipG, Math.pow(clamp(rim, 0, 1), 0.92));
+    const b = lerp(baseB, tipB, Math.pow(clamp(rim, 0, 1), 1.0));
+    cols[i * 3] = r;
+    cols[i * 3 + 1] = g;
+    cols[i * 3 + 2] = b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  return geo;
+}
+
+function buildTaperedCurvedBranch(points, rBase, rTip, segs = 10, radSegs = 7, seed = 1) {
+  // Organically curved, smoothly tapering 3D coral branch with calcareous nodularity & rounded polyp-bud tip!
+  const curve = new THREE.CatmullRomCurve3(points);
+  const frames = curve.computeFrenetFrames(segs, false);
+  const rings = segs + 2;
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+  const pt = new THREE.Vector3();
+  const v = new THREE.Vector3();
+
+  for (let s = 0; s <= segs + 1; s++) {
+    const isCap = s === segs + 1;
+    const t = isCap ? 1.0 : s / segs;
+    curve.getPointAt(t, pt);
+    const fi = Math.min(segs, s);
+    const N = frames.normals[fi];
+    const B = frames.binormals[fi];
+    const T = frames.tangents[fi];
+    const rad = isCap
+      ? rTip * 0.22
+      : lerp(rBase, rTip, Math.pow(t, 0.72)) * (1.0 + Math.pow(1 - t, 3.0) * 0.24);
+    if (isCap) {
+      pt.addScaledVector(T, rTip * 0.85);
+    }
+    for (let j = 0; j <= radSegs; j++) {
+      const a = (j / radSegs) * TAU;
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+      const nodule = isCap
+        ? 1.0
+        : 1.0 + 0.11 * Math.sin(t * 15.0 + a * 3.0 + seed) + 0.06 * Math.cos(t * 24.0 - a * 2.0 + seed * 1.7);
+      const rr = rad * nodule;
+      v.copy(pt).addScaledVector(N, ca * rr).addScaledVector(B, sa * rr);
+      positions.push(v.x, v.y, v.z);
+      uvs.push((j / radSegs) * 1.4, t * 2.4);
+    }
+  }
+
+  const stride = radSegs + 1;
+  for (let s = 0; s < rings - 1; s++) {
+    for (let j = 0; j < radSegs; j++) {
+      const a = s * stride + j;
+      const b = a + stride;
+      const c = b + 1;
+      const d = a + 1;
+      indices.push(a, b, d, b, c, d);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function buildSculptedStaghornCoralGeo(seed = 3101) {
+  // Lush organically curved multi-forked Acropora / Staghorn branching coral cluster (ZERO Play-Doh straight sticks!)
+  const rng = mulberry32(seed);
+  const parts = [];
+
+  const holdfast = new THREE.SphereGeometry(0.32, 10, 7);
+  holdfast.scale(1.22, 0.56, 1.15);
+  holdfast.translate(0, 0.04, 0);
+  parts.push(holdfast);
+
+  const primaryCount = 7;
+  for (let i = 0; i < primaryCount; i++) {
+    const az = (i / primaryCount) * TAU + (rng() - 0.5) * 0.42;
+    const spread = 0.34 + rng() * 0.36;
+    const h = 0.62 + (i % 3) * 0.22 + rng() * 0.16;
+    const cx = Math.cos(az);
+    const cz = Math.sin(az);
+    const perpX = -cz;
+    const perpZ = cx;
+    const sway = (rng() - 0.5) * 0.26;
+
+    const p0 = new THREE.Vector3(cx * 0.10, -0.04, cz * 0.10);
+    const p1 = new THREE.Vector3(cx * (spread * 0.48) + perpX * sway * 0.4, h * 0.32, cz * (spread * 0.48) + perpZ * sway * 0.4);
+    const p2 = new THREE.Vector3(cx * (spread * 0.96) + perpX * sway, h * 0.72, cz * (spread * 0.96) + perpZ * sway);
+    const p3 = new THREE.Vector3(cx * (spread * 0.86) + perpX * sway * 0.7, h, cz * (spread * 0.86) + perpZ * sway * 0.7);
+
+    const rBase = 0.088 + (i % 2) * 0.018;
+    const rTip = 0.036 + (i % 3) * 0.006;
+    parts.push(buildTaperedCurvedBranch([p0, p1, p2, p3], rBase, rTip, 6, 5, seed + i * 19));
+
+    const forkSide = i % 2 === 0 ? 1 : -1;
+    const fStart = p1.clone().lerp(p2, 0.38);
+    const fMid = fStart
+      .clone()
+      .add(new THREE.Vector3(cx * 0.20 + perpX * forkSide * 0.20, h * 0.22, cz * 0.20 + perpZ * forkSide * 0.20));
+    const fTip = fMid
+      .clone()
+      .add(new THREE.Vector3(cx * 0.08 + perpX * forkSide * 0.10, h * 0.26, cz * 0.08 + perpZ * forkSide * 0.10));
+    parts.push(buildTaperedCurvedBranch([fStart, fMid, fTip], rBase * 0.64, rTip * 0.84, 5, 5, seed + i * 43 + 7));
+
+    if (i % 2 === 0) {
+      const bStart = p2.clone().lerp(p3, 0.15);
+      const bMid = bStart
+        .clone()
+        .add(new THREE.Vector3(-perpX * forkSide * 0.14 + cx * 0.09, h * 0.14, -perpZ * forkSide * 0.14 + cz * 0.09));
+      const bTip = bMid.clone().add(new THREE.Vector3(cx * 0.04, h * 0.17, cz * 0.04));
+      parts.push(buildTaperedCurvedBranch([bStart, bMid, bTip], rBase * 0.48, rTip * 0.74, 4, 5, seed + i * 67 + 13));
+    }
+  }
+
+  const merged = mergeBufferGeos(parts);
+  merged.computeVertexNormals();
+  return bakeCoralVertexColors(merged, -0.05, 1.15, {
+    baseR: 0.66,
+    baseG: 0.58,
+    baseB: 0.64,
+    tipR: 1.28,
+    tipG: 1.20,
+    tipB: 1.12,
+    radialBoost: 0.18,
+    maxR: 0.88,
+  });
+}
+
+function buildSculptedTableCoralGeo(seed = 6409) {
+  // Multi-tiered undulating scalloped Montipora plate coral rosette + clustered porous domes!
+  const rng = mulberry32(seed);
+  const parts = [];
+
+  const stem = new THREE.CylinderGeometry(0.18, 0.28, 0.44, 8);
+  stem.translate(0, 0.14, 0);
+  parts.push(stem);
+
+  const tiers = [
+    { ox: -0.14, oy: 0.28, oz: 0.12, rad: 0.66, thick: 0.12, phase: 0.4 },
+    { ox: 0.20, oy: 0.46, oz: -0.10, rad: 0.54, thick: 0.11, phase: 2.1 },
+    { ox: -0.04, oy: 0.62, oz: -0.02, rad: 0.36, thick: 0.10, phase: 4.0 },
+  ];
+  for (let t = 0; t < tiers.length; t++) {
+    const tr = tiers[t];
+    const plate = new THREE.CylinderGeometry(tr.rad, tr.rad * 0.46, tr.thick, 16, 1);
+    const pos = plate.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      let x = pos.getX(i);
+      let y = pos.getY(i);
+      let z = pos.getZ(i);
+      const r = Math.hypot(x, z);
+      const a = Math.atan2(z, x);
+      const rn = clamp(r / tr.rad, 0, 1);
+      const scallop = 1.0 + 0.14 * Math.sin(a * 6 + tr.phase) + 0.09 * Math.cos(a * 11 - tr.phase * 1.4);
+      const cup = rn * rn * 0.14 + Math.sin(a * 5 + tr.phase) * 0.045 * rn;
+      x *= scallop;
+      z *= scallop;
+      y += cup;
+      pos.setXYZ(i, x + tr.ox, y + tr.oy, z + tr.oz);
+    }
+    plate.computeVertexNormals();
+    parts.push(plate);
+  }
+
+  for (let d = 0; d < 2; d++) {
+    const dome = new THREE.SphereGeometry(0.24 - d * 0.04, 10, 7, 0, TAU, 0, Math.PI * 0.65);
+    const dp = dome.attributes.position;
+    for (let i = 0; i < dp.count; i++) {
+      const vx = dp.getX(i), vy = dp.getY(i), vz = dp.getZ(i);
+      const ang = Math.atan2(vz, vx);
+      const groove = 1.0 + 0.08 * Math.sin(ang * 8 + vy * 16 + d * 2);
+      dp.setXYZ(i, vx * groove * 1.12, vy * groove * 0.82, vz * groove * 1.12);
+    }
+    dome.translate(d === 0 ? 0.34 : -0.32, 0.04, d === 0 ? 0.24 : -0.18 + (rng() - 0.5) * 0.08);
+    dome.computeVertexNormals();
+    parts.push(dome);
+  }
+
+  const merged = mergeBufferGeos(parts);
+  merged.computeVertexNormals();
+  return bakeCoralVertexColors(merged, -0.04, 0.78, {
+    baseR: 0.74,
+    baseG: 0.66,
+    baseB: 0.70,
+    tipR: 1.26,
+    tipG: 1.20,
+    tipB: 1.14,
+    radialBoost: 0.28,
+    maxR: 0.78,
+  });
+}
+
+function buildSculptedSeaFanGeo(seed = 5207) {
+  // True 3D cupped, gracefully arching branching Gorgonian Sea-Fan (ZERO flat 2D sticker cards!)
+  const rng = mulberry32(seed);
+  const parts = [];
+
+  const root = new THREE.SphereGeometry(0.16, 8, 6);
+  root.scale(1.15, 0.65, 1.05);
+  root.translate(0, 0.02, 0);
+  parts.push(root);
+
+  const fanRibs = 9;
+  for (let i = 0; i < fanRibs; i++) {
+    const u = (i / (fanRibs - 1)) * 2 - 1;
+    const fanAng = u * 1.02 + (rng() - 0.5) * 0.08;
+    const len = (1.08 - u * u * 0.30) * (0.94 + rng() * 0.14);
+    const sx = Math.sin(fanAng);
+    const sy = Math.cos(fanAng * 0.82);
+    const zCup = 0.16 * (1 - u * u * 1.6) + Math.sin(u * 3.1 + seed) * 0.09;
+
+    const p0 = new THREE.Vector3(u * 0.05, -0.02, 0);
+    const p1 = new THREE.Vector3(sx * len * 0.34, sy * len * 0.36, zCup * 0.42);
+    const p2 = new THREE.Vector3(sx * len * 0.72, sy * len * 0.74, zCup * 0.95);
+    const p3 = new THREE.Vector3(sx * len * 0.96, sy * len * 1.02, zCup * 1.15 - 0.06);
+    parts.push(buildTaperedCurvedBranch([p0, p1, p2, p3], 0.044, 0.014, 5, 4, seed + i * 29));
+
+    for (const side of [-1, 1]) {
+      if ((i === 0 && side < 0) || (i === fanRibs - 1 && side > 0)) continue;
+      const tBranch = side > 0 ? 0.48 : 0.68;
+      const sPt = p1.clone().lerp(p2, tBranch);
+      const bAng = fanAng + side * 0.34;
+      const bLen = len * 0.36;
+      const mPt = sPt.clone().add(new THREE.Vector3(Math.sin(bAng) * bLen * 0.55, Math.cos(bAng * 0.8) * bLen * 0.55, zCup * 0.18));
+      const ePt = sPt.clone().add(new THREE.Vector3(Math.sin(bAng * 0.92) * bLen, Math.cos(bAng * 0.78) * bLen, zCup * 0.28));
+      parts.push(buildTaperedCurvedBranch([sPt, mPt, ePt], 0.024, 0.009, 4, 4, seed + i * 53 + side * 11));
+    }
+  }
+
+  const merged = mergeBufferGeos(parts);
+  merged.computeVertexNormals();
+  return bakeCoralVertexColors(merged, -0.02, 1.12, {
+    baseR: 0.66,
+    baseG: 0.58,
+    baseB: 0.72,
+    tipR: 1.30,
+    tipG: 1.22,
+    tipB: 1.20,
+    radialBoost: 0.22,
+    maxR: 0.95,
+  });
+}
+
+function buildSculptedKelpRibbonGeo(seed = 8123) {
+  // Graceful, slender, organically curving & ruffled 3D ocean kelp fronds (ZERO stiff grass sticks or chunky planks!)
+  const rng = mulberry32(seed);
+  const parts = [];
+  const bladeCount = 7;
+  const hSegs = 10;
+
+  for (let b = 0; b < bladeCount; b++) {
+    const az = (b / bladeCount) * TAU + (rng() - 0.5) * 0.48;
+    const height = 0.78 + (b % 3) * 0.28 + rng() * 0.18;
+    const maxW = 0.056 + (b % 2) * 0.018;
+    const lean = 0.34 + rng() * 0.28;
+    const curveDir = b % 2 === 0 ? 1 : -1;
+    const twistRate = (0.75 + rng() * 0.65) * curveDir;
+    const cx = Math.cos(az);
+    const cz = Math.sin(az);
+    const px = -cz;
+    const pz = cx;
+
+    const positions = [];
+    const uvs = [];
+    const colors = [];
+    const indices = [];
+
+    for (let s = 0; s <= hSegs; s++) {
+      const t = s / hSegs;
+      const widthEnv = Math.sin(Math.pow(t, 0.65) * Math.PI) * maxW + (1 - t) * 0.012;
+      // Flowing oceanic S-curve current arch with graceful curling tip
+      const sCurve = Math.sin(t * Math.PI * 1.65 + b * 1.1) * 0.22 * t;
+      const arcOut = Math.pow(t, 1.55) * lean;
+      const spineX = cx * (0.04 + arcOut) + px * sCurve;
+      const spineY = -0.06 + t * height - Math.pow(t, 3.0) * 0.14;
+      const spineZ = cz * (0.04 + arcOut) + pz * sCurve;
+
+      const tw = az + t * twistRate + Math.sin(t * 8.0 + b) * 0.22;
+      const wx = -Math.sin(tw);
+      const wz = Math.cos(tw);
+      const ruffle = Math.sin(t * 16.0 + b * 2.1) * 0.022 * Math.sin(t * Math.PI);
+
+      // Natural sunlit sea-kelp olive-teal -> warm emerald -> translucent golden-aqua tips
+      const cr = lerp(0.10, 0.52, Math.pow(t, 1.15));
+      const cg = lerp(0.36, 0.96, Math.pow(t, 0.80));
+      const cb = lerp(0.32, 0.78, Math.pow(t, 0.90));
+
+      for (let w = 0; w <= 2; w++) {
+        const u = w - 1;
+        const edgeRuffleY = u !== 0 ? ruffle * u : 0;
+        const edgeCupZ = u === 0 ? 0.012 * Math.sin(t * Math.PI) : 0;
+        positions.push(
+          spineX + wx * u * widthEnv + cx * edgeCupZ,
+          spineY + edgeRuffleY,
+          spineZ + wz * u * widthEnv + cz * edgeCupZ
+        );
+        uvs.push(w * 0.5, t * 2.0);
+        const edgeGlow = u !== 0 ? 1.10 : 0.94;
+        colors.push(cr * edgeGlow, cg * edgeGlow, cb * edgeGlow);
+      }
+    }
+
+    for (let s = 0; s < hSegs; s++) {
+      for (let w = 0; w < 2; w++) {
+        const a = s * 3 + w;
+        const c = a + 3;
+        indices.push(a, c, a + 1, c, c + 1, a + 1);
+      }
+    }
+
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    g.setIndex(indices);
+    g.computeVertexNormals();
+    parts.push(g);
+  }
+
+  return mergeBufferGeos(parts);
+}
+
 function buildCraggyReefRidgeGeo(radius, height, seed) {
   const rng = mulberry32(seed);
   const parts = [];
-  // Low, natural sculpted limestone seabed outcrop (ZERO giant eggs or tall brick towers!)
-  const main = new THREE.SphereGeometry(radius, 14, 10);
+  // Sculpted stepped sunlit limestone seabed outcrop with natural reef ledges for cradling corals!
+  const main = new THREE.SphereGeometry(radius, 16, 11);
   const pos = main.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     let x = pos.getX(i);
@@ -564,19 +983,25 @@ function buildCraggyReefRidgeGeo(radius, height, seed) {
       1.0 +
       0.18 * Math.sin(x * 2.4 + seed) * Math.cos(z * 2.1 - seed) +
       0.12 * Math.cos(y * 3.8 + x * 1.9) +
-      (rng() - 0.5) * 0.08;
-    x *= n * 1.45;
-    y = Math.max(-height * 0.35, y * n * (height / (radius * 2.1)));
-    z *= n * 0.88;
+      (rng() - 0.5) * 0.06;
+    x *= n * 1.38;
+    const terrace = y > 0 ? Math.pow(y / radius, 0.85) * height * 0.72 : y * (height / (radius * 2.0));
+    y = Math.max(-height * 0.36, terrace * n);
+    z *= n * 0.94;
     pos.setXYZ(i, x, y, z);
   }
   main.computeVertexNormals();
   parts.push(main);
 
-  const shelf = new THREE.SphereGeometry(radius * 0.62, 12, 8);
-  shelf.scale(1.55, 0.52, 0.92);
-  shelf.translate(radius * 0.85, -height * 0.18, 0.2);
+  const shelf = new THREE.SphereGeometry(radius * 0.68, 12, 9);
+  shelf.scale(1.42, 0.58, 0.96);
+  shelf.translate(radius * 0.76, -height * 0.08, 0.18);
   parts.push(shelf);
+
+  const flank = new THREE.SphereGeometry(radius * 0.54, 12, 8);
+  flank.scale(1.18, 0.62, 1.05);
+  flank.translate(-radius * 0.66, -height * 0.12, -0.16);
+  parts.push(flank);
   return mergeBufferGeos(parts);
 }
 
@@ -955,26 +1380,20 @@ export class SubRenderer {
     this.reefBackdrop.position.set(0, 0, -24);
     this.reefScene.add(this.reefBackdrop);
 
-    // Soft Gaussian-feathered sunlit volumetric caustic god-ray shafts filling the upper reef!
-    this.rayGroup = new THREE.Group();
-    this.rayMeshes = [];
+    // Soft Gaussian-feathered sunlit volumetric caustic god-ray shafts (1 instanced draw call — saves 13 draw calls!)
     const rayGeo = new THREE.PlaneGeometry(3.8, 17);
-    for (let i = 0; i < MAX_RAYS; i++) {
-      const rm = new THREE.MeshBasicMaterial({
-        map: this.godRayTex,
-        color: '#e0f7ff',
-        transparent: true,
-        opacity: 0.22,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      });
-      const m = new THREE.Mesh(rayGeo, rm);
-      m.rotation.z = -0.22 + (i % 4) * 0.045;
-      this.rayGroup.add(m);
-      this.rayMeshes.push(m);
-    }
-    this.reefScene.add(this.rayGroup);
+    this.rayMat = new THREE.MeshBasicMaterial({
+      map: this.godRayTex,
+      color: '#ffffff',
+      transparent: true,
+      opacity: 0.28,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    this.rayInst = new THREE.InstancedMesh(rayGeo, this.rayMat, MAX_RAYS);
+    this.rayInst.frustumCulled = false;
+    this.reefScene.add(this.rayInst);
 
     // Undulating Sculpted Sandy-Reef Canyon Seabed (`mg_pbr_reef_seabed_{albedo,normal}.webp` — ZERO Voronoi grid!)
     this.seabedMat = new THREE.MeshStandardMaterial({
@@ -996,98 +1415,123 @@ export class SubRenderer {
     this.seabedMesh.position.set(0, -4.4, -3.5);
     this.reefScene.add(this.seabedMesh);
 
-    // Large Sculpted Organic Limestone Reef Canyon Outcrops framing the midground & floor margins
-    this.ridgeGroup = new THREE.Group();
+    // Large Sculpted Sunlit Limestone Reef Canyon Outcrops (1 instanced draw call — saves 7 draw calls!)
     this.reefStoneTex.repeat.set(2, 2);
     this.ridgeMat = new THREE.MeshStandardMaterial({
-      color: '#a9b8b4',
+      color: '#dcd8cc',
       map: this.reefStoneTex,
-      roughness: 0.82,
+      emissive: '#0c3948',
+      emissiveIntensity: 0.14,
+      roughness: 0.80,
       metalness: 0.04,
     });
-    this.ridgeMeshes = [];
+    const ridgeGeo = buildCraggyReefRidgeGeo(1.65, 1.85, 1037);
+    this.ridgeInst = new THREE.InstancedMesh(ridgeGeo, this.ridgeMat, 8);
+    this.ridgeInst.frustumCulled = false;
+    const ridgeTints = ['#e6e0d2', '#d7ded8', '#e2d8c8', '#cfd9d8'];
     for (let i = 0; i < 8; i++) {
-      const ridgeGeo = buildCraggyReefRidgeGeo(1.45 + (i % 3) * 0.42, 1.55 + (i % 2) * 0.58, 1000 + i * 37);
-      const outcrop = new THREE.Mesh(ridgeGeo, this.ridgeMat);
-      outcrop.position.set((i - 3.5) * 6.8, -4.5, -6.2 - (i % 3) * 2.4);
-      outcrop.rotation.y = (i * 0.95) % TAU;
-      this.ridgeGroup.add(outcrop);
-      this.ridgeMeshes.push(outcrop);
+      this._col.set(ridgeTints[i % ridgeTints.length]);
+      this.ridgeInst.setColorAt(i, this._col);
     }
-    this.reefScene.add(this.ridgeGroup);
+    this.reefScene.add(this.ridgeInst);
 
-    // Sculpted PBR Coral-Encrusted Limestone Reef Boulders + Ridged Brain-Coral Domes + Dark-Edged Swaying Kelp Fronds
-    // (ZERO Play-Doh straight sticks on orange balls, ZERO flat stacked green discs, ZERO white-fringed stickers!)
-    const coralBoulderGeo = buildCraggyReefRidgeGeo(0.76, 0.54, 7121);
-    const brainCoralGeo = new THREE.SphereGeometry(0.56, 18, 12, 0, TAU, 0, Math.PI * 0.58);
-    const bcPos = brainCoralGeo.attributes.position;
-    for (let i = 0; i < bcPos.count; i++) {
-      const vx = bcPos.getX(i), vy = bcPos.getY(i), vz = bcPos.getZ(i);
-      const ang = Math.atan2(vz, vx);
-      const groove = 1.0 + 0.09 * Math.sin(ang * 9 + vy * 14) + 0.06 * Math.cos(vx * 11 - vz * 10);
-      bcPos.setXYZ(i, vx * groove * 1.15, vy * groove * 0.72, vz * groove * 1.15);
-    }
-    brainCoralGeo.computeVertexNormals();
-    // Curved crossed kelp/sea-fan bough cluster (`alphaTest: 0.58, transparent: false` — crisp dark edge, ZERO white halo!)
-    const kelpPlanes = [];
-    for (let p = 0; p < 3; p++) {
-      const kp = new THREE.PlaneGeometry(1.15, 1.48, 2, 4);
-      const kPos = kp.attributes.position;
-      for (let j = 0; j < kPos.count; j++) {
-        const ky = Math.max(0, kPos.getY(j) + 0.74);
-        const bend = Math.pow(ky / 1.48, 1.8) * 0.24 * (p % 2 === 0 ? 1 : -1);
-        kPos.setY(j, ky);
-        kPos.setZ(j, kPos.getZ(j) + bend);
-      }
-      kp.rotateY((p * Math.PI) / 3);
-      kp.computeVertexNormals();
-      kelpPlanes.push(kp);
-    }
-    const kelpClusterGeo = mergeBufferGeos(kelpPlanes);
+    // Abzû-Tier Sunlit Multi-Hued 3D Coral Reef Ecosystem nestled naturally onto `biome_rock_limestone` outcrops
+    // alongside gently swaying 3D kelp ribbons (ZERO Play-Doh straight sticks, ZERO flat 2D white-fringed stickers!)
+    const porousCoralPbr = createPorousCoralPbrTextures(256);
+    this.coralPorousAlbedo = porousCoralPbr.albedo;
+    this.coralPorousNormal = porousCoralPbr.normal;
 
-    this.staghornMat = new THREE.MeshStandardMaterial({
-      color: '#c4b8a8',
+    const coralBoulderGeo = buildCraggyReefRidgeGeo(0.78, 0.72, 7121);
+    const branchCoralGeo = buildSculptedStaghornCoralGeo(3101);
+    const tableCoralGeo = buildSculptedTableCoralGeo(6409);
+    const seaFanGeo = buildSculptedSeaFanGeo(5207);
+    const kelpRibbonGeo = buildSculptedKelpRibbonGeo(8123);
+
+    this.boulderMat = new THREE.MeshStandardMaterial({
+      color: '#e6e0d4',
       map: this.reefStoneTex,
+      emissive: '#0e3b4a',
+      emissiveIntensity: 0.14,
       roughness: 0.80,
-      metalness: 0.05,
+      metalness: 0.04,
+    });
+    this.branchCoralMat = new THREE.MeshStandardMaterial({
+      color: '#ffffff',
+      map: this.coralPorousAlbedo,
+      normalMap: this.coralPorousNormal,
+      normalScale: new THREE.Vector2(1.45, 1.45),
+      vertexColors: true,
+      emissive: '#52262c',
+      emissiveIntensity: 0.30,
+      roughness: 0.54,
+      metalness: 0.04,
     });
     this.tableCoralMat = new THREE.MeshStandardMaterial({
-      color: '#c8a690',
-      map: this.reefStoneTex,
-      roughness: 0.72,
-      metalness: 0.06,
-    });
-    this.kelpFoliageTex = createKelpFrondTex(128);
-    this.tubeSpongeMat = new THREE.MeshStandardMaterial({
       color: '#ffffff',
-      map: this.kelpFoliageTex,
-      emissive: '#0d5e54',
-      emissiveIntensity: 0.28,
+      map: this.coralPorousAlbedo,
+      normalMap: this.coralPorousNormal,
+      normalScale: new THREE.Vector2(1.38, 1.38),
+      vertexColors: true,
+      emissive: '#542a26',
+      emissiveIntensity: 0.34,
       roughness: 0.56,
       metalness: 0.04,
-      alphaTest: 0.45,
-      transparent: false,
+    });
+    this.seaFanMat = new THREE.MeshStandardMaterial({
+      color: '#ffffff',
+      map: this.coralPorousAlbedo,
+      normalMap: this.coralPorousNormal,
+      normalScale: new THREE.Vector2(1.25, 1.25),
+      vertexColors: true,
+      emissive: '#3a2854',
+      emissiveIntensity: 0.32,
+      roughness: 0.48,
+      metalness: 0.04,
+    });
+    this.kelpRibbonMat = new THREE.MeshStandardMaterial({
+      color: '#ffffff',
+      vertexColors: true,
+      emissive: '#0c443e',
+      emissiveIntensity: 0.20,
+      roughness: 0.46,
+      metalness: 0.04,
       side: THREE.DoubleSide,
     });
-    this.staghornInst = new THREE.InstancedMesh(coralBoulderGeo, this.staghornMat, 18);
-    this.tableCoralInst = new THREE.InstancedMesh(brainCoralGeo, this.tableCoralMat, 16);
-    this.tubeSpongeInst = new THREE.InstancedMesh(kelpClusterGeo, this.tubeSpongeMat, 18);
-    const stagTints = ['#9faea6', '#b5a898', '#96a8aa', '#ab9c8e', '#8fa5a0'];
-    const tableTints = ['#b87e6e', '#a98a64', '#869c92', '#b07b7e', '#949878'];
-    const spongeTints = ['#5eead4', '#34d399', '#6ee7b7', '#2dd4bf', '#86efac'];
+
+    this.boulderInst = new THREE.InstancedMesh(coralBoulderGeo, this.boulderMat, 18);
+    this.branchCoralInst = new THREE.InstancedMesh(branchCoralGeo, this.branchCoralMat, 26);
+    this.tableCoralInst = new THREE.InstancedMesh(tableCoralGeo, this.tableCoralMat, 18);
+    this.seaFanInst = new THREE.InstancedMesh(seaFanGeo, this.seaFanMat, 18);
+    this.kelpInst = new THREE.InstancedMesh(kelpRibbonGeo, this.kelpRibbonMat, 22);
+
+    const boulderTints = ['#e8e2d5', '#dbe0da', '#e5dbc9', '#d2dcda', '#e0ddd2'];
+    // Vibrant sunlit Abzû coral reef palette: warm rose-coral, sunlit amber-ochre, seafoam-teal, violet sea-fan!
+    const branchTints = ['#e06d70', '#d98a4e', '#3ba89c', '#e87c82', '#8b6fc9', '#e59a5c', '#e06d70'];
+    const tableTints = ['#d98a4e', '#e06d70', '#3ba89c', '#8b6fc9', '#e49664', '#de767b'];
+    const fanTints = ['#8b6fc9', '#e06d70', '#d98a4e', '#9b7fd6', '#3ba89c', '#e57b82'];
+    const kelpTints = ['#7fd8c4', '#6ecfb6', '#8be0cb', '#62c4ac', '#74d1bc'];
+
     for (let i = 0; i < 18; i++) {
-      this._col.set(stagTints[i % stagTints.length]);
-      this.staghornInst.setColorAt(i, this._col);
+      this._col.set(boulderTints[i % boulderTints.length]);
+      this.boulderInst.setColorAt(i, this._col);
     }
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < 26; i++) {
+      this._col.set(branchTints[i % branchTints.length]);
+      this.branchCoralInst.setColorAt(i, this._col);
+    }
+    for (let i = 0; i < 18; i++) {
       this._col.set(tableTints[i % tableTints.length]);
       this.tableCoralInst.setColorAt(i, this._col);
     }
     for (let i = 0; i < 18; i++) {
-      this._col.set(spongeTints[i % spongeTints.length]);
-      this.tubeSpongeInst.setColorAt(i, this._col);
+      this._col.set(fanTints[i % fanTints.length]);
+      this.seaFanInst.setColorAt(i, this._col);
     }
-    for (const im of [this.staghornInst, this.tableCoralInst, this.tubeSpongeInst]) {
+    for (let i = 0; i < 22; i++) {
+      this._col.set(kelpTints[i % kelpTints.length]);
+      this.kelpInst.setColorAt(i, this._col);
+    }
+    for (const im of [this.boulderInst, this.branchCoralInst, this.tableCoralInst, this.seaFanInst, this.kelpInst]) {
       im.frustumCulled = false;
       this.reefScene.add(im);
     }
@@ -1867,15 +2311,17 @@ export class SubRenderer {
   }
 
   _applyCoralPbr() {
-    for (const m of [this.staghornMat, this.tableCoralMat]) {
+    // Apply sunlit `biome_rock_limestone` PBR textures to reef outcrops & boulders while keeping
+    // our porous calcareous coral PBR maps & subsurface rim warmth intact on the coral clusters!
+    for (const m of [this.boulderMat, this.ridgeMat]) {
       if (!m) continue;
       if (this.limestoneAlbedo) m.map = this.limestoneAlbedo;
       if (this.limestoneNormal) {
         m.normalMap = this.limestoneNormal;
-        m.normalScale.set(1.35, 1.35);
+        m.normalScale.set(1.25, 1.25);
       }
-      m.roughness = 0.78;
-      m.metalness = 0.05;
+      m.roughness = 0.80;
+      m.metalness = 0.04;
       m.needsUpdate = true;
     }
   }
@@ -2171,65 +2617,131 @@ export class SubRenderer {
     const playHalfH = bedW.halfH;
     this.seabedMesh.position.y = bedWorldY - 0.55;
 
-    // Anchor large sculpted limestone reef outcrops naturally into the undulating seabed canyon
-    for (let i = 0; i < this.ridgeMeshes.length; i++) {
-      const m = this.ridgeMeshes[i];
-      const ox = (((i * 6.8 - scroll * 0.012) % 52) + 52) % 52 - 26;
-      const oz = -6.2 - (i % 3) * 2.4;
-      m.position.set(ox, bedWorldY - 0.85 + reefSeabedHeight(ox, oz) * 0.45, oz);
-    }
-
-    // Animate sunlit caustic god-ray shafts across the upper reef water column
-    for (let i = 0; i < MAX_RAYS; i++) {
-      const m = this.rayMeshes[i];
-      const rx = (((i * 3.2 - scroll * 0.011) % 36) + 36) % 36 - 18;
-      m.position.set(rx, surfWorldY - 1.4, -2.5 - (i % 3) * 1.4);
-      m.material.color.set(pal.ray);
-      m.material.opacity = 0.18 + 0.08 * Math.sin(time * 1.5 + i * 1.2);
-    }
-
-    // REAL 3D Sculpted Blender Coral Reef Formations rooted solidly into the undulating sandy seabed!
-    // ZERO 2D cardboard cutouts, ZERO white cutout edges!
     const dm = this._dummy;
-    const coralBaseScale = portrait ? 0.92 : 1.08;
-    for (let i = 0; i < 18; i++) {
-      const cx = (((i * 2.45 - scroll * 0.022) % 44) + 44) % 44 - 22;
-      const cz = -1.2 - (i % 5) * 1.25;
-      const cy = bedWorldY - 0.62 + reefSeabedHeight(cx, cz + 3.5);
-      const sc = (0.85 + (i % 4) * 0.24) * coralBaseScale;
-      dm.position.set(cx, cy, cz);
-      dm.rotation.set(0, i * 1.37, Math.sin(time * 1.2 + i) * 0.03);
-      dm.scale.set(sc, sc * (0.9 + (i % 3) * 0.15), sc);
-      dm.updateMatrix();
-      this.staghornInst.setMatrixAt(i, dm.matrix);
-    }
-    this.staghornInst.instanceMatrix.needsUpdate = true;
 
-    for (let i = 0; i < 16; i++) {
-      const cx = (((i * 2.75 + 1.1 - scroll * 0.021) % 44) + 44) % 44 - 22;
-      const cz = -1.8 - ((i + 2) % 4) * 1.45;
-      const cy = bedWorldY - 0.64 + reefSeabedHeight(cx, cz + 3.5);
-      const sc = (0.92 + (i % 3) * 0.28) * coralBaseScale;
-      dm.position.set(cx, cy, cz);
-      dm.rotation.set(0, i * 1.92, 0);
-      dm.scale.set(sc, sc * 0.95, sc);
+    // Anchor large sculpted sunlit limestone reef canyon outcrops naturally into the midground seabed (1 draw call!)
+    const ridgeX = [];
+    const ridgeY = [];
+    const ridgeZ = [];
+    for (let i = 0; i < 8; i++) {
+      const ox = (((i * 6.5 - scroll * 0.012) % 52) + 52) % 52 - 26;
+      const oz = -6.0 - (i % 3) * 2.1;
+      const oy = bedWorldY - 0.72 + reefSeabedHeight(ox, oz + 3.5) * 0.65;
+      const sx = 0.92 + (i % 3) * 0.22;
+      const sy = 0.88 + (i % 2) * 0.26;
+      const sz = 0.90 + ((i + 1) % 3) * 0.16;
+      ridgeX[i] = ox;
+      ridgeY[i] = oy;
+      ridgeZ[i] = oz;
+      dm.position.set(ox, oy, oz);
+      dm.rotation.set(0, (i * 0.95) % TAU, 0);
+      dm.scale.set(sx, sy, sz);
+      dm.updateMatrix();
+      this.ridgeInst.setMatrixAt(i, dm.matrix);
+    }
+    this.ridgeInst.instanceMatrix.needsUpdate = true;
+
+    // Animate sunlit caustic god-ray shafts across the upper reef water column (1 instanced draw call!)
+    for (let i = 0; i < MAX_RAYS; i++) {
+      const rx = (((i * 3.2 - scroll * 0.011) % 36) + 36) % 36 - 18;
+      dm.position.set(rx, surfWorldY - 1.4, -2.5 - (i % 3) * 1.4);
+      dm.rotation.set(0, 0, -0.22 + (i % 4) * 0.045);
+      dm.scale.setScalar(1);
+      dm.updateMatrix();
+      this.rayInst.setMatrixAt(i, dm.matrix);
+      const rayBright = 0.65 + 0.30 * Math.sin(time * 1.5 + i * 1.2);
+      this._col.set(pal.ray).multiplyScalar(rayBright);
+      this.rayInst.setColorAt(i, this._col);
+    }
+    this.rayInst.instanceMatrix.needsUpdate = true;
+    if (this.rayInst.instanceColor) this.rayInst.instanceColor.needsUpdate = true;
+
+    // Abzû-Tier Sculpted Multi-Hued 3D Coral Reef Gardens nestled naturally onto sunlit limestone outcrops
+    // alongside gently swaying 3D kelp ribbons (ZERO flat 2D stickers, ZERO straight grass sticks!)
+    const coralBaseScale = portrait ? 0.92 : 1.06;
+    for (let i = 0; i < 18; i++) {
+      const cx = (((i * 2.44 - scroll * 0.022) % 44) + 44) % 44 - 22;
+      const cz = -0.95 - (i % 5) * 1.18;
+      const sandY = bedWorldY - 0.55 + reefSeabedHeight(cx, cz + 3.5);
+      const sc = (0.78 + (i % 4) * 0.16) * coralBaseScale;
+
+      // 1. Sunlit `biome_rock_limestone` reef mound grounded solidly into the undulating sandy seabed
+      dm.position.set(cx, sandY - 0.14, cz);
+      dm.rotation.set(0, i * 1.37, 0);
+      dm.scale.set(sc * 1.05, sc * (0.82 + (i % 3) * 0.14), sc);
+      dm.updateMatrix();
+      this.boulderInst.setMatrixAt(i, dm.matrix);
+
+      // 2. Sculpted organically curved branching Acropora / Staghorn coral nestled onto the limestone crest!
+      const bOffX = (i % 2 === 0 ? -0.24 : 0.22) * sc;
+      const bOffZ = (i % 3 === 0 ? 0.08 : -0.10) * sc;
+      const bSc = (0.86 + ((i + 1) % 3) * 0.20) * coralBaseScale;
+      dm.position.set(cx + bOffX, sandY + 0.10 * sc, cz + bOffZ);
+      dm.rotation.set(0.05 * Math.sin(i * 2.3), i * 1.73, Math.sin(time * 0.85 + i) * 0.022);
+      dm.scale.set(bSc, bSc * (0.94 + (i % 3) * 0.12), bSc);
+      dm.updateMatrix();
+      this.branchCoralInst.setMatrixAt(i, dm.matrix);
+
+      // 3. Sculpted multi-tiered scalloped table-coral rosette terraced on the rock's sunlit shoulder!
+      const tOffX = (i % 2 === 0 ? 0.44 : -0.46) * sc;
+      const tOffZ = (i % 2 === 0 ? 0.18 : 0.12) * sc;
+      const tSc = (0.76 + (i % 3) * 0.18) * coralBaseScale;
+      dm.position.set(cx + tOffX, sandY + 0.02 * sc, cz + tOffZ);
+      dm.rotation.set(0.04 * Math.cos(i * 1.9), i * 2.14, 0.04 * Math.sin(i * 1.5));
+      dm.scale.set(tSc, tSc * 0.92, tSc);
       dm.updateMatrix();
       this.tableCoralInst.setMatrixAt(i, dm.matrix);
-    }
-    this.tableCoralInst.instanceMatrix.needsUpdate = true;
 
-    for (let i = 0; i < 18; i++) {
-      const cx = (((i * 2.45 + 1.8 - scroll * 0.022) % 44) + 44) % 44 - 22;
-      const cz = -1.0 - ((i + 1) % 5) * 1.25;
-      const sc = (0.82 + (i % 3) * 0.20) * coralBaseScale;
-      const cy = bedWorldY - 0.74 + reefSeabedHeight(cx, cz + 3.5);
-      dm.position.set(cx, cy, cz);
-      dm.rotation.set(0, i * 1.85, Math.sin(time * 1.45 + i * 0.9) * 0.085);
-      dm.scale.set(sc, sc * (0.95 + (i % 3) * 0.16), sc);
+      // 4. Sculpted cupped 3D Gorgonian Sea-Fan swaying gently on the back flank of the reef outcrop!
+      const fOffX = (i % 2 === 0 ? 0.12 : -0.18) * sc;
+      const fOffZ = -0.28 * sc;
+      const fSc = (0.84 + ((i + 2) % 3) * 0.18) * coralBaseScale;
+      dm.position.set(cx + fOffX, sandY + 0.14 * sc, cz + fOffZ);
+      dm.rotation.set(
+        Math.sin(time * 1.1 + i * 0.8) * 0.045,
+        ((i * 0.72) % 1.4) - 0.7,
+        Math.sin(time * 1.35 + i * 1.1) * 0.075
+      );
+      dm.scale.set(fSc, fSc * (0.96 + (i % 2) * 0.16), fSc);
       dm.updateMatrix();
-      this.tubeSpongeInst.setMatrixAt(i, dm.matrix);
+      this.seaFanInst.setMatrixAt(i, dm.matrix);
     }
-    this.tubeSpongeInst.instanceMatrix.needsUpdate = true;
+
+    // 8 extra midground branching coral crowns perched atop the large limestone canyon ridges (bridges seamlessly to backdrop!)
+    for (let i = 0; i < 8; i++) {
+      const rx = ridgeX[i] + (i % 2 === 0 ? -0.45 : 0.52);
+      const rz = ridgeZ[i] + 0.35;
+      const ry = ridgeY[i] + 0.62;
+      const rSc = (1.18 + (i % 3) * 0.22) * coralBaseScale;
+      dm.position.set(rx, ry, rz);
+      dm.rotation.set(0, i * 2.15, Math.sin(time * 0.75 + i) * 0.02);
+      dm.scale.set(rSc, rSc * 1.08, rSc);
+      dm.updateMatrix();
+      this.branchCoralInst.setMatrixAt(18 + i, dm.matrix);
+    }
+
+    // 22 true 3D sinuous, gently swaying kelp ribbon clusters nestled in sandy crevices beside the reef mounds!
+    for (let i = 0; i < 22; i++) {
+      const kx = (((i * 2.02 + 0.95 - scroll * 0.022) % 44) + 44) % 44 - 22;
+      const kz = -0.85 - ((i + 1) % 5) * 1.32;
+      const kSandY = bedWorldY - 0.55 + reefSeabedHeight(kx, kz + 3.5);
+      const kSc = (0.76 + (i % 4) * 0.16) * coralBaseScale;
+      dm.position.set(kx, kSandY - 0.08, kz);
+      dm.rotation.set(
+        Math.cos(time * 1.15 + i * 0.7) * 0.055,
+        i * 1.85,
+        Math.sin(time * 1.48 + i * 0.95) * 0.115
+      );
+      dm.scale.set(kSc, kSc * (0.92 + (i % 3) * 0.18), kSc);
+      dm.updateMatrix();
+      this.kelpInst.setMatrixAt(i, dm.matrix);
+    }
+
+    this.boulderInst.instanceMatrix.needsUpdate = true;
+    this.branchCoralInst.instanceMatrix.needsUpdate = true;
+    this.tableCoralInst.instanceMatrix.needsUpdate = true;
+    this.seaFanInst.instanceMatrix.needsUpdate = true;
+    this.kelpInst.instanceMatrix.needsUpdate = true;
 
     // Graceful Mid-Distance Sculpted 3D Reef Manta Ray gliding smoothly through the upper sunlit water column
     if (this.mantaGroup.visible) {
@@ -2603,7 +3115,7 @@ export class SubRenderer {
     this.particleInst.instanceMatrix.needsUpdate = true;
     if (this.particleInst.instanceColor) this.particleInst.instanceColor.needsUpdate = true;
 
-    this._syncPopups(opts.popups || stageOrSubOrState.popups || []);
+    this._syncPopups(opts.popups || stageOrSubOrState.popups || [], heroX, heroY, vesselScale, surfWorldY, portrait);
 
     // Camera subtle surge & shake (direct single-pass WebGL2 60fps!)
     const sh = Number(opts.shake ?? stageOrSubOrState.shake) || 0;
@@ -2906,7 +3418,9 @@ export class SubRenderer {
     this.webgl.setRenderTarget(prevTarget);
   }
 
-  _syncPopups(popups) {
+  _syncPopups(popups, heroX = 0, heroY = 0, vesselScale = 1.2, surfWorldY = 3.2, portrait = false) {
+    const canopyTopY = heroY + 0.62 * vesselScale;
+    const minAboveCanopyY = canopyTopY + 0.85;
     for (let i = 0; i < MAX_POPUPS; i++) {
       const slot = this.popupPool[i];
       if (i >= popups.length || popups[i].x == null || popups[i].y == null) {
@@ -2923,9 +3437,17 @@ export class SubRenderer {
       }
       const wp = this._screenToWorld(p.x, p.y, 0.8);
       const t = 1 - clamp(p.life / Math.max(0.01, p.maxLife || 1), 0, 1);
+      const safeX = clamp(wp.x, -wp.halfW * 0.68, wp.halfW * 0.68);
+      let py = wp.y + 0.25 + t * 0.45;
+      // Guarantee score/surge popups NEVER cover Gateway piloting inside the crystal bubble canopy!
+      if (Math.abs(safeX - heroX) < 1.95 * vesselScale && py > heroY - 0.85 * vesselScale && py < minAboveCanopyY) {
+        py = minAboveCanopyY + t * 0.35;
+      }
+      const maxHudClearY = Math.min(surfWorldY + 0.15, wp.halfH * 0.66);
+      py = Math.min(py, maxHudClearY);
       slot.sprite.visible = true;
-      slot.sprite.position.set(wp.x, wp.y + t * 0.45, 0.8);
-      slot.sprite.scale.set(2.2, 0.44, 1);
+      slot.sprite.position.set(safeX, py, 0.8);
+      slot.sprite.scale.set(portrait ? 1.85 : 2.2, portrait ? 0.37 : 0.44, 1);
       slot.sprite.material.opacity = Math.max(0, 1 - t * t);
     }
   }
@@ -2941,6 +3463,8 @@ export class SubRenderer {
     this.backdropTex?.dispose();
     this.reefStoneTex?.dispose();
     this.barkTex?.dispose();
+    this.coralPorousAlbedo?.dispose();
+    this.coralPorousNormal?.dispose();
     this.envTex?.dispose();
     for (const p of this.popupPool) {
       p.sprite.material.map?.dispose();

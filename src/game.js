@@ -656,6 +656,7 @@ export class ToweringWatersGame {
   }
 
   startPuristMode({ startTowerIdx = 0 } = {}) {
+    this.masterWatershed = false;
     this.zenMode = false;
     this.gameMode = 'purist';
     this.runType = 'purist';
@@ -677,6 +678,7 @@ export class ToweringWatersGame {
   }
 
   startFloodRushMode({ seed = Date.now() } = {}) {
+    this.masterWatershed = false;
     this.zenMode = false;
     this.gameMode = 'flood_rush';
     this.runType = 'flood_rush';
@@ -703,6 +705,7 @@ export class ToweringWatersGame {
   }
 
   startSanctumTrialsMode({ seed = Date.now(), startTowerIdx = 0 } = {}) {
+    this.masterWatershed = false;
     this.zenMode = true;
     this.gameMode = 'sanctum_trials';
     this.runType = 'sanctum_trials';
@@ -733,6 +736,7 @@ export class ToweringWatersGame {
   }
 
   startExpeditionMode({ seed = Date.now(), initialMutation = null } = {}) {
+    this.masterWatershed = false;
     this.zenMode = false;
     this.gameMode = 'expedition';
     this.runType = 'expedition';
@@ -759,6 +763,7 @@ export class ToweringWatersGame {
 
   startDailyChallenge(date = new Date()) {
     const { seed, dateKey } = getDailySeed(date);
+    this.masterWatershed = false;
     this.zenMode = false;
     this.gameMode = 'daily_tide';
     this.runType = 'daily_tide';
@@ -1238,7 +1243,34 @@ export class ToweringWatersGame {
   _instantiateEnemy(e, idx = 0) {
     const needsSpan = e.type === 'snap_crab' || e.type === 'gulp_hopper' || (e.type === 'rail_skater' && e.axis !== 'v');
     const span = needsSpan ? this._computeContiguousSpan(e.col, Math.round(e.floor), e.type) : null;
-    const initCol = span ? wrapCol(span.startCol + span.initialOffset) : e.col;
+    let initCol = span ? wrapCol(span.startCol + span.initialOffset) : e.col;
+
+    // Keep Siphon Warden / Lock-Keeper bosses patrolling cleanly over their Crown Arena terrace (never offscreen over empty void!)
+    let arenaStart = null;
+    let arenaLen = null;
+    let arenaMinOff = 0.85;
+    let arenaMaxOff = null;
+    let arenaOffset = 0;
+    if (e.type === 'siphon_warden') {
+      if (e.arenaStartCol !== undefined && e.arenaLen && e.arenaLen < COLS) {
+        arenaStart = wrapCol(e.arenaStartCol);
+        arenaLen = e.arenaLen;
+      } else {
+        const wSpan = this._computeContiguousSpan(e.col, Math.round(e.floor), 'siphon_warden');
+        if (wSpan && wSpan.length >= 3 && wSpan.length < COLS) {
+          arenaStart = wSpan.startCol;
+          arenaLen = wSpan.length;
+        }
+      }
+      if (arenaStart !== null && arenaLen !== null) {
+        arenaMinOff = Math.min(0.85, arenaLen * 0.2);
+        arenaMaxOff = Math.max(arenaMinOff, arenaLen - arenaMinOff);
+        const rel = ((wrapCol(initCol) - arenaStart) % COLS + COLS) % COLS;
+        arenaOffset = Math.max(arenaMinOff, Math.min(arenaMaxOff, rel));
+        initCol = wrapCol(arenaStart + arenaOffset);
+      }
+    }
+
     return {
       ...e,
       col: initCol,
@@ -1266,7 +1298,13 @@ export class ToweringWatersGame {
       bossPhaseTier: 1,
       coreExposed: false,
       coreExposeTimer: 0,
-      bossTimer: 2.4,
+      bossTimer: 2.2,
+      bossHitCooldown: 0,
+      arenaStart,
+      arenaLen,
+      arenaMinOff,
+      arenaMaxOff,
+      arenaOffset,
       dead: false,
       deathTimer: 0,
       edgePause: 0,
@@ -2609,23 +2647,30 @@ export class ToweringWatersGame {
     }
 
     if (en.type === 'siphon_warden') {
+      if ((en.bossHitCooldown || 0) > 0) return;
       const breakerRank = this.getSkillRank('warden_breaker');
       const exposeMult = 1 + breakerRank * 0.2;
-      if (en.bossPhase === 'patrol' && source === 'pulse') {
-        // Hydro-Pulse cracks shield into early Core Exposure window!
+      const isShielded = Boolean(en.shielded || (!en.coreExposed && en.bossPhase !== 'vulnerable'));
+
+      if (isShielded && source !== 'deflect') {
+        // Hydro-Pulse or Tail-Whip cracks the Siphon Shield into a clear Core Exposure window!
         en.bossPhase = 'vulnerable';
         en.shielded = false;
         en.coreExposed = true;
-        en.bossTimer = 2.6 * exposeMult;
+        en.bossTimer = 2.8 * exposeMult;
         en.coreExposeTimer = en.bossTimer;
-        this.addShake(2.5);
-        this.addPopup({ col: en.col, floor: en.floor + 0.9, text: 'SHIELD CRACKED • CORE EXPOSED!', color: '#67e8f9', maxLife: 0.95 });
+        en.bossHitCooldown = 0.26;
+        this.addShake(3.2);
+        if (pos) this._spawnParticles(pos.x, pos.y, '#67e8f9', 10, 115, 160, en.col, en.floor + 0.5);
+        this.addPopup({ col: en.col, floor: en.floor + 0.95, text: '◈ SHIELD CRACKED • STRIKE CORE!', color: '#67e8f9', maxLife: 1.05 });
         sound?.stunEnemy?.();
         return;
       }
+
       const dmg = en.coreExposed && source === 'whip' && breakerRank >= 3 ? 2 : 1;
       en.hp = Math.max(0, (en.hp || 1) - dmg);
-      en.stunTimer = 0.55;
+      en.stunTimer = 0.48;
+      en.bossHitCooldown = 0.45;
       this.addShake(5.5);
       if (pos) this._spawnParticles(pos.x, pos.y, '#f472b6', 14, 130, 170, en.col, en.floor + 0.5);
       if (en.hp <= 0) {
@@ -2657,15 +2702,36 @@ export class ToweringWatersGame {
           }
         }
       } else {
+        const prevTier = en.bossPhaseTier || 1;
+        const nextRatio = en.hp / Math.max(1, en.maxHp || 3);
+        const nextTier = nextRatio <= 0.35 ? 3 : nextRatio <= 0.68 ? 2 : 1;
+        en.bossPhaseTier = nextTier;
+        // Re-engage shield cleanly between HP stages so every phase plays its signature telegraph & attack!
+        en.bossPhase = 'patrol';
+        en.shielded = true;
+        en.coreExposed = false;
+        en.coreExposeTimer = 0;
+        en.bossTimer = nextTier === 3 ? 1.55 : 2.1;
+        en.dir = -(en.dir || 1);
+
         this._awardGears(1);
         this._scoreActionHit(300 + breakerRank * 150, { col: en.col, floor: en.floor + 0.8 }, '#fb7185');
         this.addPopup({
           col: en.col,
           floor: en.floor + 1.25,
-          text: `WARDEN ${en.hp}/${en.maxHp}`,
+          text: source === 'deflect' ? `◎ DEFLECT COUNTER! (${en.hp}/${en.maxHp})` : `WARDEN ${en.hp}/${en.maxHp}`,
           color: '#fde047',
-          maxLife: 1.0,
+          maxLife: 1.1,
         });
+        if (nextTier > prevTier) {
+          const bTitle = (en.bossTitle || 'SIPHON WARDEN').toUpperCase();
+          if (nextTier === 3) {
+            this.lightningFlash = Math.max(this.lightningFlash, 0.72);
+            this.cb.onBanner?.(`${bTitle} — FINAL OVERDRIVE!`, 'DUAL BEAM & SLAM • CRACK SHIELD TO FINISH!');
+          } else {
+            this.cb.onBanner?.(`${bTitle} — PHASE 2!`, 'SIPHON SHIELD RECHARGED • WATCH FOR TENTACLE SLAM!');
+          }
+        }
         sound?.hitEnemy?.();
       }
       return;
@@ -3849,15 +3915,17 @@ export class ToweringWatersGame {
     // Waterline Check: Purified Floodgate Buoyant Swim vs Corrupted Siphon Surge!
     if (p.floor <= this.waterFloor + 0.02) {
       if (this.waterPurified) {
-        if (!p.isSwimming) {
-          p.isSwimming = true;
-          sound?.splash?.();
-          this._emitProgEvent('floodgate_swim', { towerId: this.tower?.id || 1 });
+        if (p.vy <= 0.1) {
+          if (!p.isSwimming) {
+            p.isSwimming = true;
+            sound?.splash?.();
+            this._emitProgEvent('floodgate_swim', { towerId: this.tower?.id || 1 });
+          }
+          p.floor = this.waterFloor;
+          p.vy = 0;
+          p.onGround = true;
+          p.swimPhase = (p.swimPhase || 0) + dt * 6.5;
         }
-        p.floor = this.waterFloor;
-        p.vy = 0;
-        p.onGround = true;
-        p.swimPhase = (p.swimPhase || 0) + dt * 6.5;
       } else if (p.floor < this.waterFloor) {
         // Bio-Mutation: Water-Strider Skim (`aqua_step`) emergency hydro-leap off surge water!
         if (this.hasMutation('aqua_step') && (this._aquaStepCooldown || 0) <= 0) {
@@ -4511,22 +4579,53 @@ export class ToweringWatersGame {
           en.telegraph = 0;
         }
       }
-      // 6. siphon_warden: Escalating 3-Phase Act-End Leviathan-Mech Boss!
+      // 6. siphon_warden: Escalating 3-Phase Act-End Leviathan-Mech & Lock-Keeper Boss!
       else if (en.type === 'siphon_warden') {
+        if ((en.bossHitCooldown || 0) > 0) {
+          en.bossHitCooldown = Math.max(0, en.bossHitCooldown - dt);
+        }
         en.bossTimer -= dt;
         const hpRatio = (en.hp || 1) / Math.max(1, en.maxHp || 3);
-        const phaseTier = hpRatio <= 0.35 ? 3 : hpRatio <= 0.66 ? 2 : 1;
+        const phaseTier = hpRatio <= 0.35 ? 3 : hpRatio <= 0.68 ? 2 : 1;
         en.bossPhaseTier = phaseTier;
         const breakerMult = 1 + this.getSkillRank('warden_breaker') * 0.2;
-        const spdMult = phaseTier === 3 ? 1.38 : phaseTier === 2 ? 1.20 : 1.0;
+        const spdMult = phaseTier === 3 ? 1.35 : phaseTier === 2 ? 1.18 : 1.0;
         en.slitherPhase = (en.slitherPhase || 0) + dt * (4.2 * spdMult);
 
-        // Phase 2 Escalation: deploy a flippable Snap-Crab springboard helper once per boss fight!
+        const advanceWardenCol = (speedVal) => {
+          if (en.arenaStart != null && en.arenaLen != null && en.arenaLen < COLS) {
+            const minOff = en.arenaMinOff ?? 0.85;
+            const maxOff = en.arenaMaxOff ?? Math.max(minOff, en.arenaLen - 0.85);
+            let nextOff = (en.arenaOffset ?? 0) + (en.dir || 1) * speedVal * dt;
+            if (nextOff >= maxOff) {
+              nextOff = maxOff;
+              en.dir = -1;
+            } else if (nextOff <= minOff) {
+              nextOff = minOff;
+              en.dir = 1;
+            }
+            en.arenaOffset = nextOff;
+            en.col = wrapCol(en.arenaStart + en.arenaOffset);
+          } else {
+            en.col = wrapCol(en.col + (en.dir || 1) * speedVal * dt);
+          }
+        };
+
+        // Phase 2 Escalation: deploy a flippable Snap-Crab springboard helper safely clear of Gateway!
         if (phaseTier >= 2 && !en.phase2Spawned && this.enemies.length < 8) {
           en.phase2Spawned = true;
-          const spawnLedge = this.ledges.find(
-            (l) => this._isWalkableLedge(l) && Math.abs(l.floor - Math.round(en.baseFloor)) <= 1
+          const arenaFloor = Math.round(en.baseFloor);
+          const candidateLedges = this.ledges.filter(
+            (l) =>
+              this._isWalkableLedge(l) &&
+              Math.abs(l.floor - arenaFloor) <= 1 &&
+              Math.abs(colDist(l.col + 0.5, p.col)) >= 2.1
           );
+          const spawnLedge =
+            candidateLedges.sort(
+              (a, b) => Math.abs(colDist(b.col + 0.5, p.col)) - Math.abs(colDist(a.col + 0.5, p.col))
+            )[0] ||
+            this.ledges.find((l) => this._isWalkableLedge(l) && Math.abs(l.floor - arenaFloor) <= 1);
           if (spawnLedge) {
             this.enemies.push(
               this._instantiateEnemy(
@@ -4542,19 +4641,19 @@ export class ToweringWatersGame {
           en.shielded = true;
           en.coreExposed = false;
           en.coreExposeTimer = 0;
-          en.col = wrapCol(en.col + en.dir * (en.speed || 2.1) * spdMult * dt);
+          advanceWardenCol((en.speed || 2.1) * spdMult);
           en.floor = en.baseFloor + Math.sin(en.slitherPhase * 0.7) * (phaseTier === 3 ? 0.55 : 0.42);
           en.telegraph = 0;
           en.openAmount = 0;
           if (en.bossTimer <= 0) {
             en.bossPhase = 'telegraph';
-            en.bossTimer = phaseTier === 3 ? 0.72 : 0.92;
+            en.bossTimer = phaseTier === 3 ? 0.75 : 0.92;
           }
         } else if (en.bossPhase === 'telegraph') {
           en.shielded = true;
           en.coreExposed = false;
           en.coreExposeTimer = 0;
-          en.telegraph = 1 - Math.max(0, en.bossTimer / (phaseTier === 3 ? 0.72 : 0.92));
+          en.telegraph = 1 - Math.max(0, en.bossTimer / (phaseTier === 3 ? 0.75 : 0.92));
           en.openAmount = en.telegraph;
           if (en.bossTimer <= 0) {
             if (Math.abs(en.floor - p.floor) < 6.0 && this.enemyProjectiles.length < 8) {
@@ -4601,7 +4700,7 @@ export class ToweringWatersGame {
             en.bossPhase = 'vulnerable';
             en.shielded = false;
             en.coreExposed = true;
-            en.bossTimer = (phaseTier === 3 ? 2.2 : 2.6) * breakerMult;
+            en.bossTimer = (phaseTier === 3 ? 2.4 : 2.8) * breakerMult;
             en.coreExposeTimer = en.bossTimer;
             en.dir *= -1;
           }
@@ -4612,13 +4711,13 @@ export class ToweringWatersGame {
           en.coreExposeTimer = Math.max(0, en.bossTimer);
           en.openAmount = 1;
           en.telegraph = 0.35;
-          en.col = wrapCol(en.col + en.dir * 0.75 * spdMult * dt);
+          advanceWardenCol(0.75 * spdMult);
           if (en.bossTimer <= 0) {
             en.bossPhase = 'patrol';
             en.shielded = true;
             en.coreExposed = false;
             en.coreExposeTimer = 0;
-            en.bossTimer = phaseTier === 3 ? 1.9 : 2.5;
+            en.bossTimer = phaseTier === 3 ? 1.85 : 2.4;
           }
         }
       }
@@ -5048,7 +5147,10 @@ export class ToweringWatersGame {
     const p = this.gateway;
     if (this.runType === 'purist') {
       // Purist Arcade Rule: zero mid-spire checkpoints -> full spire reset to Floor 0!
+      const prevDeathsHere = this.towerDeathsHere;
       this.loadTower(this.towerIndex);
+      this.towerDeathsHere = prevDeathsHere;
+      this.cb.onBanner?.(reason, `${this.lives} ${this.lives === 1 ? 'LIFE' : 'LIVES'} LEFT • FLOOR 0 RESET`);
       return;
     }
 

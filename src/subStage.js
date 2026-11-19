@@ -493,7 +493,7 @@ export class SubStage {
     if (this.hits === 0) {
       this.perfect = true;
       this._score(fx, PERFECT_BONUS);
-      fx.popup?.(this.sub.x, this.sub.y - 40 * this.s, `PURE TIDE SWIM +${PERFECT_BONUS}`, '#fde047');
+      fx.popup?.(this.sub.x, this.sub.y - 78 * this.s, `PURE TIDE SWIM +${PERFECT_BONUS}`, '#fde047');
       sound?.secret?.();
     }
     fx.banner?.(`SPIRE ${this.towerIndex + 2}`, `ARRIVING: ${this.nextTowerName}`);
@@ -888,7 +888,7 @@ export class SubStage {
           const mult = this._comboHit();
           const pts = VENT_BOOST_POINTS * mult;
           this._score(fx, pts);
-          fx.popup?.(swimmer.x, swimmer.y - 24 * s, `GEYSER SURGE! +${pts}`, '#67e8f9');
+          fx.popup?.(swimmer.x, swimmer.y - 78 * s, `GEYSER SURGE! +${pts}`, '#67e8f9');
           this._vfx('whoosh', swimmer.x, swimmer.y, { life: 0.4, size: swimmer.rx * 0.9, a: 1 });
           sound?.bubble?.();
         }
@@ -918,7 +918,7 @@ export class SubStage {
         this._ring(wc.x, wc.y, 8 * s, 85 * s, '#fde047', 0.58);
         this._vfx('sparkle', wc.x, wc.y, { life: 0.8, size: 42 * s, color: '#5efce8' });
         fx.particles?.(wc.x, wc.y, '#5efce8', 20, 145);
-        fx.popup?.(swimmer.x, swimmer.y - 26 * s, 'CORAL SANCTUARY! +5 SEEDS & AEGIS', '#5efce8');
+        fx.popup?.(swimmer.x, swimmer.y - 78 * s, 'CORAL SANCTUARY! +5 SEEDS & AEGIS', '#5efce8');
         (sound?.collectStar || sound?.secret)?.call(sound);
       }
       if (wc.x < -90 * s) wc.active = false;
@@ -1426,7 +1426,7 @@ export class SubStage {
     }
     fx.popup?.(
       swimmer.x,
-      swimmer.y - 30 * this.s,
+      swimmer.y - 78 * this.s,
       penalty > 0 ? `${kind === 'mine' ? 'SURGE!' : 'STING!'} -${penalty}` : kind === 'mine' ? 'SURGE!' : 'STING!',
       '#fb7185'
     );
@@ -1467,7 +1467,7 @@ export class SubStage {
       const mult = this._comboHit();
       const pts = NEAR_MISS_POINTS * mult;
       this._score(fx, pts);
-      fx.popup?.(swimmer.x, swimmer.y - 34 * this.s, mult > 1 ? `GLIDE SLIP +${pts} x${mult}` : `GLIDE SLIP +${pts}`, '#67e8f9');
+      fx.popup?.(swimmer.x, swimmer.y - 78 * this.s, mult > 1 ? `GLIDE SLIP +${pts} x${mult}` : `GLIDE SLIP +${pts}`, '#67e8f9');
       this._vfx('whoosh', swimmer.x, swimmer.y, { life: 0.45, size: swimmer.rx, a: y < swimmer.y ? -1 : 1 });
       (sound?.nearMiss || sound?.whoosh || sound?.gust)?.call(sound);
     }

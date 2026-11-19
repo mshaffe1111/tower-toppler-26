@@ -887,21 +887,28 @@ export function getMinigamePortalSVG(gameId = 'core_descent') {
     focalHue = '#99f6e4';
     scene = `
       <!-- Sunlit Tropical Caustic Light Shafts -->
-      <polygon points="110,0 165,0 215,132 138,132" fill="#e0f2fe" opacity="0.18"/>
-      <polygon points="235,0 288,0 342,132 268,132" fill="#99f6e4" opacity="0.16"/>
+      <polygon points="108,0 162,0 212,132 136,132" fill="#e0f2fe" opacity="0.18"/>
+      <polygon points="236,0 288,0 342,132 268,132" fill="#99f6e4" opacity="0.16"/>
       <!-- Lush Staghorn Coral Shelf & Freed Sea Turtle -->
-      <path d="M 60 132 Q 160 104 260 116 T 380 108 L 380 132 Z" fill="#064e3b"/>
-      <path d="M 292 124 C 292 102, 278 92, 272 80 M 292 114 C 302 100, 310 92, 314 82" fill="none" stroke="#fb7185" stroke-width="4" stroke-linecap="round"/>
-      <ellipse cx="326" cy="56" rx="12" ry="8" fill="#34d399" stroke="#fef08a" stroke-width="1.1"/>
-      <path d="M 322 48 L 314 38 L 328 49 M 322 64 L 314 74 L 328 63" fill="#10b981"/>
-      <!-- Gateway Free-Swimming Directly Underwater (Undulating Lizard Spine & Tail!) -->
-      <g transform="translate(196, 66)">
-        <path d="M -68 4 C -46 -14, -24 16, -2 2" fill="none" stroke="#2dd4bf" stroke-width="5.5" stroke-linecap="round"/>
-        <ellipse cx="16" cy="0" rx="18" ry="8" fill="#0d9488" stroke="#5efce8" stroke-width="1.3"/>
-        <path d="M 26 -6 L 12 -19 L 22 -3 M 26 6 L 12 19 L 22 3" fill="#5efce8" opacity="0.88"/>
-        <ellipse cx="35" cy="-1" rx="8.5" ry="5.8" fill="#5efce8"/>
-        <circle cx="38" cy="-2.2" r="2" fill="#fde047"/>
-        <circle cx="54" cy="0" r="12" fill="none" stroke="#99f6e4" stroke-width="1.6" stroke-dasharray="5 3"/>
+      <path d="M 54 132 Q 160 104 260 116 T 380 108 L 380 132 Z" fill="#064e3b"/>
+      <path d="M 294 124 C 294 102, 280 92, 274 80 M 294 114 C 304 100, 312 92, 316 82" fill="none" stroke="#fb7185" stroke-width="4" stroke-linecap="round"/>
+      <ellipse cx="332" cy="50" rx="11" ry="7.5" fill="#34d399" stroke="#fef08a" stroke-width="1.1"/>
+      <path d="M 328 43 L 320 34 L 334 44 M 328 57 L 320 66 L 334 56" fill="#10b981"/>
+      <!-- Pelagian Bio-Submersible with Crystal Canopy & Hydro-Sonar Beam -->
+      <polygon points="254,64 366,34 366,94" fill="url(#${uid}-beam)" opacity="0.72"/>
+      <g transform="translate(198, 66)">
+        <!-- Rear Bronze Hydro-Propeller Ring -->
+        <ellipse cx="-42" cy="0" rx="5.5" ry="15" fill="none" stroke="url(#${uid}-bronze)" stroke-width="3.2"/>
+        <!-- Crystal Bubble Canopy & Gateway Silhouette Inside -->
+        <path d="M -14 -12 A 22 18 0 0 1 28 -10 Z" fill="rgba(165,243,252,0.34)" stroke="#fde047" stroke-width="1.8"/>
+        <circle cx="8" cy="-16" r="5" fill="#5efce8"/>
+        <path d="M 4 -19 L -4 -25 L 3 -15 M 12 -19 L 19 -25 L 13 -15" fill="#fb7185" opacity="0.9"/>
+        <!-- Sculpted Dark-Bronze Hydro-Hull -->
+        <path d="M -38 -8 C -22 -14, 24 -14, 46 -6 C 54 -2, 54 4, 46 8 C 24 16, -22 16, -38 8 Z" fill="#0b354a" stroke="url(#${uid}-bronze)" stroke-width="2.1"/>
+        <!-- Warm Illuminated Brass Portholes & Nose Emitter -->
+        <circle cx="-10" cy="2" r="5.2" fill="#fef08a" stroke="#b45309" stroke-width="1.4"/>
+        <circle cx="14" cy="2" r="5.2" fill="#fef08a" stroke="#b45309" stroke-width="1.4"/>
+        <ellipse cx="48" cy="1" rx="3.4" ry="7.5" fill="#5efce8" stroke="#fde047" stroke-width="1.2"/>
       </g>
     `;
   } else if (id === 'rapids_surf') {
@@ -1117,8 +1124,8 @@ const WATERSHED_BIOME_BANDS = [
     code: 'ACT I • REDWOOD CANYON RIVERS',
     shortName: 'CANYON RIVERS',
     theme: 'canyon_river',
-    yTop: 448,
-    yBot: 554,
+    yTop: 470,
+    yBot: 586,
     parchedFill: '#5c4d3c',
     restoredFill: '#115e59',
     waterParched: '#786652',
@@ -1132,8 +1139,8 @@ const WATERSHED_BIOME_BANDS = [
     code: 'ACT II • CRYSTAL ALPINE LAKES',
     shortName: 'ALPINE LAKES',
     theme: 'alpine_lake',
-    yTop: 338,
-    yBot: 448,
+    yTop: 354,
+    yBot: 470,
     parchedFill: '#57534e',
     restoredFill: '#0e4f6e',
     waterParched: '#78716c',
@@ -1147,8 +1154,8 @@ const WATERSHED_BIOME_BANDS = [
     code: 'ACT III • EMERALD MIST BAYOUS',
     shortName: 'MIST BAYOUS',
     theme: 'mist_bayou',
-    yTop: 228,
-    yBot: 338,
+    yTop: 238,
+    yBot: 354,
     parchedFill: '#4f4a3e',
     restoredFill: '#065f46',
     waterParched: '#6b6353',
@@ -1162,8 +1169,8 @@ const WATERSHED_BIOME_BANDS = [
     code: 'ACT IV • SUNLIT CORAL SEAS',
     shortName: 'CORAL SEAS',
     theme: 'coral_sea',
-    yTop: 118,
-    yBot: 228,
+    yTop: 122,
+    yBot: 238,
     parchedFill: '#615548',
     restoredFill: '#0284c7',
     waterParched: '#7c6f60',
@@ -1178,7 +1185,7 @@ const WATERSHED_BIOME_BANDS = [
     shortName: 'TEMPEST OCEANS',
     theme: 'storm_ocean',
     yTop: 6,
-    yBot: 118,
+    yBot: 122,
     parchedFill: '#3f3f46',
     restoredFill: '#1e3a8a',
     waterParched: '#52525b',
@@ -1190,16 +1197,16 @@ const WATERSHED_BIOME_BANDS = [
 ];
 
 const NODE_COORDS_10 = [
-  { x: 102, y: 506, actIdx: 0, routeNext: 'rapids_surf', routeLbl: 'SURF' },
-  { x: 306, y: 476, actIdx: 0, routeNext: 'frill_glide', routeLbl: 'GLIDE' },
-  { x: 296, y: 398, actIdx: 1, routeNext: 'reef_swim', routeLbl: 'SWIM' },
-  { x: 112, y: 368, actIdx: 1, routeNext: 'frill_glide', routeLbl: 'GLIDE' },
-  { x: 118, y: 292, actIdx: 2, routeNext: 'rapids_surf', routeLbl: 'SURF' },
-  { x: 308, y: 262, actIdx: 2, routeNext: 'reef_swim', routeLbl: 'SWIM' },
-  { x: 298, y: 184, actIdx: 3, routeNext: 'rapids_surf', routeLbl: 'SURF' },
-  { x: 114, y: 152, actIdx: 3, routeNext: 'frill_glide', routeLbl: 'GLIDE' },
-  { x: 126, y: 82, actIdx: 4, routeNext: 'reef_swim', routeLbl: 'SWIM' },
-  { x: 292, y: 48, actIdx: 4, routeNext: null, routeLbl: '' },
+  { x: 108, y: 554, actIdx: 0, routeNext: 'rapids_surf', routeLbl: 'SURF' },
+  { x: 294, y: 538, actIdx: 0, routeNext: 'frill_glide', routeLbl: 'GLIDE' },
+  { x: 294, y: 440, actIdx: 1, routeNext: 'reef_swim', routeLbl: 'DIVE' },
+  { x: 108, y: 424, actIdx: 1, routeNext: 'frill_glide', routeLbl: 'GLIDE' },
+  { x: 108, y: 324, actIdx: 2, routeNext: 'rapids_surf', routeLbl: 'SURF' },
+  { x: 294, y: 308, actIdx: 2, routeNext: 'reef_swim', routeLbl: 'DIVE' },
+  { x: 294, y: 208, actIdx: 3, routeNext: 'rapids_surf', routeLbl: 'SURF' },
+  { x: 108, y: 192, actIdx: 3, routeNext: 'frill_glide', routeLbl: 'GLIDE' },
+  { x: 108, y: 92, actIdx: 4, routeNext: 'reef_swim', routeLbl: 'DIVE' },
+  { x: 294, y: 78, actIdx: 4, routeNext: null, routeLbl: '' },
 ];
 
 const DEFAULT_SPIRE_BRIEFS = [
@@ -1314,18 +1321,21 @@ export function renderWatershedWorldMap(container, opts = {}) {
       `;
     }).join('');
 
-    // 2. Inter-Spire Living Water Travel Routes
+    // 2. Inter-Spire Living Water Travel Routes (Zero collision with Act headers or spire tips!)
     const routesSvg = coordsList
       .slice(0, -1)
       .map((nd, idx) => {
         const nx = coordsList[idx + 1];
         const routeActive = readStars(idx).clear;
-        const mx = (nd.x + nx.x) * 0.5;
-        const my = (nd.y + nx.y) * 0.5 - 8;
+        const isVerticalHop = Math.abs(nd.x - nx.x) < 40;
+        const mx = isVerticalHop ? (nd.x > 200 ? 356 : 48) : (nd.x + nx.x) * 0.5;
+        const my = isVerticalHop ? nd.y - 34 : (nd.y + nx.y) * 0.5 - 4;
+        const ctrlX = isVerticalHop ? (nd.x > 200 ? 378 : 26) : mx;
+        const ctrlY = isVerticalHop ? (nd.y + nx.y) * 0.5 : my;
         const strokeCol = routeActive ? '#5efce8' : 'rgba(214,211,209,0.34)';
         return `
           <g class="sea-route-group ${routeActive ? 'unlocked' : 'locked'}">
-            <path d="M ${nd.x} ${nd.y} Q ${mx} ${my} ${nx.x} ${nx.y}" fill="none" stroke="${strokeCol}" stroke-width="${routeActive ? '2.8' : '1.6'}" stroke-dasharray="${routeActive ? 'none' : '5 5'}" stroke-linecap="round"/>
+            <path d="M ${nd.x} ${nd.y} Q ${fmt(ctrlX)} ${fmt(ctrlY)} ${nx.x} ${nx.y}" fill="none" stroke="${strokeCol}" stroke-width="${routeActive ? '2.8' : '1.6'}" stroke-dasharray="${routeActive ? 'none' : '5 5'}" stroke-linecap="round"/>
             ${
               nd.routeNext
                 ? `<g class="sea-route-pill ${routeActive ? 'unlocked' : 'locked'}" data-route-idx="${idx}" transform="translate(${fmt(mx)}, ${fmt(my)})" style="cursor:pointer;">
@@ -1436,10 +1446,10 @@ export function renderWatershedWorldMap(container, opts = {}) {
         </div>
 
         <div class="sea-chart-frame watershed-svg-frame">
-          <svg class="sea-chart-svg" viewBox="0 0 420 560" xmlns="http://www.w3.org/2000/svg" role="region" aria-label="Earth Living Watershed Restoration Map">
+          <svg class="sea-chart-svg" viewBox="0 0 420 592" xmlns="http://www.w3.org/2000/svg" role="region" aria-label="Earth Living Watershed Restoration Map">
             <defs>
               <clipPath id="${uid}-clip">
-                <rect x="6" y="6" width="408" height="548" rx="10"/>
+                <rect x="6" y="6" width="408" height="580" rx="10"/>
               </clipPath>
             </defs>
             <g clip-path="url(#${uid}-clip)">
@@ -1447,7 +1457,7 @@ export function renderWatershedWorldMap(container, opts = {}) {
               ${routesSvg}
               ${nodesSvg}
             </g>
-            <rect x="6" y="6" width="408" height="548" rx="10" fill="none" stroke="#eab308" stroke-width="1.8" opacity="0.82"/>
+            <rect x="6" y="6" width="408" height="580" rx="10" fill="none" stroke="#eab308" stroke-width="1.8" opacity="0.82"/>
           </svg>
         </div>
 

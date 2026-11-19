@@ -2168,20 +2168,20 @@ function buildCoralReefShelfGeometry() {
     return seed / 4294967296;
   };
 
-  // 1. Sculpted scalloped white-sand & turquoise coral shoals (`r = 5.2..34m`, `y = -0.68..-1.95m`)
+  // 1. Sculpted scalloped white-sand & turquoise coral shoals (`r = 12.5..38m`, submerged cleanly below Floor 0!)
   const reefPatches = 28;
   const coralPalette = [
-    ['#e11d48', '#fda4af'], // Vivid Coral-Rose Staghorn
-    ['#ea580c', '#fde047'], // Sunburst Brain Coral
-    ['#7c3aed', '#e9d5ff'], // Royal Sea-Fan
-    ['#0d9488', '#5eead4'], // Turquoise Table Acropora
-    ['#15803d', '#86efac'], // Emerald Reef Anemone
+    ['#0f766e', '#5eead4'], // Turquoise Table Acropora
+    ['#0284c7', '#7dd3fc'], // Lagoon Blue Staghorn
+    ['#b45309', '#f59e0b'], // Warm Ochre Brain Coral
+    ['#15803d', '#6ee7b7'], // Emerald Reef Anemone
+    ['#0e7490', '#99f6e4'], // Deep Seafoam Fan
   ];
 
   for (let i = 0; i < reefPatches; i++) {
     const ang = (i / reefPatches) * TWO_PI + rnd() * 0.14;
-    const rad = 5.4 + (i % 4) * 5.5 + rnd() * 2.8;
-    const shelfY = -0.76 - (i % 3) * 0.26;
+    const rad = 12.6 + (i % 4) * 6.0 + rnd() * 3.0;
+    const shelfY = -1.38 - (i % 3) * 0.28;
     const shelfW = 2.8 + rnd() * 2.4;
 
     const cx = Math.sin(ang) * rad;
@@ -2207,7 +2207,7 @@ function buildCoralReefShelfGeometry() {
     const brainUv = [0.02, 0.02, 0.46, 0.46];
     const fanUv = [0.52, 0.02, 0.46, 0.46];
 
-    const heads = 7;
+    const heads = 6;
     for (let h = 0; h < heads; h++) {
       const ha = rnd() * TWO_PI;
       const hr = rnd() * shelfW * 0.68;
@@ -2215,46 +2215,46 @@ function buildCoralReefShelfGeometry() {
       const hz = cz + Math.sin(ha) * hr;
       const pal = coralPalette[(i + h) % coralPalette.length];
       const kind = (i + h) % 3;
-      const cWorld = new THREE.Vector3(hx, shelfY + 0.35, hz);
+      const cWorld = new THREE.Vector3(hx, shelfY + 0.25, hz);
 
       if (kind === 0) {
-        // Turing-Grooved Brain Coral Cushion (tilted horizontal + low crossed dome cards)
-        const rDome = 0.75 + rnd() * 0.55;
+        // Turing-Grooved Brain Coral Cushion (tilted horizontal dome well beneath waterline)
+        const rDome = 0.72 + rnd() * 0.48;
         const flat = new THREE.PlaneGeometry(rDome * 1.4, rDome * 1.4, 2, 2);
         flat.rotateX(-Math.PI * 0.5);
         const fp = flat.attributes.position;
         for (let fi = 0; fi < fp.count; fi++) {
           const d = Math.hypot(fp.getX(fi), fp.getZ(fi)) / (rDome * 0.72);
-          fp.setY(fi, Math.max(0, 1.0 - d * d) * 0.34);
+          fp.setY(fi, Math.max(0, 1.0 - d * d) * 0.30);
         }
         flat.computeVertexNormals();
         const mFlat = new THREE.Matrix4()
-          .makeTranslation(hx, shelfY + 0.08, hz)
+          .makeTranslation(hx, shelfY + 0.06, hz)
           .multiply(new THREE.Matrix4().makeRotationY(rnd() * TWO_PI));
         b._pushDoubleSidedCard(flat, mFlat, 0.0, 1.5, 8, 0.1, pal[0], pal[1], brainUv, cWorld);
       } else if (kind === 1) {
-        // Crossed 3D Lacy Gorgonia Sea-Fan Cards swaying in lagoon current!
-        const fanSz = 0.92 + rnd() * 0.58;
+        // Submerged Gorgonia Sea-Fan swaying beneath lagoon water (never poking above y = -0.45m!)
+        const fanSz = 0.56 + rnd() * 0.32;
         for (let cr = 0; cr < 2; cr++) {
           const fan = new THREE.PlaneGeometry(fanSz, fanSz, 2, 2);
-          fan.translate(0, fanSz * 0.46, 0);
+          fan.translate(0, fanSz * 0.38, 0);
           const mFan = new THREE.Matrix4()
             .makeTranslation(hx, shelfY, hz)
             .multiply(new THREE.Matrix4().makeRotationY(ha + cr * Math.PI * 0.48))
             .multiply(new THREE.Matrix4().makeRotationX((cr - 0.5) * 0.18));
-          b._pushDoubleSidedCard(fan, mFan, 0.0, 1.5, 8, 0.45, '#f0abfc', '#ffffff', fanUv, cWorld);
+          b._pushDoubleSidedCard(fan, mFan, 0.0, 1.5, 8, 0.38, pal[0], pal[1], fanUv, cWorld);
         }
       } else {
-        // Crossed 3D Branching Acropora Staghorn Coral Cluster with glowing polyp tips!
-        const stagSz = 0.95 + rnd() * 0.62;
+        // Submerged Acropora Staghorn Coral Cluster beneath lagoon surface
+        const stagSz = 0.58 + rnd() * 0.34;
         for (let cr = 0; cr < 2; cr++) {
-          const stag = new THREE.PlaneGeometry(stagSz, stagSz * 0.95, 2, 2);
-          stag.translate(0, stagSz * 0.44, 0);
+          const stag = new THREE.PlaneGeometry(stagSz, stagSz * 0.9, 2, 2);
+          stag.translate(0, stagSz * 0.36, 0);
           const mStag = new THREE.Matrix4()
             .makeTranslation(hx, shelfY, hz)
             .multiply(new THREE.Matrix4().makeRotationY(ha + cr * Math.PI * 0.52))
             .multiply(new THREE.Matrix4().makeRotationX((cr - 0.5) * 0.24));
-          b._pushDoubleSidedCard(stag, mStag, 0.0, 1.5, 8, 0.25, pal[0], '#ffffff', stagUv, cWorld);
+          b._pushDoubleSidedCard(stag, mStag, 0.0, 1.5, 8, 0.25, pal[0], pal[1], stagUv, cWorld);
         }
       }
     }
@@ -2370,7 +2370,8 @@ function createUnderwaterReefMaterial(fallbackWhiteTex) {
           if (vVista.z > 7.5) {
             vec4 cSample = texture2D(uCoralAtlasTex, vUv);
             if (cSample.a < 0.26) discard;
-            baseAlb = cSample.rgb * mix(vec3(1.0), vCol, 0.35);
+            float luma = dot(cSample.rgb, vec3(0.299, 0.587, 0.114));
+            baseAlb = mix(vec3(luma), cSample.rgb, 0.35) * mix(vec3(0.75), vCol, 0.72);
           }
         #endif
 

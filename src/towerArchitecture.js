@@ -1779,6 +1779,44 @@ function getDetailTextures() {
     { srgb: true, clamp: true }
   );
 
+  const phaseRune = makeCanvasOrDataTex(
+    256,
+    64,
+    (g, w, h) => {
+      g.fillStyle = '#000000';
+      g.fillRect(0, 0, w, h);
+      g.strokeStyle = '#ffffff';
+      g.lineCap = 'round';
+      g.lineJoin = 'round';
+      g.shadowColor = '#ffffff';
+      g.shadowBlur = 6;
+      // Top & bottom recessed aqueduct channel lines
+      g.lineWidth = 2.6;
+      g.beginPath();
+      g.moveTo(0, 10);
+      g.lineTo(w, 10);
+      g.moveTo(0, h - 10);
+      g.lineTo(w, h - 10);
+      g.stroke();
+      // Repeating Pelagian wave-scroll & hydro-diamond frieze runes
+      g.lineWidth = 3.2;
+      for (let x = 16; x < w; x += 48) {
+        g.beginPath();
+        g.moveTo(x, h * 0.5);
+        g.lineTo(x + 12, h * 0.5 - 12);
+        g.lineTo(x + 24, h * 0.5);
+        g.lineTo(x + 12, h * 0.5 + 12);
+        g.closePath();
+        g.stroke();
+        g.beginPath();
+        g.moveTo(x + 28, h * 0.5);
+        g.quadraticCurveTo(x + 36, h * 0.5 - 11, x + 44, h * 0.5);
+        g.stroke();
+      }
+    },
+    { srgb: true, repeat: [2, 1] }
+  );
+
   DETAIL_TEX = {
     glowDot,
     mist,
@@ -1791,8 +1829,172 @@ function getDetailTextures() {
     hazard,
     runeBox,
     runeSigil,
+    phaseRune,
   };
   return DETAIL_TEX;
+}
+
+const HYDRO_BARRIER_MAT_CACHE = new Map();
+function createHydroBarrierMaterial(isCrimson = true) {
+  const key = isCrimson ? 'crimson' : 'cyan';
+  if (HYDRO_BARRIER_MAT_CACHE.has(key)) return HYDRO_BARRIER_MAT_CACHE.get(key);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uCoreCol: { value: new THREE.Color(isCrimson ? '#b91c48' : '#0369a1') },
+      uFoamCol: { value: new THREE.Color(isCrimson ? '#fb7185' : '#7dd3fc') },
+      uSparkCol: { value: new THREE.Color(isCrimson ? '#ffe4e6' : '#e0f2fe') },
+    },
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.NormalBlending,
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform vec3 uCoreCol;
+      uniform vec3 uFoamCol;
+      uniform vec3 uSparkCol;
+      varying vec2 vUv;
+
+      void main() {
+        // Horizontal high-pressure laminar water-jet bands from the 3 bronze sluice nozzles
+        float jet1 = exp(-pow((vUv.y - 0.18) / 0.075, 2.0));
+        float jet2 = exp(-pow((vUv.y - 0.50) / 0.085, 2.0));
+        float jet3 = exp(-pow((vUv.y - 0.82) / 0.075, 2.0));
+        float jets = clamp(jet1 + jet2 + jet3, 0.0, 1.25);
+
+        // Counter-flowing pressurized hydro streams & fine caustic turbulence
+        float streamA = 0.5 + 0.5 * sin(vUv.x * 24.0 - uTime * 11.5 + sin(vUv.y * 14.0 + uTime * 3.2) * 1.4);
+        float streamB = 0.5 + 0.5 * sin(vUv.x * 34.0 + uTime * 9.8 - vUv.y * 18.0);
+        float curtainRip = 0.5 + 0.5 * sin(vUv.y * 28.0 - uTime * 5.2 + sin(vUv.x * 10.0) * 1.1);
+        float foamFilaments = pow(streamA * 0.56 + streamB * 0.44, 2.4);
+
+        // Pressurized nozzle spray flare at left & right emitter mouths (vUv.x near 0 or 1)
+        float edgeSpray = exp(-vUv.x * 10.5) + exp(-(1.0 - vUv.x) * 10.5);
+        float vertEnv = smoothstep(0.0, 0.08, vUv.y) * smoothstep(1.0, 0.90, vUv.y);
+        float horizEnv = smoothstep(0.0, 0.03, vUv.x) * smoothstep(1.0, 0.97, vUv.x);
+
+        vec3 col = mix(uCoreCol, uFoamCol, clamp(foamFilaments * 0.72 + jets * 0.30 + curtainRip * 0.16, 0.0, 1.0));
+        col = mix(col, uSparkCol, clamp(edgeSpray * jets * 0.48 + pow(foamFilaments, 3.2) * jets * 0.36, 0.0, 0.72));
+        float density = 0.34 + 0.16 * curtainRip + jets * (0.28 + 0.24 * foamFilaments) + edgeSpray * 0.22;
+        float alpha = clamp(density * vertEnv * horizEnv, 0.0, 0.82);
+        gl_FragColor = vec4(col, alpha);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+  mat.userData.shared = true;
+  HYDRO_BARRIER_MAT_CACHE.set(key, mat);
+  return mat;
+}
+
+function createCrownPortalAuraMaterial() {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uUnsealed: { value: 0 }, // 0 = locked, 1 = 3/3 radiant open!
+      uProgress: { value: 0 }, // 0..1 fraction of broken seals
+    },
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      varying vec3 vNrm;
+      varying vec3 vView;
+      void main() {
+        vUv = uv;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vNrm = normalize(normalMatrix * normal);
+        vView = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform float uUnsealed;
+      uniform float uProgress;
+      varying vec2 vUv;
+      varying vec3 vNrm;
+      varying vec3 vView;
+
+      void main() {
+        float ang = vUv.x * 6.2831853;
+        float r1 = 0.5 + 0.5 * sin(ang * 6.0 - uTime * 1.8 + vUv.y * 5.0);
+        float r2 = 0.5 + 0.5 * cos(ang * 10.0 + uTime * 1.4 - vUv.y * 7.5);
+        float rise = 0.5 + 0.5 * sin(vUv.y * 14.0 - uTime * 3.4 + sin(ang * 4.0) * 1.1);
+        float vFade = smoothstep(0.0, 0.16, vUv.y) * pow(smoothstep(1.0, 0.06, vUv.y), 1.35);
+        float fres = pow(abs(dot(normalize(vNrm), normalize(vView))), 0.65);
+
+        vec3 lockedCol = mix(vec3(0.75, 0.12, 0.22), vec3(0.98, 0.45, 0.22), r1 * 0.6 + uProgress * 0.35);
+        vec3 openAqua = vec3(0.16, 0.88, 0.96);
+        vec3 openGold = vec3(1.0, 0.90, 0.48);
+        vec3 openCol = mix(openAqua, openGold, clamp(pow(rise, 2.2) * 0.65 + (1.0 - vUv.y) * 0.42, 0.0, 1.0));
+
+        vec3 col = mix(lockedCol, openCol, uUnsealed);
+        float ribbon = smoothstep(0.24, 0.94, r1 * 0.56 + r2 * 0.44) * (0.62 + 0.38 * rise);
+        float strength = mix(0.16 + 0.08 * uProgress, 0.56, uUnsealed);
+        float alpha = vFade * fres * (0.28 + 0.72 * ribbon) * strength;
+        gl_FragColor = vec4(col * mix(0.95, 1.35, uUnsealed), clamp(alpha, 0.0, 0.72));
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+}
+
+function createSealBarrierMaterial() {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uStrength: { value: 1.0 }, // dims gracefully as seals break (1.0 -> 0.72 -> 0.45)
+    },
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform float uStrength;
+      varying vec2 vUv;
+
+      void main() {
+        // Arch-masked Pelagian siphon seal veil (feathered inside the doorway arch!)
+        vec2 p = vUv - vec2(0.5, 0.52);
+        float archR = length(vec2(p.x * 2.0, max(0.0, p.y - 0.14) * 2.7));
+        float archMask = smoothstep(1.02, 0.76, archR) * smoothstep(0.0, 0.12, vUv.y) * smoothstep(0.0, 0.12, vUv.x) * smoothstep(1.0, 0.88, vUv.x);
+
+        float wave1 = 0.5 + 0.5 * sin(vUv.y * 22.0 - uTime * 3.8 + sin(vUv.x * 12.0) * 1.4);
+        float wave2 = 0.5 + 0.5 * cos(vUv.x * 18.0 + uTime * 2.4 + vUv.y * 10.0);
+        float ring = exp(-pow((length((vUv - vec2(0.5, 0.52)) * vec2(1.0, 1.35)) - 0.28) / 0.045, 2.0));
+        float pulse = 0.78 + 0.22 * sin(uTime * 4.5);
+
+        vec3 crimson = vec3(0.88, 0.12, 0.26);
+        vec3 ember = vec3(1.0, 0.58, 0.24);
+        vec3 col = mix(crimson, ember, clamp(wave1 * 0.45 + ring * 0.75, 0.0, 1.0));
+        float alpha = archMask * (0.14 + 0.18 * wave1 * wave2 + 0.30 * ring) * pulse * uStrength;
+        gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.58));
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  });
 }
 
 const PORTAL_MAT_CACHE = new Map();
@@ -2057,10 +2259,10 @@ const BIOME_SPECS = {
     tile: 0.58,
     colors: ['#242f42', '#2f3c54', '#1c2536', '#394863', '#29354a'],
     mortar: '#080e1a',
-    coreGlow: ['#0284c7', 0.34],
-    roughness: 0.32,
-    metalness: 0.42,
-    normalScale: 1.18,
+    coreGlow: ['#0c223d', 0.10],
+    roughness: 0.44,
+    metalness: 0.24,
+    normalScale: 1.12,
     hi: '#e0f2fe',
     edgeDarken: 0.24,
     useMetalMap: true,
@@ -2284,29 +2486,53 @@ function getSharedArchGeometries() {
   };
 
   const buildMossClusterGeo = () => {
-    const m1 = new THREE.SphereGeometry(0.11, 6, 3, 0, TWO_PI, 0, Math.PI * 0.68);
-    m1.scale(1.55, 0.38, 0.78);
-    const m2 = new THREE.SphereGeometry(0.085, 5, 3, 0, TWO_PI, 0, Math.PI * 0.68);
-    m2.scale(1.32, 0.36, 0.72);
-    m2.translate(0.11, -0.015, 0.02);
-    const m3 = new THREE.SphereGeometry(0.068, 5, 3, 0, TWO_PI, 0, Math.PI * 0.75);
-    m3.scale(0.88, 1.15, 0.58);
-    m3.translate(0.02, -0.075, 0.048);
-    return mergeGeometries([m1, m2, m3]);
+    // Low-profile stone-hugging draped moss & lichen cushion (ZERO floating cartoon mushrooms!)
+    const parts = [];
+    const m1 = new THREE.SphereGeometry(0.105, 7, 4, 0, TWO_PI, 0, Math.PI * 0.55);
+    m1.scale(1.85, 0.24, 0.28);
+    m1.translate(0, 0.008, -0.008);
+    parts.push(m1);
+    const m2 = new THREE.SphereGeometry(0.082, 6, 4, 0, TWO_PI, 0, Math.PI * 0.55);
+    m2.scale(1.45, 0.22, 0.24);
+    m2.translate(0.11, -0.012, -0.004);
+    parts.push(m2);
+    const m3 = new THREE.SphereGeometry(0.072, 6, 4, 0, TWO_PI, 0, Math.PI * 0.55);
+    m3.scale(1.25, 0.20, 0.22);
+    m3.translate(-0.10, -0.008, -0.005);
+    parts.push(m3);
+    // Subtle downward stone-crevice moss drape flush to masonry face
+    const m4 = new THREE.SphereGeometry(0.056, 5, 4);
+    m4.scale(0.85, 1.05, 0.16);
+    m4.translate(0.03, -0.042, 0.004);
+    parts.push(m4);
+    return mergeGeometries(parts);
   };
 
   const buildCoralClusterGeo = () => {
-    const c1 = new THREE.CylinderGeometry(0.095, 0.032, 0.24, 7);
-    c1.rotateX(0.45);
-    c1.translate(0, 0.06, 0.08);
-    const c2 = new THREE.CylinderGeometry(0.075, 0.026, 0.19, 6);
-    c2.rotateX(0.55);
-    c2.rotateZ(-0.42);
-    c2.translate(0.08, 0.02, 0.07);
-    const c3 = new THREE.SphereGeometry(0.072, 7, 5);
-    c3.scale(1.2, 0.65, 1.0);
-    c3.translate(-0.06, -0.02, 0.05);
-    return mergeGeometries([c1, c2, c3]);
+    // Low-profile weathered carved travertine barnacle & calcified sea-shell stone reliefs hugging the masonry
+    const parts = [];
+    const specs = [
+      { rT: 0.028, rB: 0.072, h: 0.044, x: 0.0, y: 0.012, z: 0.018, rx: Math.PI * 0.5 },
+      { rT: 0.022, rB: 0.056, h: 0.036, x: 0.078, y: -0.014, z: 0.014, rx: Math.PI * 0.48 },
+      { rT: 0.020, rB: 0.052, h: 0.034, x: -0.072, y: -0.008, z: 0.014, rx: Math.PI * 0.52 },
+      { rT: 0.016, rB: 0.042, h: 0.028, x: 0.032, y: 0.068, z: 0.011, rx: Math.PI * 0.46 },
+      { rT: 0.015, rB: 0.040, h: 0.026, x: -0.038, y: -0.058, z: 0.011, rx: Math.PI * 0.54 },
+    ];
+    for (let i = 0; i < specs.length; i++) {
+      const s = specs[i];
+      const barnacle = new THREE.CylinderGeometry(s.rT, s.rB, s.h, 7);
+      barnacle.rotateX(s.rx);
+      barnacle.rotateZ((i - 2) * 0.24);
+      barnacle.translate(s.x, s.y, s.z);
+      parts.push(barnacle);
+    }
+    // Scalloped calcified stone collar backing for seamless blend into travertine ashlar
+    const backing = new THREE.CylinderGeometry(0.115, 0.132, 0.018, 9);
+    backing.rotateX(Math.PI * 0.5);
+    backing.scale(1.18, 0.84, 1.0);
+    backing.translate(0.004, 0.0, 0.006);
+    parts.push(backing);
+    return mergeGeometries(parts);
   };
 
   const buildCrystalClusterGeo = () => {
@@ -2344,12 +2570,23 @@ function getSharedArchGeometries() {
   };
 
   const buildButtressSegGeo = () => {
-    // 1-floor native height (`FLOOR_HEIGHT - 0.04`) so `sy = 1.0` preserves crisp 1:1 unstretched stone/timber UVs!
-    const h = FLOOR_HEIGHT - 0.04;
-    const spine = new RoundedBoxGeometry(0.34, h, 0.42, 1, 0.028);
-    const fin = new RoundedBoxGeometry(0.18, h - 0.04, 0.56, 1, 0.022);
+    // Interlocking 1-floor height (`FLOOR_HEIGHT + 0.025`) so consecutive buttress courses have ZERO horizontal sky slits!
+    const h = FLOOR_HEIGHT + 0.025;
+    const spine = new RoundedBoxGeometry(0.34, h, 0.42, 1, 0.024);
+    const fin = new RoundedBoxGeometry(0.18, h, 0.56, 1, 0.02);
     fin.translate(0, 0, 0.06);
     return mergeGeometries([spine, fin]);
+  };
+
+  const buildButtressBaseGeo = () => {
+    // Tapered carved stone corbel foot anchoring floating upper buttresses cleanly back into the spire wall!
+    const topLip = new RoundedBoxGeometry(0.38, 0.11, 0.60, 1, 0.018);
+    topLip.translate(0, -0.04, 0.03);
+    const corbUpper = new RoundedBoxGeometry(0.30, 0.16, 0.44, 1, 0.02);
+    corbUpper.translate(0, -0.17, -0.04);
+    const corbLower = new RoundedBoxGeometry(0.22, 0.18, 0.28, 1, 0.018);
+    corbLower.translate(0, -0.32, -0.11);
+    return mergeGeometries([topLip, corbUpper, corbLower]);
   };
 
   const buildButtressCapGeo = () => {
@@ -2411,6 +2648,7 @@ function getSharedArchGeometries() {
     endGuardRail: buildEndGuardRailGeo(),
 
     buttressSeg: buildButtressSegGeo(),
+    buttressBase: buildButtressBaseGeo(),
     buttressCap: buildButtressCapGeo(),
     buttressCollar: buildButtressCollarGeo(),
     conduitClamp: buildConduitClampGeo(),
@@ -2420,6 +2658,43 @@ function getSharedArchGeometries() {
     templeLantern: buildTempleLanternGeo(),
     lanternCore: buildLanternCoreGeo(),
     valveWheel: buildValveWheelGeo(),
+    switchPedestal: (() => {
+      const parts = [];
+      // Stepped octagonal forged-bronze plinth
+      const plinth = new THREE.CylinderGeometry(0.215, 0.255, 0.072, 8);
+      plinth.translate(0, 0.036, 0);
+      parts.push(plinth);
+      const baseBead = new THREE.TorusGeometry(0.192, 0.018, 6, 16);
+      baseBead.rotateX(Math.PI * 0.5);
+      baseBead.translate(0, 0.076, 0);
+      parts.push(baseBead);
+      // Fluted tapered pedestal column
+      const shaft = new THREE.CylinderGeometry(0.122, 0.168, 0.165, 8);
+      shaft.translate(0, 0.16, 0);
+      parts.push(shaft);
+      // Flared crown capital & riveted bezel collar
+      const cap = new THREE.CylinderGeometry(0.178, 0.124, 0.048, 8);
+      cap.translate(0, 0.264, 0);
+      parts.push(cap);
+      const collar = new THREE.TorusGeometry(0.156, 0.021, 6, 18);
+      collar.rotateX(Math.PI * 0.5);
+      collar.translate(0, 0.292, 0);
+      parts.push(collar);
+      // 4 sculpted Pelagian cradle prongs framing the faceted resonator crystal
+      for (let k = 0; k < 4; k++) {
+        const ang = (k / 4) * TWO_PI + Math.PI * 0.25;
+        const prong = new THREE.BoxGeometry(0.028, 0.135, 0.032);
+        prong.rotateX(0.26);
+        prong.translate(0, 0.352, 0.145);
+        prong.rotateY(ang);
+        parts.push(prong);
+        const tip = new THREE.OctahedronGeometry(0.018, 0);
+        tip.translate(0, 0.422, 0.164);
+        tip.rotateY(ang);
+        parts.push(tip);
+      }
+      return mergeGeometries(parts);
+    })(),
 
     crumbleTriple: (() => {
       const parts = [];
@@ -2475,6 +2750,162 @@ function getSharedArchGeometries() {
       return mergeGeometries([cL, cR]);
     })(),
     singleReturnCable: new THREE.CylinderGeometry(0.016, 0.016, 1.0, 6),
+    // Carved Pelagian Stone & Antique-Bronze Sluice Emitter Pillars (`laserGate` — nominal height 1.56u)
+    sluiceGateStone: (() => {
+      const parts = [];
+      const xOff = ledgeWidth * 0.44;
+      for (const sx of [-1, 1]) {
+        const px = sx * xOff;
+        // Stepped carved stone plinth anchored flush on the terrace
+        const plinth = new RoundedBoxGeometry(0.24, 0.16, 0.34, 1, 0.018);
+        plinth.translate(px, 0.08, 0);
+        parts.push(plinth);
+        // Octagonal carved fluted stone sluice column shaft
+        const shaft = new THREE.CylinderGeometry(0.082, 0.098, 1.24, 8);
+        shaft.translate(px, 0.78, 0);
+        parts.push(shaft);
+        // Carved stone capital cornice block
+        const cap = new RoundedBoxGeometry(0.22, 0.12, 0.30, 1, 0.016);
+        cap.translate(px, 1.44, 0);
+        parts.push(cap);
+      }
+      return mergeGeometries(parts);
+    })(),
+    sluiceGateBronze: (() => {
+      const parts = [];
+      const xOff = ledgeWidth * 0.44;
+      for (const sx of [-1, 1]) {
+        const px = sx * xOff;
+        // Bronze base collar & top crest valve finial
+        const baseRing = new THREE.CylinderGeometry(0.112, 0.122, 0.065, 10);
+        baseRing.translate(px, 0.18, 0);
+        parts.push(baseRing);
+        const topFinialBase = new THREE.CylinderGeometry(0.068, 0.095, 0.09, 10);
+        topFinialBase.translate(px, 1.54, 0);
+        parts.push(topFinialBase);
+        const topFinialBulb = new THREE.SphereGeometry(0.062, 8, 6);
+        topFinialBulb.scale(1.0, 1.25, 1.0);
+        topFinialBulb.translate(px, 1.62, 0);
+        parts.push(topFinialBulb);
+        // 3 Fluted inward-facing antique-bronze hydro-sluice emitter nozzles & riveted pressure collars
+        for (const ny of [0.38, 0.80, 1.22]) {
+          const collar = new THREE.CylinderGeometry(0.104, 0.104, 0.085, 10);
+          collar.translate(px, ny, 0);
+          parts.push(collar);
+          // Nozzle barrel pointing inward toward the gate center (`-sx`)
+          const nozzle = new THREE.CylinderGeometry(0.044, 0.066, 0.15, 8);
+          nozzle.rotateZ(sx * Math.PI * 0.5);
+          nozzle.translate(px - sx * 0.115, ny, 0);
+          parts.push(nozzle);
+          const lip = new THREE.TorusGeometry(0.048, 0.013, 6, 12);
+          lip.rotateY(Math.PI * 0.5);
+          lip.translate(px - sx * 0.185, ny, 0);
+          parts.push(lip);
+        }
+        // Rear intake manifold pipe tying pillar cleanly into spire masonry
+        const pipe = new THREE.CylinderGeometry(0.036, 0.036, 0.42, 8);
+        pipe.rotateX(Math.PI * 0.5);
+        pipe.translate(px, 0.80, -0.22);
+        parts.push(pipe);
+      }
+      return mergeGeometries(parts);
+    })(),
+    // Permanent sculpted antique-bronze wall corbel brackets for `phaseBlock` aqueduct ledges
+    phaseBracket: (() => {
+      const parts = [];
+      for (const side of [-1, 1]) {
+        const thC = side * 0.34 * COL_ANGLE;
+        const [wx, , wz] = cylLocalVec(R + 0.08, thC, -0.14, refR);
+        const backPlate = new RoundedBoxGeometry(0.14, 0.38, 0.12, 1, 0.016);
+        backPlate.rotateY(thC);
+        backPlate.translate(wx, -0.16, wz);
+        parts.push(backPlate);
+
+        const [kx, , kz] = cylLocalVec(R + 0.36, thC, -0.16, refR);
+        const knee = new THREE.BoxGeometry(0.075, 0.085, 0.62);
+        knee.rotateX(-0.34);
+        knee.rotateY(thC);
+        knee.translate(kx, -0.20, kz);
+        parts.push(knee);
+
+        const [sx, , sz] = cylLocalVec(R + 0.46, thC, -0.055, refR);
+        const shelf = new RoundedBoxGeometry(0.11, 0.065, 0.72, 1, 0.012);
+        shelf.rotateY(thC);
+        shelf.translate(sx, -0.065, sz);
+        parts.push(shelf);
+      }
+      return mergeGeometries(parts);
+    })(),
+    // Carved rune-inlaid stone aqueduct slab + antique-bronze structural frame (`phaseBlock`)
+    phaseStoneSlab: (() => {
+      const parts = [];
+      const deck = arcSlab(R - 0.04, R + 0.92, span * 0.96, 0.16, 0.022, 3, 1, 0.018, R - 0.01);
+      deck.translate(0, 0, -refR);
+      parts.push(deck);
+      // Recessed underside aqueduct arch haunch
+      const under = arcSlab(R - 0.04, R + 0.74, span * 0.86, 0.09, 0.014, 2, 1, 0.012, R - 0.01);
+      under.translate(0, -0.14, -refR);
+      parts.push(under);
+      return mergeGeometries(parts);
+    })(),
+    phaseBronzeFrame: (() => {
+      const parts = [];
+      // Outer riveted antique-bronze fascia curb & top/bottom lips framing the recessed rune strip
+      const topCurb = arcSlab(R + 0.90, R + 0.965, span * 0.97, 0.042, 0.006, 3, 1, 0);
+      topCurb.translate(0, 0.005, -refR);
+      parts.push(topCurb);
+      const botCurb = arcSlab(R + 0.89, R + 0.955, span * 0.97, 0.038, 0.006, 3, 1, 0);
+      botCurb.translate(0, -0.135, -refR);
+      parts.push(botCurb);
+      // Twin side bronze clamping cheeks & corner rivet bosses
+      for (const side of [-1, 1]) {
+        const thE = side * 0.455 * COL_ANGLE;
+        const [ex, , ez] = cylLocalVec(R + 0.48, thE, -0.075, refR);
+        const cheek = new RoundedBoxGeometry(0.068, 0.18, 0.94, 1, 0.012);
+        cheek.rotateY(thE);
+        cheek.translate(ex, -0.078, ez);
+        parts.push(cheek);
+
+        const [bx, , bz] = cylLocalVec(R + 0.945, side * 0.41 * COL_ANGLE, -0.07, refR);
+        const boss = new THREE.CylinderGeometry(0.034, 0.038, 0.04, 8);
+        boss.rotateX(Math.PI * 0.5);
+        boss.rotateY(side * 0.41 * COL_ANGLE);
+        boss.translate(bx, -0.07, bz);
+        parts.push(boss);
+      }
+      return mergeGeometries(parts);
+    })(),
+    phaseRuneInlay: (() => {
+      const parts = [];
+      // Front carved fascia rune channel recessed cleanly between top & bottom bronze curbs
+      const frontStrip = arcSlab(R + 0.915, R + 0.955, span * 0.82, 0.092, 0.004, 3, 1, 0);
+      frontStrip.translate(0, -0.038, -refR);
+      parts.push(frontStrip);
+      // Flush top-deck Pelagian rune trim bar near outer lip
+      const topStrip = arcSlab(R + 0.78, R + 0.88, span * 0.88, 0.016, 0.002, 3, 1, 0);
+      topStrip.translate(0, 0.012, -refR);
+      parts.push(topStrip);
+      return mergeGeometries(parts);
+    })(),
+    phaseGhostFrame: (() => {
+      const parts = [];
+      // Whisper-thin outline rim indicating where the dormant aqueduct slab will materialize
+      const rimOut = arcSlab(R + 0.89, R + 0.95, span * 0.94, 0.038, 0.004, 3, 1, 0);
+      rimOut.translate(0, -0.01, -refR);
+      parts.push(rimOut);
+      const rimIn = arcSlab(R + 0.04, R + 0.10, span * 0.94, 0.038, 0.004, 3, 1, 0);
+      rimIn.translate(0, -0.01, -refR);
+      parts.push(rimIn);
+      for (const side of [-1, 1]) {
+        const thE = side * 0.45 * COL_ANGLE;
+        const [ex, , ez] = cylLocalVec(R + 0.49, thE, -0.02, refR);
+        const rail = new THREE.BoxGeometry(0.036, 0.036, 0.88);
+        rail.rotateY(thE);
+        rail.translate(ex, -0.02, ez);
+        parts.push(rail);
+      }
+      return mergeGeometries(parts);
+    })(),
     laserEmitters: (() => {
       const eL = new THREE.CylinderGeometry(0.088, 0.105, 0.34, 8);
       eL.translate(-ledgeWidth * 0.44, 0.18, 0);
@@ -2496,15 +2927,135 @@ function getSharedArchGeometries() {
       rR.translate(0.32, -0.1, -0.44);
       return mergeGeometries([rL, rR]);
     })(),
-    exitCrownTines: (() => {
+    // Monumental Pelagian Crown Exit Pediment Crest (anchored atop the Exit Archway keystone!)
+    exitCrownPediment: (() => {
       const parts = [];
-      for (let sp = 0; sp < 6; sp++) {
-        const ca = (sp / 6) * TWO_PI;
-        const tine = new THREE.ConeGeometry(0.048, 0.18, 6);
-        tine.translate(Math.cos(ca) * 0.24, 0.1, Math.sin(ca) * 0.24);
-        parts.push(tine);
+      // Stepped arched bronze pediment cornice crowning the doorway archivolt
+      const archCrown = new THREE.TorusGeometry(DOOR_W * 0.5 + 0.18, 0.052, 8, 22, Math.PI * 0.86);
+      archCrown.rotateZ(Math.PI * 0.07);
+      archCrown.translate(0, DOOR_H * 0.5 - (DOOR_W * 0.5 + 0.08), 0.17);
+      parts.push(archCrown);
+      // Central sunburst crest shield & fluted finial rays
+      const crestBase = new RoundedBoxGeometry(0.42, 0.20, 0.18, 1, 0.025);
+      crestBase.translate(0, DOOR_H * 0.5 + 0.18, 0.18);
+      parts.push(crestBase);
+      const bezelRing = new THREE.TorusGeometry(0.145, 0.028, 8, 18);
+      bezelRing.translate(0, DOOR_H * 0.5 + 0.20, 0.27);
+      parts.push(bezelRing);
+      // 5 Sculpted Pelagian crown sunburst spikes fanning gracefully from the pediment
+      for (let i = -2; i <= 2; i++) {
+        const ang = i * 0.36;
+        const len = i === 0 ? 0.32 : Math.abs(i) === 1 ? 0.24 : 0.17;
+        const ray = new THREE.ConeGeometry(0.034, len, 6);
+        ray.rotateZ(-ang);
+        ray.translate(Math.sin(ang) * (0.16 + len * 0.42), DOOR_H * 0.5 + 0.22 + Math.cos(ang) * (0.14 + len * 0.42), 0.22);
+        parts.push(ray);
+      }
+      // Twin flanking bronze arch-shoulder volute scrolls
+      for (const sx of [-1, 1]) {
+        const scroll = new THREE.TorusGeometry(0.095, 0.026, 6, 14);
+        scroll.translate(sx * 0.34, DOOR_H * 0.5 + 0.10, 0.19);
+        parts.push(scroll);
+        const capFin = new THREE.CylinderGeometry(0.042, 0.068, 0.14, 8);
+        capFin.translate(sx * (DOOR_W * 0.5 + 0.10), DOOR_H * 0.5 - 0.14, 0.16);
+        parts.push(capFin);
       }
       return mergeGeometries(parts);
+    })(),
+    // Sculpted Pelagian Astrolabe Crown Halo Ring (replaces flat yellow cone halo!)
+    exitCrownTines: (() => {
+      const parts = [];
+      const band = new THREE.TorusGeometry(0.42, 0.036, 8, 28);
+      band.rotateX(Math.PI * 0.5);
+      parts.push(band);
+      const innerFiligree = new THREE.TorusGeometry(0.32, 0.018, 6, 24);
+      innerFiligree.rotateX(Math.PI * 0.5);
+      innerFiligree.translate(0, 0.035, 0);
+      parts.push(innerFiligree);
+      for (let sp = 0; sp < 8; sp++) {
+        const ca = (sp / 8) * TWO_PI;
+        const isMajor = sp % 2 === 0;
+        const tine = new THREE.ConeGeometry(isMajor ? 0.042 : 0.028, isMajor ? 0.20 : 0.12, 6);
+        tine.translate(Math.cos(ca) * 0.40, isMajor ? 0.11 : 0.075, Math.sin(ca) * 0.40);
+        parts.push(tine);
+        const spoke = new THREE.BoxGeometry(0.022, 0.022, 0.12);
+        spoke.rotateY(-ca);
+        spoke.translate(Math.cos(ca) * 0.36, 0.02, Math.sin(ca) * 0.36);
+        parts.push(spoke);
+      }
+      return mergeGeometries(parts);
+    })(),
+    // Heavy Forged 3D Interlocking Siphon Seal Chains + 4 Bolted Wall Shackles (1 merged draw call!)
+    forgedSealChains: (() => {
+      const parts = [];
+      const xSpan = DOOR_W * 0.56;
+      const ySpan = DOOR_H * 0.41;
+      // 4 Heavy bolted iron wall shackle plates + eye rings mounted on the doorway jambs
+      for (const sx of [-1, 1]) {
+        for (const sy of [-1, 1]) {
+          const plate = new RoundedBoxGeometry(0.14, 0.16, 0.08, 1, 0.014);
+          plate.translate(sx * xSpan, sy * ySpan + 0.02, -0.01);
+          parts.push(plate);
+          const eye = new THREE.TorusGeometry(0.056, 0.018, 6, 12);
+          eye.rotateY(Math.PI * 0.5);
+          eye.translate(sx * xSpan, sy * ySpan + 0.02, 0.035);
+          parts.push(eye);
+        }
+      }
+      // Twin diagonal heavy forged interlocking 3D chains (13 alternating 90° links per chain!)
+      const linkCount = 13;
+      const diagAng = Math.atan2(ySpan * 2, xSpan * 2);
+      for (const sgn of [-1, 1]) {
+        for (let i = 0; i < linkCount; i++) {
+          const t = (i + 0.5) / linkCount - 0.5;
+          const lx = t * xSpan * 2.02;
+          const ly = 0.02 + sgn * t * ySpan * 2.02;
+          const lz = 0.038 + (sgn > 0 ? 0.014 : -0.008) * Math.exp(-t * t * 14.0);
+          // Forged oval chain link (stretched torus)
+          const link = new THREE.TorusGeometry(0.052, 0.018, 6, 12);
+          link.scale(1.38, 0.84, 1.0);
+          if (i % 2 === 1) link.rotateX(Math.PI * 0.48);
+          link.rotateZ(sgn * diagAng);
+          link.translate(lx, ly, lz);
+          parts.push(link);
+        }
+      }
+      return mergeGeometries(parts);
+    })(),
+    // Monumental Sculpted Pelagian Seal Padlock (Body + Bevel Faceplate + Rivets + Forged U-Shackle, 1 draw call!)
+    sealPadlockBody: (() => {
+      const parts = [];
+      // Heavy forged U-shaped shackle gripping the chain
+      const shackleArch = new THREE.TorusGeometry(0.068, 0.022, 7, 14, Math.PI);
+      shackleArch.translate(0, 0.115, 0);
+      parts.push(shackleArch);
+      for (const sx of [-0.068, 0.068]) {
+        const leg = new THREE.CylinderGeometry(0.022, 0.024, 0.085, 8);
+        leg.translate(sx, 0.085, 0);
+        parts.push(leg);
+      }
+      // Beveled octagonal/shield heavy antique-bronze padlock body
+      const body = new RoundedBoxGeometry(0.20, 0.22, 0.095, 2, 0.024);
+      body.translate(0, -0.035, 0);
+      parts.push(body);
+      // Recessed faceplate collar & 4 corner rivets
+      const collar = new THREE.TorusGeometry(0.064, 0.016, 6, 14);
+      collar.translate(0, -0.035, 0.048);
+      parts.push(collar);
+      for (const sx of [-0.068, 0.068]) {
+        for (const sy of [-0.105, 0.035]) {
+          const rivet = new THREE.SphereGeometry(0.013, 6, 4);
+          rivet.translate(sx, sy, 0.048);
+          parts.push(rivet);
+        }
+      }
+      return mergeGeometries(parts);
+    })(),
+    sealPadlockCore: (() => {
+      const core = new THREE.OctahedronGeometry(0.052, 0);
+      core.scale(0.88, 1.18, 0.72);
+      core.translate(0, -0.035, 0.054);
+      return core;
     })(),
     // Heavy Carved Stone-and-Riveted-Antique-Bronze Pelagian Counterweight Block (ZERO sci-fi Tron crosshair cubes!)
     energyBox: new RoundedBoxGeometry(0.98, 0.76, 0.76, 2, 0.055),
@@ -2537,7 +3088,14 @@ function getSharedArchGeometries() {
       return mergeGeometries(parts);
     })(),
     flutedPillar: new THREE.CylinderGeometry(0.32, 0.34, 1.0, 12),
-    pillarCollar: new RoundedBoxGeometry(0.88, 0.11, 0.76, 1, 0.022),
+    // Stepped Pelagian column capital/plinth molding (astragal ring + beveled abacus slab)
+    pillarCollar: (() => {
+      const abacus = new RoundedBoxGeometry(0.86, 0.085, 0.74, 1, 0.02);
+      abacus.translate(0, 0.012, 0);
+      const astragal = new THREE.CylinderGeometry(0.37, 0.38, 0.055, 12);
+      astragal.translate(0, -0.035, 0);
+      return mergeGeometries([abacus, astragal]);
+    })(),
     pipeSegment: new THREE.CylinderGeometry(0.056, 0.056, 1.0, 8),
     pipeFlange: new THREE.CylinderGeometry(0.098, 0.098, 0.068, 10),
     ashlarBlock: new RoundedBoxGeometry(1, 1, 1, 1, 0.06),
@@ -2599,6 +3157,32 @@ function buildBandedInstancedFromList(
   { castShadow = false, receiveShadow = true, keepInReflection = false } = {}
 ) {
   if (!list.length) return [];
+  // Keep sparse prop batches (`<= 28` instances) in a single tight-bounded InstancedMesh to avoid duplicate band-boundary draw calls!
+  if (list.length <= 28) {
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < list.length; i++) {
+      const item = list[i];
+      item._bandOutRef = { inst: null, localIdx: i };
+      if (item.y < minY) minY = item.y;
+      if (item.y > maxY) maxY = item.y;
+    }
+    const inst = buildInstancedFromList(geo, mat, list, {
+      castShadow,
+      receiveShadow,
+      keepInReflection,
+    });
+    if (!inst) return [];
+    inst.userData.bandMinY = minY - 0.9;
+    inst.userData.bandMaxY = maxY + 1.8;
+    inst.userData.bandMidY = (minY + maxY) * 0.5;
+    for (let j = 0; j < list.length; j++) {
+      list[j]._bandOutRef.inst = inst;
+    }
+    group.add(inst);
+    bandedMeshes.push(inst);
+    return [inst];
+  }
   const buckets = new Map();
   for (let i = 0; i < list.length; i++) {
     const item = list[i];
@@ -2771,7 +3355,7 @@ function buildTowerMasonryAndAccents(
     coreMat.emissiveIntensity = spec.coreGlow[1];
   }
   const core = new THREE.Mesh(
-    new THREE.CylinderGeometry(R - 0.11, R - 0.02, totalH + 0.4, 40, 1, false),
+    new THREE.CylinderGeometry(R - 0.15, R - 0.06, totalH + 0.4, 40, 1, false),
     coreMat
   );
   core.position.y = totalH * 0.5;
@@ -2846,8 +3430,8 @@ function buildTowerMasonryAndAccents(
 
   const basePaletteCols = spec.colors.map((hex) => new THREE.Color(hex));
   const bandCol = spec.bands ? new THREE.Color(spec.bands.color) : null;
-  const mossHexes = ['#295422', '#35682c', '#1f4219', '#3f7834'];
-  const coralHexes = ['#f472b6', '#fb7185', '#38bdf8', '#fbbf24', '#2dd4bf'];
+  const mossHexes = ['#2f4c2a', '#3b5a31', '#253e22', '#446336'];
+  const coralHexes = ['#dcd3c0', '#cfc3aa', '#bfc9bc', '#d4c8b8', '#c6ceb8'];
   const crystalHexes = ['#38bdf8', '#67e8f9', '#818cf8'];
 
   const half = (capA * r1 + 2 * bev) * 0.5 / rf;
@@ -2857,21 +3441,25 @@ function buildTowerMasonryAndAccents(
 
   const placeBlock = (a0, a1, y0, hr) => {
     const sp = a1 - a0;
-    // Skip tiny disconnected sliver bricks (`< 22%` width) and any brick inside an elevator shaft cavity!
-    if (sp < blockA * 0.22 || hr < 0.08) return;
+    // Keep narrow doorway-jamb infill bricks down to 12% width so zero dark vertical slivers ever peek beside door colonnettes!
+    if (sp < blockA * 0.12 || hr < 0.08) return;
     const midA = (a0 + a1) * 0.5;
     if (y0 >= -0.25 && isInChannel(midA, y0 + hr * 0.5, shafts, 0.025)) return;
     const inConduit = y0 >= 0.1 && isInChannel(midA, y0 + hr * 0.5, conduitChannels, 0.008);
-    // Keep recessed conduit-niche stones proud of the mortar core cylinder (ZERO dark Swiss-cheese holes!)
-    const channelRecess = inConduit ? -0.055 : 0;
+    // Keep recessed conduit-niche stones strictly proud of the mortar core cylinder at every altitude!
+    const channelRecess = inConduit ? -0.018 : 0;
 
     // Graceful flared surf base (y < 2.2 down to -2.4) + sleek upward architectural entasis taper
     const flareBase = y0 < 2.2 ? Math.pow(Math.max(0, 2.2 - y0) / 4.2, 1.45) * 0.36 : 0;
-    const upperTaper = y0 > 0 ? -0.085 * Math.min(1, y0 / Math.max(14, totalH)) : 0;
+    const upperTaper = y0 > 0 ? -0.075 * Math.min(1, y0 / Math.max(14, totalH)) : 0;
 
     const proudAmt = isBand ? spec.bands.proud : spec.proud;
     const stoneRelief = isBand ? proudAmt : (rnd() - 0.45) * 2.0 * proudAmt;
-    const radialOut = 1 + (channelRecess + flareBase + upperTaper + stoneRelief) / R;
+    // Core cylinder tapers from R-0.06 at y=0 to R-0.15 at y=totalH; keep every block outer face >= coreR + 0.032!
+    const coreAtY = R - 0.06 - 0.09 * Math.max(0, Math.min(1, (y0 + hr * 0.5) / Math.max(4, totalH)));
+    const minOffset = coreAtY + 0.032 - rf;
+    const radialOffset = Math.max(minOffset, channelRecess + flareBase + upperTaper + stoneRelief);
+    const radialOut = 1 + radialOffset / R;
     const sy = isHex ? hr / blockHt : Math.max(0.15, (hr - spec.joint * 0.55) / blockHt);
 
     _e.set((rnd() - 0.5) * 0.012, midA, (rnd() - 0.5) * 0.012);
@@ -2886,7 +3474,7 @@ function buildTowerMasonryAndAccents(
     } else {
       c.copy(basePaletteCols[Math.floor(rnd() * basePaletteCols.length)]).multiplyScalar(0.92 + rnd() * 0.18);
     }
-    if (inConduit) c.multiplyScalar(0.54);
+    if (inConduit) c.multiplyScalar(0.76);
 
     wallEntries.push({
       m,
@@ -2898,34 +3486,34 @@ function buildTowerMasonryAndAccents(
 
     if (!inConduit && sp > blockA * 0.42 && y0 > -0.4 && y0 < totalH - 0.6) {
       const surfR = rf + (radialOut - 1) * R;
-      if (spec.hasMoss && !isBand && rnd() < 0.14) {
+      if (spec.hasMoss && !isBand && rnd() < 0.13) {
         const ma = a0 + sp * (0.2 + rnd() * 0.6);
         pushInstance(
           mossList,
-          Math.sin(ma) * (surfR + 0.012),
-          y0 + 0.02,
-          Math.cos(ma) * (surfR + 0.012),
-          (rnd() - 0.5) * 0.3,
+          Math.sin(ma) * (surfR + 0.002),
+          y0 + 0.015,
+          Math.cos(ma) * (surfR + 0.002),
+          0,
           ma,
-          (rnd() - 0.5) * 0.4,
-          0.85 + rnd() * 0.85,
-          0.8 + rnd() * 0.7,
-          0.85 + rnd() * 0.4,
+          (rnd() - 0.5) * 0.25,
+          0.95 + rnd() * 0.75,
+          0.85 + rnd() * 0.45,
+          0.9 + rnd() * 0.3,
           mossHexes[Math.floor(rnd() * mossHexes.length)]
         );
-      } else if (spec.hasCoral && y0 < 4.5 && rnd() < 0.16) {
+      } else if (spec.hasCoral && y0 < 3.4 && rnd() < 0.13) {
         const ca = a0 + sp * (0.2 + rnd() * 0.6);
         pushInstance(
           coralList,
-          Math.sin(ca) * (surfR + 0.01),
-          y0 + hr * 0.4,
-          Math.cos(ca) * (surfR + 0.01),
+          Math.sin(ca) * (surfR + 0.002),
+          y0 + hr * 0.42,
+          Math.cos(ca) * (surfR + 0.002),
           0,
           ca,
-          (rnd() - 0.5) * 0.6,
-          0.85 + rnd() * 0.7,
-          0.85 + rnd() * 0.7,
-          0.85 + rnd() * 0.5,
+          (rnd() - 0.5) * 0.5,
+          0.8 + rnd() * 0.38,
+          0.78 + rnd() * 0.35,
+          0.85 + rnd() * 0.3,
           coralHexes[Math.floor(rnd() * coralHexes.length)]
         );
       } else if (spec.hasPlasmaVeins && !isBand && rnd() < 0.055) {
@@ -2960,7 +3548,7 @@ function buildTowerMasonryAndAccents(
       const d0 = angDist(a0, h.a);
       const hs = a0 - d0;
       if (isHex) {
-        if (Math.abs(angDist((a0 + a1) * 0.5, h.a)) < h.w + hexHalfA * 0.65) {
+        if (Math.abs(angDist((a0 + a1) * 0.5, h.a)) < h.w + hexHalfA * 0.08) {
           overUnder(a0, a1, y0, hr, h, idx + 1);
           return;
         }
@@ -2999,7 +3587,7 @@ function buildTowerMasonryAndAccents(
     y0 += hr;
   }
 
-  materializeWallBands(group, bandedMeshes, blockGeo, blockMat, wallEntries, PROP_SPAN_Y, !isHex, false, true, 2);
+  materializeWallBands(group, bandedMeshes, blockGeo, blockMat, wallEntries, PROP_SPAN_Y, !isHex, false, true, 1);
 
   // 3. Sweeping Vertical Architectural Buttress Ribs (Breaks Up Straight Cylinder Silhouette!)
   const buttressMat = createBlockMaterial({
@@ -3027,12 +3615,24 @@ function buildTowerMasonryAndAccents(
   stoneMats.push(buttressMat, trimMetalMat, darkMetalMat);
 
   const buttressSegs = [];
+  const buttressBases = [];
   const buttressCaps = [];
   const buttressCollars = [];
   const maxFloorInt = Math.max(4, (tower?.floors || 18) - 1);
   const spawnColRef = typeof tower?.spawn?.col === 'number' ? wrapTowerCol(tower.spawn.col) : 0;
   const spawnFloorRef = Math.round(Number(tower?.spawn?.floor) || 0);
   const spawnPhiRef = (spawnColRef + 0.5) * COL_ANGLE;
+
+  const hasWalkableNearButtress = (bPhi, checkFl) => {
+    const nearCol = wrapTowerCol(Math.floor(((bPhi % TWO_PI) + TWO_PI) % TWO_PI / COL_ANGLE));
+    for (const cOff of [-1, 0, 1]) {
+      const checkCol = wrapTowerCol(nearCol + cOff);
+      const colCenterPhi = (checkCol + 0.5) * COL_ANGLE;
+      if (Math.abs(angDist(bPhi, colCenterPhi)) > COL_ANGLE * 0.72) continue;
+      if (walkableSet.has(`${checkCol}_${checkFl}`)) return true;
+    }
+    return false;
+  };
 
   const isButtressFloorClear = (bPhi, fl) => {
     const midY = (fl + 0.5) * fh;
@@ -3042,14 +3642,8 @@ function buildTowerMasonryAndAccents(
     if (fl >= spawnFloorRef - 1 && fl <= spawnFloorRef + 2 && Math.abs(angDist(bPhi, spawnPhiRef)) < COL_ANGLE * 0.95) {
       return false;
     }
-    const nearCol = wrapTowerCol(Math.floor(((bPhi % TWO_PI) + TWO_PI) % TWO_PI / COL_ANGLE));
-    for (const cOff of [-1, 0, 1]) {
-      const checkCol = wrapTowerCol(nearCol + cOff);
-      const colCenterPhi = (checkCol + 0.5) * COL_ANGLE;
-      if (Math.abs(angDist(bPhi, colCenterPhi)) > COL_ANGLE * 0.68) continue;
-      if (walkableSet.has(`${checkCol}_${fl}`) || walkableSet.has(`${checkCol}_${fl - 1}`)) {
-        return false;
-      }
+    if (hasWalkableNearButtress(bPhi, fl) || hasWalkableNearButtress(bPhi, fl - 1)) {
+      return false;
     }
     return true;
   };
@@ -3079,14 +3673,47 @@ function buildTowerMasonryAndAccents(
         depthScale
       );
 
+      // Anchor floating buttress bottoms gracefully back into the spire wall with a tapered stone corbel foot!
+      const prevClear = fl <= -1 || isButtressFloorClear(bPhi, fl - 1);
+      if (!prevClear) {
+        pushInstance(
+          buttressBases,
+          Math.sin(bPhi) * br,
+          fl * fh,
+          Math.cos(bPhi) * br,
+          0,
+          bPhi,
+          0,
+          0.95 - altFrac * 0.18,
+          1.0,
+          depthScale
+        );
+      }
+
       const nextClear = fl + 1 < maxFloorInt && isButtressFloorClear(bPhi, fl + 1);
       const isTierStepTop = (fl + 1) > 0 && (fl + 1) % 4 === 0;
-      if (!nextClear || isTierStepTop) {
+      // Never let a pyramid buttress cap poke up through a walkable terrace or staircase landing at fl + 1!
+      const terraceAbove = hasWalkableNearButtress(bPhi, fl + 1);
+      if ((!nextClear || isTierStepTop) && !terraceAbove) {
         pushInstance(
           buttressCaps,
           Math.sin(bPhi) * (br + 0.02),
           (fl + 1) * fh - 0.06,
           Math.cos(bPhi) * (br + 0.02),
+          0,
+          bPhi,
+          0,
+          0.98 - altFrac * 0.18,
+          1.0,
+          depthScale
+        );
+      } else if (terraceAbove) {
+        // Tuck a clean structural bronze capital collar flush UNDERNEATH the terrace deck!
+        pushInstance(
+          buttressCollars,
+          Math.sin(bPhi) * (br + 0.015),
+          (fl + 1) * fh - 0.16,
+          Math.cos(bPhi) * (br + 0.015),
           0,
           bPhi,
           0,
@@ -3118,6 +3745,10 @@ function buildTowerMasonryAndAccents(
     }
   }
   buildBandedInstancedFromList(group, bandedMeshes, G.buttressSeg, buttressMat, buttressSegs, PROP_SPAN_Y, {
+    castShadow: false,
+    keepInReflection: true,
+  });
+  buildBandedInstancedFromList(group, bandedMeshes, G.buttressBase, buttressMat, buttressBases, PROP_SPAN_Y, {
     castShadow: false,
     keepInReflection: true,
   });
@@ -4504,15 +5135,21 @@ export function buildSwitchMesh(mode = 'pipeValve', glbAssets = null) {
     mode === 'pipeValve' || mode === 'floodValve' || mode === 'drainValve' || mode === 'valve';
 
   const sightMat = new THREE.MeshStandardMaterial({
-    color: '#fbbf24',
-    emissive: '#f59e0b',
-    emissiveIntensity: 1.35,
-    roughness: 0.12,
+    color: '#d97706',
+    emissive: '#b45309',
+    emissiveIntensity: 0.44,
+    roughness: 0.14,
+    metalness: 0.26,
+    flatShading: true,
+    transparent: true,
+    opacity: 0.88,
+    envMapIntensity: 1.55,
   });
 
   let wheel = null;
-  const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.14, 0), sightMat);
-  orb.position.y = 0.42;
+  const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.135, 0), sightMat);
+  orb.scale.set(0.84, 1.32, 0.84);
+  orb.position.y = 0.45;
 
   if (isValve && valveGlb) {
     const cloned = valveGlb.clone(true);
@@ -4552,14 +5189,21 @@ export function buildSwitchMesh(mode = 'pipeValve', glbAssets = null) {
     orb.visible = false;
     g.add(base, standPipe, wallPipe, sightCyl, wheel, orb);
   } else {
-    const ironMat = new THREE.MeshStandardMaterial({ color: '#2b384b', metalness: 0.8, roughness: 0.32 });
-    const brassMat = new THREE.MeshStandardMaterial({ color: '#d9a438', metalness: 0.88, roughness: 0.22 });
-    const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, 0.24, 12), ironMat);
-    ped.position.y = 0.12;
-    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.028, 6, 18), brassMat);
-    collar.rotation.x = Math.PI * 0.5;
-    collar.position.y = 0.24;
-    g.add(ped, collar, orb);
+    const bronzeMaps = getSurfaceMaps1024('antique_bronze', 1.2);
+    const bronzePedMat = new THREE.MeshStandardMaterial({
+      color: '#c49652',
+      map: bronzeMaps.map,
+      normalMap: bronzeMaps.normalMap,
+      normalScale: new THREE.Vector2(0.85, 0.85),
+      roughnessMap: bronzeMaps.roughnessMap,
+      metalness: 0.78,
+      roughness: 0.34,
+      envMapIntensity: 1.2,
+    });
+    const ped = new THREE.Mesh(G.switchPedestal, bronzePedMat);
+    ped.castShadow = true;
+    ped.receiveShadow = true;
+    g.add(ped, orb);
   }
 
   g.userData = { orb, orbMat: sightMat, wheel, mode, isValve, usedGlb: Boolean(isValve && valveGlb) };
@@ -4754,14 +5398,24 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
 
   const totalH = (tower?.floors || 18) * fh;
   const initialClueEntries = collectTowerClueEntries(tower);
-  const pipeAvoidHoles = holes.concat(
-    initialClueEntries.map((ce) => ({
-      a: ce.colCenter * COL_ANGLE,
-      w: COL_ANGLE * 0.72,
-      y0: (ce.floorY - 0.75) * fh,
-      y1: (ce.floorY + 0.75) * fh,
-    }))
-  );
+  const rawWallStripsEarly = tower?.wallStrips || tower?.geckoStrips || tower?.climbStrips || [];
+  const pipeAvoidHoles = holes
+    .concat(
+      initialClueEntries.map((ce) => ({
+        a: ce.colCenter * COL_ANGLE,
+        w: COL_ANGLE * 0.72,
+        y0: (ce.floorY - 0.75) * fh,
+        y1: (ce.floorY + 0.75) * fh,
+      }))
+    )
+    .concat(
+      rawWallStripsEarly.map((ws) => ({
+        a: (ws.col + 0.5) * COL_ANGLE,
+        w: COL_ANGLE * 0.62,
+        y0: ((ws.minFloor ?? ws.floor ?? 0) - 0.2) * fh,
+        y1: ((ws.maxFloor ?? (ws.floor ?? 0) + (ws.h || 3)) + 0.2) * fh,
+      }))
+    );
 
   const heroSpawnPhi = ((typeof tower?.spawn?.col === 'number' ? wrapTowerCol(tower.spawn.col) : 0) + 0.5) * COL_ANGLE;
   const buttressAngles = selectClearSpireAngles(
@@ -4912,6 +5566,20 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     archivolt.translate(0, DOOR_H * 0.5 - archRad, 0.085);
     doorArchParts.push(transformDoorGeo(archivolt, phi, doorCenterY));
 
+    // Carved stone spandrel tympanum corners behind the semicircular archivolt (seals black rectangular doorway corner gaps!)
+    for (const sx of [-1, 1]) {
+      const spandrel = new THREE.Shape();
+      const outerX = archRad + 0.08;
+      const topY = archRad + 0.09;
+      spandrel.moveTo(sx * (archRad * 0.52), topY);
+      spandrel.lineTo(sx * outerX, topY);
+      spandrel.lineTo(sx * outerX, archRad * 0.22);
+      spandrel.quadraticCurveTo(sx * (archRad * 0.96), archRad * 0.88, sx * (archRad * 0.52), topY);
+      const spGeo = new THREE.ExtrudeGeometry(spandrel, { depth: 0.14, bevelEnabled: false, curveSegments: 8 });
+      spGeo.translate(0, DOOR_H * 0.5 - archRad, -0.05);
+      doorArchParts.push(transformDoorGeo(spGeo, phi, doorCenterY));
+    }
+
     const innerBronzeTrim = new THREE.TorusGeometry(archRad - 0.065, 0.036, 6, 18, Math.PI);
     innerBronzeTrim.translate(0, DOOR_H * 0.5 - archRad, 0.14);
     doorMetalParts.push(transformDoorGeo(innerBronzeTrim, phi, doorCenterY));
@@ -4996,103 +5664,120 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
         dg.add(outerLock, innerLock);
         exitRings.push(outerLock, innerLock);
       } else if (isExitDoor) {
+        // Monumental Carved Pelagian Crown Portal Pediment, Rotating Astrolabe Halo & 3-Seal Forged Chains/Padlocks!
+        const bronzeMaps = getSurfaceMaps1024('antique_bronze', 1.4);
         const crownGoldMat = new THREE.MeshStandardMaterial({
-          color: '#fde047',
+          color: '#f7d372',
+          map: bronzeMaps.map,
+          normalMap: bronzeMaps.normalMap,
+          normalScale: new THREE.Vector2(0.85, 0.85),
+          roughnessMap: bronzeMaps.ormMap,
+          metalnessMap: bronzeMaps.ormMap,
           emissive: '#06b6d4',
-          emissiveIntensity: 1.35,
-          metalness: 0.9,
-          roughness: 0.16,
+          emissiveIntensity: 0.55,
+          metalness: 0.88,
+          roughness: 0.24,
         });
-        const exitHalo = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.048, 6, 24), crownGoldMat);
-        exitHalo.rotation.x = Math.PI * 0.5;
-        exitHalo.position.set(0, DOOR_H * 0.5 + 0.42, 0.18);
+        subscribeMaterialToSurface(bronzeMaps, crownGoldMat);
+
+        const pedimentMesh = new THREE.Mesh(G.exitCrownPediment, crownGoldMat);
+
+        const crestGemMat = new THREE.MeshStandardMaterial({
+          color: '#67e8f9',
+          emissive: '#06b6d4',
+          emissiveIntensity: 1.55,
+          roughness: 0.12,
+          metalness: 0.25,
+        });
+        const crestGem = new THREE.Mesh(new THREE.OctahedronGeometry(0.105, 0), crestGemMat);
+        crestGem.scale.set(0.85, 1.25, 0.72);
+        crestGem.position.set(0, DOOR_H * 0.5 + 0.20, 0.29);
 
         const crownGrp = new THREE.Group();
-        crownGrp.position.set(0, DOOR_H * 0.5 + 0.42, 0.18);
+        crownGrp.position.set(0, DOOR_H * 0.5 + 0.58, 0.20);
         crownGrp.add(new THREE.Mesh(G.exitCrownTines, crownGoldMat));
 
-        const beamMat = new THREE.MeshBasicMaterial({
+        const auraMat = createCrownPortalAuraMaterial();
+        const beam = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.46, 0.62, 3.6, 20, 1, true),
+          auraMat
+        );
+        beam.position.set(0, DOOR_H * 0.5 + 1.55, 0.14);
+
+        // Radiant Unsealed Archway Threshold Ring (glows golden-aqua when 3/3 unsealed!)
+        const openGlowMat = new THREE.MeshBasicMaterial({
+          map: T.runeSigil,
           color: '#67e8f9',
           transparent: true,
-          opacity: 0.2,
+          opacity: 0.0,
           blending: THREE.AdditiveBlending,
           depthWrite: false,
-          side: THREE.DoubleSide,
         });
-        const beam = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.28, 0.46, 3.8, 12, 1, true),
-          beamMat
-        );
-        beam.position.set(0, DOOR_H * 0.5 + 1.95, 0.16);
+        const openSigil = new THREE.Mesh(new THREE.PlaneGeometry(0.86, 0.86), openGlowMat);
+        openSigil.position.set(0, 0.06, 0.14);
 
-        // 3D Siphon Crown Seal Chains & 3 Glowing Barrier Lock Medallions across sealed Summit Crown Doors!
+        // 3D Forged Interlocking Siphon Seal Chains & 3 Monumental Pelagian Padlocks across sealed Crown Doors!
         const sealGroup = new THREE.Group();
         sealGroup.position.set(0, 0, 0.17);
         const chainMat = new THREE.MeshStandardMaterial({
-          color: '#3b2429',
-          emissive: '#dc2626',
-          emissiveIntensity: 0.48,
-          metalness: 0.84,
-          roughness: 0.34,
+          color: '#34282e',
+          map: bronzeMaps.map,
+          normalMap: bronzeMaps.normalMap,
+          normalScale: new THREE.Vector2(0.95, 0.95),
+          roughnessMap: bronzeMaps.ormMap,
+          metalnessMap: bronzeMaps.ormMap,
+          emissive: '#991b1b',
+          emissiveIntensity: 0.28,
+          metalness: 0.86,
+          roughness: 0.36,
         });
-        const barrierMat = new THREE.MeshBasicMaterial({
-          color: '#f43f5e',
-          transparent: true,
-          opacity: 0.34,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-        });
-        const barrierField = new THREE.Mesh(new THREE.PlaneGeometry(DOOR_W * 0.96, DOOR_H * 0.94), barrierMat);
-        barrierField.position.set(0, 0, -0.02);
+        subscribeMaterialToSurface(bronzeMaps, chainMat);
+
+        const barrierMat = createSealBarrierMaterial();
+        const barrierField = new THREE.Mesh(new THREE.PlaneGeometry(DOOR_W * 0.98, DOOR_H * 0.96), barrierMat);
+        barrierField.position.set(0, 0.02, -0.02);
         sealGroup.add(barrierField);
 
-        // Twin forged diagonal Siphon Seal Chains crossing in an unmistakable heavy 'X' across the Crown Door!
-        const diagLen = Math.hypot(DOOR_W * 1.06, DOOR_H * 0.88);
-        const diagAng = Math.atan2(DOOR_H * 0.88, DOOR_W * 1.06);
-        for (const sgn of [-1, 1]) {
-          const chainBar = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.036, diagLen, 8), chainMat);
-          chainBar.rotation.z = sgn * (Math.PI * 0.5 - diagAng);
-          chainBar.position.set(0, 0.02, 0.02);
-          sealGroup.add(chainBar);
-          // Forged heavy chain link collars spaced along each diagonal bar
-          for (let li = -2; li <= 2; li++) {
-            const frac = li * 0.18;
-            const link = new THREE.Mesh(new THREE.TorusGeometry(0.056, 0.017, 6, 10), chainMat);
-            link.position.set(
-              frac * DOOR_W * 0.95,
-              0.02 + sgn * frac * DOOR_H * 0.82,
-              0.024
-            );
-            link.rotation.y = li % 2 === 0 ? 0.3 : Math.PI * 0.5;
-            sealGroup.add(link);
-          }
-        }
+        // ALL 26 interlocking 3D forged chain links + 4 bolted wall shackles in ONE merged mesh (-11 draw calls!)
+        const forgedChainsMesh = new THREE.Mesh(G.forgedSealChains, chainMat);
+        sealGroup.add(forgedChainsMesh);
 
-        // 3 Individual Glowing Lock Medallions (Seal 1, Seal 2, Seal 3) mounted horizontally across the chains
+        // 3 Sculpted Monumental Pelagian Seal Padlocks (Left, Grand Centerpiece, Right)
+        const lockBodyMat = new THREE.MeshStandardMaterial({
+          color: '#b88948',
+          map: bronzeMaps.map,
+          normalMap: bronzeMaps.normalMap,
+          normalScale: new THREE.Vector2(0.92, 0.92),
+          roughnessMap: bronzeMaps.ormMap,
+          metalnessMap: bronzeMaps.ormMap,
+          emissive: '#7f1d1d',
+          emissiveIntensity: 0.32,
+          metalness: 0.86,
+          roughness: 0.30,
+        });
+        subscribeMaterialToSurface(bronzeMaps, lockBodyMat);
+
         const lockNodes = [];
-        const lockX = [-0.28, 0.0, 0.28];
-        const lockY = [0.02, 0.14, 0.02];
+        const lockX = [-0.29, 0.0, 0.29];
+        const lockY = [-0.03, 0.12, -0.03];
+        const lockZ = [0.068, 0.088, 0.068];
+        const lockScale = [0.92, 1.14, 0.92];
         for (let k = 0; k < 3; k++) {
           const lk = new THREE.Group();
-          lk.position.set(lockX[k], lockY[k], 0.065);
-          const ringMat = new THREE.MeshStandardMaterial({
-            color: '#fbbf24',
-            emissive: '#ef4444',
+          lk.position.set(lockX[k], lockY[k], lockZ[k]);
+          lk.scale.setScalar(lockScale[k]);
+          const bodyMesh = new THREE.Mesh(G.sealPadlockBody, lockBodyMat);
+          const coreMat = new THREE.MeshStandardMaterial({
+            color: '#fda4af',
+            emissive: '#e11d48',
             emissiveIntensity: 1.55,
-            metalness: 0.86,
-            roughness: 0.2,
+            roughness: 0.14,
+            metalness: 0.18,
           });
-          const coreMat = new THREE.MeshBasicMaterial({
-            color: '#ff6b8b',
-            transparent: true,
-            opacity: 0.94,
-          });
-          const ring = new THREE.Mesh(new THREE.TorusGeometry(0.115, 0.026, 6, 16), ringMat);
-          const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.072, 0), coreMat);
-          lk.add(ring, core);
+          const core = new THREE.Mesh(G.sealPadlockCore, coreMat);
+          lk.add(bodyMesh, core);
           sealGroup.add(lk);
-          lockNodes.push({ group: lk, ringMat, coreMat, core });
+          lockNodes.push({ group: lk, ringMat: lockBodyMat, coreMat, core });
         }
 
         // Default visibility matches initial tower seal count (hidden only if explicitly unsealed!)
@@ -5102,15 +5787,20 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
         ) || 0;
         sealGroup.visible = initSeals > 0;
 
-        dg.add(exitHalo, crownGrp, beam, sealGroup);
+        dg.add(pedimentMesh, crestGem, crownGrp, beam, openSigil, sealGroup);
         exitRings.push(crownGrp);
         exitSealNodes.push({
           doorId: door.id || null,
           sealGroup,
           chainMat,
+          lockBodyMat,
           barrierMat,
           lockNodes,
-          beamMat,
+          auraMat,
+          openSigil,
+          openGlowMat,
+          crestGem,
+          crestGemMat,
           crownGoldMat,
         });
       }
@@ -5640,7 +6330,42 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
   const steamDeckBatch = [];
   const steamCapBatch = [];
   const steamNozzleBatch = [];
-  const laserEmitterBatch = [];
+  const sluiceStoneBatch = [];
+  const sluiceBronzeBatch = [];
+  const phaseBracketBatch = [];
+
+  // Shared rune inlay & dormant ghost materials for `phaseBlock` aqueduct ledges (zero extra shader compiles!)
+  const phaseRuneMatCyan = new THREE.MeshStandardMaterial({
+    color: '#0e7490',
+    emissive: '#38bdf8',
+    emissiveMap: T.phaseRune,
+    emissiveIntensity: 1.35,
+    roughness: 0.24,
+    metalness: 0.35,
+  });
+  const phaseRuneMatRed = new THREE.MeshStandardMaterial({
+    color: '#881337',
+    emissive: '#fb7185',
+    emissiveMap: T.phaseRune,
+    emissiveIntensity: 1.35,
+    roughness: 0.24,
+    metalness: 0.35,
+  });
+  const phaseGhostMatCyan = new THREE.MeshBasicMaterial({
+    color: '#67e8f9',
+    transparent: true,
+    opacity: 0.24,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const phaseGhostMatRed = new THREE.MeshBasicMaterial({
+    color: '#fda4af',
+    transparent: true,
+    opacity: 0.24,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const hydroCurtainMats = new Set();
 
   const conveyorRollers = [];
   const ledgeMeshes = [];
@@ -5803,10 +6528,11 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
         const mx = (ledgeR + 0.34) * Math.sin(deckPhi);
         const mz = (ledgeR + 0.34) * Math.cos(deckPhi);
         pushInstance(ledgeMossBatch, mx, y - 0.01, mz, 0.12, deckPhi, 0, 0.9, 0.65, 0.9, '#2e5926');
-      } else if (spec.hasCoral && fl <= 3 && (wc + fl) % 2 === 1) {
-        const cx = (ledgeR + 0.32) * Math.sin(deckPhi);
-        const cz = (ledgeR + 0.32) * Math.cos(deckPhi);
-        pushInstance(ledgeCoralBatch, cx, y - 0.08, cz, 0.2, deckPhi, 0.3, 0.85, 0.85, 0.85, '#fb7185');
+      } else if (spec.hasCoral && fl <= 2 && (wc + fl) % 3 === 1) {
+        // Subtle encrusted travertine barnacle stone relief tucked cleanly beneath the outer cornice lip
+        const cx = (ledgeR + 0.16) * Math.sin(deckPhi);
+        const cz = (ledgeR + 0.16) * Math.cos(deckPhi);
+        pushInstance(ledgeCoralBatch, cx, y - 0.16, cz, 0.12, deckPhi, 0.15, 0.68, 0.56, 0.68, '#cfc3aa');
       }
 
       ledgeMeshes.push(makeStaticProxy(phi, y, l.type, batchRefs));
@@ -5885,39 +6611,67 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
       };
     } else if (l.type === 'laserGate') {
       const isRed = l.switchGroup !== 'cyan';
-      const beamColor = isRed ? '#fb7185' : '#38bdf8';
       const lx = ledgeR * Math.sin(phi);
       const lz = ledgeR * Math.cos(phi);
-      const e1 = pushInstance(laserEmitterBatch, lx, y, lz, 0, phi, 0, 1, 1, 1);
-      const beam = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.058, 0.058, ledgeWidth * 0.9, 6),
-        new THREE.MeshBasicMaterial({ color: beamColor, transparent: true, opacity: 0.9 })
-      );
-      beam.rotation.z = Math.PI * 0.5;
-      beam.position.y = 0.24;
-      node.add(beam);
+      // Scale carved stone-and-bronze sluice emitter pillars proportionally to barrier height (`h = 1..3`)
+      const gateH = Math.max(1.56, Math.min(2.65, (l.h || 1) * fh * 0.62));
+      const syGate = gateH / 1.56;
+      const eStone = pushInstance(sluiceStoneBatch, lx, y, lz, 0, phi, 0, 1, syGate, 1);
+      const eBronze = pushInstance(sluiceBronzeBatch, lx, y, lz, 0, phi, 0, 1, syGate, 1);
+
+      // Shimmering high-pressure hydro-barrier curtain spanning cleanly between the bronze sluice nozzles (1 draw call!)
+      const curtainMat = createHydroBarrierMaterial(isRed);
+      hydroCurtainMats.add(curtainMat);
+      const curtainW = ledgeWidth * 0.84;
+      const curtainH = gateH * 0.80;
+      const pFront = new THREE.PlaneGeometry(curtainW, curtainH);
+      pFront.translate(0, 0, 0.025);
+      const pBack = new THREE.PlaneGeometry(curtainW, curtainH);
+      pBack.translate(0, 0, -0.025);
+      const curtainMesh = new THREE.Mesh(mergeGeometries([pFront, pBack]), curtainMat);
+      curtainMesh.position.y = gateH * 0.50;
+      node.add(curtainMesh);
       node.userData = {
         baseR: ledgeR,
         baseY: y,
         phi,
         type: l.type,
-        beam,
-        batchRefs: [laserEmitterBatch[e1]],
+        beam: curtainMesh,
+        curtainMat,
+        batchRefs: [sluiceStoneBatch[eStone], sluiceBronzeBatch[eBronze]],
         lastGone: false,
       };
     } else if (l.type === 'phaseBlock') {
       const isRed = l.switchGroup === 'red';
-      const holoMat = new THREE.MeshStandardMaterial({
-        color: isRed ? '#f43f5e' : '#38bdf8',
-        emissive: isRed ? '#e11d48' : '#0284c7',
-        emissiveIntensity: 0.85,
-        transparent: true,
-        opacity: 0.82,
-        roughness: 0.14,
-      });
-      const slab = new THREE.Mesh(G.iceSlab, holoMat);
-      node.add(slab);
-      node.userData = { baseR: ledgeR, baseY: y, phi, type: l.type, slab };
+      const lx = ledgeR * Math.sin(phi);
+      const lz = ledgeR * Math.cos(phi);
+      // Permanent sculpted antique-bronze wall corbel brackets remain mounted even when the slab phases out!
+      const pbIdx = pushInstance(phaseBracketBatch, lx, y, lz, 0, phi, 0, 1, 1, 1);
+
+      // Active solid carved rune-inlaid biome-stone aqueduct slab + riveted antique-bronze frame
+      const solidGrp = new THREE.Group();
+      const stoneMesh = new THREE.Mesh(G.phaseStoneSlab, ledgeTopMat);
+      stoneMesh.receiveShadow = true;
+      const bronzeMesh = new THREE.Mesh(G.phaseBronzeFrame, trimMetalMat);
+      const runeMesh = new THREE.Mesh(G.phaseRuneInlay, isRed ? phaseRuneMatRed : phaseRuneMatCyan);
+      solidGrp.add(stoneMesh, bronzeMesh, runeMesh);
+
+      // Subtle translucent ghosted rune-frame outline shown ONLY while phased out (`l.active === false`)
+      const ghostMesh = new THREE.Mesh(G.phaseGhostFrame, isRed ? phaseGhostMatRed : phaseGhostMatCyan);
+      ghostMesh.visible = false;
+
+      node.add(solidGrp, ghostMesh);
+      node.userData = {
+        baseR: ledgeR,
+        baseY: y,
+        phi,
+        type: l.type,
+        slab: solidGrp,
+        ghostMesh,
+        runeMat: isRed ? phaseRuneMatRed : phaseRuneMatCyan,
+        batchRefs: [phaseBracketBatch[pbIdx]],
+        lastGone: false,
+      };
     } else if (l.type === 'piston') {
       const rams = new THREE.Mesh(G.pistonRams, cableMat);
       const deck = new THREE.Mesh(terraceStoneGeo, ledgeTopMat);
@@ -6078,35 +6832,52 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
   });
   buildBandedInstancedFromList(group, bandedMeshes, terraceMetalGeo, trimMetalMat, steamCapBatch, TINY_PROP_SPAN_Y);
   buildBandedInstancedFromList(group, bandedMeshes, G.steamNozzle, trimMetalMat, steamNozzleBatch, TINY_PROP_SPAN_Y);
-  buildBandedInstancedFromList(group, bandedMeshes, G.laserEmitters, trimMetalMat, laserEmitterBatch, TINY_PROP_SPAN_Y);
+  buildBandedInstancedFromList(group, bandedMeshes, G.sluiceGateStone, ledgeTopMat, sluiceStoneBatch, TINY_PROP_SPAN_Y, {
+    castShadow: false,
+  });
+  buildBandedInstancedFromList(group, bandedMeshes, G.sluiceGateBronze, trimMetalMat, sluiceBronzeBatch, TINY_PROP_SPAN_Y, {
+    castShadow: false,
+  });
+  buildBandedInstancedFromList(group, bandedMeshes, G.phaseBracket, trimMetalMat, phaseBracketBatch, TINY_PROP_SPAN_Y, {
+    castShadow: false,
+  });
 
   if (ledgeMossBatch.length) {
     const lmMat = attachWaterlineShader(
-      new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.9, metalness: 0.02 }),
+      new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.94, metalness: 0.01 }),
       0.7
     );
     stoneMats.push(lmMat);
     buildBandedInstancedFromList(group, bandedMeshes, G.mossCluster, lmMat, ledgeMossBatch, TINY_PROP_SPAN_Y);
   }
   if (ledgeCoralBatch.length) {
+    const travMaps = getSurfaceMaps1024('coral_travertine', 1.2);
     const lcMat = attachWaterlineShader(
-      new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.58, metalness: 0.06 }),
+      new THREE.MeshStandardMaterial({
+        color: '#ffffff',
+        map: travMaps.map,
+        normalMap: travMaps.normalMap,
+        normalScale: new THREE.Vector2(0.75, 0.75),
+        roughnessMap: travMaps.roughnessMap,
+        roughness: 0.84,
+        metalness: 0.04,
+      }),
       0.65
     );
     stoneMats.push(lcMat);
     buildBandedInstancedFromList(group, bandedMeshes, G.coralCluster, lcMat, ledgeCoralBatch, TINY_PROP_SPAN_Y);
   }
 
-  // 6. Gecko Wall-Scamper Crystal/Moss Strips (`tower.wallStrips`) & Tail-Swing Grapple Rings (`tower.grappleRings`)!
+  // 6. Gecko Wall-Scamper Carved Bronze & Crystal-Grip Ladder Strips (`tower.wallStrips`) & Tail-Swing Grapple Rings!
   const wallStripNodes = [];
-  const rawStrips = tower?.wallStrips || tower?.geckoStrips || tower?.climbStrips || [];
+  const rawStrips = rawWallStripsEarly;
   if (rawStrips.length > 0) {
     const stripPadMat = new THREE.MeshStandardMaterial({
-      color: rbTheme === 'mist_bayou' || rbTheme === 'canyon_river' ? '#2dd4bf' : '#67e8f9',
-      emissive: rbTheme === 'mist_bayou' ? '#10b981' : '#0891b2',
-      emissiveIntensity: 0.58,
-      roughness: 0.34,
-      metalness: 0.18,
+      color: rbTheme === 'mist_bayou' || rbTheme === 'canyon_river' ? '#14b8a6' : '#38bdf8',
+      emissive: rbTheme === 'mist_bayou' ? '#10b981' : '#0284c7',
+      emissiveIntensity: 0.52,
+      roughness: 0.28,
+      metalness: 0.24,
     });
     for (let i = 0; i < rawStrips.length; i++) {
       const ws = rawStrips[i];
@@ -6115,34 +6886,39 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
       const maxY = (ws.maxFloor ?? (ws.floor ?? 0) + (ws.h || 3)) * fh;
       const spanH = Math.max(0.8, maxY - minY);
       const midY = (minY + maxY) * 0.5;
-      const sr = R + BRICK_PROUD + 0.045;
+      // Stand cleanly proud of BOTH curved masonry & protruding hexagonal storm_ocean basalt columns!
+      const sr = R + BRICK_PROUD + (spec.shape === 'hexBasalt' ? 0.155 : 0.072);
 
       const stripGrp = new THREE.Group();
       stripGrp.position.set(sr * Math.sin(sPhi), midY, sr * Math.cos(sPhi));
       stripGrp.rotation.y = sPhi;
 
       const railParts = [];
-      for (const sx of [-0.34, 0.34]) {
-        const rail = new THREE.BoxGeometry(0.052, spanH, 0.068);
-        rail.translate(sx, 0, 0.02);
+      for (const sx of [-0.30, 0.30]) {
+        const rail = new RoundedBoxGeometry(0.062, spanH, 0.088, 1, 0.012);
+        rail.translate(sx, 0, 0.01);
         railParts.push(rail);
       }
       const padParts = [];
-      const rungCount = Math.max(3, Math.floor(spanH / 0.38));
+      const rungCount = Math.max(3, Math.floor(spanH / 0.42));
       for (let r = 0; r < rungCount; r++) {
         const ry = -spanH * 0.5 + ((r + 0.5) / rungCount) * spanH;
-        const chevL = new THREE.BoxGeometry(0.32, 0.085, 0.055);
-        chevL.rotateZ(0.34);
-        chevL.translate(-0.13, ry, 0.035);
-        const chevR = new THREE.BoxGeometry(0.32, 0.085, 0.055);
-        chevR.rotateZ(-0.34);
-        chevR.translate(0.13, ry, 0.035);
-        padParts.push(chevL, chevR);
+        // Carved antique-bronze rung housing spanning between the twin vertical rails
+        const rungBar = new RoundedBoxGeometry(0.62, 0.068, 0.072, 1, 0.01);
+        rungBar.translate(0, ry, 0.02);
+        railParts.push(rungBar);
+        // Subtle recessed Pelagian hydro-grip crystal inlay centered on each bronze rung
+        const inlayL = new RoundedBoxGeometry(0.20, 0.042, 0.036, 1, 0.008);
+        inlayL.rotateZ(0.24);
+        inlayL.translate(-0.10, ry + 0.016, 0.048);
+        const inlayR = new RoundedBoxGeometry(0.20, 0.042, 0.036, 1, 0.008);
+        inlayR.rotateZ(-0.24);
+        inlayR.translate(0.10, ry + 0.016, 0.048);
+        padParts.push(inlayL, inlayR);
       }
 
       const railsMesh = new THREE.Mesh(mergeGeometries(railParts), trimMetalMat);
       const padsMesh = new THREE.Mesh(mergeGeometries(padParts), stripPadMat);
-      padsMesh.castShadow = true;
       stripGrp.add(railsMesh, padsMesh);
       group.add(stripGrp);
       wallStripNodes.push({ group: stripGrp, phi: sPhi, minY, maxY, padMat: stripPadMat });
@@ -6374,24 +7150,26 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
       metalness: 0.85,
       roughness: 0.32,
     });
-    const botCollar = new THREE.Mesh(new THREE.TorusGeometry(ringR + 0.30, 0.055, 6, 32), rimMat);
-    botCollar.rotation.x = Math.PI * 0.5;
-    botCollar.position.y = 0.06;
-    const topCollar = new THREE.Mesh(new THREE.TorusGeometry(ringR + 0.30, 0.055, 6, 32), rimMat);
-    topCollar.rotation.x = Math.PI * 0.5;
-    topCollar.position.y = bandH - 0.06;
+    const botCollarGeo = new THREE.TorusGeometry(ringR + 0.30, 0.055, 6, 32);
+    botCollarGeo.rotateX(Math.PI * 0.5);
+    botCollarGeo.translate(0, 0.06, 0);
+    const topCollarGeo = new THREE.TorusGeometry(ringR + 0.30, 0.055, 6, 32);
+    topCollarGeo.rotateX(Math.PI * 0.5);
+    topCollarGeo.translate(0, bandH - 0.06, 0);
+    const collarsMesh = new THREE.Mesh(mergeGeometries([botCollarGeo, topCollarGeo]), rimMat);
 
-    // 8 Glowing Lock Beacons spaced around the Siphon Barrier collar
+    // 8 Glowing Lock Beacons merged into ONE draw call (-7 draw calls!)
     const lockBeaconMat = new THREE.MeshBasicMaterial({ color: '#fbbf24' });
-    const lockGeo = new THREE.OctahedronGeometry(0.11, 0);
+    const lockParts = [];
     for (let b = 0; b < 8; b++) {
       const ba = (b / 8) * TWO_PI;
-      const bk = new THREE.Mesh(lockGeo, lockBeaconMat);
-      bk.position.set(Math.sin(ba) * (ringR + 0.36), bandH * 0.5, Math.cos(ba) * (ringR + 0.36));
-      bg.add(bk);
+      const g = new THREE.OctahedronGeometry(0.11, 0);
+      g.translate(Math.sin(ba) * (ringR + 0.36), bandH * 0.5, Math.cos(ba) * (ringR + 0.36));
+      lockParts.push(g);
     }
+    const locksMesh = new THREE.Mesh(mergeGeometries(lockParts), lockBeaconMat);
 
-    bg.add(energyCyl, botCollar, topCollar);
+    bg.add(energyCyl, collarsMesh, locksMesh);
     group.add(bg);
     return {
       id: barrierDef?.id || null,
@@ -6453,6 +7231,7 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     sparkInstancers,
     forgeLights,
     portalMats,
+    hydroCurtainMats: Array.from(hydroCurtainMats),
     exitRings,
     exitSealNodes,
     siphonBarrierNodes,
@@ -6677,6 +7456,11 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
       cachedTower.portalMats[i].uniforms.uTime.value = time;
     }
   }
+  if (cachedTower.hydroCurtainMats) {
+    for (let i = 0; i < cachedTower.hydroCurtainMats.length; i++) {
+      cachedTower.hydroCurtainMats[i].uniforms.uTime.value = time;
+    }
+  }
 
   if (cachedTower.clueUpdater) {
     cachedTower.clueUpdater(time, state, tower);
@@ -6739,20 +7523,36 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
 
   if (cachedTower.exitSealNodes?.length > 0) {
     const isSealed = sealsRemaining > 0;
-    const pulse = 0.5 + 0.5 * Math.sin(time * 5.2);
+    const sealFrac = crownTotal > 0 ? Math.max(0, Math.min(1, crownBroken / crownTotal)) : isSealed ? 0 : 1;
+    const remainingFrac = crownTotal > 0 ? Math.max(0.35, sealsRemaining / crownTotal) : 1;
+    const pulse = 0.5 + 0.5 * Math.sin(time * 4.8);
     for (let i = 0; i < cachedTower.exitSealNodes.length; i++) {
       const es = cachedTower.exitSealNodes[i];
       es.sealGroup.visible = isSealed;
+      if (es.auraMat?.uniforms) {
+        es.auraMat.uniforms.uTime.value = time;
+        es.auraMat.uniforms.uUnsealed.value = isSealed ? 0.0 : 1.0;
+        es.auraMat.uniforms.uProgress.value = sealFrac;
+      }
       if (isSealed) {
-        es.barrierMat.opacity = 0.24 + pulse * 0.16;
-        es.chainMat.emissiveIntensity = 0.36 + pulse * 0.34;
-        if (es.beamMat) {
-          es.beamMat.color.set('#f43f5e');
-          es.beamMat.opacity = 0.08 + pulse * 0.05;
+        if (es.barrierMat?.uniforms) {
+          es.barrierMat.uniforms.uTime.value = time;
+          es.barrierMat.uniforms.uStrength.value = remainingFrac;
+        }
+        es.chainMat.emissiveIntensity = (0.22 + pulse * 0.28) * remainingFrac;
+        if (es.lockBodyMat) {
+          es.lockBodyMat.emissiveIntensity = 0.24 + pulse * 0.26;
+        }
+        if (es.openSigil) es.openSigil.visible = false;
+        if (es.openGlowMat) es.openGlowMat.opacity = 0;
+        if (es.crestGemMat) {
+          es.crestGemMat.color.set('#fda4af');
+          es.crestGemMat.emissive.set('#e11d48');
+          es.crestGemMat.emissiveIntensity = 1.15 + pulse * 0.55;
         }
         if (es.crownGoldMat) {
-          es.crownGoldMat.emissive.set('#ef4444');
-          es.crownGoldMat.emissiveIntensity = 0.75 + pulse * 0.45;
+          es.crownGoldMat.emissive.set('#991b1b');
+          es.crownGoldMat.emissiveIntensity = 0.24 + pulse * 0.20;
         }
         for (let k = 0; k < es.lockNodes.length; k++) {
           const lk = es.lockNodes[k];
@@ -6765,19 +7565,28 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
           }
           lk.group.visible = !broken && (crownTotal === 0 || k < Math.max(1, crownTotal));
           if (lk.group.visible) {
-            lk.core.rotation.y = time * 2.8 + k * 1.1;
-            lk.core.rotation.x = time * 1.9;
-            lk.ringMat.emissiveIntensity = 1.25 + pulse * 0.65;
+            lk.core.rotation.y = time * 2.2 + k * 1.1;
+            lk.coreMat.emissiveIntensity = 1.35 + pulse * 0.65;
           }
         }
       } else {
-        if (es.beamMat) {
-          es.beamMat.color.set('#67e8f9');
-          es.beamMat.opacity = 0.28 + 0.08 * Math.sin(time * 3.0);
+        // 3/3 UNSEALED: Dramatically radiant golden-aquamarine Pelagian Crown Portal!
+        const radPulse = 0.5 + 0.5 * Math.sin(time * 3.2);
+        if (es.openSigil) es.openSigil.visible = true;
+        if (es.openGlowMat && es.openSigil) {
+          es.openGlowMat.opacity = 0.78 + 0.20 * radPulse;
+          es.openSigil.rotation.z = time * 0.55;
+        }
+        if (es.crestGem && es.crestGemMat) {
+          es.crestGem.rotation.y = time * 1.6;
+          es.crestGemMat.color.set('#fef08a');
+          es.crestGemMat.emissive.set('#22d3ee');
+          es.crestGemMat.emissiveIntensity = 1.65 + 0.45 * radPulse;
         }
         if (es.crownGoldMat) {
-          es.crownGoldMat.emissive.set('#06b6d4');
-          es.crownGoldMat.emissiveIntensity = 1.45;
+          // Keep pediment gleaming sculpted antique gold (zero blown-out white washout!)
+          es.crownGoldMat.emissive.set('#d97706');
+          es.crownGoldMat.emissiveIntensity = 0.34 + 0.16 * radPulse;
         }
       }
     }
@@ -6961,10 +7770,13 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
       if (ud.treadMesh.material !== wantMat) ud.treadMesh.material = wantMat;
     } else if (l.type === 'laserGate' && ud.beam) {
       ud.beam.visible = l.active !== false;
-      const pulse = 0.85 + 0.2 * Math.sin(time * 28);
-      ud.beam.scale.set(pulse, 1, pulse);
     } else if (l.type === 'phaseBlock' && ud.slab) {
-      ud.slab.visible = l.active !== false;
+      const isSolid = l.active !== false;
+      ud.slab.visible = isSolid;
+      if (ud.ghostMesh) ud.ghostMesh.visible = !isSolid;
+      if (isSolid && ud.runeMat) {
+        ud.runeMat.emissiveIntensity = 1.15 + 0.35 * Math.sin(time * 3.4);
+      }
     } else if (l.type === 'piston') {
       const ext = l.pistonExt != null ? l.pistonExt : 1;
       const rad = TOWER_RADIUS - 0.3 + ext * (LEDGE_OFFSET + 0.3);
@@ -7075,7 +7887,8 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
 
     const u = sm.userData;
     if (u.orb && u.orb.visible) {
-      u.orb.rotation.y = time * 2.8;
+      u.orb.rotation.y = time * 2.2;
+      u.orb.position.y = 0.45 + Math.sin(time * 2.6 + i) * 0.024;
     }
     if (u.wheel) {
       if (typeof sw.valveAngle === 'number') {
@@ -7084,11 +7897,12 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
         u.wheel.rotation.z = sw.active ? time * 4.8 : Math.sin(time * 1.4) * 0.12;
       }
     }
-    const idleHex = sw.group === 'cyan' ? '#38bdf8' : '#f59e0b';
-    const activeHex = sw.active ? '#2dd4bf' : idleHex;
-    u.orbMat.color.set(activeHex);
-    u.orbMat.emissive.set(activeHex);
-    u.orbMat.emissiveIntensity = sw.active ? 1.65 : 1.05;
+    const isCyan = sw.group === 'cyan';
+    const diffHex = sw.active ? '#14b8a6' : isCyan ? '#0ea5e9' : '#d97706';
+    const emHex = sw.active ? '#0d9488' : isCyan ? '#0369a1' : '#b45309';
+    u.orbMat.color.set(diffHex);
+    u.orbMat.emissive.set(emHex);
+    u.orbMat.emissiveIntensity = sw.active ? 0.78 : 0.42;
   }
 
   // 10. Embedded Workbench & Sunken Treasure Chest

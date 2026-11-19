@@ -19,11 +19,12 @@ export const GATEWAY_SKINS = [
     id: 'sea_glass_guardian',
     name: 'Sea-Glass Guardian',
     bodyColor: '#16b3ac',
-    bellyColor: '#fff1eb',
+    bodyDeepColor: '#0b5258',
+    bellyColor: '#e6d8cf',
     crestColor: '#4ef4e2',
-    vestColor: '#e8f6f8',
-    harnessColor: '#e8f6f8',
-    packColor: '#e2b15c',
+    vestColor: '#dcecf0',
+    harnessColor: '#dcecf0',
+    packColor: '#d9a44c',
     eyeGlow: '#fbbf24',
     accentColor: '#5efce8',
     metallic: 0.08,
@@ -31,93 +32,101 @@ export const GATEWAY_SKINS = [
   {
     id: 'coral_reef_empress',
     name: 'Coral Reef Empress',
-    bodyColor: '#f43f5e',
-    bellyColor: '#fff5f2',
-    crestColor: '#2dd4bf',
-    vestColor: '#ffe4e6',
-    harnessColor: '#ffe4e6',
-    packColor: '#fb7185',
+    bodyColor: '#d94865',
+    bodyDeepColor: '#761e35',
+    bellyColor: '#e8d7d0',
+    crestColor: '#22c7b8',
+    vestColor: '#e4d2d7',
+    harnessColor: '#e4d2d7',
+    packColor: '#dc9a68',
     eyeGlow: '#2dd4bf',
-    accentColor: '#fde047',
+    accentColor: '#5efce8',
     metallic: 0.10,
   },
   {
     id: 'canyon_rapids_ranger',
     name: 'Canyon Rapids Ranger',
-    bodyColor: '#10b981',
-    bellyColor: '#fef3c7',
-    crestColor: '#06b6d4',
-    vestColor: '#fde68a',
-    harnessColor: '#f5ebe0',
-    packColor: '#d97706',
+    bodyColor: '#c4622d',
+    bodyDeepColor: '#692b13',
+    bellyColor: '#e3d3bc',
+    crestColor: '#1ea87a',
+    vestColor: '#dcd0bf',
+    harnessColor: '#dcd0bf',
+    packColor: '#c78830',
     eyeGlow: '#f59e0b',
-    accentColor: '#38bdf8',
+    accentColor: '#5eead4',
     metallic: 0.14,
   },
   {
     id: 'alpine_glacier_mystic',
     name: 'Alpine Glacier Mystic',
-    bodyColor: '#38bdf8',
-    bellyColor: '#f8fafc',
-    crestColor: '#f472b6',
-    vestColor: '#e2e8f0',
-    harnessColor: '#f1f5f9',
-    packColor: '#0284c7',
-    eyeGlow: '#a5f3fc',
-    accentColor: '#67e8f9',
+    bodyColor: '#2d8fd4',
+    bodyDeepColor: '#154473',
+    bellyColor: '#d6e2ec',
+    crestColor: '#d978ad',
+    vestColor: '#d0dce8',
+    harnessColor: '#d0dce8',
+    packColor: '#d4947e',
+    eyeGlow: '#67e8f9',
+    accentColor: '#7dd3fc',
     metallic: 0.18,
   },
   {
     id: 'bayou_biolume',
     name: 'Bayou Biolume',
-    bodyColor: '#0f766e',
-    bellyColor: '#fef9c3',
-    crestColor: '#84cc16',
-    vestColor: '#cbd5e1',
-    harnessColor: '#d1fae5',
-    packColor: '#b45309',
+    bodyColor: '#167d69',
+    bodyDeepColor: '#093b34',
+    bellyColor: '#ddd6bc',
+    crestColor: '#82c834',
+    vestColor: '#c4d1ca',
+    harnessColor: '#c4d1ca',
+    packColor: '#b87228',
     eyeGlow: '#facc15',
-    accentColor: '#4ade80',
+    accentColor: '#fbbf24',
     metallic: 0.12,
   },
   {
     id: 'abyssal_leviathan',
     name: 'Abyssal Leviathan',
-    bodyColor: '#1d4ed8',
-    bellyColor: '#cbd5e1',
-    crestColor: '#a855f7',
-    vestColor: '#334155',
-    harnessColor: '#94a3b8',
-    packColor: '#6366f1',
+    bodyColor: '#2a4194',
+    bodyDeepColor: '#141e4d',
+    bellyColor: '#bcc9db',
+    crestColor: '#8b5cf6',
+    vestColor: '#546682',
+    harnessColor: '#5a6c88',
+    packColor: '#7c8ce0',
     eyeGlow: '#22d3ee',
-    accentColor: '#00f5d4',
-    metallic: 0.26,
+    accentColor: '#22d3ee',
+    metallic: 0.24,
   },
   {
     id: 'solar_oasis',
     name: 'Solar Oasis',
-    bodyColor: '#0ea5e9',
-    bellyColor: '#fefce8',
-    crestColor: '#f97316',
-    vestColor: '#fef08a',
-    harnessColor: '#fef9c3',
-    packColor: '#eab308',
+    bodyColor: '#d99124',
+    bodyDeepColor: '#78440e',
+    bellyColor: '#e6dcc2',
+    crestColor: '#1cc4b6',
+    vestColor: '#e2d7be',
+    harnessColor: '#e2d7be',
+    packColor: '#b8732a',
     eyeGlow: '#10b981',
-    accentColor: '#fbbf24',
-    metallic: 0.34,
+    accentColor: '#5efce8',
+    metallic: 0.28,
   },
   {
     id: 'sovereign_starlight',
     name: 'Sovereign Starlight',
-    bodyColor: '#eab308',
-    bellyColor: '#ffffff',
-    crestColor: '#c084fc',
-    vestColor: '#fef08a',
-    harnessColor: '#faf5ff',
-    packColor: '#fde047',
+    bodyColor: '#6c8cc6',
+    bodyDeepColor: '#344278',
+    bellyColor: '#d6dae6',
+    crestColor: '#b478f2',
+    vestColor: '#d8d6e6',
+    harnessColor: '#d8d6e6',
+    packColor: '#e2b548',
     eyeGlow: '#e879f9',
-    accentColor: '#67e8f9',
-    metallic: 0.68,
+    accentColor: '#5efce8',
+    metallic: 0.42,
+    iridescentOpal: true,
   },
 ];
 
@@ -397,10 +406,54 @@ function loadSharedGatewayGlb() {
   return _sharedGatewayGlbPromise;
 }
 
+let _sharedPalmSplashTex = null;
+
+function getSharedPalmSplashTex() {
+  if (_sharedPalmSplashTex) return _sharedPalmSplashTex;
+  if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+  const c = document.createElement('canvas');
+  c.width = 64;
+  c.height = 64;
+  const ctx = c.getContext('2d');
+  if (!ctx) return null;
+  ctx.clearRect(0, 0, 64, 64);
+  const g = ctx.createRadialGradient(32, 32, 1, 32, 32, 28);
+  g.addColorStop(0.0, 'rgba(255, 255, 255, 0.95)');
+  g.addColorStop(0.28, 'rgba(180, 250, 255, 0.65)');
+  g.addColorStop(0.62, 'rgba(94, 252, 232, 0.20)');
+  g.addColorStop(0.88, 'rgba(94, 252, 232, 0.0)');
+  g.addColorStop(1.0, 'rgba(94, 252, 232, 0.0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  // Subtle 6-petal hydro-splash rays feathered well inside the disc
+  ctx.save();
+  ctx.translate(32, 32);
+  for (let i = 0; i < 6; i++) {
+    ctx.rotate(Math.PI / 3);
+    const rg = ctx.createLinearGradient(0, 0, 24, 0);
+    rg.addColorStop(0.0, 'rgba(255, 255, 255, 0.75)');
+    rg.addColorStop(0.55, 'rgba(125, 235, 255, 0.28)');
+    rg.addColorStop(1.0, 'rgba(125, 235, 255, 0.0)');
+    ctx.fillStyle = rg;
+    ctx.beginPath();
+    ctx.moveTo(2, -2.2);
+    ctx.quadraticCurveTo(14, -4.0, 24, 0);
+    ctx.quadraticCurveTo(14, 4.0, 2, 2.2);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  _sharedPalmSplashTex = tex;
+  return tex;
+}
+
 /**
  * Synthesizes and caches per-skin `albedo` & `emissive` CanvasTextures from the embedded
- * 1K `gateway.glb` atlas while preserving 100% of hexagonal scale shading, belly scutes,
- * radial iris fibers, corneal catchlights, and bioluminescent lateral-line spots!
+ * 1K `gateway.glb` atlas while preserving 100% of Voronoi scale crevices, sculpted belly scutes,
+ * fin venation, radial iris fibers, corneal catchlights, and bioluminescent lateral-line spots
+ * with zero chest blowout and zero crushed-black shadows!
  */
 function getOrBuildSkinAtlasMaps(skin, baseMaps) {
   if (!baseMaps || !baseMaps.albedo || !baseMaps.albedo.image) return null;
@@ -428,12 +481,14 @@ function getOrBuildSkinAtlasMaps(skin, baseMaps) {
     const dA = imgA.data;
 
     const cBody = hexToRgb01(skin.bodyColor);
+    const cDeep = hexToRgb01(skin.bodyDeepColor || skin.bodyColor);
     const cBelly = hexToRgb01(skin.bellyColor);
     const cCrest = hexToRgb01(skin.crestColor);
     const cHarness = hexToRgb01(skin.harnessColor);
     const cPack = hexToRgb01(skin.packColor);
     const cEye = hexToRgb01(skin.eyeGlow);
     const cAccent = hexToRgb01(skin.accentColor);
+    const isOpal = Boolean(skin.iridescentOpal);
 
     for (let py = 0; py < h; py++) {
       // glTF PNG top row `py = 0` corresponds to `v_blender = 1.0`!
@@ -445,65 +500,120 @@ function getOrBuildSkinAtlasMaps(skin, baseMaps) {
         const g0 = dA[idx + 1] / 255;
         const b0 = dA[idx + 2] / 255;
         const lum = 0.2126 * r0 + 0.7152 * g0 + 0.0722 * b0;
+        const sat = Math.max(r0, g0, b0) - Math.min(r0, g0, b0);
 
-        let tr = cBody[0];
-        let tg = cBody[1];
-        let tb = cBody[2];
-        let keepOrig = 0;
+        let outR = r0;
+        let outG = g0;
+        let outB = b0;
+        let keepOrig = false;
 
         if (ub <= 0.705 && vb <= 0.765) {
-          // Q_SKIN: blend smoothly between dorsal/flank scales and ventral pearl belly!
+          // Q_SKIN: preserve deep Voronoi scale crevices + sculpted ventral belly scutes!
           const su = Math.max(0, Math.min(1, (ub - 0.02) / 0.66));
           const frontDist = Math.abs(su - 0.5) * 2.0;
           const sv = Math.max(0, Math.min(1, (vb - 0.02) / 0.72));
-          const bellyMask =
-            frontDist < 0.34 && sv > 0.10 && sv < 0.86
-              ? Math.max(0, Math.min(1, (0.34 - frontDist) / 0.20))
+          const uvBelly =
+            frontDist < 0.34 && sv > 0.09 && sv < 0.87
+              ? Math.max(0, Math.min(1, (0.34 - frontDist) / 0.18))
               : 0;
-          tr = cBody[0] * (1 - bellyMask) + cBelly[0] * bellyMask;
-          tg = cBody[1] * (1 - bellyMask) + cBelly[1] * bellyMask;
-          tb = cBody[2] * (1 - bellyMask) + cBelly[2] * bellyMask;
+          // Blend UV mask with natural baked pale-belly detection for crisp scute transitions
+          const warmBellyHint = r0 > b0 * 0.92 && lum > 0.44 && sat < 0.28 ? 1 : 0;
+          const bellyMask = Math.max(0, Math.min(1, uvBelly * (0.72 + warmBellyHint * 0.28)));
+
+          // Scale tonal curve: deep rich grout (`cDeep`) -> vibrant mid-scale (`cBody`) -> subtle iridescent crown
+          const normScale = Math.max(0, Math.min(1, (lum - 0.06) / 0.66));
+          const creviceT = Math.pow(normScale, 0.94);
+          let sr = cDeep[0] * (1 - creviceT) + cBody[0] * creviceT;
+          let sg = cDeep[1] * (1 - creviceT) + cBody[1] * creviceT;
+          let sb = cDeep[2] * (1 - creviceT) + cBody[2] * creviceT;
+
+          // Subtle iridescent opal shimmer across scales for Sovereign Starlight
+          if (isOpal) {
+            const wave = 0.5 + 0.5 * Math.sin(sv * 8.5 + su * 5.2);
+            const opalR = cAccent[0] * (1 - wave) + cCrest[0] * wave;
+            const opalG = cAccent[1] * (1 - wave) + cCrest[1] * wave;
+            const opalB = cAccent[2] * (1 - wave) + cCrest[2] * wave;
+            const sheen = 0.24 + 0.18 * creviceT;
+            sr = sr * (1 - sheen) + opalR * sheen;
+            sg = sg * (1 - sheen) + opalG * sheen;
+            sb = sb * (1 - sheen) + opalB * sheen;
+          } else if (creviceT > 0.65) {
+            // Subtle crest-tinted dorsal highlight on scale crowns
+            const hi = (creviceT - 0.65) * 0.32;
+            sr = sr * (1 - hi) + cCrest[0] * hi;
+            sg = sg * (1 - hi) + cCrest[1] * hi;
+            sb = sb * (1 - hi) + cCrest[2] * hi;
+          }
+
+          // Preserve scale depth contrast (`0.38..1.04`, zero crushed black & zero blown-out white!)
+          const scaleGain = 0.38 + 0.66 * Math.pow(normScale, 0.88);
+          sr *= scaleGain;
+          sg *= scaleGain;
+          sb *= scaleGain;
+
+          // Sculpted belly scutes: normalize against baked belly lum so every scute ridge stays crisp!
+          const bellyNorm = Math.max(0, Math.min(1, lum / 0.88));
+          const bellyGain = 0.36 + 0.52 * Math.pow(bellyNorm, 1.18);
+          const br = cBelly[0] * bellyGain;
+          const bg = cBelly[1] * bellyGain;
+          const bb = cBelly[2] * bellyGain;
+
+          outR = sr * (1 - bellyMask) + br * bellyMask;
+          outG = sg * (1 - bellyMask) + bg * bellyMask;
+          outB = sb * (1 - bellyMask) + bb * bellyMask;
         } else if (ub > 0.705 && vb <= 0.70) {
-          // Q_FRILL: iridescent frill base -> accent margin
+          // Q_FRILL: smooth root-to-tip gradient preserving branching fin membrane veins!
           const fu = Math.max(0, Math.min(1, (ub - 0.72) / 0.26));
-          tr = cCrest[0] * (1 - fu * 0.45) + cAccent[0] * (fu * 0.45);
-          tg = cCrest[1] * (1 - fu * 0.45) + cAccent[1] * (fu * 0.45);
-          tb = cCrest[2] * (1 - fu * 0.45) + cAccent[2] * (fu * 0.45);
+          const rootT = Math.max(0, Math.min(1, fu * 1.45));
+          const tipT = Math.max(0, Math.min(1, (fu - 0.42) / 0.58));
+          let fr = cBody[0] * (1 - rootT) + cCrest[0] * rootT;
+          let fg = cBody[1] * (1 - rootT) + cCrest[1] * rootT;
+          let fb = cBody[2] * (1 - rootT) + cCrest[2] * rootT;
+          fr = fr * (1 - tipT * 0.48) + cAccent[0] * (tipT * 0.48);
+          fg = fg * (1 - tipT * 0.48) + cAccent[1] * (tipT * 0.48);
+          fb = fb * (1 - tipT * 0.48) + cAccent[2] * (tipT * 0.48);
+          const veinGain = 0.34 + 0.68 * Math.pow(Math.max(0.02, lum), 0.90);
+          outR = fr * veinGain;
+          outG = fg * veinGain;
+          outB = fb * veinGain;
         } else if (ub > 0.705 && vb > 0.70) {
-          // Q_EYE: preserve dark pupil (`lum < 0.08`) & bright sclera/catchlight (`lum > 0.80`), tint iris!
+          // Q_EYE: preserve dark slit pupil (`lum < 0.08`) & sclera/catchlight (`lum > 0.82`), tint iris!
           const ex = (ub - 0.85) / 0.125;
           const ey = (vb - 0.85) / 0.125;
           const er = Math.hypot(ex, ey);
-          if (er > 0.70 || lum > 0.82 || lum < 0.07) {
-            keepOrig = 1;
+          if (er > 0.70 || lum > 0.82 || lum < 0.08) {
+            keepOrig = true;
           } else {
-            tr = cEye[0];
-            tg = cEye[1];
-            tb = cEye[2];
+            const irisGain = 0.38 + 0.76 * Math.pow(Math.max(0.02, lum), 0.86);
+            outR = cEye[0] * irisGain;
+            outG = cEye[1] * irisGain;
+            outB = cEye[2] * irisGain;
           }
         } else {
-          // Q_GEAR: ceramic (0..0.36), metallic trim (0.36..0.68), Harmonic Water Seed (0.68..1.0)
+          // Q_GEAR: ceramic plates (0..0.36), metallic filigree (0.36..0.68), Water Seed crystal (0.68..1.0)
           const gv = Math.max(0, Math.min(1, (vb - 0.78) / 0.20));
           if (gv < 0.36) {
-            tr = cHarness[0];
-            tg = cHarness[1];
-            tb = cHarness[2];
+            const cerGain = 0.36 + 0.58 * Math.pow(Math.max(0.02, lum), 0.96);
+            outR = cHarness[0] * cerGain;
+            outG = cHarness[1] * cerGain;
+            outB = cHarness[2] * cerGain;
           } else if (gv < 0.68) {
-            tr = cPack[0];
-            tg = cPack[1];
-            tb = cPack[2];
+            const metGain = 0.34 + 0.74 * Math.pow(Math.max(0.02, lum), 0.90);
+            outR = cPack[0] * metGain;
+            outG = cPack[1] * metGain;
+            outB = cPack[2] * metGain;
           } else {
-            tr = cAccent[0];
-            tg = cAccent[1];
-            tb = cAccent[2];
+            const gemGain = 0.42 + 0.68 * Math.pow(Math.max(0.02, lum), 0.86);
+            outR = cAccent[0] * gemGain;
+            outG = cAccent[1] * gemGain;
+            outB = cAccent[2] * gemGain;
           }
         }
 
-        if (keepOrig < 0.99) {
-          const gain = Math.pow(Math.max(0.02, lum), 0.78) * 1.48;
-          dA[idx] = Math.max(0, Math.min(255, Math.round(tr * gain * 255)));
-          dA[idx + 1] = Math.max(0, Math.min(255, Math.round(tg * gain * 255)));
-          dA[idx + 2] = Math.max(0, Math.min(255, Math.round(tb * gain * 255)));
+        if (!keepOrig) {
+          dA[idx] = Math.max(0, Math.min(255, Math.round(outR * 255)));
+          dA[idx + 1] = Math.max(0, Math.min(255, Math.round(outG * 255)));
+          dA[idx + 2] = Math.max(0, Math.min(255, Math.round(outB * 255)));
         }
       }
     }
@@ -514,6 +624,7 @@ function getOrBuildSkinAtlasMaps(skin, baseMaps) {
     texA.colorSpace = THREE.SRGBColorSpace;
     texA.minFilter = THREE.LinearMipmapLinearFilter;
     texA.magFilter = THREE.LinearFilter;
+    texA.anisotropy = 4;
     texA.generateMipmaps = true;
 
     let texE = baseMaps.emissive || null;
@@ -529,12 +640,12 @@ function getOrBuildSkinAtlasMaps(skin, baseMaps) {
         for (let i = 0; i < dE.length; i += 4) {
           const elum = Math.max(dE[i], dE[i + 1], dE[i + 2]) / 255;
           if (elum > 0.01) {
-            // Preserve white catchlight peaks (`elum > 0.92` & neutral)
+            // Preserve crisp corneal catchlights (`elum > 0.92` & neutral)
             const isWhite = dE[i] > 225 && dE[i + 1] > 225 && dE[i + 2] > 225;
             if (!isWhite) {
-              dE[i] = Math.min(255, Math.round(cAccent[0] * elum * 285));
-              dE[i + 1] = Math.min(255, Math.round(cAccent[1] * elum * 285));
-              dE[i + 2] = Math.min(255, Math.round(cAccent[2] * elum * 285));
+              dE[i] = Math.min(255, Math.round(cAccent[0] * elum * 235));
+              dE[i + 1] = Math.min(255, Math.round(cAccent[1] * elum * 235));
+              dE[i + 2] = Math.min(255, Math.round(cAccent[2] * elum * 235));
             }
           }
         }
@@ -657,27 +768,42 @@ export class GatewayRig {
         roughness: 0.38,
         metalness: 0.08,
         emissive: '#ffffff',
-        emissiveIntensity: 0.92,
+        emissiveIntensity: 0.78,
       })
     );
     this.accentMat = this._trackMat(
       new THREE.MeshStandardMaterial({
         color: '#5efce8',
         emissive: '#38bdf8',
-        emissiveIntensity: 1.45,
-        roughness: 0.12,
-        metalness: 0.18,
+        emissiveIntensity: 1.05,
+        roughness: 0.14,
+        metalness: 0.22,
       })
     );
+    const palmSplashTex = getSharedPalmSplashTex();
     this.flashMat = this._trackMat(
       new THREE.MeshBasicMaterial({
-        color: '#67e8f9',
+        color: '#7dd3fc',
+        map: palmSplashTex,
         transparent: true,
-        opacity: 0.62,
+        opacity: 0.82,
+        side: THREE.DoubleSide,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       })
     );
+    this._starMoteMat = this._trackMat(
+      new THREE.MeshStandardMaterial({
+        color: '#c4f5ff',
+        emissive: '#7dd3fc',
+        emissiveIntensity: 0.85,
+        roughness: 0.12,
+        metalness: 0.35,
+        transparent: true,
+        opacity: 0.88,
+      })
+    );
+    this._moteDummy = new THREE.Object3D();
     // Legacy compatibility map if external code inspects `rig.mats`
     this.mats = {
       skin: this.mainMat,
@@ -837,15 +963,19 @@ export class GatewayRig {
       this._hydroEmitterGroup.name = 'GatewayHydroCasterEmitter';
 
       const muzzle = new THREE.Group();
-      const flashRing = new THREE.Mesh(
-        this._trackGeo(new THREE.TorusGeometry(0.034, 0.006, 8, 20)),
+      const flashBloomA = new THREE.Mesh(
+        this._trackGeo(new THREE.PlaneGeometry(0.11, 0.11)),
         this.flashMat
       );
-      const flashCore = new THREE.Mesh(
-        this._trackGeo(new THREE.SphereGeometry(0.020, 12, 10)),
-        this.accentMat
+      const flashBloomB = new THREE.Mesh(
+        this._trackGeo(new THREE.PlaneGeometry(0.095, 0.095)),
+        this.flashMat
       );
-      muzzle.add(flashRing, flashCore);
+      flashBloomB.rotation.y = Math.PI * 0.5;
+      const coreGeo = this._trackGeo(new THREE.OctahedronGeometry(0.016, 0));
+      coreGeo.scale(0.85, 1.55, 0.85);
+      const flashCore = new THREE.Mesh(coreGeo, this.accentMat);
+      muzzle.add(flashBloomA, flashBloomB, flashCore);
       muzzle.visible = false;
       this._muzzleNode = muzzle;
 
@@ -861,15 +991,21 @@ export class GatewayRig {
       this._compatBackpackDummy = new THREE.Group();
       this._compatHarnessDummy = new THREE.Group();
 
-      // Sovereign Starlight orbiting water-starlight motes
+      // Sovereign Starlight orbiting aurora star-droplets (1 InstancedMesh = 1 draw call!)
       this._starMotesGroup = new THREE.Group();
-      this._starMotes = [];
-      const moteGeo = this._trackGeo(new THREE.OctahedronGeometry(0.022, 0));
+      const moteGeo = this._trackGeo(new THREE.OctahedronGeometry(0.015, 0));
+      moteGeo.scale(0.65, 1.75, 0.65);
+      const moteInst = new THREE.InstancedMesh(moteGeo, this._starMoteMat, 6);
+      moteInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      const auroraHexes = ['#5efce8', '#c084fc', '#fde047', '#67e8f9', '#e879f9', '#99f6e4'];
       for (let i = 0; i < 6; i++) {
-        const m = new THREE.Mesh(moteGeo, this.accentMat);
-        this._starMotesGroup.add(m);
-        this._starMotes.push(m);
+        this._scratchColor.set(auroraHexes[i]);
+        moteInst.setColorAt(i, this._scratchColor);
       }
+      if (moteInst.instanceColor) moteInst.instanceColor.needsUpdate = true;
+      this._starMoteInst = moteInst;
+      this._starMotes = [];
+      this._starMotesGroup.add(moteInst);
       this._starMotesGroup.visible = false;
     }
 
@@ -1016,7 +1152,7 @@ export class GatewayRig {
       this.mainMat.metalness = this._baseGlbMaps.metalness ? Math.max(0.85, metalBase) : metalBase;
       this.mainMat.emissiveMap = skinMaps ? skinMaps.emissive : this._baseGlbMaps.emissive || null;
       this.mainMat.emissive.set('#ffffff');
-      this.mainMat.emissiveIntensity = 0.95;
+      this.mainMat.emissiveIntensity = 0.78;
     } else {
       this.mainMat.map = null;
       this.mainMat.color.set(skin.bodyColor);
@@ -1303,9 +1439,9 @@ export class GatewayRig {
     // Invulnerability bioluminescent pulse shimmer
     if (invuln > 0) {
       const pulse = 0.5 + 0.5 * Math.sin(time * 30);
-      this.mainMat.emissiveIntensity = 0.95 + pulse * 0.85;
-    } else if (this.mainMat.emissiveIntensity > 1.0) {
-      this.mainMat.emissiveIntensity = 0.95;
+      this.mainMat.emissiveIntensity = 0.78 + pulse * 0.85;
+    } else if (this.mainMat.emissiveIntensity > 0.82) {
+      this.mainMat.emissiveIntensity = 0.78;
     }
 
     // 3. Additive Spine Turn-Banking, Skid Lean, Landing Impact Compression & Hurt Flinch
@@ -1525,20 +1661,23 @@ export class GatewayRig {
       this._addBoneLocalEuler(tBone, addRx, 0, addRz);
     }
 
-    // 9. Sovereign Starlight Prestige Orbiting Water-Starlight Droplets
-    if (this._starMotesGroup && this._starMotesGroup.visible) {
-      for (let i = 0; i < this._starMotes.length; i++) {
-        const mote = this._starMotes[i];
-        const a = time * 1.85 + (i * Math.PI * 2) / this._starMotes.length;
-        const rad = 0.26 + Math.sin(time * 2.5 + i) * 0.04;
-        mote.position.set(
+    // 9. Sovereign Starlight Prestige Orbiting Aurora Water-Starlight Droplets (1 InstancedMesh draw call!)
+    if (this._starMotesGroup && this._starMotesGroup.visible && this._starMoteInst) {
+      const dm = this._moteDummy;
+      for (let i = 0; i < 6; i++) {
+        const a = time * 1.65 + (i * Math.PI * 2) / 6;
+        const rad = 0.27 + Math.sin(time * 2.2 + i) * 0.035;
+        dm.position.set(
           Math.cos(a) * rad,
-          0.06 + Math.sin(time * 3.0 + i * 1.3) * 0.14,
+          0.05 + Math.sin(time * 2.6 + i * 1.3) * 0.12,
           Math.sin(a) * rad
         );
-        mote.rotation.set(time * 2.2 + i, time * 1.7, 0);
-        mote.scale.setScalar(0.75 + Math.sin(time * 4.6 + i * 2) * 0.25);
+        dm.rotation.set(time * 1.8 + i, a + time * 1.4, Math.sin(time * 2.1 + i) * 0.35);
+        dm.scale.setScalar(0.72 + Math.sin(time * 4.2 + i * 2) * 0.22);
+        dm.updateMatrix();
+        this._starMoteInst.setMatrixAt(i, dm.matrix);
       }
+      this._starMoteInst.instanceMatrix.needsUpdate = true;
     }
   }
 

@@ -1356,7 +1356,7 @@ export class PuzzleRenderer {
       roughness: 0.16,
       metalness: 0.38,
     });
-    this.waterMesh = new THREE.Mesh(new THREE.PlaneGeometry(54, 54, 24, 24), this.waterMat);
+    this.waterMesh = new THREE.Mesh(new THREE.PlaneGeometry(140, 140, 24, 24), this.waterMat);
     this.waterMesh.rotation.x = -Math.PI * 0.5;
     this.waterMesh.position.y = WATER_Y;
     this.scene.add(this.waterMesh);
@@ -2430,16 +2430,45 @@ export class PuzzleRenderer {
     const ox = (cols - 1) * 0.5;
     const oz = (rows - 1) * 0.5;
 
-    // 1. Update Camera First — guarantees ENTIRE stone architrave + 3D crystal clue frieze sit cleanly inside 16:9 & 412x915!
+    // 1. Update Camera First — guarantees 100% of puzzle pieces (including `beam` side-wall emitters/receptors
+    //    & outer `bells`) + stone architrave + 3D crystal clue frieze fit cleanly inside 16:9 & 412x915 Portrait!
     const v = room.view;
     if (v && v.eye && v.target) {
       const aspect = Math.max(0.35, this.width / Math.max(1, this.height));
       const portrait = aspect < 0.85;
       const kIn = room.phase === 'intro' ? 1 - smooth01((room.phaseT || 0) / INTRO_T) : 0;
-      const zoomK = portrait ? 0.74 : 0.74;
+      const camFov = (v.fov || 30) + (portrait ? 3 : 3.5);
       const tx = v.target[0];
       const ty = v.target[1] + (portrait ? 0.42 : 0.78);
       const tz = v.target[2] - (portrait ? 0.10 : 0.35);
+
+      let zoomK = portrait ? 0.78 : 0.74;
+      if (portrait) {
+        const pTypeCam = room.type || room.puzzle.type;
+        let maxAbsX = ox + 0.68;
+        if (pTypeCam === 'beam') {
+          if (room.source) maxAbsX = Math.max(maxAbsX, Math.abs(room.source.x - ox) + 0.64);
+          if (room.crystal) maxAbsX = Math.max(maxAbsX, Math.abs(room.crystal.x - ox) + 0.64);
+          const mirrors = room.mirrors || [];
+          for (let i = 0; i < mirrors.length; i++) {
+            maxAbsX = Math.max(maxAbsX, Math.abs(mirrors[i].x - ox) + 0.58);
+          }
+        } else if (pTypeCam === 'bells' && room.bells) {
+          for (let i = 0; i < room.bells.length; i++) {
+            maxAbsX = Math.max(maxAbsX, Math.abs(room.bells[i].x - ox) + 0.68);
+          }
+        }
+        // Keep clue frieze & fluted portal columns comfortably inside Portrait safe width
+        maxAbsX = Math.max(maxAbsX, 2.35);
+        const rawDx = v.eye[0] - tx;
+        const rawDy = v.eye[1] - ty;
+        const rawDz = v.eye[2] - tz;
+        const rawDist = Math.hypot(rawDx, rawDy, rawDz) || 1;
+        const tanHalfH = Math.tan((camFov * 0.5) * (Math.PI / 180)) * aspect;
+        const minDistH = maxAbsX / (0.91 * Math.max(0.08, tanHalfH)) + 1.45;
+        zoomK = Math.max(zoomK, minDistH / rawDist);
+      }
+
       const dx = (v.eye[0] - tx) * zoomK;
       const dy = (v.eye[1] - ty) * (zoomK * 0.94);
       const dz = (v.eye[2] - tz) * zoomK;
@@ -2449,7 +2478,7 @@ export class PuzzleRenderer {
       const ez = tz + dz + kIn * kIn * 1.4;
       this.camera.position.set(ex, ey, ez);
       this.camera.lookAt(tx, ty, tz);
-      this.camera.fov = (v.fov || 30) + (portrait ? 3 : 3.5);
+      this.camera.fov = camFov;
       this.camera.aspect = aspect;
       this.camera.updateProjectionMatrix();
     }
@@ -2477,20 +2506,31 @@ export class PuzzleRenderer {
     }
     this._updateClueBoard(room);
 
-    // 3. Position Sculpted Antique-Bronze Tripod Braziers outward (`ox + 1.38`) clear of laser beams & waterfalls!
+    // 3. Position Sculpted Antique-Bronze Tripod Braziers outward (`ox + 1.38`, or `ox + 1.88` on `beam`!)
+    //    so brazier flames NEVER obstruct `beam` side-wall emitters/receptors or waterfalls!
     const dm = this._dummy;
+    const isBeamRoom = (room.type || room.puzzle.type) === 'beam';
+    const brazierOutX = ox + (isBeamRoom ? 1.88 : 1.38);
     this.brazierEmberMat.emissiveIntensity = 1.45 + Math.sin(time * 11.5) * 0.22;
+    let brVis = 0;
     for (let i = 0; i < MAX_VALVE_SCONCES; i++) {
       const side = i % 2 === 0 ? -1 : 1;
-      const bx = side * (ox + 1.38);
+      const bx = side * brazierOutX;
       const bz = -oz + 0.55 + (Math.floor(i / 2) / 2) * (rows - 1.55);
+      if (isBeamRoom) {
+        const srcX = room.source ? room.source.x - ox : 99;
+        const srcZ = room.source ? room.source.y - oz : 99;
+        const cryX = room.crystal ? room.crystal.x - ox : 99;
+        const cryZ = room.crystal ? room.crystal.y - oz : 99;
+        if (Math.hypot(bx - srcX, bz - srcZ) < 1.15 || Math.hypot(bx - cryX, bz - cryZ) < 1.15) continue;
+      }
 
       dm.position.set(bx, 0, bz);
       dm.rotation.set(0, i * 1.1, 0);
       dm.scale.setScalar(1);
       dm.updateMatrix();
-      this.brazierBodyInst.setMatrixAt(i, dm.matrix);
-      this.brazierEmberInst.setMatrixAt(i, dm.matrix);
+      this.brazierBodyInst.setMatrixAt(brVis, dm.matrix);
+      this.brazierEmberInst.setMatrixAt(brVis, dm.matrix);
 
       // Soft organic flickering flame billboards facing camera (ZERO solid cones!)
       const flkA = Math.sin(time * 9.5 + i * 2.1) * 0.12 + Math.cos(time * 15.3 + i * 1.3) * 0.06;
@@ -2499,18 +2539,19 @@ export class PuzzleRenderer {
       dm.quaternion.copy(camQ);
       dm.scale.set(0.95 + flkB * 0.35, 1.0 + flkA * 0.65, 1);
       dm.updateMatrix();
-      this.brazierFlameOuterInst.setMatrixAt(i, dm.matrix);
+      this.brazierFlameOuterInst.setMatrixAt(brVis, dm.matrix);
 
       dm.position.set(bx - Math.sin(time * 8.2 + i) * 0.015, 1.12 + flkB * 0.10, bz);
       dm.quaternion.copy(camQ);
       dm.scale.set(0.88 - flkA * 0.25, 0.96 + flkB * 0.55, 1);
       dm.updateMatrix();
-      this.brazierFlameInnerInst.setMatrixAt(i, dm.matrix);
+      this.brazierFlameInnerInst.setMatrixAt(brVis, dm.matrix);
+      brVis++;
     }
-    this.brazierBodyInst.count = MAX_VALVE_SCONCES;
-    this.brazierEmberInst.count = MAX_VALVE_SCONCES;
-    this.brazierFlameOuterInst.count = MAX_VALVE_SCONCES;
-    this.brazierFlameInnerInst.count = MAX_VALVE_SCONCES;
+    this.brazierBodyInst.count = brVis;
+    this.brazierEmberInst.count = brVis;
+    this.brazierFlameOuterInst.count = brVis;
+    this.brazierFlameInnerInst.count = brVis;
     this.brazierBodyInst.instanceMatrix.needsUpdate = true;
     this.brazierEmberInst.instanceMatrix.needsUpdate = true;
     this.brazierFlameOuterInst.instanceMatrix.needsUpdate = true;

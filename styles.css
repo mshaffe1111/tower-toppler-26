@@ -666,16 +666,16 @@ body {
 }
 
 #btn-pause {
-  min-width: 42px !important;
-  min-height: 40px !important;
-  width: 42px;
-  height: 40px;
+  min-width: 34px;
+  min-height: 28px;
+  width: 34px;
+  height: 28px;
   padding: 0;
 }
 
 #btn-pause .ico-svg {
-  width: 17px;
-  height: 17px;
+  width: 15px;
+  height: 15px;
 }
 
 /* ================= IN-STAGE TELEMETRY & REACTOR CORE DESCENT HUD ================= */
@@ -2190,6 +2190,8 @@ body {
   font-size: 10.5px;
   font-weight: 800;
   color: var(--bronze-gleam);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .btn-icon-close {
@@ -2568,7 +2570,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 9px;
-  max-height: 68dvh;
+  max-height: 75dvh;
   overflow-y: auto;
   padding: 2px 3px 4px 1px;
 }
@@ -2600,13 +2602,17 @@ body {
   background: #072840;
 }
 
+.arcade-portal-card .portal-art-bg {
+  opacity: 0.16;
+}
+
 .arcade-portal-card::after {
   content: '';
   position: absolute;
   inset: 1.6px;
   z-index: 2;
   clip-path: var(--poly-portal-arch);
-  background: linear-gradient(90deg, rgba(4, 18, 32, 0.90) 0%, rgba(5, 24, 42, 0.68) 52%, rgba(5, 24, 42, 0.12) 82%, rgba(4, 18, 32, 0.34) 100%);
+  background: linear-gradient(90deg, rgba(4, 18, 32, 0.92) 0%, rgba(5, 24, 42, 0.78) 60%, rgba(5, 24, 42, 0.32) 86%, rgba(4, 18, 32, 0.48) 100%);
   pointer-events: none;
 }
 
@@ -2878,18 +2884,22 @@ body {
 }
 
 #overlay-wardrobe .modal-card {
-  max-width: 680px;
-  max-height: 44dvh;
-  padding: 10px 12px 11px;
+  max-width: min(94vw, 820px);
+  max-height: 36dvh;
+  padding: 9px 12px 10px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
 }
 
+#overlay-wardrobe[data-sanctuary-tab="bestiary"] .modal-card {
+  max-height: 39dvh;
+}
+
 #overlay-wardrobe[data-sanctuary-tab="skills"] .modal-card,
 #overlay-wardrobe[data-sanctuary-tab="critters"] .modal-card {
-  max-height: 60dvh;
+  max-height: 56dvh;
 }
 
 #overlay-wardrobe .retro-pill {
@@ -2927,7 +2937,9 @@ body {
 .skill-tree-grid {
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding-right: 3px;
   touch-action: pan-y;
@@ -3051,13 +3063,14 @@ body {
 }
 
 .bestiary-detail-strip {
-  padding: 6px 10px;
+  padding: 5px 10px;
   clip-path: var(--poly-oct-sm);
-  background: rgba(6, 30, 50, 0.86);
-  box-shadow: inset 0 0 0 1px rgba(251, 113, 133, 0.42);
-  font-size: 10.5px;
-  line-height: 1.26;
+  background: rgba(6, 30, 50, 0.88);
+  box-shadow: inset 0 0 0 1px rgba(94, 252, 232, 0.42);
+  font-size: 10px;
+  line-height: 1.24;
   color: #e2f2ff;
+  flex-shrink: 0;
 }
 
 .bestiary-detail-strip strong {
@@ -3070,6 +3083,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding-right: 3px;
   touch-action: pan-y;
@@ -3620,22 +3635,25 @@ body {
   flex: 1 1 auto;
   width: 100%;
   min-height: 0;
-  background: transparent;
+  background: radial-gradient(ellipse at 50% 48%, rgba(4, 14, 26, 0.44) 0%, rgba(4, 14, 26, 0.64) 100%);
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  justify-content: flex-start;
-  padding: 12px calc(16px + var(--safe-right)) 12px calc(16px + var(--safe-left));
+  align-items: center;
+  justify-content: center;
+  padding: 16px calc(20px + var(--safe-right)) 16px calc(20px + var(--safe-left));
 }
 
 .cinema-keyframe-card {
-  margin: 0;
-  width: min(84vw, 296px);
-  clip-path: var(--poly-oct-sm);
-  background: linear-gradient(160deg, rgba(8, 38, 60, 0.92), rgba(4, 18, 32, 0.96));
-  box-shadow: inset 0 0 0 1.5px rgba(94, 252, 232, 0.58);
-  filter: drop-shadow(0 12px 26px rgba(0, 0, 0, 0.78));
+  margin: 0 auto;
+  width: min(72vw, 740px);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  clip-path: var(--poly-oct-plaque);
+  background: linear-gradient(160deg, rgba(8, 38, 60, 0.94), rgba(4, 18, 32, 0.98));
+  box-shadow: inset 0 0 0 1.8px rgba(94, 252, 232, 0.72), 0 0 42px rgba(94, 252, 232, 0.14);
+  filter: drop-shadow(0 18px 36px rgba(0, 0, 0, 0.85));
   overflow: hidden;
   pointer-events: none;
   transition: opacity 0.25s ease, transform 0.25s ease;
@@ -3643,37 +3661,39 @@ body {
 
 @media (max-width: 600px) and (orientation: portrait) {
   .cinema-stage-window {
-    padding: 8px calc(10px + var(--safe-right)) 8px calc(10px + var(--safe-left));
+    padding: 12px calc(12px + var(--safe-right)) 12px calc(12px + var(--safe-left));
   }
 
   .cinema-keyframe-card {
-    width: 158px;
+    width: min(92vw, 380px);
+    clip-path: var(--poly-oct-sm);
   }
 
   .cinema-keyframe-caption {
-    font-size: 6.5px;
-    letter-spacing: 0.1em;
-    padding: 2.5px 6px 3px;
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    padding: 5px 10px 6px;
   }
 }
 
 .cinema-keyframe-img {
   display: block;
   width: 100%;
+  min-height: 0;
   aspect-ratio: 16 / 9;
   object-fit: cover;
 }
 
 .cinema-keyframe-caption {
-  padding: 4px 10px 5px;
-  font-family: var(--font-ui);
-  font-size: 8px;
+  padding: 7px 14px 8px;
+  font-family: var(--font-display);
+  font-size: 10px;
   font-weight: 800;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
   color: var(--bronze-gleam);
   text-align: center;
-  border-top: 1px solid rgba(94, 252, 232, 0.28);
-  background: rgba(4, 18, 32, 0.92);
+  border-top: 1px solid rgba(94, 252, 232, 0.34);
+  background: rgba(4, 18, 32, 0.94);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3829,10 +3849,75 @@ body {
     height: 38px;
   }
 
+  .hud-utility-row {
+    flex-wrap: nowrap;
+    gap: 3px;
+    margin-top: 3px;
+  }
+
+  #hud .gears-pill {
+    padding: 2.5px 7px;
+    gap: 3px;
+    font-size: 9px;
+  }
+
+  #hud .gears-pill .ico-svg {
+    width: 10px;
+    height: 10px;
+  }
+
   .hud-icon-btn {
-    min-width: 25px;
-    height: 23px;
-    padding: 0 4px;
+    min-width: 24px;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+  }
+
+  #btn-pause {
+    min-width: 26px;
+    min-height: 24px;
+    width: 26px;
+    height: 24px;
+  }
+
+  #btn-pause .ico-svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  #app:has(#crown-seals-pill:not(.hidden)) .stage-banner {
+    top: calc(118px + var(--safe-top));
+  }
+
+  .sub-tabs-5 .sub-tab-btn {
+    padding: 5px 6px;
+    font-size: 8px;
+    gap: 3px;
+  }
+
+  .sub-tabs-5 .sub-tab-btn .ico-svg {
+    width: 11px;
+    height: 11px;
+  }
+
+  .retro-pill {
+    font-size: 7.5px;
+    letter-spacing: 0.11em;
+    padding: 3px 9px;
+  }
+
+  .sanctuary-anim-bar {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    gap: 4px;
+    padding: 2px 2px;
+  }
+
+  .anim-studio-pill {
+    padding: 3.5px 8px;
+    font-size: 7.5px;
+    flex-shrink: 0;
   }
 
   #touch-controls {
@@ -3957,9 +4042,14 @@ body {
     left: calc(14px + var(--safe-left));
     right: auto;
     transform: none;
-    max-width: min(260px, 27vw);
-    padding: 8px 15px;
+    max-width: min(296px, 30vw);
+    padding: 9px 18px;
     text-align: left;
+  }
+
+  .stage-banner::before,
+  .stage-banner::after {
+    clip-path: var(--poly-oct-sm);
   }
 
   #puzzle-hud,
@@ -4015,7 +4105,11 @@ body {
   }
 
   #overlay-worlds .modal-card {
-    max-width: min(94vw, 800px);
+    max-width: min(94vw, 840px);
+  }
+
+  .sea-chart-svg {
+    max-height: min(58dvh, 520px);
   }
 
   .watershed-map-shell {
@@ -4100,7 +4194,8 @@ body {
   }
 
   .cinema-keyframe-card {
-    width: min(26vw, 184px);
+    width: min(44vw, 310px);
+    clip-path: var(--poly-oct-sm);
   }
 
   .cinema-keyframe-caption {

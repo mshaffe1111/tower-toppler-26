@@ -182,13 +182,27 @@ const worldsStarsPillEl = document.getElementById('worlds-stars-pill');
 const worldsMapListEl = document.getElementById('worlds-map-list');
 const btnCloseWorlds = document.getElementById('btn-close-worlds');
 
-// Sanctuary Wardrobe & Hydro-Pulse FX Controls
+// Sanctuary Wardrobe, Hydro-Pulse FX, Bio-Skill Tree, 3D Bestiary & Critters Controls
+const sanctuaryTurntableStageEl = document.getElementById('sanctuary-turntable-stage');
+const sanctuaryTurntableHintEl = document.getElementById('sanctuary-turntable-hint');
+const btnSanctuaryZoomOut = document.getElementById('btn-sanctuary-zoom-out');
+const btnSanctuaryResetCam = document.getElementById('btn-sanctuary-reset-cam');
+const btnSanctuaryZoomIn = document.getElementById('btn-sanctuary-zoom-in');
+const sanctuaryAnimBarEl = document.getElementById('sanctuary-anim-bar');
 const wardrobeGearsEl = document.getElementById('wardrobe-gears');
 const wardrobeGridEl = document.getElementById('wardrobe-grid');
 const blasterFxGridEl = document.getElementById('blaster-fx-grid');
+const skillTreeGridEl = document.getElementById('skill-tree-grid');
+const bestiaryPanelEl = document.getElementById('bestiary-panel');
+const bestiaryDetailStripEl = document.getElementById('bestiary-detail-strip');
+const bestiaryGridEl = document.getElementById('bestiary-grid');
+const crittersGridEl = document.getElementById('critters-grid');
 const wardrobeTabBtns = document.querySelectorAll('[data-wardrobe-tab]');
 const wardrobeSkinsTabLbl = document.getElementById('wardrobe-skins-tab-lbl');
 const wardrobeBlasterTabLbl = document.getElementById('wardrobe-blaster-tab-lbl');
+const wardrobeSkillsTabLbl = document.getElementById('wardrobe-skills-tab-lbl');
+const wardrobeBestiaryTabLbl = document.getElementById('wardrobe-bestiary-tab-lbl');
+const wardrobeCrittersTabLbl = document.getElementById('wardrobe-critters-tab-lbl');
 const btnCloseWardrobe = document.getElementById('btn-close-wardrobe');
 
 // Honors & Field Logs Controls
@@ -1744,6 +1758,10 @@ function syncTitleShowcaseState() {
   }
   game.titleShowcase = titleOpen && !cutsceneState.active;
   game.wardrobeSpotlight = wardrobeOpen && !cutsceneState.active;
+  if (!wardrobeOpen) {
+    renderer.setBestiaryPreview?.(null);
+    renderer.setWardrobePreview?.(null);
+  }
 
   const hideGameplayChrome =
     titleOpen || wardrobeOpen || cutsceneState.active || (modalOpen && game.mode === 'title');
@@ -1940,18 +1958,36 @@ function resolveCutsceneKeyframeSpec(kind, def) {
   if (k === 'act5_intro' || k === 'purify_storm_ocean' || k === 'epilogue') {
     return {
       src: './assets/textures/story_keyframe_finale.webp',
-      caption: k === 'epilogue' ? 'GLOBAL HYDROSPHERE • 100% HARMONY' : 'POLAR AURORA • MOTHER SIPHON',
+      caption: k === 'epilogue' ? 'GLOBAL HYDROSPHERE • 100%' : 'POLAR AURORA • MOTHER SIPHON',
     };
   }
-  if (def?.isPurification || k.startsWith('purify_') || k === 'act2_intro' || k === 'act3_intro' || k === 'act4_intro') {
+  if (k === 'act2_intro') {
+    return {
+      src: './assets/textures/story_keyframe_act2.webp',
+      caption: 'ACT II • CRYSTAL ALPINE LAKES',
+    };
+  }
+  if (k === 'act3_intro') {
+    return {
+      src: './assets/textures/story_keyframe_act3.webp',
+      caption: 'ACT III • EMERALD MIST BAYOUS',
+    };
+  }
+  if (k === 'act4_intro') {
+    return {
+      src: './assets/textures/story_keyframe_act4.webp',
+      caption: 'ACT IV • SUNLIT CORAL SEAS',
+    };
+  }
+  if (def?.isPurification || k.startsWith('purify_')) {
     return {
       src: './assets/textures/story_keyframe_purification.webp',
-      caption: def?.isPurification ? 'WATERSHED PURIFIED • CROWN FOUNTAIN' : `${def?.act || 'BIOME'} • SANCTUARY`,
+      caption: 'CROWN FOUNTAIN PURIFIED',
     };
   }
   return {
     src: './assets/textures/story_keyframe_prologue.webp',
-    caption: 'REDWOOD GORGE • PELAGIAN DESCENT',
+    caption: 'REDWOOD CANYON DESCENT',
   };
 }
 
@@ -2323,7 +2359,167 @@ function getEquippedHydroFxSafe() {
   return progression.getEquippedBlasterFx?.() || progression.getSettings?.()?.blasterFxId || 'sea_glass_pulse';
 }
 
+const BESTIARY_CATALOG = [
+  {
+    family: 'snap_crab',
+    name: 'Snap-Claw Dredger',
+    biome: 'CANYON & ATOLL',
+    colors: ['#e07a5f', '#f4a261', '#2dd4bf'],
+    tactic: 'Tail-Whip flips it upside-down onto its bronze carapace — bounce off it as a high Hydro-Springboard!',
+  },
+  {
+    family: 'gulp_hopper',
+    name: 'Gulp-Hopper Drone',
+    biome: 'ALL WATERSHEDS',
+    colors: ['#38bdf8', '#7dd3fc', '#fde047'],
+    tactic: 'Inhales stolen river water into its glass belly tank before leaping; cast Hydro-Pulse mid-swell to stun.',
+  },
+  {
+    family: 'volt_eel',
+    name: 'Conduit Volt-Eel',
+    biome: 'ALPINE & STORM',
+    colors: ['#22d3ee', '#818cf8', '#f472b6'],
+    tactic: '8-segment bio-mechanical moray slithering across wet ledges; leap its arc antennae or deflect with Tail-Whip.',
+  },
+  {
+    family: 'rail_skater',
+    name: 'Riptide Rail-Skater',
+    biome: 'CANYON & CORAL',
+    colors: ['#14b8a6', '#eab308', '#38bdf8'],
+    tactic: 'Twin-impeller manta strider patrolling long spire walkways; time a jump or stun-bubble to clear the lane.',
+  },
+  {
+    family: 'barnacle_mortar',
+    name: 'Barnacle Geyser-Mortar',
+    biome: 'BAYOU & CORAL',
+    colors: ['#fb7185', '#f59e0b', '#34d399'],
+    tactic: 'Five reef-iron petals flare before launching pressure bubbles — Tail-Whip right back to shatter its lock!',
+  },
+  {
+    family: 'vent_stalker',
+    name: 'Thermal Vent-Stalker',
+    biome: 'ALPINE & POLAR',
+    colors: ['#60a5fa', '#c084fc', '#5efce8'],
+    tactic: 'Cryo-steam salamander prowling glacial terraces; watch dorsal vent plumes before striking with Hydro-Pulse.',
+  },
+  {
+    family: 'siphon_warden',
+    name: 'Siphon Warden Leviathan',
+    biome: 'ACT BOSS • APEX',
+    colors: ['#f43f5e', '#f59e0b', '#a855f7'],
+    tactic: 'Sovereign Siphon Boss with 4 orbiting Aegis shields — break shields with Hydro-Pulse, then Tail-Whip the core!',
+  },
+];
+
+const GATEWAY_ANIM_POSES = [
+  { id: 'IdleBreathe', label: 'IDLE' },
+  { id: 'FluidRun', label: 'RUN' },
+  { id: 'TailWhip', label: 'TAIL-WHIP' },
+  { id: 'HydroCast', label: 'PULSE' },
+  { id: 'FrillGlide', label: 'GLIDE' },
+  { id: 'FreeSwim', label: 'SWIM' },
+  { id: 'Celebrate', label: 'VICTORY' },
+];
+
+const BESTIARY_ANIM_POSES = [
+  { id: 'idle', label: 'IDLE' },
+  { id: 'taunt', label: 'TAUNT' },
+  { id: 'attack', label: 'ATTACK' },
+];
+
+const sanctuaryState = {
+  yaw: null,
+  zoom: 1.0,
+  anim: 'IdleBreathe',
+  bestiaryFamily: 'snap_crab',
+  bestiaryYaw: 0.35,
+  bestiaryZoom: 1.0,
+  bestiaryAnim: 'idle',
+  dragging: false,
+  dragStartX: 0,
+  dragBaseYaw: 0,
+};
+
+function formatPearlCopy(str) {
+  return String(str || '')
+    .replace(/\bHydro-Gears\b/gi, 'Water Pearls')
+    .replace(/\bHydro Gears\b/gi, 'Water Pearls')
+    .replace(/\bGears\b/g, 'Water Pearls');
+}
+
+function syncSanctuaryTurntable() {
+  const wardrobeOpen = Boolean(overlayWardrobe && !overlayWardrobe.classList.contains('hidden'));
+  if (!wardrobeOpen) {
+    renderer.setBestiaryPreview?.(null);
+    renderer.setWardrobePreview?.(null);
+    return;
+  }
+  if (activeWardrobeTab === 'bestiary') {
+    renderer.setWardrobePreview?.(null);
+    if (renderer.enemyVisuals?.root) renderer.enemyVisuals.root.visible = true;
+    renderer.setBestiaryPreview?.({
+      active: true,
+      family: sanctuaryState.bestiaryFamily,
+      yaw: sanctuaryState.bestiaryYaw,
+      zoom: sanctuaryState.bestiaryZoom,
+      anim: sanctuaryState.bestiaryAnim,
+    });
+    if (sanctuaryTurntableHintEl) {
+      const entry = BESTIARY_CATALOG.find((e) => e.family === sanctuaryState.bestiaryFamily) || BESTIARY_CATALOG[0];
+      sanctuaryTurntableHintEl.textContent = `DRAG 360° • ${entry.name.toUpperCase()}`;
+    }
+  } else {
+    renderer.setBestiaryPreview?.(null);
+    renderer.setWardrobePreview?.({
+      yaw: sanctuaryState.yaw,
+      zoom: sanctuaryState.zoom,
+      anim: sanctuaryState.anim === 'IdleBreathe' ? null : sanctuaryState.anim,
+    });
+    if (sanctuaryTurntableHintEl) {
+      sanctuaryTurntableHintEl.textContent = 'DRAG TO SPIN 360°';
+    }
+  }
+}
+
+function renderSanctuaryAnimBar() {
+  if (!sanctuaryAnimBarEl) return;
+  const showBar = activeWardrobeTab === 'skins' || activeWardrobeTab === 'blaster' || activeWardrobeTab === 'bestiary';
+  sanctuaryAnimBarEl.classList.toggle('hidden', !showBar);
+  if (!showBar) return;
+
+  const isBestiary = activeWardrobeTab === 'bestiary';
+  const poses = isBestiary ? BESTIARY_ANIM_POSES : GATEWAY_ANIM_POSES;
+  const activePose = isBestiary ? sanctuaryState.bestiaryAnim : sanctuaryState.anim;
+
+  sanctuaryAnimBarEl.innerHTML = '';
+  poses.forEach((pose) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `anim-studio-pill${activePose === pose.id ? ' active' : ''}`;
+    btn.textContent = pose.label;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      sound.unlock?.();
+      sound.switchToggle?.();
+      if (isBestiary) {
+        sanctuaryState.bestiaryAnim = pose.id;
+        if (pose.id !== 'idle') {
+          renderer.enemyVisuals?.triggerBestiaryFlourish?.(pose.id);
+        }
+      } else {
+        sanctuaryState.anim = pose.id;
+      }
+      syncSanctuaryTurntable();
+      renderSanctuaryAnimBar();
+    });
+    sanctuaryAnimBarEl.appendChild(btn);
+  });
+}
+
 function syncWardrobeTabsUI() {
+  if (overlayWardrobe) {
+    overlayWardrobe.dataset.sanctuaryTab = activeWardrobeTab;
+  }
   wardrobeTabBtns.forEach((btn) => {
     const active = btn.dataset.wardrobeTab === activeWardrobeTab;
     btn.classList.toggle('active', active);
@@ -2331,6 +2527,167 @@ function syncWardrobeTabsUI() {
   });
   wardrobeGridEl?.classList.toggle('hidden', activeWardrobeTab !== 'skins');
   blasterFxGridEl?.classList.toggle('hidden', activeWardrobeTab !== 'blaster');
+  skillTreeGridEl?.classList.toggle('hidden', activeWardrobeTab !== 'skills');
+  bestiaryPanelEl?.classList.toggle('hidden', activeWardrobeTab !== 'bestiary');
+  crittersGridEl?.classList.toggle('hidden', activeWardrobeTab !== 'critters');
+  syncSanctuaryTurntable();
+  renderSanctuaryAnimBar();
+}
+
+function renderSkillTreePanel() {
+  if (!skillTreeGridEl) return;
+  const catalog = Array.isArray(progMod.SKILL_TREE) ? progMod.SKILL_TREE : [];
+  const gears = progression.getGears?.() ?? 0;
+  const totalRanks = progression.getTotalSkillRanks?.() ?? 0;
+  const maxTotalRanks = catalog.reduce((s, sk) => s + (sk.maxRank || 3), 0);
+  if (wardrobeSkillsTabLbl) {
+    wardrobeSkillsTabLbl.textContent = `SKILLS (${totalRanks}/${maxTotalRanks || 36})`;
+  }
+
+  const branches = [
+    { key: 'agility', title: 'PELAGIAN AGILITY' },
+    { key: 'combat', title: 'HYDRO-COMBAT' },
+    { key: 'watershed', title: 'WATERSHED MASTERY' },
+  ];
+
+  skillTreeGridEl.innerHTML = '';
+  const notice = document.createElement('div');
+  notice.className = 'skill-tree-notice';
+  notice.textContent = 'Spend Water Pearls to permanently evolve Gateway across Campaign, Expedition & Mini-Games (disabled in Purist Arcade).';
+  skillTreeGridEl.appendChild(notice);
+
+  branches.forEach((br) => {
+    const nodes = catalog.filter((sk) => sk.branch === br.key);
+    if (nodes.length === 0) return;
+    const grp = document.createElement('div');
+    grp.className = 'skill-branch-group';
+    const head = document.createElement('div');
+    head.className = 'skill-branch-head';
+    head.textContent = br.title;
+    grp.appendChild(head);
+
+    const row = document.createElement('div');
+    row.className = 'skill-branch-nodes';
+    nodes.forEach((sk) => {
+      const rank = progression.getSkillRank?.(sk.id) ?? 0;
+      const maxRank = sk.maxRank || 3;
+      const maxed = rank >= maxRank;
+      const nextCost = maxed ? 0 : (progression.getSkillUpgradeCost?.(sk.id) ?? sk.costs?.[rank] ?? 25);
+      const affordable = !maxed && gears >= nextCost;
+
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = `skill-node-card${maxed ? ' maxed' : ''}${affordable ? ' affordable' : ''}`;
+      const pipsHtml = Array.from({ length: maxRank }, (_, i) => `<span class="skill-pip${i < rank ? ' on' : ''}"></span>`).join('');
+      card.innerHTML = `
+        <div class="skill-node-top">
+          <span class="skill-node-name">${sk.name}</span>
+          <span class="skill-rank-pips">${pipsHtml}</span>
+        </div>
+        <div class="skill-node-desc">${sk.shortDesc || sk.description || ''}</div>
+        <div class="skill-node-foot">
+          <span>RANK ${rank}/${maxRank}</span>
+          <span>${maxed ? 'MAXED' : `UPGRADE • ${nextCost} PEARLS`}</span>
+        </div>
+      `;
+      card.addEventListener('click', () => {
+        sound.unlock?.();
+        if (maxed) return;
+        const res = progression.upgradeSkill?.(sk.id);
+        if (res && res.upgraded !== false && res !== false) {
+          sound.collectStar?.();
+          renderWardrobeModal();
+          refreshTitleMeta();
+        } else {
+          sound.vaultFail?.();
+        }
+      });
+      row.appendChild(card);
+    });
+    grp.appendChild(row);
+    skillTreeGridEl.appendChild(grp);
+  });
+}
+
+function renderBestiaryPanel() {
+  if (!bestiaryGridEl) return;
+  if (wardrobeBestiaryTabLbl) {
+    wardrobeBestiaryTabLbl.textContent = `BESTIARY (${BESTIARY_CATALOG.length})`;
+  }
+  const activeEntry = BESTIARY_CATALOG.find((e) => e.family === sanctuaryState.bestiaryFamily) || BESTIARY_CATALOG[0];
+  if (bestiaryDetailStripEl && activeEntry) {
+    bestiaryDetailStripEl.innerHTML = `<strong>${activeEntry.name}</strong> • ${activeEntry.biome} — ${activeEntry.tactic}`;
+  }
+
+  bestiaryGridEl.innerHTML = '';
+  BESTIARY_CATALOG.forEach((entry) => {
+    const selected = entry.family === sanctuaryState.bestiaryFamily;
+    const [c1, c2, c3] = entry.colors;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `skin-card${selected ? ' equipped' : ''}`;
+    btn.innerHTML = `
+      <div class="skin-top-row">
+        <span class="skin-swatch" style="background: linear-gradient(135deg, ${c1} 0%, ${c2} 55%, ${c3} 100%);"></span>
+        <span class="skin-name">${entry.name}</span>
+      </div>
+      <div class="skin-desc">${entry.biome}</div>
+      <span class="skin-action-tag">${selected ? 'INSPECTING 3D' : 'INSPECT 3D'}</span>
+    `;
+    btn.addEventListener('click', () => {
+      sound.unlock?.();
+      sound.switchToggle?.();
+      sanctuaryState.bestiaryFamily = entry.family;
+      sanctuaryState.bestiaryYaw = 0.35;
+      sanctuaryState.bestiaryAnim = 'taunt';
+      syncSanctuaryTurntable();
+      renderer.enemyVisuals?.triggerBestiaryFlourish?.('taunt');
+      renderBestiaryPanel();
+      renderSanctuaryAnimBar();
+    });
+    bestiaryGridEl.appendChild(btn);
+  });
+}
+
+function renderCrittersPanel() {
+  if (!crittersGridEl) return;
+  const catalog = Array.isArray(progMod.CRITTER_CATALOG) ? progMod.CRITTER_CATALOG : [];
+  const rescuedTotal = catalog.filter((c) => progression.isCritterRescued?.(c.id)).length;
+  if (wardrobeCrittersTabLbl) {
+    wardrobeCrittersTabLbl.textContent = `CRITTERS (${rescuedTotal}/${catalog.length || 30})`;
+  }
+
+  const groups = [
+    { biome: 'canyon_river', title: 'ACT I • RIVER OTTERS' },
+    { biome: 'alpine_lake', title: 'ACT II • ALPINE NEWTS' },
+    { biome: 'mist_bayou', title: 'ACT III • BAYOU AXOLOTLS' },
+    { biome: 'coral_sea', title: 'ACT IV • SEA TURTLES' },
+    { biome: 'storm_ocean', title: 'ACT V • POLAR PUFFINS' },
+  ];
+
+  crittersGridEl.innerHTML = '';
+  groups.forEach((g) => {
+    const items = catalog.filter((c) => c.biome === g.biome);
+    if (items.length === 0) return;
+    const rescuedInBiome = items.filter((c) => progression.isCritterRescued?.(c.id)).length;
+    const box = document.createElement('div');
+    box.className = 'critter-biome-group';
+    box.innerHTML = `
+      <div class="critter-biome-head">
+        <span>${g.title}</span>
+        <span>${rescuedInBiome}/${items.length}</span>
+      </div>
+      <div class="critter-pips-row">
+        ${items
+          .map((c) => {
+            const ok = Boolean(progression.isCritterRescued?.(c.id));
+            return `<div class="critter-chip${ok ? ' rescued' : ''}" title="${ok ? c.lore : 'Hidden along Campaign Spire ' + c.towerId}">${ok ? c.name : `Spire ${c.towerId} • Hidden`}</div>`;
+          })
+          .join('')}
+      </div>
+    `;
+    crittersGridEl.appendChild(box);
+  });
 }
 
 function renderWardrobeModal() {
@@ -2343,8 +2700,8 @@ function renderWardrobeModal() {
   if (wardrobeGearsEl) wardrobeGearsEl.textContent = String(gears);
 
   const unlockedSkins = SKIN_CATALOG.filter((s) => progression.isSkinUnlocked?.(s.id)).length;
-  if (wardrobeSkinsTabLbl) wardrobeSkinsTabLbl.textContent = `GATEWAY SKINS (${unlockedSkins}/${SKIN_CATALOG.length})`;
-  if (wardrobeBlasterTabLbl) wardrobeBlasterTabLbl.textContent = `HYDRO-PULSE FX (${fxCatalog.length})`;
+  if (wardrobeSkinsTabLbl) wardrobeSkinsTabLbl.textContent = `SKINS (${unlockedSkins}/${SKIN_CATALOG.length})`;
+  if (wardrobeBlasterTabLbl) wardrobeBlasterTabLbl.textContent = `PULSE (${fxCatalog.length})`;
 
   syncWardrobeTabsUI();
 
@@ -2365,7 +2722,7 @@ function renderWardrobeModal() {
         actionMarkup =
           skin.gearCost > 0
             ? `<span>UNLOCK</span>${SVG_GEAR}<span>${skin.gearCost}</span>`
-            : `<span>${skin.milestoneText || 'MILESTONE'}</span>`;
+            : `<span>${formatPearlCopy(skin.milestoneText || 'MILESTONE')}</span>`;
       }
 
       btn.innerHTML = `
@@ -2373,7 +2730,7 @@ function renderWardrobeModal() {
           <span class="skin-swatch" style="background: linear-gradient(135deg, ${c1} 0%, ${c2} 55%, ${c3} 100%);"></span>
           <span class="skin-name">${skin.name}</span>
         </div>
-        <div class="skin-desc">${unlocked ? skin.description : (skin.milestoneText || skin.description)}</div>
+        <div class="skin-desc">${formatPearlCopy(unlocked ? skin.description : (skin.milestoneText || skin.description))}</div>
         <span class="skin-action-tag">${actionMarkup}</span>
       `;
 
@@ -2430,7 +2787,7 @@ function renderWardrobeModal() {
           <span class="skin-swatch" style="background: linear-gradient(135deg, ${colors[0]} 0%, ${colors[1]} 50%, ${colors[2] || colors[0]} 100%);">${SVG_BLASTER}</span>
           <span class="skin-name">${fx.name}</span>
         </div>
-        <div class="skin-desc">${fx.description || ''}</div>
+        <div class="skin-desc">${formatPearlCopy(fx.description || '')}</div>
         <span class="skin-action-tag">${actionMarkup}</span>
       `;
 
@@ -2466,6 +2823,10 @@ function renderWardrobeModal() {
       blasterFxGridEl.appendChild(btn);
     });
   }
+
+  renderSkillTreePanel();
+  renderBestiaryPanel();
+  renderCrittersPanel();
 }
 
 function syncTrophyViewTabsUI() {
@@ -3091,16 +3452,94 @@ btnWardrobe?.addEventListener('click', () => {
     game.camCol = hero.col ?? 0.5;
     game.camFloor = hero.floor ?? 0;
   }
-  renderWardrobeModal();
   overlayWardrobe?.classList.remove('hidden');
+  renderWardrobeModal();
   pushNavGuard();
   syncTitleShowcaseState();
+  syncSanctuaryTurntable();
 });
 
 btnCloseWardrobe?.addEventListener('click', () => {
   overlayWardrobe?.classList.add('hidden');
   overlayTitle?.classList.remove('hidden');
   syncTitleShowcaseState();
+});
+
+// Interactive 360° Pelagian Sanctuary Orbit Drag & Zoom Controls
+sanctuaryTurntableStageEl?.addEventListener('pointerdown', (e) => {
+  if (e.target.closest('button')) return;
+  sanctuaryState.dragging = true;
+  sanctuaryState.dragStartX = e.clientX;
+  if (activeWardrobeTab === 'bestiary') {
+    sanctuaryState.dragBaseYaw = sanctuaryState.bestiaryYaw || 0;
+  } else {
+    if (sanctuaryState.yaw == null) sanctuaryState.yaw = 0;
+    sanctuaryState.dragBaseYaw = sanctuaryState.yaw;
+  }
+  sanctuaryTurntableStageEl.classList.add('dragging');
+  try { sanctuaryTurntableStageEl.setPointerCapture(e.pointerId); } catch (_) {}
+});
+
+sanctuaryTurntableStageEl?.addEventListener('pointermove', (e) => {
+  if (!sanctuaryState.dragging) return;
+  const dx = e.clientX - sanctuaryState.dragStartX;
+  const nextYaw = sanctuaryState.dragBaseYaw + dx * 0.012;
+  if (activeWardrobeTab === 'bestiary') {
+    sanctuaryState.bestiaryYaw = nextYaw;
+  } else {
+    sanctuaryState.yaw = nextYaw;
+  }
+  syncSanctuaryTurntable();
+});
+
+const endSanctuaryDrag = (e) => {
+  if (!sanctuaryState.dragging) return;
+  sanctuaryState.dragging = false;
+  sanctuaryTurntableStageEl?.classList.remove('dragging');
+  try { sanctuaryTurntableStageEl?.releasePointerCapture(e.pointerId); } catch (_) {}
+};
+sanctuaryTurntableStageEl?.addEventListener('pointerup', endSanctuaryDrag);
+sanctuaryTurntableStageEl?.addEventListener('pointercancel', endSanctuaryDrag);
+
+btnSanctuaryZoomIn?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  sound.unlock?.();
+  sound.switchToggle?.();
+  if (activeWardrobeTab === 'bestiary') {
+    sanctuaryState.bestiaryZoom = Math.min(1.65, Number((sanctuaryState.bestiaryZoom + 0.2).toFixed(2)));
+  } else {
+    sanctuaryState.zoom = Math.min(1.65, Number((sanctuaryState.zoom + 0.2).toFixed(2)));
+  }
+  syncSanctuaryTurntable();
+});
+
+btnSanctuaryZoomOut?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  sound.unlock?.();
+  sound.switchToggle?.();
+  if (activeWardrobeTab === 'bestiary') {
+    sanctuaryState.bestiaryZoom = Math.max(0.65, Number((sanctuaryState.bestiaryZoom - 0.2).toFixed(2)));
+  } else {
+    sanctuaryState.zoom = Math.max(0.65, Number((sanctuaryState.zoom - 0.2).toFixed(2)));
+  }
+  syncSanctuaryTurntable();
+});
+
+btnSanctuaryResetCam?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  sound.unlock?.();
+  sound.switchToggle?.();
+  if (activeWardrobeTab === 'bestiary') {
+    sanctuaryState.bestiaryYaw = 0.35;
+    sanctuaryState.bestiaryZoom = 1.0;
+    sanctuaryState.bestiaryAnim = 'idle';
+  } else {
+    sanctuaryState.yaw = null;
+    sanctuaryState.zoom = 1.0;
+    sanctuaryState.anim = 'IdleBreathe';
+  }
+  syncSanctuaryTurntable();
+  renderSanctuaryAnimBar();
 });
 
 wardrobeTabBtns.forEach((btn) => {
@@ -3220,7 +3659,7 @@ btnTitleMusic?.addEventListener('click', handleToggleMusic);
 btnTitleVoice?.addEventListener('click', handleToggleVoice);
 
 function triggerPauseToggle() {
-  if (game.mode === 'title' || game.mode === 'gameover' || game.mode === 'victory') return;
+  if (cutsceneState.active || game.mode === 'title' || game.mode === 'gameover' || game.mode === 'victory') return;
   sound.unlock?.();
   const paused = game.togglePause?.();
   input.resetState?.();
@@ -3232,7 +3671,7 @@ function triggerPauseToggle() {
     if (pauseTowerName) {
       const pf = game.pausedFrom;
       if (pf === 'core_descent') pauseTowerName.textContent = 'Reactor Core Descent';
-      else if (pf === 'reef_swim' || pf === 'submarine') pauseTowerName.textContent = 'Coral Reef Free-Swim';
+      else if (pf === 'reef_swim' || pf === 'submarine') pauseTowerName.textContent = 'Pelagian Reef Dive (Bio-Submersible)';
       else if (pf === 'rapids_surf' || pf === 'skimmer') pauseTowerName.textContent = 'Whitewater Rapids Tail-Surf';
       else if (pf === 'frill_glide' || pf === 'glide') pauseTowerName.textContent = 'Canyon Updraft Frill-Glide';
       else if (pf === 'aqueduct_sanctum' || pf === 'puzzle') pauseTowerName.textContent = 'Aqueduct Sanctum';
@@ -3297,6 +3736,9 @@ window.visualViewport?.addEventListener('resize', handleResize);
 // ================= STARTUP ASSET PRE-WARMING (ZERO MID-CLIMB STUTTERS) =================
 const PREWARM_STORY_ASSETS = [
   './assets/textures/story_keyframe_prologue.webp',
+  './assets/textures/story_keyframe_act2.webp',
+  './assets/textures/story_keyframe_act3.webp',
+  './assets/textures/story_keyframe_act4.webp',
   './assets/textures/story_keyframe_purification.webp',
   './assets/textures/story_keyframe_finale.webp',
   './assets/textures/story_portrait_gateway.webp',

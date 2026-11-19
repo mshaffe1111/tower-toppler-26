@@ -143,6 +143,17 @@ const BIOME_HARMONICS = Object.freeze({
 
 const CROSSFADE_SECONDS = 2.0;
 
+// Aqueduct Sanctum Bronze Temple Bell Pentatonic Tuning (C5, D5, E5, G5, A5)
+// Distinct, warm, resonant harmonic intervals with zero harsh >5kHz buzz.
+const TEMPLE_BELL_PENTATONIC_HZ = Object.freeze([
+  523.25, // 0: C5 (Coral)
+  587.33, // 1: D5 (Gold)
+  659.25, // 2: E5 (Emerald)
+  783.99, // 3: G5 (Azure)
+  880.00, // 4: A5 (Violet)
+]);
+const TEMPLE_BELL_SEMITONES = Object.freeze([0, 2, 4, 7, 9]);
+
 function clamp(v, lo, hi) {
   const n = Number(v);
   if (!Number.isFinite(n)) return lo;
@@ -195,8 +206,48 @@ class EqualPowerStemDeck {
     }
   }
 
+  _disconnectVoice(voice) {
+    if (!voice) return;
+    this.fadingVoices.delete(voice);
+    try {
+      voice.src.onended = null;
+      voice.src.disconnect();
+    } catch {
+      // Ignore disconnect errors
+    }
+    try {
+      voice.gain.disconnect();
+    } catch {
+      // Ignore disconnect errors
+    }
+  }
+
+  _trimFadingVoices(maxConcurrent = 4) {
+    while (this.fadingVoices.size > maxConcurrent) {
+      const oldest = this.fadingVoices.values().next().value;
+      if (!oldest) break;
+      try {
+        oldest.src.stop();
+      } catch {
+        // Ignore already-stopped source errors
+      }
+      this._disconnectVoice(oldest);
+    }
+  }
+
   _scheduleEqualPowerOut(voice, now, durationSec) {
-    if (!voice || !this.engine.ctx) return;
+    if (!voice) return;
+    const ctx = this.engine.ctx;
+    if (!ctx || ctx.state !== 'running') {
+      try {
+        voice.src.stop();
+      } catch {
+        // Ignore already-stopped source errors
+      }
+      this._disconnectVoice(voice);
+      return;
+    }
+
     const dur = Math.max(0.08, durationSec);
     const gParam = voice.gain.gain;
     const startVal = Math.max(0.0001, gParam.value);
@@ -219,18 +270,14 @@ class EqualPowerStemDeck {
       }
       voice.src.stop(now + dur + 0.05);
     } catch {
-      // Ignore already-stopped source errors
+      this._disconnectVoice(voice);
+      return;
     }
 
     this.fadingVoices.add(voice);
+    this._trimFadingVoices(4);
     voice.src.onended = () => {
-      this.fadingVoices.delete(voice);
-      try {
-        voice.src.disconnect();
-        voice.gain.disconnect();
-      } catch {
-        // Ignore disconnect errors
-      }
+      this._disconnectVoice(voice);
     };
   }
 
@@ -238,7 +285,7 @@ class EqualPowerStemDeck {
     this.targetFilename = filename;
     const ctx = this.engine.ctx;
     const dest = this.getDestNode();
-    if (!ctx || !dest || !filename) return;
+    if (!ctx || ctx.state === 'closed' || !dest || !filename) return;
 
     if (this.activeVoice && this.activeVoice.filename === filename) {
       if (onStarted) onStarted(true);
@@ -248,29 +295,31 @@ class EqualPowerStemDeck {
     const token = ++this.requestToken;
     this.engine._loadAudioBuffer(filename).then((buffer) => {
       if (token !== this.requestToken || this.targetFilename !== filename) return;
-      if (!this.engine.ctx || !buffer) return;
+      const liveCtx = this.engine.ctx;
+      const liveDest = this.getDestNode();
+      if (!liveCtx || liveCtx.state === 'closed' || !liveDest || !buffer) return;
       if (this.activeVoice && this.activeVoice.filename === filename) {
         if (onStarted) onStarted(true);
         return;
       }
 
-      const now = this.engine.ctx.currentTime;
+      const now = liveCtx.currentTime;
       const hadPrevious = Boolean(this.activeVoice);
       if (this.activeVoice) {
         this._scheduleEqualPowerOut(this.activeVoice, now, crossfadeSec);
         this.activeVoice = null;
       }
 
-      const src = this.engine.ctx.createBufferSource();
+      const src = liveCtx.createBufferSource();
       src.buffer = buffer;
       src.loop = true;
 
-      const gain = this.engine.ctx.createGain();
+      const gain = liveCtx.createGain();
       const fadeDur = hadPrevious ? crossfadeSec : Math.min(1.35, crossfadeSec);
       this._scheduleEqualPowerIn(gain.gain, now, fadeDur, 1.0);
 
       src.connect(gain);
-      gain.connect(dest);
+      gain.connect(liveDest);
 
       const savedOffset = this.bookmarks.get(filename) ?? 0;
       const startOffset = buffer.duration > 0.5 ? savedOffset % buffer.duration : 0;
@@ -292,13 +341,41 @@ class EqualPowerStemDeck {
   fadeOutAll(fadeSec = 0.75) {
     this.targetFilename = null;
     this.requestToken++;
-    if (!this.activeVoice || !this.engine.ctx) {
+    const ctx = this.engine.ctx;
+    const now = ctx ? ctx.currentTime : 0;
+
+    if (this.activeVoice) {
+      const v = this.activeVoice;
       this.activeVoice = null;
-      return;
+      this._scheduleEqualPowerOut(v, now, fadeSec);
     }
-    const now = this.engine.ctx.currentTime;
-    this._scheduleEqualPowerOut(this.activeVoice, now, fadeSec);
-    this.activeVoice = null;
+
+    // Also expedite any lingering fading voices so mute/stop never leaks audio tails
+    if (this.fadingVoices.size > 0) {
+      const existing = [...this.fadingVoices];
+      for (const fv of existing) {
+        if (!ctx || ctx.state !== 'running') {
+          try {
+            fv.src.stop();
+          } catch {
+            // Ignore
+          }
+          this._disconnectVoice(fv);
+        } else {
+          try {
+            const gParam = fv.gain.gain;
+            const cur = Math.max(0.0001, gParam.value);
+            const quick = Math.max(0.08, Math.min(fadeSec, 0.45));
+            gParam.cancelScheduledValues(now);
+            gParam.setValueAtTime(cur, now);
+            gParam.linearRampToValueAtTime(0.0001, now + quick);
+            fv.src.stop(now + quick + 0.04);
+          } catch {
+            this._disconnectVoice(fv);
+          }
+        }
+      }
+    }
   }
 }
 
@@ -341,6 +418,7 @@ export class SoundEngine {
 
     this.musicBus = null;
     this.ambienceBus = null;
+    this.ambienceLPF = null;
     this.sfxGain = null;
     this.sfxReverbGain = null;
 
@@ -361,31 +439,60 @@ export class SoundEngine {
 
     // Ultra-gentle warm breath pad fallback ONLY before initial .ogg finishes decoding
     this._fallbackPadTimer = null;
+    this._activeFallbackVoice = null;
     this._musicBufferReady = false;
 
-    // Continuous 60fps-safe updraft/dive wind bed (Frill-Glide / Core-Descent)
+    // Continuous 60fps-safe updraft/dive wind bed (Frill-Glide) & mini-game ambience beds
+    // (reef_swim underwater current, core_descent turbine whoosh, rapids_surf whitewater rush)
     this._windLevel = 0;
     this._glideWindNodes = null;
+    this._modeBedNodes = null; // { mode, src, lfo, lfoGain, filter, gain }
 
+    // Bulletproof zero-warning user-gesture unlock & voice/bell diagnostics
     this._unlockedOnce = false;
+    this._hasUserGesture = false;
+    this._pendingUnlock = false;
+    this._unlockEvents = null;
+    this._onUnlockGesture = null;
+    this._activeSfxVoices = 0;
+    this._lastBellPitchHz = 0;
+    this._lastBellIndex = -1;
     this._lastTriggerMap = new Map();
 
     this._bindAutoUnlock();
   }
 
+  _hasGestureActivation() {
+    if (this._hasUserGesture) return true;
+    if (typeof navigator !== 'undefined' && navigator.userActivation) {
+      return Boolean(navigator.userActivation.hasBeenActive);
+    }
+    return true;
+  }
+
+  _unbindAutoUnlock() {
+    if (typeof window === 'undefined' || !this._unlockEvents || !this._onUnlockGesture) return;
+    for (const ev of this._unlockEvents) {
+      window.removeEventListener(ev, this._onUnlockGesture, true);
+    }
+    this._unlockEvents = null;
+    this._onUnlockGesture = null;
+  }
+
   _bindAutoUnlock() {
     if (typeof window === 'undefined') return;
 
-    const events = ['pointerdown', 'touchstart', 'mousedown', 'keydown'];
+    const events = ['pointerdown', 'touchstart', 'touchend', 'mousedown', 'click', 'keydown'];
     const onGesture = () => {
-      this.unlock();
+      this._hasUserGesture = true;
+      this.unlock(true);
       if (this.ctx && this.ctx.state === 'running') {
-        for (const ev of events) {
-          window.removeEventListener(ev, onGesture, true);
-        }
+        this._unbindAutoUnlock();
       }
     };
 
+    this._unlockEvents = events;
+    this._onUnlockGesture = onGesture;
     for (const ev of events) {
       window.addEventListener(ev, onGesture, { capture: true, passive: true });
     }
@@ -393,8 +500,16 @@ export class SoundEngine {
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', () => {
         if (!this.ctx) return;
+        if (document.visibilityState === 'hidden') {
+          this._stopGlideWind();
+          this._stopModeBed();
+          return;
+        }
         if (document.visibilityState === 'visible' && !this.muted) {
-          if (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted') {
+          if (
+            (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted') &&
+            this._hasGestureActivation()
+          ) {
             this.ctx.resume().catch(() => {});
           }
           this._syncPlayback();
@@ -421,7 +536,11 @@ export class SoundEngine {
     this.ctx = ctx;
     ctx.onstatechange = () => {
       if (this.ctx && this.ctx.state === 'running') {
+        this._unbindAutoUnlock();
         this._syncPlayback();
+        if (this._windLevel > 0.005) {
+          this.setWind(this._windLevel);
+        }
       }
     };
 
@@ -485,7 +604,12 @@ export class SoundEngine {
     this.musicBus.connect(this.masterGain);
 
     this.ambienceBus = ctx.createGain();
-    this.ambienceBus.connect(this.masterGain);
+    this.ambienceLPF = ctx.createBiquadFilter();
+    this.ambienceLPF.type = 'lowpass';
+    this.ambienceLPF.frequency.value = 18000;
+    this.ambienceLPF.Q.value = 0.68;
+    this.ambienceBus.connect(this.ambienceLPF);
+    this.ambienceLPF.connect(this.masterGain);
 
     this.sfxGain = ctx.createGain();
     this.sfxGain.connect(this.masterGain);
@@ -829,15 +953,32 @@ export class SoundEngine {
 
   // --- Public Lifecycle, Biome & 3-Channel Mixer API ---
 
-  unlock() {
+  unlock(fromGesture = false) {
+    if (fromGesture) {
+      this._hasUserGesture = true;
+    }
+    // Never create an AudioContext before user activation (eliminates Chromium autoplay warnings)
+    if (!this.ctx && !this._hasGestureActivation()) {
+      this._pendingUnlock = true;
+      return false;
+    }
+
+    this._pendingUnlock = false;
     this._initGraph();
-    if (!this.ctx) return;
+    if (!this.ctx) return false;
 
     if (!this._unlockedOnce && this._silentBuf) {
       try {
         const s = this.ctx.createBufferSource();
         s.buffer = this._silentBuf;
         s.connect(this.masterGain);
+        s.onended = () => {
+          try {
+            s.disconnect();
+          } catch {
+            // Ignore
+          }
+        };
         s.start(0);
         this._unlockedOnce = true;
       } catch {
@@ -845,15 +986,24 @@ export class SoundEngine {
       }
     }
 
-    if (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted') {
+    if (
+      (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted') &&
+      this._hasGestureActivation()
+    ) {
       this.ctx
         .resume()
         .then(() => {
+          if (this.ctx && this.ctx.state === 'running') {
+            this._unbindAutoUnlock();
+          }
           this._syncPlayback();
         })
         .catch(() => {});
+    } else if (this.ctx.state === 'running') {
+      this._unbindAutoUnlock();
     }
     this._syncPlayback();
+    return this.ctx.state === 'running';
   }
 
   startMusic(themeOrMode = undefined) {
@@ -967,6 +1117,9 @@ export class SoundEngine {
     if (this.miniGameMode === 'frill_glide' && next !== 'frill_glide') {
       this.setWind(0);
     }
+    if (next === null) {
+      this.setWind(0);
+    }
     this.miniGameMode = next;
     this._syncPlayback();
   }
@@ -1019,7 +1172,10 @@ export class SoundEngine {
 
   setMuted(muted) {
     this.muted = Boolean(muted);
-    if (this.muted) this._stopGlideWind();
+    if (this.muted) {
+      this._stopGlideWind();
+      this._stopModeBed();
+    }
     this._syncBusGains(false);
     this._syncPlayback();
     return this.muted;
@@ -1042,6 +1198,7 @@ export class SoundEngine {
 
   setAmbienceEnabled(enabled) {
     this.ambienceEnabled = Boolean(enabled);
+    if (!this.ambienceEnabled) this._stopModeBed();
     this._syncBusGains(false);
     this._syncPlayback();
     return this.ambienceEnabled;
@@ -1075,13 +1232,17 @@ export class SoundEngine {
     const next = Boolean(active);
     if (this.musicActive === next) return;
     this.musicActive = next;
-    if (!this.musicActive) this._stopGlideWind();
+    if (!this.musicActive) {
+      this._stopGlideWind();
+      this._stopModeBed();
+    }
     this._syncPlayback();
   }
 
   _syncPlayback() {
     if (!this.ctx || this.ctx.state !== 'running') {
       this._stopFallbackPad();
+      this._stopModeBed();
       return;
     }
 
@@ -1092,6 +1253,13 @@ export class SoundEngine {
     const wantAmbience = Boolean(
       this.musicActive && this.ambienceEnabled && !this.muted && this.ambienceVolume > 0.002
     );
+
+    // Smooth underwater low-pass contour for `reef_swim` vs crisp open-air ambience
+    if (this.ambienceLPF) {
+      const now = this.ctx.currentTime;
+      const targetCutoff = this.miniGameMode === 'reef_swim' ? 560 : 18000;
+      this.ambienceLPF.frequency.setTargetAtTime(targetCutoff, now, 0.38);
+    }
 
     if (wantMusic) {
       if (!this._bufferCache.has(musicFile)) {
@@ -1112,8 +1280,137 @@ export class SoundEngine {
 
     if (wantAmbience) {
       this._ambienceDeck.transitionTo(ambienceFile, CROSSFADE_SECONDS);
+      this._syncModeBed();
     } else {
       this._ambienceDeck.fadeOutAll(0.85);
+      this._stopModeBed();
+    }
+  }
+
+  /**
+   * Leak-free continuous mini-game acoustic texture bed routed into `ambienceBus`:
+   * - `reef_swim`: warm submerged ocean current (low-passed pink noise + 0.18 Hz swell LFO)
+   * - `core_descent`: pulsing hydro-reactor turbine whoosh (bandpass 260 Hz + 1.45 Hz blade LFO)
+   * - `rapids_surf`: crisp canyon whitewater rush (velvet air bandpass 620 Hz + 0.42 Hz wave LFO)
+   */
+  _syncModeBed() {
+    const mode = this.miniGameMode;
+    const wantBed =
+      mode === 'reef_swim' || mode === 'core_descent' || mode === 'rapids_surf';
+
+    if (
+      !wantBed ||
+      !this.ctx ||
+      this.ctx.state !== 'running' ||
+      !this.ambienceBus ||
+      this.muted ||
+      !this.ambienceEnabled ||
+      !this.musicActive ||
+      this.ambienceVolume <= 0.002
+    ) {
+      this._stopModeBed();
+      return;
+    }
+
+    if (this._modeBedNodes && this._modeBedNodes.mode === mode) {
+      return;
+    }
+
+    this._stopModeBed();
+
+    const buf = mode === 'rapids_surf' ? this._softAirBuf : this._pinkNoiseBuf;
+    if (!buf) return;
+
+    const now = this.ctx.currentTime;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+
+    const filter = this.ctx.createBiquadFilter();
+    const lfo = this.ctx.createOscillator();
+    lfo.type = 'sine';
+    const lfoGain = this.ctx.createGain();
+    const gain = this.ctx.createGain();
+
+    let targetGain = 0.045;
+    if (mode === 'reef_swim') {
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(220, now);
+      filter.Q.setValueAtTime(0.85, now);
+      lfo.frequency.setValueAtTime(0.18, now);
+      lfoGain.gain.setValueAtTime(55, now);
+      targetGain = 0.068;
+    } else if (mode === 'core_descent') {
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(265, now);
+      filter.Q.setValueAtTime(1.55, now);
+      lfo.frequency.setValueAtTime(1.45, now);
+      lfoGain.gain.setValueAtTime(95, now);
+      targetGain = 0.056;
+    } else {
+      // rapids_surf whitewater rush
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(620, now);
+      filter.Q.setValueAtTime(0.95, now);
+      lfo.frequency.setValueAtTime(0.42, now);
+      lfoGain.gain.setValueAtTime(185, now);
+      targetGain = 0.046;
+    }
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(targetGain, now + 0.55);
+
+    lfo.connect(lfoGain);
+    lfoGain.connect(filter.frequency);
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.ambienceBus);
+
+    src.start(now, Math.random() * Math.max(0.1, buf.duration - 0.5));
+    lfo.start(now);
+
+    this._modeBedNodes = { mode, src, lfo, lfoGain, filter, gain };
+  }
+
+  _stopModeBed() {
+    const n = this._modeBedNodes;
+    if (!n) return;
+    this._modeBedNodes = null;
+
+    const disconnectAll = () => {
+      try {
+        n.src.onended = null;
+        n.src.disconnect();
+        n.lfo.disconnect();
+        n.lfoGain.disconnect();
+        n.filter.disconnect();
+        n.gain.disconnect();
+      } catch {
+        // Ignore teardown errors
+      }
+    };
+
+    if (!this.ctx || this.ctx.state !== 'running') {
+      try {
+        n.src.stop();
+        n.lfo.stop();
+      } catch {
+        // Ignore
+      }
+      disconnectAll();
+      return;
+    }
+
+    const now = this.ctx.currentTime;
+    try {
+      n.gain.gain.cancelScheduledValues(now);
+      n.gain.gain.setValueAtTime(Math.max(0.0001, n.gain.gain.value), now);
+      n.gain.gain.linearRampToValueAtTime(0.0001, now + 0.32);
+      n.src.onended = disconnectAll;
+      n.src.stop(now + 0.35);
+      n.lfo.stop(now + 0.35);
+    } catch {
+      disconnectAll();
     }
   }
 
@@ -1158,11 +1455,20 @@ export class SoundEngine {
         osc.stop(now + 3.45);
         oscs.push(osc);
       }
+      const voice = { oscs, lp, env };
+      this._activeFallbackVoice = voice;
       if (oscs.length > 0) {
         oscs[0].onended = () => {
-          for (const o of oscs) o.disconnect();
-          lp.disconnect();
-          env.disconnect();
+          if (this._activeFallbackVoice === voice) {
+            this._activeFallbackVoice = null;
+          }
+          try {
+            for (const o of oscs) o.disconnect();
+            lp.disconnect();
+            env.disconnect();
+          } catch {
+            // Ignore
+          }
         };
       }
     };
@@ -1176,6 +1482,21 @@ export class SoundEngine {
       clearInterval(this._fallbackPadTimer);
       this._fallbackPadTimer = null;
     }
+    const fv = this._activeFallbackVoice;
+    if (fv && this.ctx) {
+      this._activeFallbackVoice = null;
+      const now = this.ctx.currentTime;
+      try {
+        fv.env.gain.cancelScheduledValues(now);
+        fv.env.gain.setValueAtTime(Math.max(0.0001, fv.env.gain.value), now);
+        fv.env.gain.linearRampToValueAtTime(0.0001, now + 0.25);
+        for (const o of fv.oscs) {
+          o.stop(now + 0.28);
+        }
+      } catch {
+        // Ignore already-stopped oscillators
+      }
+    }
   }
 
   // --- Organic Acoustic Foley Synthesis Primitives (Strictly Warm & Non-Fatiguing) ---
@@ -1184,9 +1505,10 @@ export class SoundEngine {
     if (this.muted || !this.sfxEnabled || this.sfxVolume <= 0.002 || !this.ctx || !this.sfxGain) {
       return false;
     }
-    if (this.ctx.state === 'suspended') {
+    if (this.ctx.state === 'suspended' && this._hasGestureActivation()) {
       this.ctx.resume().catch(() => {});
     }
+    if (this.ctx.state !== 'running') return false;
     const now = this.ctx.currentTime;
     const prev = this._lastTriggerMap.get(key) ?? -1;
     if (now - prev < minGap) return false;
@@ -1250,19 +1572,121 @@ export class SoundEngine {
     osc2.connect(g2);
     g2.connect(bodyLPF);
 
+    this._activeSfxVoices++;
     osc1.onended = () => {
-      osc1.disconnect();
-      osc2.disconnect();
-      g2.disconnect();
-      bodyLPF.disconnect();
-      out.disconnect();
-      if (panner) panner.disconnect();
+      this._activeSfxVoices = Math.max(0, this._activeSfxVoices - 1);
+      try {
+        osc1.disconnect();
+        osc2.disconnect();
+        g2.disconnect();
+        bodyLPF.disconnect();
+        out.disconnect();
+        if (panner) panner.disconnect();
+      } catch {
+        // Ignore teardown errors
+      }
     };
 
     osc1.start(now);
     osc2.start(now);
     osc1.stop(now + dur + 0.025);
     osc2.stop(now + dur + 0.025);
+  }
+
+  /**
+   * Authentic cast-bronze temple bell synthesizer for the Aqueduct Sanctum `bells` puzzle.
+   * Pure sine partials only (0.5x hum + 1.0x/1.0018x beating strike + 1.498x quint + 2.0x tierce
+   * + damped 2.756x nominal), routed through a warm silk low-pass filter (<= 3,400 Hz, ZERO >5kHz buzz)
+   * with gentle clapper weight and leak-free `onended` teardown.
+   */
+  _bronzeTempleBell(
+    freq,
+    { duration = 1.32, gainVal = 0.068, delay = 0, pan = 0, sendReverb = true } = {}
+  ) {
+    if (!this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime + Math.max(0, delay);
+    const f0 = clamp(freq, 220, 1760);
+    const dur = Math.max(0.35, duration);
+    const peak = clamp(gainVal, 0.0002, 0.22);
+
+    const out = this.ctx.createGain();
+    out.gain.setValueAtTime(0.0001, now);
+    out.gain.linearRampToValueAtTime(peak, now + 0.006);
+    out.gain.exponentialRampToValueAtTime(peak * 0.42, now + dur * 0.32);
+    out.gain.exponentialRampToValueAtTime(0.0002, now + dur);
+
+    // Warm resonant bronze bell filter — strictly below 3,400 Hz (zero metallic harshness!)
+    const warmLPF = this.ctx.createBiquadFilter();
+    warmLPF.type = 'lowpass';
+    warmLPF.frequency.setValueAtTime(Math.min(3400, f0 * 3.85), now);
+    warmLPF.frequency.exponentialRampToValueAtTime(Math.min(1850, f0 * 2.1), now + dur * 0.68);
+    warmLPF.Q.value = 0.72;
+
+    warmLPF.connect(out);
+    const panner = this._connectSfx(out, sendReverb, pan);
+
+    const partials = [
+      // Hum sub-octave (deep temple bronze foundation)
+      { ratio: 0.5, amp: 0.34, decayMul: 1.04 },
+      // Strike fundamental + subtle twin chorus partial for organic bronze shimmer
+      { ratio: 1.0, amp: 0.72, decayMul: 0.96 },
+      { ratio: 1.0018, amp: 0.28, decayMul: 0.88 },
+      // Warm fifth (quint) & octave overtones
+      { ratio: 1.498, amp: 0.16, decayMul: 0.58 },
+      { ratio: 2.0, amp: 0.2, decayMul: 0.48 },
+      // Soft struck nominal partial (decays quickly into singing fundamental)
+      { ratio: 2.756, amp: 0.09, decayMul: 0.22 },
+    ];
+
+    const oscs = [];
+    const gains = [];
+    let longestStop = now + dur + 0.03;
+
+    for (const p of partials) {
+      const pf = f0 * p.ratio;
+      if (pf > 3550) continue; // Strictly cap every partial well below 5kHz
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(pf, now);
+
+      const g = this.ctx.createGain();
+      const pDur = Math.max(0.14, dur * p.decayMul);
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.linearRampToValueAtTime(p.amp, now + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0002, now + pDur);
+
+      osc.connect(g);
+      g.connect(warmLPF);
+
+      const stopAt = now + Math.min(dur + 0.04, pDur + 0.03);
+      if (stopAt > longestStop) longestStop = stopAt;
+      osc.start(now);
+      osc.stop(stopAt);
+      oscs.push(osc);
+      gains.push(g);
+    }
+
+    // Attach teardown to the longest-running partial (hum tone, index 0)
+    const anchorOsc = oscs[0];
+    if (anchorOsc) {
+      this._activeSfxVoices++;
+      anchorOsc.onended = () => {
+        this._activeSfxVoices = Math.max(0, this._activeSfxVoices - 1);
+        try {
+          for (const o of oscs) o.disconnect();
+          for (const g of gains) g.disconnect();
+          warmLPF.disconnect();
+          out.disconnect();
+          if (panner) panner.disconnect();
+        } catch {
+          // Ignore teardown errors
+        }
+      };
+    }
+
+    // Soft wooden/bronze clapper strike transient + delicate sanctuary water resonance
+    this._warmBodyTone(195, 96, 0.036, peak * 0.42, delay, 'sine', 340, false, pan);
+    this._waterDrop(Math.min(1850, f0 * 1.498), 0.13, peak * 0.26, delay + 0.012, pan * 0.8, true);
   }
 
   /**
@@ -1288,10 +1712,16 @@ export class SoundEngine {
 
     osc.connect(gain);
     const panner = this._connectSfx(gain, sendReverb, pan);
+    this._activeSfxVoices++;
     osc.onended = () => {
-      osc.disconnect();
-      gain.disconnect();
-      if (panner) panner.disconnect();
+      this._activeSfxVoices = Math.max(0, this._activeSfxVoices - 1);
+      try {
+        osc.disconnect();
+        gain.disconnect();
+        if (panner) panner.disconnect();
+      } catch {
+        // Ignore teardown errors
+      }
     };
     osc.start(now);
     osc.stop(now + dur + 0.02);
@@ -1340,11 +1770,17 @@ export class SoundEngine {
     filter.connect(gain);
     const panner = this._connectSfx(gain, sendReverb, pan);
 
+    this._activeSfxVoices++;
     osc.onended = () => {
-      osc.disconnect();
-      filter.disconnect();
-      gain.disconnect();
-      if (panner) panner.disconnect();
+      this._activeSfxVoices = Math.max(0, this._activeSfxVoices - 1);
+      try {
+        osc.disconnect();
+        filter.disconnect();
+        gain.disconnect();
+        if (panner) panner.disconnect();
+      } catch {
+        // Ignore teardown errors
+      }
     };
     osc.start(now);
     osc.stop(now + dur + 0.025);
@@ -1390,11 +1826,17 @@ export class SoundEngine {
     bp.connect(gain);
     const panner = this._connectSfx(gain, sendReverb, pan);
 
+    this._activeSfxVoices++;
     src.onended = () => {
-      src.disconnect();
-      bp.disconnect();
-      gain.disconnect();
-      if (panner) panner.disconnect();
+      this._activeSfxVoices = Math.max(0, this._activeSfxVoices - 1);
+      try {
+        src.disconnect();
+        bp.disconnect();
+        gain.disconnect();
+        if (panner) panner.disconnect();
+      } catch {
+        // Ignore teardown errors
+      }
     };
 
     const offset = Math.random() * Math.max(0.01, buf.duration - dur - 0.04);
@@ -1433,10 +1875,16 @@ export class SoundEngine {
     src.connect(gain);
     const panner = this._connectSfx(gain, false, pan);
 
+    this._activeSfxVoices++;
     src.onended = () => {
-      src.disconnect();
-      gain.disconnect();
-      if (panner) panner.disconnect();
+      this._activeSfxVoices = Math.max(0, this._activeSfxVoices - 1);
+      try {
+        src.disconnect();
+        gain.disconnect();
+        if (panner) panner.disconnect();
+      } catch {
+        // Ignore teardown errors
+      }
     };
     src.start(now);
 
@@ -1553,9 +2001,14 @@ export class SoundEngine {
 
   sonarPing() {
     if (!this._canPlay('sonarPing', 0.12)) return;
-    const f = this._scaleFreq(5, 0);
-    this._kalimbaChime(f, 0.62, 0.048, 0, 0, true);
-    this._kalimbaChime(f * 1.5, 0.55, 0.026, 0.08, 0.18, true);
+    // Deep Pelagian underwater sonar ping with warm stereo sub-aquatic echoes (< 2.4kHz)
+    const f = clamp(this._scaleFreq(5, 0), 620, 1180);
+    this._warmBodyTone(f, f * 1.008, 0.52, 0.052, 0, 'sine', 2100, true, 0);
+    this._warmBodyTone(f * 0.5, f * 0.5, 0.46, 0.024, 0, 'sine', 900, true, 0);
+    // Two gentle stereo-bouncing reef cavern echo returns
+    this._warmBodyTone(f * 1.002, f * 0.996, 0.44, 0.026, 0.22, 'sine', 1450, true, -0.26);
+    this._warmBodyTone(f * 0.998, f * 0.992, 0.38, 0.015, 0.46, 'sine', 1050, true, 0.28);
+    this._waterDrop(Math.min(1450, f * 1.25), 0.13, 0.024, 0.02, 0.12, true);
   }
 
   subSurface() {
@@ -1798,7 +2251,7 @@ export class SoundEngine {
       return;
     }
 
-    if (this.ctx.state === 'suspended') {
+    if (this.ctx.state === 'suspended' && this._hasGestureActivation()) {
       this.ctx.resume().catch(() => {});
     }
     if (this.ctx.state !== 'running') return;
@@ -1841,25 +2294,37 @@ export class SoundEngine {
     const n = this._glideWindNodes;
     if (!n) return;
     this._glideWindNodes = null;
-    if (!this.ctx) return;
+
+    const disconnectAll = () => {
+      try {
+        n.src.onended = null;
+        n.src.disconnect();
+        n.bp.disconnect();
+        n.gain.disconnect();
+      } catch {
+        // Ignore teardown errors
+      }
+    };
+
+    if (!this.ctx || this.ctx.state !== 'running') {
+      try {
+        n.src.stop();
+      } catch {
+        // Ignore
+      }
+      disconnectAll();
+      return;
+    }
 
     const now = this.ctx.currentTime;
     try {
       n.gain.gain.cancelScheduledValues(now);
       n.gain.gain.setValueAtTime(Math.max(0.0001, n.gain.gain.value), now);
-      n.gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+      n.gain.gain.linearRampToValueAtTime(0.0001, now + 0.09);
+      n.src.onended = disconnectAll;
       n.src.stop(now + 0.11);
-      n.src.onended = () => {
-        try {
-          n.src.disconnect();
-          n.bp.disconnect();
-          n.gain.disconnect();
-        } catch {
-          // Ignore teardown errors
-        }
-      };
     } catch {
-      // Ignore
+      disconnectAll();
     }
   }
 
@@ -1927,18 +2392,103 @@ export class SoundEngine {
     }
   }
 
-  puzzleBell(semitone = 0) {
-    const semi = clamp(Number(semitone) || 0, -12, 24);
-    if (!this._canPlay(`puzzleBell_${semi}`, 0.025)) return;
-    const f = 392.0 * Math.pow(2, semi / 12);
-    // Warm water-sanctuary bronze & glass bowl resonance
-    this._kalimbaChime(f, 0.88, 0.058, 0, 0, true);
-    this._warmBodyTone(f * 0.5, f * 0.5, 0.85, 0.036, 0, 'sine', 900, true);
-    this._waterDrop(Math.min(1850, f * 1.5), 0.14, 0.024, 0.01, 0.12, true);
+  /**
+   * Resolves a canonical Aqueduct Sanctum temple bell pitch (C5, D5, E5, G5, A5).
+   * Supports both `puzzleBell(b.note, b.color)` from `puzzleRoom.js` AND direct bell index `0..4`.
+   */
+  resolveTempleBellPitch(semitoneOrIndex = 0, colorIdx = undefined) {
+    if (typeof colorIdx === 'number' && Number.isFinite(colorIdx)) {
+      const idx = clamp(Math.floor(colorIdx), 0, TEMPLE_BELL_PENTATONIC_HZ.length - 1);
+      return {
+        index: idx,
+        freqHz: TEMPLE_BELL_PENTATONIC_HZ[idx],
+        pan: (idx - 2) * 0.14,
+      };
+    }
+    const val = Number(semitoneOrIndex) || 0;
+    const exactSemiIdx = TEMPLE_BELL_SEMITONES.indexOf(val);
+    if (exactSemiIdx >= 0) {
+      return {
+        index: exactSemiIdx,
+        freqHz: TEMPLE_BELL_PENTATONIC_HZ[exactSemiIdx],
+        pan: (exactSemiIdx - 2) * 0.14,
+      };
+    }
+    const semi = clamp(val, -12, 24);
+    const freqHz = Number((523.25 * Math.pow(2, semi / 12)).toFixed(2));
+    return {
+      index: clamp(Math.floor(semi), 0, 4),
+      freqHz,
+      pan: 0,
+    };
   }
 
-  puzzleNote(semitone = 0) {
-    this.puzzleBell(semitone);
+  puzzleBell(semitone = 0, colorIdx = undefined, opts = undefined) {
+    const resolved = this.resolveTempleBellPitch(semitone, colorIdx);
+    const delay = Math.max(0, Number(opts?.delay) || 0);
+    const gainScale = clamp(opts?.gainScale ?? 1, 0.25, 1.35);
+    const debounceKey = `puzzleBell_${resolved.index}_${Math.round(resolved.freqHz)}`;
+    if (delay <= 0) {
+      if (!this._canPlay(debounceKey, 0.025)) return resolved.freqHz;
+    } else if (
+      this.muted ||
+      !this.sfxEnabled ||
+      this.sfxVolume <= 0.002 ||
+      !this.ctx ||
+      this.ctx.state !== 'running' ||
+      !this.sfxGain
+    ) {
+      return resolved.freqHz;
+    }
+
+    this._lastBellPitchHz = resolved.freqHz;
+    this._lastBellIndex = resolved.index;
+    this._bronzeTempleBell(resolved.freqHz, {
+      duration: opts?.duration ?? 1.34,
+      gainVal: 0.068 * gainScale,
+      delay,
+      pan: opts?.pan ?? resolved.pan,
+      sendReverb: true,
+    });
+    return resolved.freqHz;
+  }
+
+  puzzleBellByIndex(bellIndex = 0, opts = undefined) {
+    const idx = clamp(Math.floor(Number(bellIndex) || 0), 0, TEMPLE_BELL_PENTATONIC_HZ.length - 1);
+    return this.puzzleBell(TEMPLE_BELL_SEMITONES[idx], idx, opts);
+  }
+
+  /**
+   * Plays a full Aqueduct Sanctum musical bell clue sequence using identical bronze temple bell
+   * pitches (`C5, D5, E5, G5, A5`) scheduled sample-accurately on the WebAudio clock.
+   */
+  puzzleBellClueSequence(order = [], opts = {}) {
+    if (!Array.isArray(order) || order.length === 0) return [];
+    const stepSec = clamp(opts.stepSec ?? 0.44, 0.18, 1.2);
+    const gainScale = clamp(opts.gainScale ?? 0.88, 0.3, 1.2);
+    const pitches = [];
+    order.forEach((entry, i) => {
+      const idx =
+        typeof entry === 'object' && entry !== null
+          ? Number(entry.color ?? entry.index ?? 0)
+          : Number(entry) || 0;
+      const safeIdx = clamp(Math.floor(idx), 0, TEMPLE_BELL_PENTATONIC_HZ.length - 1);
+      const hz = this.puzzleBell(TEMPLE_BELL_SEMITONES[safeIdx], safeIdx, {
+        delay: i * stepSec,
+        gainScale,
+        duration: 1.15,
+      });
+      pitches.push(hz);
+    });
+    return pitches;
+  }
+
+  playBellClue(order = [], opts = {}) {
+    return this.puzzleBellClueSequence(order, opts);
+  }
+
+  puzzleNote(semitone = 0, colorIdx = undefined, opts = undefined) {
+    return this.puzzleBell(semitone, colorIdx, opts);
   }
 
   puzzleMirror() {
@@ -2219,6 +2769,36 @@ export class SoundEngine {
     if (p > 0.62) {
       this._waterDrop(this._scaleFreq(deg + 2, 0), 0.11, vol * 0.78, 0.11, 0.08, true);
     }
+  }
+
+  /**
+   * Diagnostic snapshot for automated QA verification (node-leak checks, active stems, bell tuning).
+   */
+  getDiagnostics() {
+    const stems = this._resolveDesiredStems();
+    return {
+      ctxState: this.ctx ? this.ctx.state : 'uninitialized',
+      muted: this.muted,
+      musicActive: this.musicActive,
+      biome: this.biome,
+      theme: this.theme,
+      gameMode: this.gameMode,
+      miniGameMode: this.miniGameMode,
+      bossActive: this.bossActive,
+      desiredMusic: stems.musicFile,
+      desiredAmbience: stems.ambienceFile,
+      activeMusicStem: this._musicDeck.activeVoice?.filename || null,
+      activeAmbienceStem: this._ambienceDeck.activeVoice?.filename || null,
+      fadingMusicVoices: this._musicDeck.fadingVoices.size,
+      fadingAmbienceVoices: this._ambienceDeck.fadingVoices.size,
+      activeSfxVoices: this._activeSfxVoices,
+      modeBed: this._modeBedNodes?.mode || null,
+      windActive: Boolean(this._glideWindNodes),
+      ambienceCutoffHz: this.ambienceLPF ? Math.round(this.ambienceLPF.frequency.value) : 0,
+      lastBellPitchHz: this._lastBellPitchHz,
+      lastBellIndex: this._lastBellIndex,
+      bellPentatonicHz: TEMPLE_BELL_PENTATONIC_HZ,
+    };
   }
 }
 

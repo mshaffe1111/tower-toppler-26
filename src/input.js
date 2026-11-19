@@ -71,6 +71,10 @@ const TILT_DEADZONE_DEG = 2.5;
 const TILT_BASE_FULL_DEG = 16.0;
 const TILT_EMA_ALPHA = 0.55;
 
+// Standard Gamepad Constants (W3C Standard Mapping)
+const GAMEPAD_STICK_DEADZONE = 0.18;
+const GAMEPAD_TRIGGER_THRESHOLD = 0.35;
+
 export class InputController {
   /** @param {{ mode?: string, controlMode?: string, hapticsEnabled?: boolean, tiltSensitivity?: number }} [options] */
   constructor(options = {}) {
@@ -130,6 +134,41 @@ export class InputController {
     // Internal Multi-Source Input Tracking
     this._activePointers = new Map();
     this._heldKeys = new Set();
+    this._heldKeyCodes = new Set();
+    this._keyMap = {
+      ArrowLeft: 'left',
+      KeyA: 'left',
+      ArrowRight: 'right',
+      KeyD: 'right',
+      ArrowUp: 'up',
+      KeyW: 'up',
+      ArrowDown: 'down',
+      KeyS: 'down',
+      Space: 'jump',
+      KeyZ: 'jump',
+      KeyK: 'jump',
+      KeyX: 'fire',
+      Enter: 'fire',
+      KeyJ: 'fire',
+      KeyC: 'whip',
+      KeyL: 'whip',
+      KeyE: 'whip',
+      ShiftLeft: 'whip',
+      ShiftRight: 'whip',
+    };
+    this._gamepadConnected = false;
+    this._gpActive = false;
+    this._gpState = {
+      left: false,
+      right: false,
+      up: false,
+      down: false,
+      jump: false,
+      fire: false,
+      whip: false,
+      analogX: 0,
+      analogY: 0,
+    };
     this._leftPulseActive = false;
     this._leftPulseTimer = null;
     this._rightPulseActive = false;
@@ -164,10 +203,14 @@ export class InputController {
     return this.state;
   }
 
-  /** Per-frame tick hook called by game.update(dt) — detects stationary post-flick thumb stops & expires ballistic carry deterministically. */
+  /** Per-frame tick hook called by game.update(dt) — polls gamepads, detects stationary post-flick thumb stops & expires ballistic carry deterministically. */
   update(dt = 0) {
     const stepDt = Number.isFinite(dt) && dt > 0 ? Math.min(0.05, dt) : 0;
     let changed = false;
+
+    if (this._pollGamepad()) {
+      changed = true;
+    }
 
     if (stepDt > 0) {
       if (this._horizCarryDir !== 0 && this._horizCarryRemainingSec > 0) {
@@ -465,6 +508,18 @@ export class InputController {
     }
     this._activePointers.clear();
     this._heldKeys.clear();
+    this._heldKeyCodes.clear();
+
+    this._gpActive = false;
+    this._gpState.left = false;
+    this._gpState.right = false;
+    this._gpState.up = false;
+    this._gpState.down = false;
+    this._gpState.jump = false;
+    this._gpState.fire = false;
+    this._gpState.whip = false;
+    this._gpState.analogX = 0;
+    this._gpState.analogY = 0;
 
     this._tiltLeft = false;
     this._tiltRight = false;
@@ -610,6 +665,114 @@ export class InputController {
     this._jumpPulseRemainingSec = 0;
   }
 
+  _pollGamepad() {
+    if (typeof navigator === 'undefined' || typeof navigator.getGamepads !== 'function') {
+      return false;
+    }
+    let pads;
+    try {
+      pads = navigator.getGamepads();
+    } catch (_) {
+      return false;
+    }
+    if (!pads || pads.length === 0) {
+      if (!this._gpActive) return false;
+      this._gpActive = false;
+      const g = this._gpState;
+      g.left = g.right = g.up = g.down = g.jump = g.fire = g.whip = false;
+      g.analogX = 0;
+      g.analogY = 0;
+      return true;
+    }
+
+    let left = false;
+    let right = false;
+    let up = false;
+    let down = false;
+    let jump = false;
+    let fire = false;
+    let whip = false;
+    let ax = 0;
+    let ay = 0;
+    let foundPad = false;
+
+    for (let i = 0; i < pads.length; i++) {
+      const pad = pads[i];
+      if (!pad || !pad.connected) continue;
+      foundPad = true;
+      const btns = pad.buttons || [];
+      const axes = pad.axes || [];
+      const pressed = (idx) => {
+        const b = btns[idx];
+        return Boolean(b && (b.pressed || b.value >= GAMEPAD_TRIGGER_THRESHOLD));
+      };
+
+      // D-Pad (standard W3C indices 12..15)
+      if (pressed(14)) left = true;
+      if (pressed(15)) right = true;
+      if (pressed(12)) up = true;
+      if (pressed(13)) down = true;
+
+      // Left Analog Stick (axes 0, 1) with clean radial deadzone & smooth rescaling
+      const rawX = Number(axes[0]) || 0;
+      const rawY = Number(axes[1]) || 0;
+      const mag = Math.hypot(rawX, rawY);
+      if (mag > GAMEPAD_STICK_DEADZONE) {
+        const scaled = Math.min(1, (mag - GAMEPAD_STICK_DEADZONE) / (1 - GAMEPAD_STICK_DEADZONE));
+        const sx = (rawX / mag) * scaled;
+        const sy = (rawY / mag) * scaled;
+        if (Math.abs(sx) > Math.abs(ax)) ax = sx;
+        if (Math.abs(sy) > Math.abs(ay)) ay = sy;
+      }
+
+      // Action buttons: A/Cross = Jump, X/Square or RT = Pulse, B/Circle or Y/Triangle or RB = Tail-Whip
+      if (pressed(0)) jump = true;
+      if (pressed(2) || pressed(7)) fire = true;
+      if (pressed(1) || pressed(3) || pressed(5)) whip = true;
+    }
+
+    this._gamepadConnected = foundPad;
+    if (!foundPad && !this._gpActive) return false;
+
+    if (ax < -0.22) left = true;
+    if (ax > 0.22) right = true;
+    if (ay < -0.35) up = true;
+    if (ay > 0.35) down = true;
+    if (left && !right && ax === 0) ax = -1;
+    if (right && !left && ax === 0) ax = 1;
+    if (up && !down && ay === 0) ay = -1;
+    if (down && !up && ay === 0) ay = 1;
+
+    const g = this._gpState;
+    const anyNow = left || right || up || down || jump || fire || whip || Math.abs(ax) > 0.01 || Math.abs(ay) > 0.01;
+    const changed =
+      anyNow !== this._gpActive ||
+      left !== g.left ||
+      right !== g.right ||
+      up !== g.up ||
+      down !== g.down ||
+      jump !== g.jump ||
+      fire !== g.fire ||
+      whip !== g.whip ||
+      Math.abs(ax - g.analogX) > 0.01 ||
+      Math.abs(ay - g.analogY) > 0.01;
+
+    if (!changed) return false;
+
+    this._gpActive = anyNow;
+    g.left = left;
+    g.right = right;
+    g.up = up;
+    g.down = down;
+    g.jump = jump;
+    g.fire = fire;
+    g.whip = whip;
+    g.analogX = ax;
+    g.analogY = ay;
+    if (left || right) this._clearHorizCarry();
+    return true;
+  }
+
   _recomputeState(suppressEdgeHaptic = false) {
     let left = this._heldKeys.has('left') || this._leftPulseActive;
     let right = this._heldKeys.has('right') || this._rightPulseActive;
@@ -622,6 +785,26 @@ export class InputController {
 
     let analogX = (right ? 1 : 0) - (left ? 1 : 0);
     let analogY = (down ? 1 : 0) - (up ? 1 : 0);
+
+    // Merge W3C Standard Gamepad state cleanly without clobbering touch/keyboard
+    if (this._gpActive) {
+      const g = this._gpState;
+      if (g.left) {
+        left = true;
+        liveHorizHeld = true;
+      }
+      if (g.right) {
+        right = true;
+        liveHorizHeld = true;
+      }
+      if (g.up) up = true;
+      if (g.down) down = true;
+      if (g.jump) jump = true;
+      if (g.fire) fire = true;
+      if (g.whip) whip = true;
+      if (Math.abs(g.analogX) > Math.abs(analogX)) analogX = g.analogX;
+      if (Math.abs(g.analogY) > Math.abs(analogY)) analogY = g.analogY;
+    }
 
     for (const entry of this._activePointers.values()) {
       if (entry.type === 'button') {
@@ -939,8 +1122,34 @@ export class InputController {
   // Direct Action Button Halo & Slide-Press Helper (#btn-fire <-> #btn-jump <-> #btn-whip)
   // ===========================================================================
 
-  _findActionButtonHalo(clientX, clientY, padPx = 10) {
+  _isActionBtnVisible(btn) {
+    if (!btn || typeof btn.getBoundingClientRect !== 'function') return false;
+    if (typeof window !== 'undefined' && window.getComputedStyle) {
+      const cs = window.getComputedStyle(btn);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || cs.pointerEvents === 'none') {
+        return false;
+      }
+    }
+    const r = btn.getBoundingClientRect();
+    return r.width > 4 && r.height > 4;
+  }
+
+  _findActionButtonHalo(clientX, clientY, padPx = 12) {
     if (typeof document === 'undefined') return null;
+
+    const touchRoot = document.getElementById('touch-controls');
+    if (touchRoot && typeof window !== 'undefined' && window.getComputedStyle) {
+      const tcs = window.getComputedStyle(touchRoot);
+      // Note: #touch-controls intentionally uses pointer-events: none as a pass-through flex container;
+      // check display, visibility, and opacity to detect when overlays/cutscenes hide touch controls.
+      if (
+        tcs.display === 'none' ||
+        tcs.visibility === 'hidden' ||
+        Number(tcs.opacity) <= 0.02
+      ) {
+        return null;
+      }
+    }
 
     const candidates = [
       document.getElementById('btn-jump'),
@@ -951,9 +1160,8 @@ export class InputController {
     let bestDist = Infinity;
 
     for (const btn of candidates) {
-      if (!btn || typeof btn.getBoundingClientRect !== 'function') continue;
+      if (!this._isActionBtnVisible(btn)) continue;
       const r = btn.getBoundingClientRect();
-      if (r.width <= 0 || r.height <= 0) continue;
       const cx = r.left + r.width * 0.5;
       const cy = r.top + r.height * 0.5;
       const maxR = Math.max(r.width, r.height) * 0.5 + padPx;
@@ -968,14 +1176,9 @@ export class InputController {
 
   _updateButtonSlidePointer(entry, clientX, clientY) {
     if (typeof document === 'undefined') return;
-    const jumpBtn = document.getElementById('btn-jump');
-    const fireBtn = document.getElementById('btn-fire');
-    const whipBtn = document.getElementById('btn-whip');
-    const hitButton = (btn) => {
-      if (!btn || typeof btn.getBoundingClientRect !== 'function') return false;
+    const insideRect = (btn, pad = 2) => {
+      if (!this._isActionBtnVisible(btn)) return false;
       const r = btn.getBoundingClientRect();
-      if (r.width <= 0 || r.height <= 0) return false;
-      const pad = 8;
       return (
         clientX >= r.left - pad &&
         clientX <= r.right + pad &&
@@ -984,28 +1187,53 @@ export class InputController {
       );
     };
 
+    // Stay locked to the currently pressed button while the thumb remains inside it (+3px hysteresis).
+    // Prevents accidental JUMP <-> PULSE hijacking across tight 8px mobile button gaps on 412x915 Portrait!
+    if (entry.el && insideRect(entry.el, 3)) {
+      return;
+    }
+
+    const candidates = [
+      { action: 'jump', el: document.getElementById('btn-jump') },
+      { action: 'fire', el: document.getElementById('btn-fire') },
+      { action: 'whip', el: document.getElementById('btn-whip') },
+    ];
+
     let nextAction = entry.action;
     let nextEl = entry.el;
-    if (entry.action !== 'jump' && hitButton(jumpBtn)) {
-      nextAction = 'jump';
-      nextEl = jumpBtn;
-    } else if (entry.action !== 'fire' && hitButton(fireBtn)) {
-      nextAction = 'fire';
-      nextEl = fireBtn;
-    } else if (entry.action !== 'whip' && hitButton(whipBtn)) {
-      nextAction = 'whip';
-      nextEl = whipBtn;
+    let bestDist = Infinity;
+
+    for (const c of candidates) {
+      if (c.action === entry.action || !insideRect(c.el, 2)) continue;
+      const r = c.el.getBoundingClientRect();
+      const d = Math.hypot(clientX - (r.left + r.width * 0.5), clientY - (r.top + r.height * 0.5));
+      if (d < bestDist) {
+        bestDist = d;
+        nextAction = c.action;
+        nextEl = c.el;
+      }
     }
 
     if (nextAction !== entry.action) {
-      if (entry.el) entry.el.classList.remove('active');
+      const prevEl = entry.el;
       entry.action = nextAction;
       entry.el = nextEl;
+      if (prevEl && !this._hasOtherPointerOnEl(entry, prevEl)) {
+        prevEl.classList.remove('active');
+      }
       if (entry.el) entry.el.classList.add('active');
       this.justPressed[nextAction] = true;
       this.haptic(nextAction === 'whip' ? 16 : nextAction === 'jump' ? 14 : 12);
       this._recomputeState(true);
     }
+  }
+
+  _hasOtherPointerOnEl(excludeEntry, el) {
+    if (!el) return false;
+    for (const other of this._activePointers.values()) {
+      if (other !== excludeEntry && other.el === el) return true;
+    }
+    return false;
   }
 
   // ===========================================================================
@@ -1603,9 +1831,55 @@ export class InputController {
     }
 
     if (gmode === 'puzzle' || gmode === 'aqueduct_sanctum') {
-      const dx = x - entry.anchorX;
-      const dy = y - entry.anchorY;
-      const stepThresh = 16;
+      const stepThresh = 15;
+      const leash = 32;
+      const recoilReverse = 14;
+      let dx = x - entry.anchorX;
+      let dy = y - entry.anchorY;
+
+      // Instant 180-degree recoil reversal along the active cardinal axis
+      if (entry.horizDir === 1) {
+        if (x > entry.extremeX) entry.extremeX = x;
+        if (entry.extremeX - x >= recoilReverse) {
+          entry.anchorX = x + stepThresh + 1;
+          entry.anchorY = y;
+          entry.extremeX = x;
+          entry.extremeY = y;
+          dx = x - entry.anchorX;
+          dy = 0;
+        }
+      } else if (entry.horizDir === -1) {
+        if (x < entry.extremeX) entry.extremeX = x;
+        if (x - entry.extremeX >= recoilReverse) {
+          entry.anchorX = x - stepThresh - 1;
+          entry.anchorY = y;
+          entry.extremeX = x;
+          entry.extremeY = y;
+          dx = x - entry.anchorX;
+          dy = 0;
+        }
+      } else if (entry.vertDir === 'down') {
+        if (y > entry.extremeY) entry.extremeY = y;
+        if (entry.extremeY - y >= recoilReverse) {
+          entry.anchorY = y + stepThresh + 1;
+          entry.anchorX = x;
+          entry.extremeY = y;
+          entry.extremeX = x;
+          dy = y - entry.anchorY;
+          dx = 0;
+        }
+      } else if (entry.vertDir === 'up') {
+        if (y < entry.extremeY) entry.extremeY = y;
+        if (y - entry.extremeY >= recoilReverse) {
+          entry.anchorY = y - stepThresh - 1;
+          entry.anchorX = x;
+          entry.extremeY = y;
+          entry.extremeX = x;
+          dy = y - entry.anchorY;
+          dx = 0;
+        }
+      }
+
       if (Math.hypot(dx, dy) < stepThresh) {
         entry.horizDir = 0;
         entry.left = false;
@@ -1613,24 +1887,43 @@ export class InputController {
         entry.analogX = 0;
         entry.vertDir = null;
         entry.analogY = 0;
+        entry.extremeX = x;
+        entry.extremeY = y;
       } else if (Math.abs(dx) >= Math.abs(dy)) {
+        const nextH = dx < 0 ? -1 : 1;
+        if (entry.horizDir !== nextH) {
+          entry.extremeX = x;
+        } else {
+          entry.extremeX = nextH > 0 ? Math.max(entry.extremeX, x) : Math.min(entry.extremeX, x);
+        }
         entry.vertDir = null;
         entry.analogY = 0;
-        entry.horizDir = dx < 0 ? -1 : 1;
-        entry.left = dx < 0;
-        entry.right = dx > 0;
+        entry.horizDir = nextH;
+        entry.left = nextH < 0;
+        entry.right = nextH > 0;
         entry.analogX = entry.horizDir;
-        entry.puzzleSwipeDir = dx < 0 ? 'left' : 'right';
-        if (Math.abs(dx) > 48) entry.anchorX = x - Math.sign(dx) * 48;
+        entry.puzzleSwipeDir = nextH < 0 ? 'left' : 'right';
+        if (Math.abs(dx) > leash) entry.anchorX = x - Math.sign(dx) * leash;
+        // Track orthogonal axis cleanly so immediate 90-degree turns (e.g. Right -> Up) respond in ~15px!
+        entry.anchorY += (y - entry.anchorY) * 0.65;
+        entry.extremeY = y;
       } else {
+        const nextV = dy < 0 ? 'up' : 'down';
+        if (entry.vertDir !== nextV) {
+          entry.extremeY = y;
+        } else {
+          entry.extremeY = nextV === 'down' ? Math.max(entry.extremeY, y) : Math.min(entry.extremeY, y);
+        }
         entry.horizDir = 0;
         entry.left = false;
         entry.right = false;
         entry.analogX = 0;
-        entry.vertDir = dy < 0 ? 'up' : 'down';
-        entry.analogY = dy < 0 ? -1 : 1;
+        entry.vertDir = nextV;
+        entry.analogY = nextV === 'up' ? -1 : 1;
         entry.puzzleSwipeDir = entry.vertDir;
-        if (Math.abs(dy) > 48) entry.anchorY = y - Math.sign(dy) * 48;
+        if (Math.abs(dy) > leash) entry.anchorY = y - Math.sign(dy) * leash;
+        entry.anchorX += (x - entry.anchorX) * 0.65;
+        entry.extremeX = x;
       }
       this._recomputeState();
       return;
@@ -1926,11 +2219,36 @@ export class InputController {
       entry.analogY = 0;
     }
 
-    const upT = entry.up ? -0.40 : this._isDoorOrLiftContext() ? -0.44 : -0.56;
-    const dnT = entry.down ? 0.40 : 0.56;
-    const vDom = Math.abs(py) >= Math.abs(px) * (entry.up || entry.down ? 0.58 : 0.80);
-    entry.up = ny <= upT && vDom;
-    entry.down = ny >= dnT && vDom;
+    const gmode = this._activeGameMode();
+    if (gmode === 'puzzle' || gmode === 'aqueduct_sanctum') {
+      // Crisp symmetric 4-way cardinal mapping inside Aqueduct Sanctums
+      const cardDead = entry.up || entry.down || entry.left || entry.right ? 0.22 : 0.28;
+      if (Math.hypot(nx, ny) < cardDead) {
+        entry.left = entry.right = entry.up = entry.down = false;
+        entry.analogX = 0;
+        entry.analogY = 0;
+      } else if (Math.abs(px) >= Math.abs(py)) {
+        entry.left = nx < 0;
+        entry.right = nx > 0;
+        entry.up = false;
+        entry.down = false;
+        entry.analogX = Math.sign(nx);
+        entry.analogY = 0;
+      } else {
+        entry.left = false;
+        entry.right = false;
+        entry.up = ny < 0;
+        entry.down = ny > 0;
+        entry.analogX = 0;
+        entry.analogY = Math.sign(ny);
+      }
+    } else {
+      const upT = entry.up ? -0.40 : this._isDoorOrLiftContext() ? -0.44 : -0.56;
+      const dnT = entry.down ? 0.40 : 0.56;
+      const vDom = Math.abs(py) >= Math.abs(px) * (entry.up || entry.down ? 0.58 : 0.80);
+      entry.up = ny <= upT && vDom;
+      entry.down = ny >= dnT && vDom;
+    }
 
     if (recompute) {
       this._recomputeState();
@@ -2385,15 +2703,13 @@ export class InputController {
       // Never intercept HUD chrome buttons/controls
       if (target.closest('#hud button, #hud a, #hud select, #hud input')) return;
 
-      // Any new touch immediately cancels stale horizontal carry
-      this._clearHorizCarry();
-
-      // 1. Direct Action Buttons (#btn-jump, #btn-fire, #btn-whip active across ALL 4 modes, multi-touch + slide + 10px halo)
+      // 1. Direct Action Buttons (#btn-jump, #btn-fire, #btn-whip active across ALL 4 modes, multi-touch + slide + 12px halo)
+      //    Checked BEFORE clearing horizontal carry so tapping JUMP/WHIP/PULSE never kills slide momentum!
       let jumpBtn = target.closest('#btn-jump');
       let fireBtn = target.closest('#btn-fire');
       let whipBtn = target.closest('#btn-whip');
       if (!jumpBtn && !fireBtn && !whipBtn && !target.closest('button, select, input, a, #dpad, #joystick-zone')) {
-        const nearActionBtn = this._findActionButtonHalo(e.clientX, e.clientY, 10);
+        const nearActionBtn = this._findActionButtonHalo(e.clientX, e.clientY, 12);
         if (nearActionBtn?.id === 'btn-jump') jumpBtn = nearActionBtn;
         else if (nearActionBtn?.id === 'btn-fire') fireBtn = nearActionBtn;
         else if (nearActionBtn?.id === 'btn-whip') whipBtn = nearActionBtn;
@@ -2410,6 +2726,9 @@ export class InputController {
         this._recomputeState(true);
         return;
       }
+
+      // Any new directional / stage touch cancels stale ballistic horizontal carry
+      this._clearHorizCarry();
 
       // 2. Virtual Joystick Widget (#joystick-zone) — single-pointer ownership prevents thumb stealing
       const joystickEl = target.closest('#joystick-zone');
@@ -2528,7 +2847,9 @@ export class InputController {
       this._activePointers.delete(e.pointerId);
 
       if (entry.type === 'button') {
-        if (entry.el) entry.el.classList.remove('active');
+        if (entry.el && !this._hasOtherPointerOnEl(entry, entry.el)) {
+          entry.el.classList.remove('active');
+        }
       } else if (entry.type === 'dpad') {
         if (entry.el) entry.el.classList.remove('active');
         if (entry.dpadEl) entry.dpadEl.classList.remove('active');
@@ -2565,27 +2886,14 @@ export class InputController {
       { passive: false }
     );
 
-    // Full Keyboard Fallback across all 4 control modes
-    const keyMap = {
-      ArrowLeft: 'left',
-      KeyA: 'left',
-      ArrowRight: 'right',
-      KeyD: 'right',
-      ArrowUp: 'up',
-      KeyW: 'up',
-      ArrowDown: 'down',
-      KeyS: 'down',
-      Space: 'jump',
-      KeyZ: 'jump',
-      KeyK: 'jump',
-      KeyX: 'fire',
-      Enter: 'fire',
-      KeyJ: 'fire',
-      KeyC: 'whip',
-      KeyL: 'whip',
-      KeyE: 'whip',
-      ShiftLeft: 'whip',
-      ShiftRight: 'whip',
+    // Full Keyboard Fallback across all 4 control modes (tracks physical key codes so releasing ArrowRight while holding KeyD never drops 'right'!)
+    const keyMap = this._keyMap;
+    const syncHeldActionsFromCodes = () => {
+      this._heldKeys.clear();
+      for (const code of this._heldKeyCodes) {
+        const act = keyMap[code];
+        if (act) this._heldKeys.add(act);
+      }
     };
 
     this._onKeyDown = (e) => {
@@ -2609,14 +2917,19 @@ export class InputController {
       if (action === 'left' || action === 'right') {
         this._clearHorizCarry();
       }
-      this._heldKeys.add(action);
+      this._heldKeyCodes.add(e.code);
+      syncHeldActionsFromCodes();
+      if (action in this.justPressed) {
+        this.justPressed[action] = true;
+      }
       this._recomputeState();
     };
 
     this._onKeyUp = (e) => {
       const action = keyMap[e.code];
       if (!action) return;
-      this._heldKeys.delete(action);
+      this._heldKeyCodes.delete(e.code);
+      syncHeldActionsFromCodes();
       this._recomputeState();
     };
 
@@ -2624,9 +2937,28 @@ export class InputController {
       this.resetState();
     };
 
+    this._onVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.hidden) {
+        this.resetState();
+      }
+    };
+
+    this._onGamepadConnected = () => {
+      this._gamepadConnected = true;
+    };
+
+    this._onGamepadDisconnected = () => {
+      if (this._pollGamepad()) {
+        this._recomputeState(true);
+      }
+    };
+
     window.addEventListener('keydown', this._onKeyDown);
     window.addEventListener('keyup', this._onKeyUp);
     window.addEventListener('blur', this._onWindowBlur);
+    document.addEventListener('visibilitychange', this._onVisibilityChange);
+    window.addEventListener('gamepadconnected', this._onGamepadConnected);
+    window.addEventListener('gamepaddisconnected', this._onGamepadDisconnected);
   }
 
   _tryPointerCapture(el, pointerId) {

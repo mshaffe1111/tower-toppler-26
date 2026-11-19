@@ -276,6 +276,396 @@ function createGlowDotTexture() {
   return tex;
 }
 
+function createTurntableHaloTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, 256, 256);
+
+  // Soft feathered radial Pelagian sea-glass contact glow (reaches 0.0 alpha well inside edges!)
+  const base = ctx.createRadialGradient(128, 128, 10, 128, 128, 118);
+  base.addColorStop(0.0, 'rgba(110, 245, 235, 0.22)');
+  base.addColorStop(0.55, 'rgba(56, 189, 248, 0.14)');
+  base.addColorStop(0.76, 'rgba(94, 252, 232, 0.36)');
+  base.addColorStop(0.84, 'rgba(253, 224, 71, 0.18)');
+  base.addColorStop(0.93, 'rgba(94, 252, 232, 0.0)');
+  base.addColorStop(1.0, 'rgba(94, 252, 232, 0.0)');
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, 256, 256);
+
+  // Delicate Pelagian compass filigree ticks & scalloped wave arc
+  ctx.save();
+  ctx.translate(128, 128);
+  ctx.strokeStyle = 'rgba(248, 210, 96, 0.62)';
+  ctx.lineWidth = 2.0;
+  ctx.beginPath();
+  ctx.arc(0, 0, 74, 0, TWO_PI);
+  ctx.stroke();
+
+  ctx.strokeStyle = 'rgba(125, 249, 240, 0.54)';
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.arc(0, 0, 96, 0, TWO_PI);
+  ctx.stroke();
+
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * TWO_PI;
+    const isMajor = i % 4 === 0;
+    ctx.strokeStyle = isMajor ? 'rgba(253, 224, 71, 0.78)' : 'rgba(125, 249, 240, 0.44)';
+    ctx.lineWidth = isMajor ? 2.6 : 1.5;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * (isMajor ? 66 : 74), Math.sin(a) * (isMajor ? 66 : 74));
+    ctx.lineTo(Math.cos(a) * (isMajor ? 102 : 92), Math.sin(a) * (isMajor ? 102 : 92));
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function createHydroSlashTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, 256, 128);
+
+  // Horizontal U = sweep along crescent (0 = leading blade head, 1 = feathered foam tail)
+  // Vertical V = across blade width (0 = outer cutting edge, 1 = inner mist edge)
+  for (let y = 0; y < 128; y++) {
+    const v = y / 127;
+    // Sharp bright leading ridge near v = 0.22, feathering cleanly to 0 at v = 0 and v = 1
+    const edgeIn = Math.min(1, v / 0.14);
+    const edgeOut = Math.pow(Math.max(0, 1 - Math.max(0, (v - 0.18) / 0.82)), 1.65);
+    const crossAlpha = edgeIn * edgeOut;
+    const ridgeBoost = Math.exp(-Math.pow((v - 0.20) / 0.11, 2));
+
+    const grad = ctx.createLinearGradient(0, y, 256, y);
+    const aHead = Math.min(1, crossAlpha * (0.85 + ridgeBoost * 0.45));
+    const aMid = Math.min(1, crossAlpha * (0.68 + ridgeBoost * 0.32));
+    const aTail = Math.min(1, crossAlpha * 0.22);
+
+    const r = Math.round(56 + ridgeBoost * 190);
+    const g = Math.round(196 + ridgeBoost * 59);
+    const b = 255;
+
+    grad.addColorStop(0.0, `rgba(${r}, ${g}, ${b}, 0.0)`);
+    grad.addColorStop(0.08, `rgba(${r}, ${g}, ${b}, ${aHead.toFixed(3)})`);
+    grad.addColorStop(0.36, `rgba(${Math.round(r * 0.88)}, ${g}, 250, ${aMid.toFixed(3)})`);
+    grad.addColorStop(0.76, `rgba(45, 212, 191, ${aTail.toFixed(3)})`);
+    grad.addColorStop(1.0, 'rgba(14, 165, 233, 0.0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, y, 256, 1);
+  }
+
+  // Flowing directional hydro-velocity ribbons & seafoam spray flecks
+  ctx.globalCompositeOperation = 'lighter';
+  for (let s = 0; s < 14; s++) {
+    const sy = 14 + (s * 7.2) % 86;
+    const sx = 10 + (s * 29) % 130;
+    const len = 58 + (s % 4) * 28;
+    const lg = ctx.createLinearGradient(sx, sy, sx + len, sy);
+    lg.addColorStop(0.0, 'rgba(235, 254, 255, 0.0)');
+    lg.addColorStop(0.28, 'rgba(225, 252, 255, 0.55)');
+    lg.addColorStop(0.75, 'rgba(94, 252, 232, 0.22)');
+    lg.addColorStop(1.0, 'rgba(56, 189, 248, 0.0)');
+    ctx.strokeStyle = lg;
+    ctx.lineWidth = s < 5 ? 3.2 : 1.8;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.quadraticCurveTo(sx + len * 0.5, sy + ((s % 2 === 0 ? 1 : -1) * 4.5), sx + len, sy + 2);
+    ctx.stroke();
+  }
+  // Delicate mist droplets in the trailing wake
+  for (let d = 0; d < 26; d++) {
+    const dx = 36 + ((d * 53) % 195);
+    const dy = 20 + ((d * 37) % 82);
+    const dr = 1.6 + (d % 3) * 1.1;
+    const dg = ctx.createRadialGradient(dx, dy, 0.2, dx, dy, dr * 2.2);
+    dg.addColorStop(0.0, 'rgba(240, 254, 255, 0.65)');
+    dg.addColorStop(1.0, 'rgba(94, 252, 232, 0.0)');
+    ctx.fillStyle = dg;
+    ctx.beginPath();
+    ctx.arc(dx, dy, dr * 2.2, 0, TWO_PI);
+    ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function createHydroWakeTexture() {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, 128, 128);
+
+  // Spiraling diagonal liquid slipstream ribbons fading cleanly to 0 at top & bottom ends
+  for (let i = 0; i < 6; i++) {
+    const x0 = (i / 6) * 128;
+    const grad = ctx.createLinearGradient(0, 0, 0, 128);
+    grad.addColorStop(0.0, 'rgba(235, 254, 255, 0.0)');
+    grad.addColorStop(0.22, 'rgba(220, 252, 255, 0.78)');
+    grad.addColorStop(0.62, 'rgba(94, 252, 232, 0.42)');
+    grad.addColorStop(1.0, 'rgba(56, 189, 248, 0.0)');
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = i % 2 === 0 ? 7.5 : 4.2;
+    ctx.beginPath();
+    ctx.moveTo(x0, 4);
+    ctx.bezierCurveTo(x0 + 26, 42, x0 + 44, 86, x0 + 64, 124);
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function createHydroBurstTexture() {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, 128, 128);
+
+  const core = ctx.createRadialGradient(64, 64, 2, 64, 64, 54);
+  core.addColorStop(0.0, 'rgba(255, 255, 255, 0.94)');
+  core.addColorStop(0.24, 'rgba(186, 248, 255, 0.68)');
+  core.addColorStop(0.54, 'rgba(56, 189, 248, 0.24)');
+  core.addColorStop(0.86, 'rgba(56, 189, 248, 0.0)');
+  core.addColorStop(1.0, 'rgba(56, 189, 248, 0.0)');
+  ctx.fillStyle = core;
+  ctx.fillRect(0, 0, 128, 128);
+
+  // Organic 7-petal water-splash crown rays + micro droplets
+  ctx.save();
+  ctx.translate(64, 64);
+  for (let i = 0; i < 7; i++) {
+    const ang = (i / 7) * TWO_PI + (i % 2) * 0.14;
+    const len = 36 + (i % 3) * 9;
+    ctx.save();
+    ctx.rotate(ang);
+    const rg = ctx.createLinearGradient(0, 0, len, 0);
+    rg.addColorStop(0.0, 'rgba(255, 255, 255, 0.85)');
+    rg.addColorStop(0.45, 'rgba(125, 245, 255, 0.42)');
+    rg.addColorStop(1.0, 'rgba(56, 189, 248, 0.0)');
+    ctx.fillStyle = rg;
+    ctx.beginPath();
+    ctx.moveTo(4, -4.5);
+    ctx.quadraticCurveTo(len * 0.52, -7.2, len, 0);
+    ctx.quadraticCurveTo(len * 0.52, 7.2, 4, 4.5);
+    ctx.closePath();
+    ctx.fill();
+
+    // Detached outer splash droplet
+    const dropR = len + 6;
+    const dg = ctx.createRadialGradient(dropR, 0, 0.5, dropR, 0, 4.5);
+    dg.addColorStop(0.0, 'rgba(235, 254, 255, 0.72)');
+    dg.addColorStop(1.0, 'rgba(94, 252, 232, 0.0)');
+    ctx.fillStyle = dg;
+    ctx.beginPath();
+    ctx.arc(dropR, 0, 4.5, 0, TWO_PI);
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function createBraidedTetherTexture() {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 256;
+  const ctx = c.getContext('2d');
+
+  // Luminous translucent deep-turquoise water core (ZERO dark/black stripes!)
+  const bgGrad = ctx.createLinearGradient(0, 0, 128, 0);
+  bgGrad.addColorStop(0.0, '#0284c7');
+  bgGrad.addColorStop(0.5, '#0ea5e9');
+  bgGrad.addColorStop(1.0, '#0284c7');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, 128, 256);
+
+  // Softly braided flowing turquoise water-tendrils (`#0284c7` -> `#38bdf8` -> `#a5f3fc`) + subtle gold thread!
+  ctx.lineCap = 'round';
+  for (let pass = -2; pass <= 4; pass++) {
+    const yOff = pass * 64;
+    // Primary aqua water-stream weave
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.72)';
+    ctx.lineWidth = 26;
+    ctx.beginPath();
+    ctx.moveTo(-16, yOff);
+    ctx.lineTo(144, yOff + 128);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(165, 243, 252, 0.84)';
+    ctx.lineWidth = 9;
+    ctx.beginPath();
+    ctx.moveTo(-16, yOff - 2);
+    ctx.lineTo(144, yOff + 126);
+    ctx.stroke();
+
+    // Counter-woven translucent sea-glass tendril
+    ctx.strokeStyle = 'rgba(34, 211, 238, 0.56)';
+    ctx.lineWidth = 20;
+    ctx.beginPath();
+    ctx.moveTo(144, yOff + 16);
+    ctx.lineTo(-16, yOff + 144);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(224, 250, 255, 0.65)';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(144, yOff + 14);
+    ctx.lineTo(-16, yOff + 142);
+    ctx.stroke();
+
+    // Delicate subtle golden filigree filament woven gently through the water-braid
+    ctx.strokeStyle = 'rgba(253, 224, 71, 0.36)';
+    ctx.lineWidth = 2.8;
+    ctx.beginPath();
+    ctx.moveTo(144, yOff + 22);
+    ctx.lineTo(-16, yOff + 150);
+    ctx.stroke();
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function createTunnelDepthTexture() {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, 128, 128);
+  const g = ctx.createRadialGradient(64, 64, 6, 64, 64, 58);
+  g.addColorStop(0.0, 'rgba(3, 15, 28, 0.92)');
+  g.addColorStop(0.45, 'rgba(6, 28, 48, 0.72)');
+  g.addColorStop(0.74, 'rgba(12, 54, 76, 0.28)');
+  g.addColorStop(0.92, 'rgba(14, 72, 92, 0.0)');
+  g.addColorStop(1.0, 'rgba(14, 72, 92, 0.0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function createTunnelSpiralTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, 256, 256);
+
+  ctx.save();
+  ctx.translate(128, 128);
+
+  // Subtle ambient recessed aqua ring glow (fades cleanly to 0 before outer edge)
+  const halo = ctx.createRadialGradient(0, 0, 16, 0, 0, 114);
+  halo.addColorStop(0.0, 'rgba(56, 189, 248, 0.34)');
+  halo.addColorStop(0.55, 'rgba(45, 212, 191, 0.22)');
+  halo.addColorStop(0.84, 'rgba(56, 189, 248, 0.0)');
+  halo.addColorStop(1.0, 'rgba(56, 189, 248, 0.0)');
+  ctx.fillStyle = halo;
+  ctx.fillRect(-128, -128, 256, 256);
+
+  // 4 graceful logarithmic Pelagian water-spiral arms + fine antique-gold current threads
+  const arms = 4;
+  for (let a = 0; a < arms; a++) {
+    const baseAng = (a / arms) * TWO_PI;
+    const isGoldAccent = a % 2 === 1;
+    for (let step = 0; step < 52; step++) {
+      const t0 = step / 52;
+      const t1 = (step + 1) / 52;
+      const r0 = 14 + t0 * 96;
+      const r1 = 14 + t1 * 96;
+      const ang0 = baseAng + t0 * Math.PI * 1.95;
+      const ang1 = baseAng + t1 * Math.PI * 1.95;
+      const fade = Math.sin(t0 * Math.PI) * (1 - t0 * 0.28);
+      ctx.strokeStyle = isGoldAccent
+        ? `rgba(245, 208, 92, ${(fade * 0.56).toFixed(3)})`
+        : `rgba(94, 248, 236, ${(fade * 0.78).toFixed(3)})`;
+      ctx.lineWidth = (1 - t0 * 0.55) * (isGoldAccent ? 4.2 : 6.8);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(ang0) * r0, Math.sin(ang0) * r0);
+      ctx.lineTo(Math.cos(ang1) * r1, Math.sin(ang1) * r1);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/**
+ * Builds a 3D sculpted, tapered crescent water-blade ribbon geometry with dynamic wave camber
+ * so Tail-Whip looks like a crisp feathered crescent hydro-slash instead of a flat torus/disc!
+ */
+function buildCrescentSlashGeo(innerR = 0.54, outerR = 1.18, arcAngle = Math.PI * 1.48, waveAmp = 0.09, segs = 36) {
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs; // 0 = leading blade head, 1 = feathered wake tip
+    const ang = -t * arcAngle;
+    // Broad sharp crescent head swelling quickly then tapering smoothly to a fine tip
+    const headEnvelope = Math.sin(Math.min(1, t / 0.16) * Math.PI * 0.5);
+    const tailTaper = Math.pow(Math.max(0, 1 - t), 0.72);
+    const widthScale = headEnvelope * (0.14 + 0.86 * tailTaper);
+
+    const midR = (innerR + outerR) * 0.5 + (1 - t) * 0.06;
+    const halfW = (outerR - innerR) * 0.5 * widthScale;
+    const rOut = midR + halfW;
+    const rIn = Math.max(0.28, midR - halfW);
+
+    // Sculpted 3D wave camber & slight cutting-edge bevel lift
+    const yBase = Math.sin(t * Math.PI * 1.15) * waveAmp;
+    const yOut = yBase + 0.048 * widthScale;
+    const yIn = yBase - 0.032 * widthScale;
+
+    const ca = Math.cos(ang);
+    const sa = Math.sin(ang);
+
+    positions.push(rOut * ca, yOut, rOut * sa);
+    uvs.push(t, 0.0);
+
+    positions.push(rIn * ca, yIn, rIn * sa);
+    uvs.push(t, 1.0);
+
+    if (i < segs) {
+      const base = i * 2;
+      indices.push(base, base + 1, base + 2);
+      indices.push(base + 1, base + 3, base + 2);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
 function createWatershedTabletTexture() {
   const canvas = document.createElement('canvas');
   canvas.width = 128;
@@ -592,24 +982,55 @@ export class GameRenderer {
   _initSharedAssets() {
     this.glowDotTex = createGlowDotTexture();
     this.relicTabletTex = createWatershedTabletTexture();
+    this.turntableHaloTex = createTurntableHaloTexture();
+    this.hydroSlashTex = createHydroSlashTexture();
+    this.hydroWakeTex = createHydroWakeTexture();
+    this.hydroBurstTex = createHydroBurstTexture();
+    this.braidedTetherTex = createBraidedTetherTexture();
+    this.tunnelDepthTex = createTunnelDepthTexture();
+    this.tunnelSpiralTex = createTunnelSpiralTexture();
 
     this.sharedParticleGeo = new THREE.BoxGeometry(0.14, 0.14, 0.14);
-    this.sharedPulseGeo = new THREE.IcosahedronGeometry(0.17, 1);
-    this.sharedPrismGeo = new THREE.OctahedronGeometry(0.20, 0);
-    this.sharedFxRingGeo = new THREE.TorusGeometry(0.25, 0.020, 6, 22);
-    this.sharedTrailDotGeo = new THREE.SphereGeometry(0.072, 8, 8);
 
+    // Sculpted streamlined glossy living-water droplet oriented along +X (ZERO opaque clay bulb!)
+    const boltProfile = [
+      new THREE.Vector2(0.0, -0.23),
+      new THREE.Vector2(0.036, -0.15),
+      new THREE.Vector2(0.078, -0.04),
+      new THREE.Vector2(0.094, 0.06),
+      new THREE.Vector2(0.064, 0.14),
+      new THREE.Vector2(0.0, 0.21),
+    ];
+    this.sharedPulseGeo = new THREE.LatheGeometry(boltProfile, 16);
+    this.sharedPulseGeo.rotateZ(-Math.PI * 0.5);
+    this.sharedPulseGeo.computeVertexNormals();
+
+    // Sleek faceted crystalline water-lance oriented along +X for prism FX styles
+    this.sharedPrismGeo = new THREE.OctahedronGeometry(0.115, 0);
+    this.sharedPrismGeo.scale(1.9, 0.82, 0.82);
+    this.sharedPrismGeo.computeVertexNormals();
+
+    // Delicate translucent spiraling hydro-wake slipstream trailing behind the water-crystal nose
+    this.sharedFxRingGeo = new THREE.CylinderGeometry(0.022, 0.118, 0.34, 16, 1, true);
+    this.sharedFxRingGeo.rotateZ(Math.PI * 0.5);
+    this.sharedFxRingGeo.translate(-0.13, 0, 0);
+
+    this.sharedTrailDotGeo = new THREE.SphereGeometry(0.056, 8, 8);
+
+    // Sculpted elongated teardrop water-droplet wakes (NOT stiff spherical beads!)
     const trailParts = [];
     const orbitParts = [];
     for (let t = 1; t <= 3; t++) {
       const sc = 1.0 - t * 0.22;
-      const tp = new THREE.SphereGeometry(0.07 * sc, 8, 8);
-      tp.translate(-t * 0.16, 0, -0.02 * t);
+      const tp = new THREE.OctahedronGeometry(0.048 * sc, 1);
+      tp.scale(1.85, 0.72, 0.72);
+      tp.translate(-0.12 - t * 0.14, (t === 2 ? 0.032 : -0.022), -0.015 * t);
       trailParts.push(tp);
 
       const ang = ((t - 1) * TWO_PI) / 3;
-      const op = new THREE.SphereGeometry(0.07 * sc, 8, 8);
-      op.translate(Math.cos(ang) * 0.26, Math.sin(ang) * 0.10, Math.sin(ang) * 0.22);
+      const op = new THREE.OctahedronGeometry(0.046 * sc, 1);
+      op.scale(1.45, 0.78, 0.78);
+      op.translate(Math.cos(ang) * 0.23, Math.sin(ang) * 0.09, Math.sin(ang) * 0.20);
       orbitParts.push(op);
     }
     this.sharedTrailClusterGeo = mergeRigidGeos(trailParts);
@@ -644,27 +1065,47 @@ export class GameRenderer {
     }
 
     this.sharedPulseMat = new THREE.MeshStandardMaterial({
-      color: '#e0f2fe',
-      emissive: '#38bdf8',
-      emissiveIntensity: 1.45,
-      roughness: 0.10,
-      metalness: 0.2,
+      color: '#0284c7',
+      emissive: '#22d3ee',
+      emissiveIntensity: 0.62,
+      roughness: 0.07,
+      metalness: 0.16,
+      transparent: true,
+      opacity: 0.84,
+      flatShading: false,
     });
     this.sharedFxRingMat = new THREE.MeshBasicMaterial({
-      color: '#5efce8',
+      map: this.hydroWakeTex,
+      color: '#38bdf8',
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.38,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
     });
-    this.sharedTrailDotMat = new THREE.MeshBasicMaterial({
-      color: '#bae6fd',
+    this.sharedTrailDotMat = new THREE.MeshStandardMaterial({
+      color: '#0ea5e9',
+      emissive: '#22d3ee',
+      emissiveIntensity: 0.58,
+      roughness: 0.08,
+      metalness: 0.14,
       transparent: true,
-      opacity: 0.62,
+      opacity: 0.72,
     });
     this.sharedHaloSpriteMat = new THREE.SpriteMaterial({
       map: this.glowDotTex,
+      color: '#38bdf8',
+      transparent: true,
+      opacity: 0.56,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    this.sharedBurstMat = new THREE.MeshBasicMaterial({
+      map: this.hydroBurstTex,
       color: '#7dd3fc',
       transparent: true,
-      opacity: 0.65,
+      opacity: 0.88,
+      side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
@@ -673,6 +1114,7 @@ export class GameRenderer {
       this.sharedFxRingMat,
       this.sharedTrailDotMat,
       this.sharedHaloSpriteMat,
+      this.sharedBurstMat,
     ]) {
       m.userData.shared = true;
     }
@@ -937,18 +1379,23 @@ export class GameRenderer {
     const fx = HYDRO_FX_STYLES[this.blasterFxId] || HYDRO_FX_STYLES.standard_cryo;
     if (fx.prismatic) {
       const hue = (time * 0.42) % 1;
-      this._prismColor.setHSL(hue, 0.92, 0.68);
-      this.sharedPulseMat.color.set('#ffffff');
+      this._prismColor.setHSL(hue, 0.88, 0.56);
+      this.sharedPulseMat.color.setHSL((hue + 0.04) % 1, 0.86, 0.38);
       this.sharedPulseMat.emissive.copy(this._prismColor);
       this.sharedHaloSpriteMat.color.copy(this._prismColor);
-      this.sharedTrailDotMat.color.setHSL((hue + 0.16) % 1, 0.9, 0.72);
-      this.sharedFxRingMat.color.setHSL((hue + 0.48) % 1, 0.95, 0.65);
+      if (this.sharedBurstMat) this.sharedBurstMat.color.copy(this._prismColor);
+      this.sharedTrailDotMat.color.setHSL((hue + 0.14) % 1, 0.84, 0.46);
+      this.sharedTrailDotMat.emissive?.setHSL((hue + 0.14) % 1, 0.88, 0.56);
+      this.sharedFxRingMat.color.setHSL((hue + 0.48) % 1, 0.90, 0.62);
     } else {
-      this.sharedPulseMat.color.set(fx.core);
+      // Translucent deep-aquamarine/jewel living water crystal (NEVER matte white!)
+      this.sharedPulseMat.color.set(fx.emissive).multiplyScalar(0.56);
       this.sharedPulseMat.emissive.set(fx.emissive);
-      this.sharedHaloSpriteMat.color.set(fx.muzzle);
-      this.sharedTrailDotMat.color.set(fx.trail);
-      if (fx.ring) this.sharedFxRingMat.color.set(fx.ring);
+      this.sharedHaloSpriteMat.color.set(fx.emissive);
+      if (this.sharedBurstMat) this.sharedBurstMat.color.set(fx.muzzle);
+      this.sharedTrailDotMat.color.set(fx.emissive).multiplyScalar(0.72);
+      this.sharedTrailDotMat.emissive?.set(fx.emissive);
+      if (fx.ring) this.sharedFxRingMat.color.set(fx.emissive);
     }
     return fx;
   }
@@ -1201,31 +1648,34 @@ export class GameRenderer {
   _buildTurntableHalo() {
     const g = new THREE.Group();
     g.visible = false;
+    // Feathered Pelagian Sanctuary Pedestal Aura sized cleanly (`r = 0.43m < 0.46m` ledge depth)
+    // so it sits 100% flush beneath Gateway's soles with ZERO ankle clipping and ZERO wall clipping!
     const outer = new THREE.Mesh(
-      new THREE.RingGeometry(0.62, 0.78, 36),
+      new THREE.PlaneGeometry(0.86, 0.86),
       new THREE.MeshBasicMaterial({
-        color: '#5efce8',
+        map: this.turntableHaloTex,
+        color: '#b8fdf5',
         transparent: true,
-        opacity: 0.68,
+        opacity: 0.76,
         side: THREE.DoubleSide,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       })
     );
     outer.rotation.x = -Math.PI * 0.5;
+
     const inner = new THREE.Mesh(
-      new THREE.RingGeometry(0.42, 0.48, 28),
-      new THREE.MeshBasicMaterial({
-        color: '#fde047',
-        transparent: true,
-        opacity: 0.52,
-        side: THREE.DoubleSide,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
+      new THREE.TorusGeometry(0.32, 0.008, 8, 36),
+      new THREE.MeshStandardMaterial({
+        color: '#d4a64a',
+        emissive: '#785012',
+        emissiveIntensity: 0.35,
+        metalness: 0.82,
+        roughness: 0.24,
       })
     );
-    inner.rotation.x = -Math.PI * 0.5;
-    inner.position.y = 0.01;
+    inner.rotation.x = Math.PI * 0.5;
+    inner.position.y = 0.003;
     g.add(outer, inner);
     g.userData = { outer, inner };
     return g;
@@ -1507,48 +1957,91 @@ export class GameRenderer {
   _buildTailWhipVfx() {
     const g = new THREE.Group();
     g.visible = false;
+    // Sculpted 3D tapered crescent hydro-blade + feathered spray wake (ZERO flat torus/disc!)
     const slashRing = new THREE.Mesh(
-      new THREE.TorusGeometry(0.96, 0.065, 8, 32, Math.PI * 1.45),
+      buildCrescentSlashGeo(0.56, 1.18, Math.PI * 1.48, 0.11, 36),
       new THREE.MeshBasicMaterial({
-        color: '#5efce8',
+        map: this.hydroSlashTex,
+        color: '#c4fbff',
         transparent: true,
-        opacity: 0.88,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      })
-    );
-    slashRing.rotation.x = Math.PI * 0.5;
-    const innerDisc = new THREE.Mesh(
-      new THREE.RingGeometry(0.52, 0.98, 28),
-      new THREE.MeshBasicMaterial({
-        color: '#38bdf8',
-        transparent: true,
-        opacity: 0.34,
+        opacity: 0.92,
         side: THREE.DoubleSide,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       })
     );
-    innerDisc.rotation.x = Math.PI * 0.5;
+    slashRing.rotation.z = 0.12;
+
+    const innerDisc = new THREE.Mesh(
+      buildCrescentSlashGeo(0.42, 0.92, Math.PI * 1.24, -0.07, 28),
+      new THREE.MeshBasicMaterial({
+        map: this.hydroSlashTex,
+        color: '#38bdf8',
+        transparent: true,
+        opacity: 0.54,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    innerDisc.position.y = -0.055;
+    innerDisc.rotation.y = -0.34;
+    innerDisc.rotation.z = -0.08;
+
     g.add(slashRing, innerDisc);
     g.userData = { slashRing, innerDisc };
     return g;
   }
 
   _buildGrappleBeam() {
-    const geo = new THREE.CylinderGeometry(0.032, 0.045, 1.0, 8);
-    geo.rotateX(Math.PI * 0.5);
-    geo.translate(0, 0, 0.5);
-    const mat = new THREE.MeshBasicMaterial({
-      color: '#5efce8',
+    // Braided Pelagian aqua-gold hydro-tether + subtle translucent sheath + antique-gold clasp!
+    const g = new THREE.Group();
+    g.visible = false;
+
+    const cordGeo = new THREE.CylinderGeometry(0.020, 0.024, 1.0, 10, 1, true);
+    cordGeo.rotateX(Math.PI * 0.5);
+    cordGeo.translate(0, 0, 0.5);
+    const cordMat = new THREE.MeshStandardMaterial({
+      map: this.braidedTetherTex,
+      color: '#ffffff',
+      emissive: '#38bdf8',
+      emissiveMap: this.braidedTetherTex,
+      emissiveIntensity: 0.56,
+      metalness: 0.18,
+      roughness: 0.12,
       transparent: true,
       opacity: 0.86,
+    });
+    const cord = new THREE.Mesh(cordGeo, cordMat);
+
+    const sheathGeo = new THREE.CylinderGeometry(0.036, 0.040, 1.0, 10, 1, true);
+    sheathGeo.rotateX(Math.PI * 0.5);
+    sheathGeo.translate(0, 0, 0.5);
+    const sheathMat = new THREE.MeshBasicMaterial({
+      map: this.hydroWakeTex,
+      color: '#5efce8',
+      transparent: true,
+      opacity: 0.28,
+      side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
-    const m = new THREE.Mesh(geo, mat);
-    m.visible = false;
-    return m;
+    const sheath = new THREE.Mesh(sheathGeo, sheathMat);
+
+    const endClasp = new THREE.Mesh(
+      new THREE.TorusGeometry(0.068, 0.017, 8, 18),
+      new THREE.MeshStandardMaterial({
+        color: '#e2ae46',
+        emissive: '#6e4508',
+        emissiveIntensity: 0.28,
+        metalness: 0.86,
+        roughness: 0.22,
+      })
+    );
+
+    g.add(cord, sheath, endClasp);
+    g.userData = { cord, sheath, endClasp };
+    return g;
   }
 
   _buildPurificationEruption() {
@@ -1676,14 +2169,20 @@ export class GameRenderer {
   }
 
   _buildMuzzleFlashGroup() {
+    // Organic feathered radial water-splash starburst + tiny crystalline droplet spark (ZERO blocky cube!)
     const g = new THREE.Group();
     g.visible = false;
+    const burstGeo = new THREE.PlaneGeometry(0.46, 0.46);
+    const burstA = new THREE.Mesh(burstGeo, this.sharedBurstMat);
+    const burstB = new THREE.Mesh(burstGeo, this.sharedBurstMat);
+    burstB.rotation.y = Math.PI * 0.5;
+    burstB.rotation.z = 0.45;
     const core = new THREE.Mesh(this.sharedPrismGeo, this.sharedPulseMat);
-    core.scale.setScalar(0.82);
+    core.scale.setScalar(0.32);
     const flare = new THREE.Sprite(this.sharedHaloSpriteMat);
-    flare.scale.set(0.95, 0.95, 1);
-    g.add(core, flare);
-    g.userData = { core, flare };
+    flare.scale.set(0.58, 0.58, 1);
+    g.add(burstA, burstB, core, flare);
+    g.userData = { burstA, burstB, core, flare };
     return g;
   }
 
@@ -1693,7 +2192,7 @@ export class GameRenderer {
     const prism = new THREE.Mesh(this.sharedPrismGeo, this.sharedPulseMat);
     const ring = new THREE.Mesh(this.sharedFxRingGeo, this.sharedFxRingMat);
     const halo = new THREE.Sprite(this.sharedHaloSpriteMat);
-    halo.scale.set(0.65, 0.65, 1);
+    halo.scale.set(0.46, 0.46, 1);
 
     const trailCluster = new THREE.Mesh(
       isOrbital ? this.sharedOrbitalTrailGeo : this.sharedTrailClusterGeo,
@@ -1737,21 +2236,51 @@ export class GameRenderer {
   }
 
   _buildTunnelVortex() {
+    // Subtle recessed Pelagian water-spiral portal (feathered depth well + swirling turquoise-gold currents!)
     const g = new THREE.Group();
     g.visible = false;
-    const outerRing = new THREE.Mesh(
-      new THREE.TorusGeometry(0.52, 0.048, 8, 26),
-      new THREE.MeshBasicMaterial({ color: '#5efce8', transparent: true, opacity: 0.85 })
-    );
-    const innerRing = new THREE.Mesh(
-      new THREE.TorusGeometry(0.34, 0.035, 8, 22),
-      new THREE.MeshBasicMaterial({ color: '#fde047', transparent: true, opacity: 0.82 })
-    );
+
     const core = new THREE.Mesh(
-      new THREE.CircleGeometry(0.28, 22),
-      new THREE.MeshBasicMaterial({ color: '#bae6fd', transparent: true, opacity: 0.48, side: THREE.DoubleSide })
+      new THREE.PlaneGeometry(1.04, 1.04),
+      new THREE.MeshBasicMaterial({
+        map: this.tunnelDepthTex,
+        transparent: true,
+        opacity: 0.92,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      })
     );
-    g.add(outerRing, innerRing, core);
+    core.position.z = -0.02;
+
+    const outerRing = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.08, 1.08),
+      new THREE.MeshBasicMaterial({
+        map: this.tunnelSpiralTex,
+        color: '#a8f8ff',
+        transparent: true,
+        opacity: 0.78,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    outerRing.position.z = 0.01;
+
+    const innerRing = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.72, 0.72),
+      new THREE.MeshBasicMaterial({
+        map: this.tunnelSpiralTex,
+        color: '#fde68a',
+        transparent: true,
+        opacity: 0.52,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    innerRing.position.z = 0.03;
+
+    g.add(core, outerRing, innerRing);
     g.userData = { outerRing, innerRing, core };
     return g;
   }
@@ -1859,54 +2388,75 @@ export class GameRenderer {
 
   _buildCollectibleMesh(type) {
     const g = new THREE.Group();
+    const getBronzeMat = () =>
+      this._getCollectibleMat(
+        'collectible:antiqueBronze',
+        () =>
+          new THREE.MeshStandardMaterial({
+            color: '#c8923c',
+            emissive: '#3e2508',
+            emissiveIntensity: 0.22,
+            metalness: 0.86,
+            roughness: 0.24,
+          })
+      );
+
     if (type === 'waterSeed' || type === 'starCore') {
+      // Sculpted Faceted Imperial Amber-Topaz Pelagian Star-Crystal + Forged Antique-Bronze Astrolabe Gimbal
+      const seedGeo = new THREE.OctahedronGeometry(0.22, 0);
+      seedGeo.scale(0.86, 1.48, 0.86);
+      seedGeo.computeVertexNormals();
       const seed = new THREE.Mesh(
-        new THREE.OctahedronGeometry(0.30, 1),
+        seedGeo,
         this._getCollectibleMat(
           'waterSeed:core',
           () =>
             new THREE.MeshStandardMaterial({
-              color: '#fde047',
-              emissive: '#f59e0b',
-              emissiveIntensity: 1.25,
-              roughness: 0.08,
-              metalness: 0.35,
+              color: '#d97706',
+              emissive: '#b45309',
+              emissiveIntensity: 0.44,
+              roughness: 0.12,
+              metalness: 0.42,
+              flatShading: true,
             })
         )
       );
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(0.40, 0.028, 8, 26),
-        this._getCollectibleMat('waterSeed:ring', () => new THREE.MeshBasicMaterial({ color: '#5efce8' }))
-      );
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.31, 0.022, 8, 24), getBronzeMat());
       g.add(seed, ring);
       g.userData.holoRing = ring;
     } else if (type === 'relic') {
-      const tabletMat = this._getCollectibleMat(
+      // Carved Antique-Bronze Framed Pelagian Stele Medallion (double-sided inlaid runes, ZERO blank dark slab!)
+      const casingMat = this._getCollectibleMat(
         'relic:tablet',
-        () => new THREE.MeshStandardMaterial({ color: '#1e3a4c', roughness: 0.42, metalness: 0.32 })
+        () =>
+          new THREE.MeshStandardMaterial({
+            color: '#9c6e2f',
+            emissive: '#2e1b06',
+            emissiveIntensity: 0.18,
+            roughness: 0.28,
+            metalness: 0.82,
+          })
       );
       const glyphMat = this._getCollectibleMat(
         'relic:glyph',
         () =>
           new THREE.MeshStandardMaterial({
             map: this.relicTabletTex,
-            emissive: '#ffffff',
+            emissive: '#5efce8',
             emissiveMap: this.relicTabletTex,
-            emissiveIntensity: 1.2,
-            roughness: 0.18,
+            emissiveIntensity: 0.55,
+            roughness: 0.22,
+            metalness: 0.24,
           })
       );
-      const slab = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.50, 0.075), tabletMat);
-      const face = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.42), glyphMat);
-      face.position.z = 0.042;
-      const holoRing = new THREE.Mesh(
-        new THREE.TorusGeometry(0.34, 0.018, 8, 28),
-        this._getCollectibleMat(
-          'relic:ring',
-          () => new THREE.MeshBasicMaterial({ color: '#5efce8', transparent: true, opacity: 0.78 })
-        )
-      );
-      g.add(slab, face, holoRing);
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.44, 0.07), casingMat);
+      const faceFront = new THREE.Mesh(new THREE.PlaneGeometry(0.26, 0.38), glyphMat);
+      faceFront.position.z = 0.038;
+      const faceBack = new THREE.Mesh(new THREE.PlaneGeometry(0.26, 0.38), glyphMat);
+      faceBack.position.z = -0.038;
+      faceBack.rotation.y = Math.PI;
+      const holoRing = new THREE.Mesh(new THREE.TorusGeometry(0.29, 0.018, 8, 24), getBronzeMat());
+      g.add(slab, faceFront, faceBack, holoRing);
       g.userData = { holoRing };
     } else if (
       type === 'critterPod' ||
@@ -1915,38 +2465,33 @@ export class GameRenderer {
       type === 'wildlife' ||
       type === 'rescuePod'
     ) {
-      // Wave 3 Rescuable Earth Water-Critter Pod (Translucent Sea-Glass Bubble + Bronze Collar + 3D Otter/Turtle!)
+      // Rescuable Earth Water-Critter Pod (Translucent Sea-Glass Bubble + Forged Bronze Collar + Sculpted Critter Core)
       const bubble = new THREE.Mesh(
-        new THREE.SphereGeometry(0.36, 16, 12),
+        new THREE.SphereGeometry(0.34, 16, 12),
         this._getCollectibleMat(
           'critterPod:bubble',
           () =>
             new THREE.MeshStandardMaterial({
-              color: '#a5f3fc',
-              emissive: '#22d3ee',
-              emissiveIntensity: 0.55,
+              color: '#38bdf8',
+              emissive: '#0284c7',
+              emissiveIntensity: 0.34,
               roughness: 0.06,
+              metalness: 0.18,
               transparent: true,
-              opacity: 0.48,
+              opacity: 0.44,
             })
         )
       );
-      const collar = new THREE.Mesh(
-        new THREE.TorusGeometry(0.38, 0.032, 8, 24),
-        this._getCollectibleMat(
-          'critterPod:collar',
-          () => new THREE.MeshStandardMaterial({ color: '#e5a945', metalness: 0.86, roughness: 0.22 })
-        )
-      );
+      const collar = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.026, 8, 24), getBronzeMat());
       const critterCore = new THREE.Mesh(
-        new THREE.CapsuleGeometry(0.11, 0.22, 6, 10),
+        new THREE.CapsuleGeometry(0.10, 0.20, 6, 10),
         this._getCollectibleMat(
           'critterPod:body',
           () =>
             new THREE.MeshStandardMaterial({
-              color: '#2dd4bf',
-              emissive: '#0d9488',
-              emissiveIntensity: 0.45,
+              color: '#14b8a6',
+              emissive: '#0f766e',
+              emissiveIntensity: 0.36,
               roughness: 0.28,
             })
         )
@@ -1955,45 +2500,32 @@ export class GameRenderer {
       g.add(bubble, collar, critterCore);
       g.userData = { holoRing: collar };
     } else if (type === 'curio' || type === 'salvage_part' || type === 'compass_key') {
+      // Faceted Deep-Emerald Pelagian Compass Jewel + Forged Antique-Bronze Meridian Gimbal
+      const orbGeo = new THREE.OctahedronGeometry(0.19, 0);
+      orbGeo.scale(0.92, 1.32, 0.92);
+      orbGeo.computeVertexNormals();
       const orb = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(0.21, 1),
+        orbGeo,
         this._getCollectibleMat(
           'curio:orb',
           () =>
             new THREE.MeshStandardMaterial({
-              color: '#5efce8',
-              emissive: '#06b6d4',
-              emissiveIntensity: 1.25,
-              roughness: 0.08,
+              color: '#0d9488',
+              emissive: '#14b8a6',
+              emissiveIntensity: 0.46,
+              roughness: 0.10,
+              metalness: 0.38,
+              flatShading: true,
             })
         )
       );
-      const gimbal = new THREE.Mesh(
-        new THREE.TorusGeometry(0.28, 0.022, 8, 24),
-        this._getCollectibleMat(
-          'curio:gimbal',
-          () => new THREE.MeshStandardMaterial({ color: '#eab308', metalness: 0.88, roughness: 0.2 })
-        )
-      );
+      const gimbal = new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.020, 8, 24), getBronzeMat());
       g.add(orb, gimbal);
       g.userData = { holoRing: gimbal };
     } else {
       // Sculpted Faceted Pelagian Sapphire Relic Crystal + Carved Antique-Bronze Equator Bezel Ring
       const drop = new THREE.Mesh(this.sharedWaterDropGeo, this.sharedWaterDropMat);
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(0.195, 0.022, 6, 18),
-        this._getCollectibleMat(
-          'waterDrop:ring',
-          () =>
-            new THREE.MeshStandardMaterial({
-              color: '#b8863b',
-              emissive: '#3b2408',
-              emissiveIntensity: 0.18,
-              metalness: 0.84,
-              roughness: 0.26,
-            })
-        )
-      );
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.195, 0.020, 6, 18), getBronzeMat());
       ring.rotation.x = Math.PI * 0.5;
       g.add(drop, ring);
       g.userData = { holoRing: ring };
@@ -2247,25 +2779,30 @@ export class GameRenderer {
     const shake = writeShakeOffset(state.shake, time, this._shakeVec);
 
     if (isBestiary) {
-      // Interactive 3D Bestiary Turntable Camera (extra zoom-out headroom for towering `siphon_warden` boss!)
+      // Interactive 3D Bestiary Turntable Camera (extra zoom-out headroom for wide enemies on 412x915 Portrait & towering boss!)
       const pFloorY = (hero?.floor || 2) * fh;
       const bFamily = String(bestiarySpec.family || bestiarySpec.type || 'snap_crab').toLowerCase();
       const isBoss = bFamily.includes('warden') || bFamily.includes('boss');
       const bZoom = clamp(Number(bestiarySpec.zoom) || 1.0, 0.55, 1.85);
       const bLand = Math.max(0, Math.min(1, (aspect - 1.05) / 1.0));
-      const baseDist = (isBoss ? 4.45 : 3.15) + bLand * 0.45;
+      const baseDist = (isBoss ? 4.45 : 3.15) + bLand * 0.45 + (isPortrait ? 1.15 : 0);
       const camDist = baseDist / bZoom;
-      const focusY = pFloorY + (isBoss ? 0.92 : 0.58);
-      this.towerCam.position.set(0, focusY + 0.18, TOWER_RADIUS + LEDGE_STAND_OFFSET + camDist);
+      const focusY = pFloorY + (isBoss ? (isPortrait ? 0.52 : 0.92) : (isPortrait ? 0.16 : 0.58));
+      const camElev = isPortrait ? 0.34 : 0.18;
+      this.towerCam.position.set(0, focusY + camElev, TOWER_RADIUS + LEDGE_STAND_OFFSET + camDist);
       this.towerCam.lookAt(0, focusY, TOWER_RADIUS + LEDGE_STAND_OFFSET);
     } else if (isWardrobe) {
       const pFloorY = (hero.floor || 0) * fh;
       const wardLand = Math.max(0, Math.min(1, (aspect - 1.05) / 1.0));
       const wZoom = clamp(Number(state.wardrobeZoom ?? this.wardrobePreview.zoom) || 1.0, 0.6, 1.85);
-      const wardY = pFloorY + 0.66 + wardLand * 0.08;
-      const wardZ = TOWER_RADIUS + LEDGE_STAND_OFFSET + (2.85 + wardLand * 0.50) / wZoom;
+      // On Portrait (`aspect < 1`), pull camera back & lower lookAt so 100% of Gateway head-to-toe +
+      // turntable halo sits cleanly in upper-center `16%–64%` Y (completely clear above bottom UI cards!)
+      const portDist = isPortrait ? 3.92 : 2.85 + wardLand * 0.50;
+      const wardLookY = pFloorY + (isPortrait ? 0.22 : 0.62);
+      const wardY = pFloorY + (isPortrait ? 0.58 : 0.78 + wardLand * 0.08);
+      const wardZ = TOWER_RADIUS + LEDGE_STAND_OFFSET + portDist / wZoom;
       this.towerCam.position.set(0, wardY, wardZ);
-      this.towerCam.lookAt(0, pFloorY + 0.62, TOWER_RADIUS + LEDGE_STAND_OFFSET);
+      this.towerCam.lookAt(0, wardLookY, TOWER_RADIUS + LEDGE_STAND_OFFSET);
     } else if (isTitleShowcase) {
       // Close-Up Heroic Title Screen Camera (`~9.6m` desktop / `~11.0m` portrait) framing Gateway squarely in center!
       const pFloorY = (hero?.floor || 0) * fh;
@@ -2504,10 +3041,14 @@ export class GameRenderer {
       const inTunnel = Boolean(hero.hidden && hero.tunnelTimer > 0 && !topple.active);
       this.tunnelVortexGroup.visible = inTunnel;
       if (inTunnel) {
-        this.tunnelVortexGroup.position.set(px, py + 0.62, pz);
+        // Tuck subtly recessed against spire stonework (NOT floating out in mid-air!)
+        const vr = TOWER_RADIUS + 0.16;
+        this.tunnelVortexGroup.position.set(vr * Math.sin(pTheta), py + 0.64, vr * Math.cos(pTheta));
         this.tunnelVortexGroup.rotation.y = pTheta;
-        this.tunnelVortexGroup.userData.outerRing.rotation.z = time * 8;
-        this.tunnelVortexGroup.userData.innerRing.rotation.z = -time * 11;
+        const vPulse = 0.94 + Math.sin(time * 5.2) * 0.06;
+        this.tunnelVortexGroup.scale.setScalar(vPulse);
+        this.tunnelVortexGroup.userData.outerRing.rotation.z = time * 2.8;
+        this.tunnelVortexGroup.userData.innerRing.rotation.z = -time * 4.4;
       }
 
       const heroVisible = !hero.hidden && !topple.active && !isBestiary;
@@ -2515,13 +3056,15 @@ export class GameRenderer {
       this.landingRingGroup.visible = heroVisible && !isWardrobe && !isCutscene && !isTitleShowcase;
       this.shieldBubble.visible = Boolean(heroVisible && hero.shield);
 
-      // Show illuminated Pelagian Turntable Halo underneath Gateway (Wardrobe) or 3D Enemy (Bestiary)
+      // Show illuminated Pelagian Turntable Halo FLUSH right on top of the stone deck underneath Gateway / Bestiary!
       if (this.turntableHalo) {
         this.turntableHalo.visible = isWardrobe || isBestiary;
         if (this.turntableHalo.visible) {
-          this.turntableHalo.position.set(0, (hero?.floor || 2) * fh + 0.04, TOWER_RADIUS + LEDGE_STAND_OFFSET);
-          this.turntableHalo.userData.outer.rotation.z = time * 0.65;
-          this.turntableHalo.userData.inner.rotation.z = -time * 1.1;
+          const haloFloor = isBestiary ? (hero?.floor || 2) : (hero?.floor ?? 0);
+          const haloY = haloFloor * fh + 0.014;
+          this.turntableHalo.position.set(0, haloY, TOWER_RADIUS + LEDGE_STAND_OFFSET + 0.015);
+          this.turntableHalo.userData.outer.rotation.z = time * 0.45;
+          this.turntableHalo.userData.inner.rotation.z = -time * 0.72;
         }
       }
 
@@ -2598,43 +3141,62 @@ export class GameRenderer {
           victory: state.mode === 'victory' || (isCutscene && (csKind === 'epilogue' || csKind.includes('purif'))),
         });
 
-        // 360° Crystalline Water-Blade Tail-Whip Slash Arc!
+        // 360° Feathered Crescent Hydro-Blade Tail-Whip Slash Arc!
         if (whipT > 0.01 && !isWardrobe) {
+          const facingDir = hero.facing || 1;
           this.tailWhipVfxGroup.visible = true;
           this.tailWhipVfxGroup.position.set(px, py + 0.56, pz);
-          this.tailWhipVfxGroup.rotation.y = pTheta + time * 24 * (hero.facing || 1);
+          this.tailWhipVfxGroup.rotation.set(0.08, pTheta + time * 18 * facingDir, -0.10 * facingDir);
           const whipAlpha = Math.min(1, whipT * 3.2);
-          this.tailWhipVfxGroup.scale.setScalar(1.0 + (1 - whipAlpha) * 0.35);
-          this.tailWhipVfxGroup.userData.slashRing.material.opacity = whipAlpha * 0.9;
-          this.tailWhipVfxGroup.userData.innerDisc.material.opacity = whipAlpha * 0.36;
+          const sweepScale = 0.96 + (1 - whipAlpha) * 0.28;
+          this.tailWhipVfxGroup.scale.set(sweepScale * facingDir, sweepScale, sweepScale);
+          this.tailWhipVfxGroup.userData.slashRing.material.opacity = whipAlpha * 0.94;
+          this.tailWhipVfxGroup.userData.innerDisc.material.opacity = whipAlpha * 0.56;
         }
 
-        // Aerial Tail-Grapple Swing Tether!
+        // Aerial Braided Pelagian Aqua-Gold Tail-Grapple Swing Tether!
         if (hero.grappleTarget && hero.grappleTarget.col != null && hero.grappleTarget.floor != null) {
           const gTheta = wrapAngle((hero.grappleTarget.col + 0.5 - effCamCol) * COL_ANGLE);
           const gr = TOWER_RADIUS + LEDGE_STAND_OFFSET;
-          this._grappleStart.set(px, py + 0.65, pz);
+          const tailSide = -(hero.facing || 1) * 0.04;
+          const tTheta = pTheta + tailSide;
+          const tr = pr - 0.05;
+          this._grappleStart.set(tr * Math.sin(tTheta), py + 0.50, tr * Math.cos(tTheta));
           this._grappleEnd.set(gr * Math.sin(gTheta), hero.grappleTarget.floor * fh, gr * Math.cos(gTheta));
           const dist = this._grappleStart.distanceTo(this._grappleEnd);
           if (dist > 0.1) {
             this.grappleBeam.visible = true;
             this.grappleBeam.position.copy(this._grappleStart);
             this.grappleBeam.lookAt(this._grappleEnd);
-            this.grappleBeam.scale.set(1, 1, dist);
+            this.grappleBeam.scale.set(1, 1, 1);
+            const gUd = this.grappleBeam.userData;
+            if (gUd?.cord) gUd.cord.scale.set(1, 1, dist);
+            if (gUd?.sheath) gUd.sheath.scale.set(1, 1, dist);
+            if (gUd?.endClasp) {
+              gUd.endClasp.position.set(0, 0, dist);
+              gUd.endClasp.rotation.z = time * 4.2;
+            }
+            if (this.braidedTetherTex) {
+              this.braidedTetherTex.repeat.set(1, Math.max(2, dist * 2.6));
+              this.braidedTetherTex.offset.y = -time * 1.8;
+            }
           }
         }
 
         if (mf > 0.01 && !isWardrobe) {
           const facingDir = hero.facing || 1;
-          const mTheta = pTheta + facingDir * 0.11;
+          const mTheta = pTheta + facingDir * 0.105;
           const mr = TOWER_RADIUS + standOff + 0.10;
-          const flashScale = Math.min(1.45, 0.6 + mf * 4.5);
+          const flashScale = Math.min(1.25, 0.58 + mf * 3.8);
           this.muzzleFlashGroup.visible = true;
           this.muzzleFlashGroup.position.set(mr * Math.sin(mTheta), py + 0.64, mr * Math.cos(mTheta));
           this.muzzleFlashGroup.scale.setScalar(flashScale);
-          this.muzzleFlashGroup.rotation.set(time * 14, mTheta, time * 18);
+          this.muzzleFlashGroup.rotation.set(0, mTheta, time * 10 * facingDir);
+          if (this.muzzleFlashGroup.userData?.core) {
+            this.muzzleFlashGroup.userData.core.rotation.set(time * 16, time * 12, 0);
+          }
           this.heroLight.color.set(activeFx.prismatic ? this._prismColor : activeFx.muzzle);
-          this.heroLight.intensity = 1.25;
+          this.heroLight.intensity = 1.15;
         } else {
           this.heroLight.color.set('#5efce8');
           this.heroLight.intensity = isTitleShowcase ? 0.58 : 0.38;
@@ -2650,14 +3212,14 @@ export class GameRenderer {
             py + 0.68 + Math.sin(time * 3.2) * 0.03,
             TOWER_RADIUS + standOff + 0.12
           );
-          this.wardrobeFxOrb.scale.setScalar(0.42);
+          this.wardrobeFxOrb.scale.setScalar(0.56);
           wUd.icosa.visible = activeFx.shape !== 'prism';
           wUd.prism.visible = activeFx.shape === 'prism';
           wUd.ring.visible = Boolean(activeFx.ring);
-          wUd.icosa.rotation.set(time * 3.5, time * 4.8, 0);
-          wUd.prism.rotation.set(time * 3.2, time * 5.0, 0);
-          wUd.ring.rotation.set(Math.PI * 0.3 + time * 3.0, time * 4.2, 0);
-          wUd.trailCluster.rotation.set(Math.sin(time * 2.4) * 0.18, time * 4.2, 0);
+          wUd.icosa.rotation.set(time * 4.5, 0.35 + Math.sin(time * 1.8) * 0.22, 0);
+          wUd.prism.rotation.set(time * 4.8, 0.35 + Math.sin(time * 1.8) * 0.22, 0);
+          wUd.ring.rotation.set(time * 7.5, 0, 0);
+          wUd.trailCluster.rotation.set(Math.sin(time * 2.4) * 0.18, time * 3.2, 0);
         }
 
         if (this.shieldBubble.visible) {
@@ -2825,16 +3387,20 @@ export class GameRenderer {
       m.rotation.y = st;
 
       const ud = m.userData;
+      const sbDir = sb.dir || (sb.vx >= 0 ? 1 : -1);
       ud.icosa.visible = activeFx.shape !== 'prism';
       ud.prism.visible = activeFx.shape === 'prism';
       ud.ring.visible = Boolean(activeFx.ring);
-      ud.icosa.rotation.set(time * 6, time * 8, 0);
-      ud.prism.rotation.set(time * 6, time * 10, 0);
-      ud.ring.rotation.set(Math.PI * 0.32 + time * 6, time * 8, 0);
+      // Orient sculpted water-bolt spearhead & spiraling slipstream along travel direction!
+      ud.icosa.scale.x = sbDir;
+      ud.prism.scale.x = sbDir;
+      ud.ring.scale.x = sbDir;
+      ud.icosa.rotation.set(time * 12 * sbDir, 0, 0);
+      ud.prism.rotation.set(time * 14 * sbDir, 0, 0);
+      ud.ring.rotation.set(time * 16 * sbDir, 0, 0);
 
-      const sbDir = sb.dir || (sb.vx >= 0 ? 1 : -1);
       ud.trailCluster.scale.x = sbDir;
-      ud.trailCluster.position.y = Math.sin(time * 22 + i) * 0.025;
+      ud.trailCluster.position.y = Math.sin(time * 22 + i) * 0.022;
     }
 
     // Update Living Biome Water (`src/water.js`) + Rising Floodgate / Surge Waterline
@@ -3097,8 +3663,9 @@ export class GameRenderer {
     this.debrisPool?.mat?.dispose();
     this.shieldBubble?.geometry?.dispose();
     this.shieldBubble?.material?.dispose();
-    this.grappleBeam?.geometry?.dispose();
-    this.grappleBeam?.material?.dispose();
+    this._disposeCollectibleMesh(this.grappleBeam, true);
+    this._disposeCollectibleMesh(this.turntableHalo, true);
+    this._disposeCollectibleMesh(this.muzzleFlashGroup, true);
     this._disposeCollectibleMesh(this.tailWhipVfxGroup, true);
     this._disposeCollectibleMesh(this.purificationEruptionGroup, true);
     this._disposeCollectibleMesh(this.landingRingGroup, true);
@@ -3116,9 +3683,17 @@ export class GameRenderer {
     this.sharedFxRingMat?.dispose();
     this.sharedTrailDotMat?.dispose();
     this.sharedHaloSpriteMat?.dispose();
+    this.sharedBurstMat?.dispose();
     this.sharedWaterDropMat?.dispose();
     this.glowDotTex?.dispose();
     this.relicTabletTex?.dispose();
+    this.turntableHaloTex?.dispose();
+    this.hydroSlashTex?.dispose();
+    this.hydroWakeTex?.dispose();
+    this.hydroBurstTex?.dispose();
+    this.braidedTetherTex?.dispose();
+    this.tunnelDepthTex?.dispose();
+    this.tunnelSpiralTex?.dispose();
     this.keyLight?.shadow?.map?.dispose?.();
     if (this._biomeEnvMaps) {
       for (const tex of this._biomeEnvMaps.values()) {
