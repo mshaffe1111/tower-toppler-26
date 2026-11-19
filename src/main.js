@@ -612,11 +612,31 @@ const STORY_CUTSCENES = {
 };
 
 const FALLBACK_BIO_MUTATIONS = [
-  { id: 'triple_whip', name: 'Cyclone Tail-Whip', description: 'Widens Gateway’s 360° lizard Tail-Whip arc by 45%, flipping distant Snap-Crabs and spinning Pipe-Valves instantly.' },
-  { id: 'hydro_jet', name: 'Hydro-Jet Frill Boost', description: 'Flaring Gateway’s aquatic neck-frills mid-air triggers an upward water-jet double-leap across wide chasm gaps.' },
-  { id: 'gecko_sprint', name: 'Gecko Scale Sprint', description: '+22% faster stair running and effortless vertical scampering up wet crystal and mossy spire walls.' },
-  { id: 'bubble_aegis', name: 'Sea-Glass Bubble Aegis', description: 'Generates a regenerative bioluminescent water-shield that absorbs one enemy or hazard impact per spire.' },
-  { id: 'tidal_magnet', name: 'Harmonic Pearl Current', description: 'Draws nearby Water Pearls, Harmonic Seeds, and air bubbles smoothly toward Gateway.' },
+  {
+    id: 'triple_whip',
+    name: 'Triple Tail-Whip',
+    description: 'Gateway’s 360° Lizard Tail-Whip unleashes 3 cascading hydro-rings, expanding reach to 1.75 columns and reflecting mortar bubbles at 2x speed.',
+  },
+  {
+    id: 'hydro_double_jump',
+    name: 'Hydro-Jet Double Jump',
+    description: 'Vents pressurized water from Gateway’s harness nozzles to trigger a crisp mid-air second jump, resetting on every landing, wall-strip, or grapple ring.',
+  },
+  {
+    id: 'gecko_sprint',
+    name: 'Gecko Sprint',
+    description: 'Micro-setae toe pads grant full dry-stone grip on Alpine ice, +22% sprint speed up real staircases, and rapid Gecko Wall-Scamper climbs.',
+  },
+  {
+    id: 'bubble_aegis',
+    name: 'Bubble Aegis',
+    description: 'Generates a regenerative Pelagian sea-glass water shield that absorbs one enemy or hazard hit per spire without losing a heart.',
+  },
+  {
+    id: 'tidal_magnet',
+    name: 'Tidal Magnet',
+    description: 'Draws nearby Water Pearls, salvage parts, compass keys, and curios smoothly toward Gateway across wide spire chasms.',
+  },
 ];
 
 const FALLBACK_HYDRO_FX = [
@@ -803,12 +823,33 @@ function resolveActionPromptSpec(rawText, hudMode, hudInteractKind = '') {
   const upper = raw.toUpperCase();
   const explicitKind = String(hudInteractKind || '').toLowerCase();
 
-  // 0. Locked Crown / Sealed Fortress Gate / Guarded Sluice MUST take top priority so touch controls are NEVER misrouted!
+  // 0a. Already-completed Sanctum / Vault badge ('✓ SANCTUM SOLVED' / '✓ CORE VAULT UNLOCKED') is informational only!
+  if (
+    hudMode === 'tower' &&
+    (raw.includes('✓') || upper.includes('SANCTUM SOLVED') || upper.includes('VAULT UNLOCKED'))
+  ) {
+    const cleanDone = upper
+      .replace(/->/g, '•')
+      .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}▲▼◀▶✓◎]/gu, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return {
+      html: `${PROMPT_ICONS.rune}<span>✓ ${cleanDone}</span>`,
+      interactKind: '',
+      triggerAction: null,
+      subtype: 'done',
+    };
+  }
+
+  // 0b. Locked Crown / Sealed Fortress Gate / Guarded Sluice MUST take top priority so touch controls are NEVER misrouted!
   if (
     hudMode === 'tower' &&
     (upper.includes('SEALED') ||
-      upper.includes('LOCKED') ||
+      (upper.includes('LOCKED') && !upper.includes('UNLOCKED')) ||
       upper.includes('TO UNLOCK') ||
+      upper.includes('NEED PARTS') ||
+      upper.includes('NEED KEYS') ||
+      upper.includes('CRAFT DYNAMO AT WORKBENCH') ||
       upper.includes('BREAK ALL') ||
       explicitKind === 'locked' ||
       explicitKind === 'sealed')
@@ -826,7 +867,7 @@ function resolveActionPromptSpec(rawText, hudMode, hudInteractKind = '') {
     };
   }
 
-  // 1. Tower Door / Summit Crown Valve / Core Dive / Sanctum / Vault / Conduit MUST take priority BEFORE 'VALVE'!
+  // 1. Tower Door / Summit Crown Valve / Core Dive / Sanctum / Vault / Tunnel MUST take priority BEFORE 'VALVE'!
   if (hudMode === 'tower') {
     if (
       upper.includes('CROWN') ||
@@ -834,7 +875,8 @@ function resolveActionPromptSpec(rawText, hudMode, hudInteractKind = '') {
       upper.includes('DIVE') ||
       upper.includes('PURIFY') ||
       upper.includes('DESCEND') ||
-      upper.includes('SUMMIT')
+      upper.includes('SUMMIT') ||
+      upper.includes('SHRINE')
     ) {
       return {
         html: `${PROMPT_ICONS.up}<span>TAP / SWIPE ↑ • DIVE CORE!</span>`,
@@ -859,7 +901,13 @@ function resolveActionPromptSpec(rawText, hudMode, hudInteractKind = '') {
         subtype: 'door',
       };
     }
-    if (upper.includes('DOOR') || upper.includes('PORTAL') || upper.includes('PASSAGE') || upper.includes('CONDUIT')) {
+    if (
+      upper.includes('DOOR') ||
+      upper.includes('PORTAL') ||
+      upper.includes('PASSAGE') ||
+      upper.includes('CONDUIT') ||
+      upper.includes('TUNNEL')
+    ) {
       return {
         html: `${PROMPT_ICONS.up}<span>TAP OR SWIPE ↑ • ENTER DOOR</span>`,
         interactKind: 'door',
@@ -879,8 +927,8 @@ function resolveActionPromptSpec(rawText, hudMode, hudInteractKind = '') {
     };
   }
 
-  // 3. Passive unpowered-lift hint ('SPIN PIPE-VALVE TO POWER LIFT') when !hudInteractKind is informational only!
-  if (upper.includes('TO POWER') && !explicitKind) {
+  // 3. Passive unpowered-lift hint ('SPIN PIPE-VALVES TO PRESSURIZE LIFT') when !hudInteractKind is informational only!
+  if ((upper.includes('TO POWER') || upper.includes('TO PRESSURIZE')) && !explicitKind) {
     const cleanHint = upper
       .replace(/->/g, '•')
       .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}▲▼◀▶✓◎]/gu, '')
@@ -968,6 +1016,11 @@ function renderMissionStatusMarkup(rawStatus) {
   return `${icon}<span>${clean}</span>`;
 }
 
+let lastTs = performance.now();
+function resetFrameClock() {
+  lastTs = performance.now();
+}
+
 // ================= BIO-MUTATION DRAFT MODAL =================
 let pendingMutationPickCb = null;
 
@@ -983,11 +1036,13 @@ function openMutationDraftModal(choices, onPickCallback) {
   input.resetState?.();
   input.setInteractContext?.(false, '');
 
-  const activeCount = Array.isArray(game?.gateway?.mutations)
-    ? game.gateway.mutations.length
-    : Array.isArray(game?.mutations)
-      ? game.mutations.length
-      : 0;
+  const activeCount = Array.isArray(game?.activeMutations)
+    ? game.activeMutations.length
+    : Array.isArray(game?.gateway?.mutations)
+      ? game.gateway.mutations.length
+      : Array.isArray(game?.mutations)
+        ? game.mutations.length
+        : 0;
   if (mutationActiveCountEl) {
     mutationActiveCountEl.textContent = `${activeCount} ACTIVE`;
   }
@@ -1016,10 +1071,11 @@ function openMutationDraftModal(choices, onPickCallback) {
         if (typeof cb === 'function') {
           cb(mut.id, mut);
         } else {
-          game.selectMutation?.(mut.id);
+          (game.selectBioMutation || game.selectMutation)?.call(game, mut.id);
         }
         showBanner('BIO-MUTATION EVOLVED', String(mut.name || mut.title || '').toUpperCase());
         syncTitleShowcaseState();
+        resetFrameClock();
       });
       mutationCardsGridEl.appendChild(card);
     });
@@ -1028,6 +1084,7 @@ function openMutationDraftModal(choices, onPickCallback) {
   overlayMutation?.classList.remove('hidden');
   pushNavGuard();
   syncTitleShowcaseState();
+  resetFrameClock();
 }
 
 window.openMutationDraftModal = openMutationDraftModal;
@@ -1282,6 +1339,10 @@ const game = new GameEngineClass(
         if (isPurist) {
           const mult = hud.comboMult || hud.multiplier || 1;
           modeLbl = mult > 1 ? `PURIST • ${mult}X` : 'PURIST ARCADE';
+        } else if (rType.includes('gauntlet') || rType.includes('warden')) {
+          modeLbl = 'WARDEN GAUNTLET';
+        } else if (rType.includes('master')) {
+          modeLbl = 'MASTER NG+';
         } else if (rType.includes('flood')) {
           modeLbl = 'FLASH-FLOOD';
         } else if (rType.includes('sanctum')) {
@@ -1354,6 +1415,8 @@ const game = new GameEngineClass(
         else if (m === 'aqueduct_sanctum' || m === 'puzzle') badge = 'SANCTUM';
         else if (m === 'vault') badge = 'VAULT';
         else if (rType.includes('daily')) badge = 'DAILY';
+        else if (rType.includes('gauntlet') || rType.includes('warden')) badge = `W${hud.towerId || 1}`;
+        else if (rType.includes('master')) badge = `M${hud.towerId || 1}`;
         if (badge !== hudCache.towerBadge) {
           hudCache.towerBadge = badge;
           towerBadgeEl.textContent = badge;
@@ -1632,21 +1695,27 @@ const game = new GameEngineClass(
             ? 'DAILY TIDE PURIFIED'
             : rType.includes('gauntlet') || rType.includes('warden')
               ? 'WARDEN GAUNTLET CONQUERED'
-              : rType.includes('purist')
-                ? 'PURIST GAUNTLET CONQUERED'
-                : rType.includes('expedition')
-                  ? 'WATERSHED EXPEDITION COMPLETE'
-                  : rType.includes('minigame')
-                    ? 'CHALLENGE HARMONIZED'
-                    : 'EARTH HYDROSPHERE RESTORED';
+              : rType.includes('master')
+                ? 'MASTER WATERSHED HEALED'
+                : rType.includes('purist')
+                  ? 'PURIST GAUNTLET CONQUERED'
+                  : rType.includes('expedition')
+                    ? 'WATERSHED EXPEDITION COMPLETE'
+                    : rType.includes('sanctum')
+                      ? 'SANCTUM TRIALS HARMONIZED'
+                      : rType.includes('minigame')
+                        ? 'CHALLENGE HARMONIZED'
+                        : 'EARTH HYDROSPHERE RESTORED';
         } else {
           goBadge.textContent = rType.includes('flood')
             ? 'OVERTAKEN BY THE SURGE'
             : rType.includes('gauntlet') || rType.includes('warden')
               ? 'GAUNTLET RUN ENDED'
-              : rType.includes('purist')
-                ? 'PURIST RUN ENDED'
-                : 'DESCENT INTERRUPTED';
+              : rType.includes('master')
+                ? 'MASTER WATERSHED ENDED'
+                : rType.includes('purist')
+                  ? 'PURIST RUN ENDED'
+                  : 'DESCENT INTERRUPTED';
         }
       }
 
@@ -1699,12 +1768,27 @@ const game = new GameEngineClass(
   progression
 );
 
+if (typeof game.loadTower === 'function') {
+  const _origLoadTower = game.loadTower.bind(game);
+  game.loadTower = (...args) => {
+    const res = _origLoadTower(...args);
+    resetFrameClock();
+    return res;
+  };
+}
+
 game.applySettings?.(progression.getSettings?.() || {});
 
 // ================= PROGRESSION SAFE HELPERS =================
+let _cachedCampaignTowers = null;
 function getTowersSafe() {
-  const list = createTowers?.('reboot');
-  return Array.isArray(list) && list.length > 0 ? list : [];
+  if (!_cachedCampaignTowers) {
+    const list = createTowers?.('reboot');
+    if (Array.isArray(list) && list.length > 0) {
+      _cachedCampaignTowers = list;
+    }
+  }
+  return _cachedCampaignTowers || [];
 }
 
 function getTowerStarsSafe(towerId) {
@@ -2147,6 +2231,7 @@ function finishCutscene() {
     overlayTitle?.classList.remove('hidden');
   }
   syncTitleShowcaseState();
+  resetFrameClock();
 }
 
 function advanceCutsceneStep() {
@@ -2207,7 +2292,7 @@ function buildTitlePreviewTower(rawTower) {
     .map((l) => ({ ...l }));
   for (const c of [18, 19, 0]) {
     if (!baseLedges.some((l) => l.floor === 2 && l.col === c && !l.isStair)) {
-      baseLedges.push({ col: c, floor: 2, type: 'solid' });
+      baseLedges.push({ col: c, floor: 2, type: 'solid', stairDir: 0 });
     }
   }
   return {
@@ -2297,6 +2382,13 @@ function refreshTitleMeta() {
   }
   if (btnModeGauntlet) {
     btnModeGauntlet.classList.remove('hidden');
+  }
+  if (metaModeMasterEl) {
+    const mHi = progression.getModeHighScore?.('master_watershed') ?? 0;
+    metaModeMasterEl.textContent = mHi > 0 ? `BEST: ${mHi.toLocaleString()}` : 'NG+ • 2X PEARL YIELD';
+  }
+  if (btnModeMaster) {
+    btnModeMaster.classList.remove('hidden');
   }
 
   const unlockedSkinsCount = SKIN_CATALOG.filter((sk) => progression.isSkinUnlocked?.(sk.id)).length;
@@ -3118,6 +3210,10 @@ function launchGameMode(modeId = 'campaign', extraOpts = {}) {
       game.startCampaign?.({ startTowerIdx: towerIdx, zenMode: mode === 'purist' ? false : zenMode, purist: mode === 'purist' });
     }
     syncTitleShowcaseState();
+    try {
+      game.render?.();
+    } catch (_) {}
+    resetFrameClock();
   };
 
   if (mode === 'campaign' && towerIdx === 0 && !hasSeenCutscene('prologue')) {
@@ -3128,6 +3224,7 @@ function launchGameMode(modeId = 'campaign', extraOpts = {}) {
       previewMode: true,
       onComplete: startActual,
     });
+    resetFrameClock();
     return;
   }
 
@@ -3139,6 +3236,10 @@ function launchMiniGameRun(miniType = 'core_descent') {
   lastLaunch = { mode: 'minigame', towerIdx: 0, zenMode: false, miniGame: miniType };
   game.startMiniGame?.(miniType, true);
   syncTitleShowcaseState();
+  try {
+    game.render?.();
+  } catch (_) {}
+  resetFrameClock();
 }
 
 function relaunchLastMode() {
@@ -3694,7 +3795,16 @@ btnTitleMusic?.addEventListener('click', handleToggleMusic);
 btnTitleVoice?.addEventListener('click', handleToggleVoice);
 
 function triggerPauseToggle() {
-  if (cutsceneState.active || game.mode === 'title' || game.mode === 'gameover' || game.mode === 'victory') return;
+  if (
+    cutsceneState.active ||
+    game.mode === 'title' ||
+    game.mode === 'gameover' ||
+    game.mode === 'victory' ||
+    game.mode === 'mutation_draft' ||
+    (overlayMutation && !overlayMutation.classList.contains('hidden'))
+  ) {
+    return;
+  }
   sound.unlock?.();
   const paused = game.togglePause?.();
   input.resetState?.();
@@ -3710,12 +3820,14 @@ function triggerPauseToggle() {
       else if (pf === 'rapids_surf' || pf === 'skimmer') pauseTowerName.textContent = 'Whitewater Rapids Tail-Surf';
       else if (pf === 'frill_glide' || pf === 'glide') pauseTowerName.textContent = 'Canyon Updraft Frill-Glide';
       else if (pf === 'aqueduct_sanctum' || pf === 'puzzle') pauseTowerName.textContent = 'Aqueduct Sanctum';
+      else if (pf === 'vault') pauseTowerName.textContent = 'Harmonic Core Vault';
       else if (game.tower) pauseTowerName.textContent = `Spire ${game.tower.id}: ${game.tower.name}`;
     }
     overlayPause?.classList.remove('hidden');
     pushNavGuard();
   } else {
     overlayPause?.classList.add('hidden');
+    resetFrameClock();
   }
 }
 
@@ -3739,6 +3851,17 @@ btnCutsceneSkip?.addEventListener('click', () => {
 
 window.addEventListener('keydown', (e) => {
   if (e.repeat) return;
+  if (overlayMutation && !overlayMutation.classList.contains('hidden')) {
+    const idx = e.code === 'Digit1' ? 0 : e.code === 'Digit2' ? 1 : e.code === 'Digit3' ? 2 : -1;
+    if (idx >= 0) {
+      const cards = mutationCardsGridEl?.querySelectorAll('.mutation-card');
+      if (cards && cards[idx]) {
+        e.preventDefault();
+        cards[idx].click();
+      }
+    }
+    return;
+  }
   if (cutsceneState.active) {
     if (e.code === 'Escape') {
       e.preventDefault();
@@ -3834,7 +3957,7 @@ handleResize();
 prewarmStartupAssets();
 
 // ================= MAIN 60FPS ANIMATION LOOP =================
-let lastTs = performance.now();
+resetFrameClock();
 
 function loop(ts) {
   requestAnimationFrame(loop);
