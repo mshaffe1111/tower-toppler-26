@@ -95,6 +95,18 @@
         <polygon points="12,2.4 20.3,7.2 20.3,16.8 12,21.6 3.7,16.8 3.7,7.2" fill="currentColor" fill-opacity="0.16" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
         <path fill="currentColor" d="M10 8.5l6.2 3.5L10 15.5v-7Z"/>
       </symbol>
+      <!-- Crown Seal Locked Padlock -->
+      <symbol id="ico-lock-closed" viewBox="0 0 24 24">
+        <rect x="4.5" y="10.5" width="15" height="10.5" rx="2.4" fill="currentColor" fill-opacity="0.22" stroke="currentColor" stroke-width="1.9"/>
+        <path d="M8 10.5V7.6a4 4 0 0 1 8 0v2.9" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+        <circle cx="12" cy="15.6" r="1.6" fill="currentColor"/>
+      </symbol>
+      <!-- Crown Seal Broken / Unsealed Radiant Lock -->
+      <symbol id="ico-lock-open" viewBox="0 0 24 24">
+        <rect x="4.5" y="10.5" width="15" height="10.5" rx="2.4" fill="currentColor" fill-opacity="0.32" stroke="currentColor" stroke-width="1.9"/>
+        <path d="M8 10.5V7.4a4 4 0 0 1 7.6-1.7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+        <path d="M9.4 15.8l1.9 1.9 3.6-3.8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </symbol>
     </defs>
   </svg>
 
@@ -102,6 +114,8 @@
     <!-- Full-Bleed 100vw x 100dvh Sunlit 3D Stage -->
     <main id="stage-wrap">
       <canvas id="game-canvas"></canvas>
+      <!-- Startup Asset Pre-Warm Veil (dismisses smoothly once WebGL + Story Art are decoded) -->
+      <div id="stage-transition-veil" class="stage-transition-veil" aria-hidden="true"></div>
 
       <!-- Right-Edge Vertical Spire Altitude & Rising Surge Meter -->
       <div id="altitude-meter" class="altitude-meter hidden" aria-label="Spire Altitude">
@@ -188,7 +202,29 @@
             </svg>
           </div>
         </div>
+        <!-- 3-Seal Hydro-Lock Progression Pill (Spire Fortress Puzzles) -->
+        <div id="crown-seals-pill" class="crown-seals-pill hidden" role="status" aria-label="Crown Seals Progress">
+          <span id="crown-seals-count" class="crown-seals-count">CROWN SEALS • 0/3</span>
+          <div class="crown-seals-row">
+            <span id="crown-seal-0" class="crown-seal-chip is-next" data-seal-idx="0">
+              <svg class="ico-svg ico-seal-lock" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-lock-closed"/></svg>
+              <svg class="ico-svg ico-seal-open" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-lock-open"/></svg>
+              <span id="crown-seal-lbl-0" class="crown-seal-lbl">1: Pipe Pressure</span>
+            </span>
+            <span id="crown-seal-1" class="crown-seal-chip" data-seal-idx="1">
+              <svg class="ico-svg ico-seal-lock" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-lock-closed"/></svg>
+              <svg class="ico-svg ico-seal-open" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-lock-open"/></svg>
+              <span id="crown-seal-lbl-1" class="crown-seal-lbl">2: Inner Sanctum</span>
+            </span>
+            <span id="crown-seal-2" class="crown-seal-chip" data-seal-idx="2">
+              <svg class="ico-svg ico-seal-lock" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-lock-closed"/></svg>
+              <svg class="ico-svg ico-seal-open" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-lock-open"/></svg>
+              <span id="crown-seal-lbl-2" class="crown-seal-lbl">3: Upper Sluice</span>
+            </span>
+          </div>
+        </div>
         <div id="mission-status-pill" class="mission-status-pill hidden"></div>
+        <div id="critter-sonar-pill" class="critter-sonar-pill hidden" aria-live="polite"></div>
       </div>
 
       <div class="hud-right">
@@ -340,9 +376,10 @@
               <span id="zen-pill-label">RELAXED FLOW • OFF</span>
               <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-curio"/></svg>
             </button>
-            <div class="ctrl-pills-grid">
+            <div class="ctrl-pills-grid ctrl-pills-3">
               <button id="btn-title-music" class="ctrl-pill-btn" type="button" aria-label="Toggle Music"></button>
               <button id="btn-title-sound" class="ctrl-pill-btn" type="button" aria-label="Toggle Sound"></button>
+              <button id="btn-title-voice" class="ctrl-pill-btn active" type="button" aria-label="Toggle Cutscene Voice Cadences">VOICE ON</button>
             </div>
 
             <span class="popover-section-lbl">3-CHANNEL STUDIO AUDIO MIXER</span>
@@ -535,14 +572,25 @@
             </div>
           </button>
 
-          <!-- Bonus Boss Challenge: Siphon Warden Gauntlet -->
-          <button id="btn-mode-gauntlet" class="mode-hub-card mode-hub-card-wide" data-mode-pick="warden_gauntlet" type="button">
+          <!-- Bonus Challenge 7: Siphon Warden Boss Gauntlet -->
+          <button id="btn-mode-gauntlet" class="mode-hub-card" data-mode-pick="warden_gauntlet" type="button">
             <div data-mode-art="warden_gauntlet" class="mode-hub-art" aria-hidden="true"></div>
             <div class="mode-hub-body">
-              <span class="mode-hub-badge badge-coral">5-ACT BOSS RUSH • ESCALATING PHASES</span>
-              <span class="mode-hub-title">SIPHON WARDEN BOSS GAUNTLET</span>
-              <span class="mode-hub-desc">Confront all 5 Sovereign Siphon Wardens back-to-back across escalating shield, tentacle, and whirlpool phases!</span>
-              <span id="meta-mode-gauntlet" class="mode-hub-meta">APEX CHALLENGE</span>
+              <span class="mode-hub-badge badge-coral">5-ACT BOSS RUSH • 3-PHASE WARDENS</span>
+              <span class="mode-hub-title">7. WARDEN GAUNTLET</span>
+              <span class="mode-hub-desc">Confront all 5 Sovereign Siphon Wardens back-to-back across escalating shield, beam, and whirlpool phases!</span>
+              <span id="meta-mode-gauntlet" class="mode-hub-meta">5 SOVEREIGN WARDENS</span>
+            </div>
+          </button>
+
+          <!-- Bonus Challenge 8: Master Watershed (New Game+) -->
+          <button id="btn-mode-master" class="mode-hub-card" data-mode-pick="master_watershed" type="button">
+            <div data-mode-art="master_watershed" class="mode-hub-art" aria-hidden="true"></div>
+            <div class="mode-hub-body">
+              <span class="mode-hub-badge badge-gold">NEW GAME+ • 2X SCORE &amp; PEARLS</span>
+              <span class="mode-hub-title">8. MASTER WATERSHED</span>
+              <span class="mode-hub-desc">Apex 10-spire campaign modifier: swifter foes, fiercer winds, tighter clocks, and double Water Pearl &amp; Score rewards!</span>
+              <span id="meta-mode-master" class="mode-hub-meta">APEX NG+ MODIFIER</span>
             </div>
           </button>
         </div>
@@ -568,13 +616,26 @@
       </div>
     </div>
 
-    <!-- 4. Live 3D Gateway Sanctuary Spotlight (#overlay-wardrobe, Top 64% Clear) -->
+    <!-- 4. Interactive 3D Pelagian Sanctuary Spotlight, Animation Studio, Bio-Skill Tree, 3D Bestiary & Critters (#overlay-wardrobe) -->
     <div id="overlay-wardrobe" class="overlay overlay-drawer hidden">
+      <!-- Interactive Upper 3D Turntable Stage (Drag 360° Orbit + Zoom + Animation / Pose Previewer!) -->
+      <div id="sanctuary-turntable-stage" class="sanctuary-turntable-stage" role="region" aria-label="Interactive 360 Degree 3D Turntable">
+        <div class="sanctuary-cam-hud">
+          <span id="sanctuary-turntable-hint" class="turntable-hint-pill">DRAG TO SPIN 360°</span>
+          <div class="turntable-zoom-row">
+            <button id="btn-sanctuary-zoom-out" class="turntable-cam-btn" type="button" aria-label="Zoom Out">−</button>
+            <button id="btn-sanctuary-reset-cam" class="turntable-cam-btn" type="button" aria-label="Reset 3D Camera">360°</button>
+            <button id="btn-sanctuary-zoom-in" class="turntable-cam-btn" type="button" aria-label="Zoom In">+</button>
+          </div>
+        </div>
+        <div id="sanctuary-anim-bar" class="sanctuary-anim-bar" role="group" aria-label="3D Animation Previewer"></div>
+      </div>
+
       <div class="modal-card modal-wide modal-drawer armory-dock">
         <div class="modal-header-row modal-header-compact">
           <div>
             <div class="retro-pill">LIVE 3D SKELETAL SPOTLIGHT</div>
-            <h2 class="modal-heading">GATEWAY SANCTUARY</h2>
+            <h2 class="modal-heading">PELAGIAN SANCTUARY</h2>
           </div>
           <div class="header-right-cluster">
             <span class="gears-pill gears-pill-lg">
@@ -587,19 +648,37 @@
           </div>
         </div>
 
-        <div class="sub-tabs-row" role="tablist" aria-label="Sanctuary Category">
+        <div class="sub-tabs-row sub-tabs-5" role="tablist" aria-label="Sanctuary Category">
           <button class="sub-tab-btn active" data-wardrobe-tab="skins" type="button" role="tab" aria-selected="true">
             <svg class="ico-svg" viewBox="0 0 24 26"><use href="#ico-gateway"/></svg>
-            <span id="wardrobe-skins-tab-lbl">GATEWAY SKINS (8)</span>
+            <span id="wardrobe-skins-tab-lbl">SKINS (8)</span>
           </button>
           <button class="sub-tab-btn" data-wardrobe-tab="blaster" type="button" role="tab" aria-selected="false">
             <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-blaster"/></svg>
-            <span id="wardrobe-blaster-tab-lbl">HYDRO-PULSE FX (6)</span>
+            <span id="wardrobe-blaster-tab-lbl">PULSE (6)</span>
+          </button>
+          <button class="sub-tab-btn" data-wardrobe-tab="skills" type="button" role="tab" aria-selected="false">
+            <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-craft"/></svg>
+            <span id="wardrobe-skills-tab-lbl">SKILLS (12)</span>
+          </button>
+          <button class="sub-tab-btn" data-wardrobe-tab="bestiary" type="button" role="tab" aria-selected="false">
+            <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-modes"/></svg>
+            <span id="wardrobe-bestiary-tab-lbl">BESTIARY (7)</span>
+          </button>
+          <button class="sub-tab-btn" data-wardrobe-tab="critters" type="button" role="tab" aria-selected="false">
+            <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-curio"/></svg>
+            <span id="wardrobe-critters-tab-lbl">CRITTERS (0/30)</span>
           </button>
         </div>
 
         <div id="wardrobe-grid" class="wardrobe-grid armory-carousel"></div>
         <div id="blaster-fx-grid" class="wardrobe-grid armory-carousel hidden"></div>
+        <div id="skill-tree-grid" class="skill-tree-grid hidden"></div>
+        <div id="bestiary-panel" class="bestiary-panel hidden">
+          <div id="bestiary-detail-strip" class="bestiary-detail-strip"></div>
+          <div id="bestiary-grid" class="wardrobe-grid armory-carousel"></div>
+        </div>
+        <div id="critters-grid" class="critters-grid hidden"></div>
       </div>
     </div>
 

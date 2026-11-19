@@ -421,6 +421,176 @@ export const BIO_MUTATIONS = [
 ];
 
 // ============================================================================
+// 12-NODE PERMANENT PELAGIAN BIO-SKILL TREE (SPEND HYDRO-GEARS; DISABLED IN PURIST)
+// ============================================================================
+
+export const SKILL_TREE = [
+  // Branch 1 — AGILITY (4 Nodes)
+  {
+    id: 'streamlined_scales',
+    branch: 'agility',
+    branchLabel: 'PELAGIAN AGILITY',
+    name: 'Streamlined Scales',
+    icon: '»',
+    accentColor: '#2dd4bf',
+    maxRank: 3,
+    costs: [20, 45, 80],
+    perRankPct: [6, 12, 18],
+    shortDesc: '+6% / +12% / +18% walk, staircase & floodgate swim speed.',
+    description: 'Hydrodynamic dorsal scales slice through canyon air and spire currents for effortless momentum.'
+  },
+  {
+    id: 'geyser_spring',
+    branch: 'agility',
+    branchLabel: 'PELAGIAN AGILITY',
+    name: 'Geyser Spring',
+    icon: '⇑',
+    accentColor: '#34d399',
+    maxRank: 3,
+    costs: [25, 55, 90],
+    perRankPct: [8, 16, 24],
+    shortDesc: '+8% / +16% / +24% Snap-Crab springboard & Hydro-Geyser launch height.',
+    description: 'Elastic digitigrade tendons amplify every bounce off flipped Dredgers and spire vents.'
+  },
+  {
+    id: 'thermal_updraft',
+    branch: 'agility',
+    branchLabel: 'PELAGIAN AGILITY',
+    name: 'Thermal Updraft',
+    icon: '∆',
+    accentColor: '#38bdf8',
+    maxRank: 3,
+    costs: [25, 55, 90],
+    perRankPct: [15, 28, 40],
+    shortDesc: 'Hold Jump while descending to cut fall sink speed by 15% / 28% / 40%.',
+    description: 'Wider iridescent neck-frills catch rising spire mist for graceful chasm crossings.'
+  },
+  {
+    id: 'gecko_grip',
+    branch: 'agility',
+    branchLabel: 'PELAGIAN AGILITY',
+    name: 'Gecko Micro-Setae',
+    icon: '▲',
+    accentColor: '#5efce8',
+    maxRank: 3,
+    costs: [20, 45, 80],
+    perRankPct: [12, 24, 36],
+    shortDesc: '+12% / +24% / +36% Wall-Scamper climb speed & superior Alpine ice traction.',
+    description: 'Microscopic Pelagian toe-pads grip wet quartz veins and glacier terraces alike.'
+  },
+
+  // Branch 2 — HYDRO-COMBAT (4 Nodes)
+  {
+    id: 'wide_tail_vortex',
+    branch: 'combat',
+    branchLabel: 'HYDRO-COMBAT',
+    name: 'Wide Tail-Vortex',
+    icon: '◎',
+    accentColor: '#f472b6',
+    maxRank: 3,
+    costs: [25, 55, 95],
+    perRankPct: [12, 24, 36],
+    shortDesc: '+12% / +24% / +36% Tail-Whip radius & snappier spin recovery.',
+    description: 'Expands Gateway’s 360° water-blade vortex to flip distant crabs and spin valves with ease.'
+  },
+  {
+    id: 'charged_hydro_lance',
+    branch: 'combat',
+    branchLabel: 'HYDRO-COMBAT',
+    name: 'Charged Hydro-Lance',
+    icon: '◇',
+    accentColor: '#c084fc',
+    maxRank: 3,
+    costs: [30, 65, 110],
+    perRankPct: [15, 25, 35],
+    shortDesc: 'Piercing Hydro-Pulses (+1/+2/+2 pierce) flying +15% / +25% / +35% faster.',
+    description: 'Focuses Gateway’s wrist Hydro-Caster into a crystalline lance that cleaves right through bubbled drones.'
+  },
+  {
+    id: 'tidal_aegis',
+    branch: 'combat',
+    branchLabel: 'HYDRO-COMBAT',
+    name: 'Tidal Aegis',
+    icon: '◈',
+    accentColor: '#67e8f9',
+    maxRank: 3,
+    costs: [35, 75, 120],
+    perRankPct: [26, 20, 15],
+    shortDesc: 'Auto-reforms a Sea-Glass Shield every 26s / 20s / 15s (starts shielded at Rank 2+).',
+    description: 'Condenses ambient waterfall mist into a self-renewing refractive water barrier.'
+  },
+  {
+    id: 'warden_breaker',
+    branch: 'combat',
+    branchLabel: 'HYDRO-COMBAT',
+    name: 'Warden Breaker',
+    icon: '⚡',
+    accentColor: '#fb7185',
+    maxRank: 3,
+    costs: [30, 65, 105],
+    perRankPct: [20, 40, 60],
+    shortDesc: '+20% / +40% / +60% longer Siphon Warden Core Exposure window & stagger score.',
+    description: 'Harmonic resonance disrupts Siphon Warden armor plates, keeping their cores vulnerable longer.'
+  },
+
+  // Branch 3 — EXPLORER SENSE (4 Nodes)
+  {
+    id: 'critter_sonar',
+    branch: 'explorer',
+    branchLabel: 'EXPLORER SENSE',
+    name: 'Critter Sonar',
+    icon: '◉',
+    accentColor: '#5efce8',
+    maxRank: 3,
+    costs: [20, 40, 75],
+    perRankPct: [3.5, 5.0, 6.5],
+    shortDesc: 'HUD pulse & sonar chime when within 3.5 / 5.0 / 6.5 floors of a hidden Critter Pod.',
+    description: 'Naiad tunes Gateway’s aquatic frills to detect distressed Earth Water-Critters in secret alcoves.'
+  },
+  {
+    id: 'chrono_reservoir',
+    branch: 'explorer',
+    branchLabel: 'EXPLORER SENSE',
+    name: 'Chrono-Reservoir',
+    icon: '◷',
+    accentColor: '#fde047',
+    maxRank: 3,
+    costs: [25, 55, 90],
+    perRankPct: [1.5, 3.0, 4.5],
+    shortDesc: 'Collecting Hydro-Gears, Seeds & Critters adds +1.5s / +3.0s / +4.5s to the Siphon Clock.',
+    description: 'Siphons stolen kinetic energy back from water pickups to stall Syndicate drainage timers.'
+  },
+  {
+    id: 'pelagic_magnet',
+    branch: 'explorer',
+    branchLabel: 'EXPLORER SENSE',
+    name: 'Pelagic Current',
+    icon: '✦',
+    accentColor: '#fbbf24',
+    maxRank: 3,
+    costs: [25, 55, 95],
+    perRankPct: [15, 30, 45],
+    shortDesc: 'Pulls nearby Gears within 1.4 / 2.2 / 3.0 cols & +15% / +30% / +45% bonus Gear yield.',
+    description: 'Generates a gentle vortex eddy around Gateway that sweeps hydro-treasures straight to hand.'
+  },
+  {
+    id: 'harmonic_grace',
+    branch: 'explorer',
+    branchLabel: 'EXPLORER SENSE',
+    name: 'Harmonic Grace',
+    icon: '✧',
+    accentColor: '#a7f3d0',
+    maxRank: 3,
+    costs: [20, 45, 85],
+    perRankPct: [12, 24, 36],
+    shortDesc: '+12% / +24% / +36% longer ledge coyote timing & post-hit invulnerability.',
+    description: 'Pelagian equilibrium steadies Gateway’s footing on sheer terraces and stormy descents.'
+  }
+];
+
+export const PELAGIAN_SKILLS = SKILL_TREE;
+
+// ============================================================================
 // 30 HIDDEN RESCUABLE EARTH WATER-CRITTER PODS (3 PER CAMPAIGN SPIRE!)
 // ============================================================================
 
@@ -1150,6 +1320,7 @@ const FX_BY_ID = new Map(HYDRO_FX_CATALOG.map((b) => [b.id, b]));
 const LOG_BY_ID = new Map(WATERSHED_LOGS.map((r) => [r.id, r]));
 const CURIO_BY_ID = new Map(CURIO_CATALOG.map((c) => [c.id, c]));
 const CRITTER_BY_ID = new Map(CRITTER_CATALOG.map((c) => [c.id, c]));
+const SKILL_BY_ID = new Map(SKILL_TREE.map((s) => [s.id, s]));
 const MUTATION_BY_ID = new Map(BIO_MUTATIONS.map((m) => [m.id, m]));
 const TROPHY_BY_ID = new Map(TROPHIES.map((t) => [t.id, t]));
 const BIOME_KEYS = WATERSHED_BIOMES.map((b) => b.key);
@@ -1227,6 +1398,7 @@ function createFreshState() {
     collectedCurios: [],
     rescuedCritters: [],
     sanctumSpireClears: [],
+    skillRanks: {},
     unlockedTrophies: [],
     playedMiniGames: [],
     seenCutscenes: [],
@@ -1362,6 +1534,15 @@ export class ProgressionManager {
         fresh.sanctumSpireClears = Array.from(
           new Set(parsed.sanctumSpireClears.map((n) => Math.floor(Number(n))).filter((n) => n >= 1 && n <= 15))
         );
+      }
+
+      if (parsed.skillRanks && typeof parsed.skillRanks === 'object') {
+        for (const [sid, rawRank] of Object.entries(parsed.skillRanks)) {
+          const def = SKILL_BY_ID.get(sid);
+          if (!def) continue;
+          const rk = Math.max(0, Math.min(def.maxRank || 3, Math.floor(Number(rawRank) || 0)));
+          if (rk > 0) fresh.skillRanks[sid] = rk;
+        }
       }
 
       if (Array.isArray(parsed.unlockedTrophies)) {
@@ -2101,6 +2282,105 @@ export class ProgressionManager {
 
   getSanctumSpireClears() {
     return [...(this.state.sanctumSpireClears || [])];
+  }
+
+  // ================= 12-NODE PERMANENT PELAGIAN BIO-SKILL TREE =================
+
+  getSkillRank(skillId) {
+    const id = String(skillId || '');
+    const def = SKILL_BY_ID.get(id);
+    if (!def) return 0;
+    return Math.max(0, Math.min(def.maxRank || 3, Math.floor(Number(this.state.skillRanks?.[id]) || 0)));
+  }
+
+  getAllSkillRanks() {
+    const out = {};
+    for (const s of SKILL_TREE) {
+      out[s.id] = this.getSkillRank(s.id);
+    }
+    return out;
+  }
+
+  getTotalSkillRanks() {
+    let sum = 0;
+    for (const s of SKILL_TREE) sum += this.getSkillRank(s.id);
+    return sum;
+  }
+
+  getSkillUpgradeCost(skillId) {
+    const def = SKILL_BY_ID.get(String(skillId || ''));
+    if (!def) return null;
+    const rank = this.getSkillRank(def.id);
+    if (rank >= (def.maxRank || 3)) return null;
+    return def.costs?.[rank] ?? (25 + rank * 30);
+  }
+
+  canUpgradeSkill(skillId) {
+    const cost = this.getSkillUpgradeCost(skillId);
+    return cost !== null && this.state.gears >= cost;
+  }
+
+  upgradeSkill(skillId) {
+    const def = SKILL_BY_ID.get(String(skillId || ''));
+    if (!def) return { upgraded: false, reason: 'invalid_skill' };
+    const curRank = this.getSkillRank(def.id);
+    const maxRank = def.maxRank || 3;
+    if (curRank >= maxRank) {
+      return { upgraded: false, reason: 'max_rank', rank: curRank, maxRank, skill: { ...def } };
+    }
+    const cost = def.costs?.[curRank] ?? (25 + curRank * 30);
+    if (this.state.gears < cost) {
+      return {
+        upgraded: false,
+        reason: 'insufficient_gears',
+        rank: curRank,
+        maxRank,
+        cost,
+        gearsRemaining: this.state.gears,
+        skill: { ...def }
+      };
+    }
+
+    this.state.gears -= cost;
+    if (!this.state.skillRanks || typeof this.state.skillRanks !== 'object') {
+      this.state.skillRanks = {};
+    }
+    const nextRank = curRank + 1;
+    this.state.skillRanks[def.id] = nextRank;
+
+    const newlyUnlockedTrophies = [];
+    const grant = (id) => {
+      const t = this._unlockTrophyNoSave(id);
+      if (t) newlyUnlockedTrophies.push(t);
+    };
+    grant('tinker_apprentice');
+    if (this.getTotalSkillRanks() >= 12) grant('arsenal_complete');
+    for (const extra of this.drainPendingTrophies()) newlyUnlockedTrophies.push(extra);
+
+    this._save();
+    return {
+      upgraded: true,
+      rank: nextRank,
+      maxRank,
+      cost,
+      gearsRemaining: this.state.gears,
+      skill: { ...def },
+      newlyUnlockedTrophies
+    };
+  }
+
+  resetSkillTree(refundGears = true) {
+    let refunded = 0;
+    if (refundGears && this.state.skillRanks) {
+      for (const s of SKILL_TREE) {
+        const rk = this.getSkillRank(s.id);
+        for (let i = 0; i < rk; i++) refunded += s.costs?.[i] ?? 25;
+      }
+      this.state.gears += refunded;
+    }
+    this.state.skillRanks = {};
+    this._save();
+    return { refunded, gears: this.state.gears };
   }
 
   // ================= SANCTUM TRIALS, EXPEDITION & FLOOD RUSH =================

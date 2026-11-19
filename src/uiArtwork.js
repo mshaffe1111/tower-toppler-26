@@ -637,6 +637,7 @@ export function getGameModeArtSVG(modeId = 'campaign') {
   const raw = String(modeId || 'campaign').toLowerCase();
   let kind = 'campaign';
   if (raw.includes('gauntlet') || raw.includes('warden') || raw.includes('boss')) kind = 'warden_gauntlet';
+  else if (raw.includes('master')) kind = 'master_watershed';
   else if (raw.includes('purist') || raw.includes('arcade')) kind = 'purist';
   else if (raw.includes('flood') || raw.includes('rush') || raw.includes('survival')) kind = 'flood_rush';
   else if (raw.includes('sanctum') || raw.includes('trial') || raw.includes('puzzle') || raw.includes('casual')) kind = 'sanctum_trials';
@@ -783,12 +784,13 @@ export function getGameModeArtSVG(modeId = 'campaign') {
 
   const modePlateMap = {
     campaign: './assets/textures/story_keyframe_prologue.webp',
-    purist: './assets/textures/story_portrait_warden.webp',
+    purist: './assets/textures/story_keyframe_act2.webp',
     flood_rush: './assets/textures/story_keyframe_finale.webp',
-    sanctum_trials: './assets/textures/story_keyframe_purification.webp',
+    sanctum_trials: './assets/textures/story_keyframe_act3.webp',
     expedition: './assets/textures/story_portrait_gateway.webp',
     daily_tide: './assets/textures/story_keyframe_purification.webp',
     warden_gauntlet: './assets/textures/story_portrait_warden.webp',
+    master_watershed: './assets/textures/story_keyframe_act4.webp',
   };
   const plateHref = modePlateMap[kind] || modePlateMap.campaign;
 
@@ -993,6 +995,8 @@ export function getMinigamePortalSVG(gameId = 'core_descent') {
 // 5. EXPRESSIVE STORY CUTSCENE PORTRAITS — getCutscenePortraitSVG(speaker, mood)
 // ============================================================================
 
+const PORTRAIT_SVG_CACHE = Object.create(null);
+
 export function getCutscenePortraitSVG(speaker = 'gateway') {
   const raw = String(speaker || 'gateway').toLowerCase();
   const key = raw.includes('naiad')
@@ -1002,8 +1006,9 @@ export function getCutscenePortraitSVG(speaker = 'gateway') {
     : raw.includes('warden')
     ? 'warden'
     : 'gateway';
-  const uid = nextUid(`port-${key}`);
+  if (PORTRAIT_SVG_CACHE[key]) return PORTRAIT_SVG_CACHE[key];
 
+  const clipId = `tw-port-hex-${key}`;
   const rimPalette = {
     gateway: { stroke: '#5efce8', inner: '#fde047', bg: '#083344' },
     naiad: { stroke: '#7dd3fc', inner: '#e0f2fe', bg: '#082f49' },
@@ -1011,18 +1016,20 @@ export function getCutscenePortraitSVG(speaker = 'gateway') {
     warden: { stroke: '#fb7185', inner: '#fda4af', bg: '#2e1065' },
   }[key];
 
-  return `
-    <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  const markup = `
+    <svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <defs>
-        <clipPath id="${uid}-hex">
-          <polygon points="16,3 48,3 62,32 48,61 16,61 2,32"/>
+        <clipPath id="${clipId}">
+          <polygon points="32,6 96,6 124,64 96,122 32,122 4,64"/>
         </clipPath>
       </defs>
-      <polygon points="16,3 48,3 62,32 48,61 16,61 2,32" fill="${rimPalette.bg}"/>
-      <image href="./assets/textures/story_portrait_${key}.webp" x="1" y="1" width="62" height="62" preserveAspectRatio="xMidYMid slice" clip-path="url(#${uid}-hex)"/>
-      <polygon points="16,3 48,3 62,32 48,61 16,61 2,32" fill="none" stroke="${rimPalette.stroke}" stroke-width="2.1" stroke-linejoin="round"/>
-      <polygon points="18,6.2 46,6.2 58.4,32 46,57.8 18,57.8 5.6,32" fill="none" stroke="${rimPalette.inner}" stroke-width="0.8" opacity="0.72" stroke-linejoin="round"/>
+      <polygon points="32,6 96,6 124,64 96,122 32,122 4,64" fill="${rimPalette.bg}"/>
+      <image href="./assets/textures/story_portrait_${key}.webp" x="2" y="2" width="124" height="124" preserveAspectRatio="xMidYMid slice" clip-path="url(#${clipId})"/>
+      <polygon points="32,6 96,6 124,64 96,122 32,122 4,64" fill="none" stroke="${rimPalette.stroke}" stroke-width="4" stroke-linejoin="round"/>
+      <polygon points="36,12 92,12 117,64 92,116 36,116 11,64" fill="none" stroke="${rimPalette.inner}" stroke-width="1.5" opacity="0.74" stroke-linejoin="round"/>
     </svg>`.trim();
+  PORTRAIT_SVG_CACHE[key] = markup;
+  return markup;
 }
 
 // ============================================================================

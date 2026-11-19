@@ -1,14 +1,18 @@
-// TOWERING WATERS: GATEWAY'S DESCENT — CANYON UPDRAFT FRILL-GLIDE 3D RENDERER (`src/glideRenderer.js`)
+// TOWERING WATERS: GATEWAY'S DESCENT — COASTAL UPDRAFT FRILL-GLIDE 3D RENDERER (`src/glideRenderer.js`)
 //
-// Zero-Hang-Glider, 100% Gateway-Centric Aerial Frill-Glide Engine:
+// AAA Gateway-Centric Aerial Frill-Glide Engine:
 //   - Gateway launches off the Spire's summit crown and soars directly on her flared, iridescent
-//     webbed neck & rib frills (`FrillGlide` pose — ZERO metal/canvas hang-glider frames!), with
-//     twin translucent bioluminescent **Water-Wing Ribbons** streaming from her frills and S-curved
-//     lizard tail!
-//   - Breathtaking 5-Biome Daylight / Alpenglow / Sunset / Lagoon / Aurora skies, multi-layered 3D
-//     red-rock canyon gorges & snow peaks, animated waterfalls crowned by **Prismatic Rainbow Mist
-//     Arcs**, Golden Thermal Updraft Rings, shimmering Water-Dew streams, soaring canyon swallows,
-//     and sunlit rushing waters below.
+//     webbed neck & rib frills (`FrillGlide` pose), streaming **soft feathered radial-alpha
+//     slipstream mist ribbons** and **soft radial-alpha glowing spray/mist sprites** (zero opaque
+//     flat stripes, zero hard hexagon particles!).
+//   - Three distinct instanced sculpted coastal formations scrolling in parallax:
+//       (a) Tall jagged coastal sea-stack pillars with stratified ledges (`mg_pbr_sedona_strata_albedo/normal`)
+//       (b) Stepped flat-topped Sedona mesa crags with waterfalls & 3D sculpted conifer crowns (ZERO 2D cardboard stickers!)
+//       (c) Weathered Pelagian sandstone aqueduct sea-arch ruin spans (`arch_canyon_sandstone` + `arch_antique_bronze` rings)
+//   - Real animated GLSL multi-wave Fresnel specular ocean shader (deep sun-dappled turquoise-to-cerulean
+//     coastal depth gradient, Schlick Fresnel sky reflections, crisp sparkling sunlit speculars,
+//     soft feathered shore foam, and horizon mist blending seamlessly into `mg_bg_frill_glide.webp` —
+//     ZERO glaring Voronoi/hexagonal caustic grids!).
 
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
@@ -24,7 +28,10 @@ const MAX_GATES = 10;
 const MAX_THERMALS = 8;
 const MAX_CLOUDS = 10;
 const MAX_BIRDS = 64;
-const MAX_CANYON_PILLARS = 14;
+const NUM_SEA_STACKS = 5;
+const NUM_MESA_CRAGS = 5;
+const NUM_SEA_ARCHES = 4;
+const TOTAL_FORMATIONS = NUM_SEA_STACKS + NUM_MESA_CRAGS + NUM_SEA_ARCHES;
 const MAX_RAINBOWS = 4;
 const MAX_RINGS = 24;
 const MAX_PARTICLES = 280;
@@ -36,57 +43,67 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const GLIDE_BIOME_PALETTES = {
   canyon_river: {
     skyTop: '#1d70b8',
-    skyHor: '#fde68a',
-    fog: '#bae6fd',
-    sun: '#fffbeb',
-    cliff: '#b4533c',
-    cliffFar: '#d97757',
-    cap: '#15803d',
-    water: '#0d9488',
+    skyHor: '#f7d699',
+    fog: '#a5d7ed',
+    sun: '#fff1d6',
+    hemiSky: '#7cc8f0',
+    hemiGnd: '#28455c',
+    cliff: '#ffffff',
+    waterDeep: '#064778',
+    waterShallow: '#0f98ab',
+    waterSky: '#b7e2f5',
     thermal: '#fde047',
   },
   alpine_lake: {
     skyTop: '#1e5aa8',
     skyHor: '#fbcfe8',
-    fog: '#dbeafe',
-    sun: '#fff1f2',
-    cliff: '#64748b',
-    cliffFar: '#94a3b8',
-    cap: '#f8fafc',
-    water: '#0284c7',
+    fog: '#c9e2f8',
+    sun: '#fff5ed',
+    hemiSky: '#98d6fa',
+    hemiGnd: '#2c4a63',
+    cliff: '#cbd5e1',
+    waterDeep: '#074074',
+    waterShallow: '#148ec4',
+    waterSky: '#d4ecff',
     thermal: '#7dd3fc',
   },
   mist_bayou: {
     skyTop: '#4c1d95',
     skyHor: '#fb923c',
-    fog: '#fed7aa',
-    sun: '#ffedd5',
-    cliff: '#3f5242',
-    cliffFar: '#6b7280',
-    cap: '#166534',
-    water: '#0f766e',
+    fog: '#dfc4ac',
+    sun: '#ffebd0',
+    hemiSky: '#8bc4db',
+    hemiGnd: '#24453c',
+    cliff: '#d5ddd0',
+    waterDeep: '#0a4448',
+    waterShallow: '#148782',
+    waterSky: '#f0cca8',
     thermal: '#34d399',
   },
   coral_sea: {
     skyTop: '#0284c7',
     skyHor: '#cffafe',
-    fog: '#a5f3fc',
-    sun: '#ffffff',
-    cliff: '#d6c39c',
-    cliffFar: '#7dd3fc',
-    cap: '#16a34a',
-    water: '#06b6d4',
+    fog: '#9de5f5',
+    sun: '#fff6e0',
+    hemiSky: '#82d8f7',
+    hemiGnd: '#1e5266',
+    cliff: '#f7ece0',
+    waterDeep: '#065682',
+    waterShallow: '#14b4c6',
+    waterSky: '#c7f4ff',
     thermal: '#fde047',
   },
   storm_ocean: {
     skyTop: '#0f2942',
     skyHor: '#2dd4bf',
-    fog: '#164e63',
-    sun: '#a5f3fc',
-    cliff: '#334155',
-    cliffFar: '#1e3a5f',
-    cap: '#bae6fd',
-    water: '#0369a1',
+    fog: '#29576e',
+    sun: '#d6ecff',
+    hemiSky: '#63a8cf',
+    hemiGnd: '#183042',
+    cliff: '#94a3b8',
+    waterDeep: '#062642',
+    waterShallow: '#106e96',
+    waterSky: '#5ca3c4',
     thermal: '#5efce8',
   },
 };
@@ -103,18 +120,399 @@ const SKIN_PALETTES = {
   default_amphibian: { scale: '#2dd4bf', belly: '#ccfbf1', frill: '#38bdf8', ribbon: '#5efce8' },
 };
 
-let _gatewayModPromise = null;
-function loadGatewayMod() {
-  if (!_gatewayModPromise) _gatewayModPromise = import('./gateway.js').catch(() => null);
-  return _gatewayModPromise;
+// --- ANIMATED GLSL MULTI-WAVE FRESNEL SPECULAR COASTAL OCEAN SHADER ---
+const GLIDE_OCEAN_VERT = /* glsl */ `
+  uniform float uTime;
+  uniform float uScroll;
+  varying vec3 vWorldPos;
+  varying float vWaveH;
+  varying float vFarT;
+  varying float vCamDist;
+
+  void main() {
+    vec3 pos = position;
+    vFarT = clamp((position.y + 24.0) / 48.0, 0.0, 1.0);
+    float sx = position.x + uScroll * 0.024;
+    float sy = position.y;
+
+    // Non-orthogonal multi-directional coastal ocean swells (zero regular horizontal bars!)
+    float h =
+      sin(sx * 0.24 + sy * 0.19 + uTime * 1.35) * 0.11 +
+      cos(sx * 0.41 - sy * 0.37 + uTime * 1.08) * 0.08 +
+      sin(sx * 0.68 + sy * 0.62 - uTime * 1.85) * 0.04;
+
+    pos.z += h * (1.0 - vFarT * 0.65);
+    vec4 worldPos = modelMatrix * vec4(pos, 1.0);
+    vWorldPos = worldPos.xyz;
+    vWaveH = h;
+    vec4 mvPos = viewMatrix * worldPos;
+    vCamDist = -mvPos.z;
+    gl_Position = projectionMatrix * mvPos;
+  }
+`;
+
+const GLIDE_OCEAN_FRAG = /* glsl */ `
+  uniform float uTime;
+  uniform float uScroll;
+  uniform vec3 uDeepColor;
+  uniform vec3 uShallowColor;
+  uniform vec3 uSkyColor;
+  uniform vec3 uSunColor;
+  uniform vec3 uSunDir;
+  uniform vec3 uFogColor;
+  uniform float uFogDensity;
+
+  varying vec3 vWorldPos;
+  varying float vWaveH;
+  varying float vFarT;
+  varying float vCamDist;
+
+  float hash21(vec2 p) {
+    p = fract(p * vec2(234.34, 435.345));
+    p += dot(p, p + 34.23);
+    return fract(p.x * p.y);
+  }
+
+  float vnoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(hash21(i + vec2(0.0, 0.0)), hash21(i + vec2(1.0, 0.0)), u.x),
+      mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), u.x),
+      u.y
+    );
+  }
+
+  float fbm(vec2 p) {
+    float s = 0.0;
+    float a = 0.5;
+    mat2 m = mat2(0.80, 0.60, -0.60, 0.80);
+    for (int i = 0; i < 4; i++) {
+      s += a * vnoise(p);
+      p = m * p * 2.03;
+      a *= 0.5;
+    }
+    return s;
+  }
+
+  float oceanHeight(vec2 p, float t) {
+    float w1 = fbm(p * vec2(0.24, 0.34) + vec2(t * 0.18, -t * 0.11));
+    float w2 = fbm(p * vec2(0.56, 0.72) + vec2(-t * 0.24, t * 0.19) + vec2(w1 * 1.4));
+    float rip = sin(p.x * 0.62 + p.y * 0.48 + t * 1.6 + w1 * 3.5) * 0.12;
+    return (w1 * 0.52 + w2 * 0.36) + rip;
+  }
+
+  void main() {
+    vec2 op = vec2(vWorldPos.x + uScroll * 0.024, vWorldPos.z);
+    float eps = 0.22;
+    float hc = oceanHeight(op, uTime);
+    float hx = oceanHeight(op + vec2(eps, 0.0), uTime);
+    float hz = oceanHeight(op + vec2(0.0, eps), uTime);
+    vec3 N = normalize(vec3((hc - hx) * 1.15, 1.0, (hc - hz) * 1.15));
+
+    vec3 V = normalize(cameraPosition - vWorldPos);
+    vec3 L = normalize(uSunDir);
+
+    // Rich deep sun-dappled turquoise-to-cerulean coastal gradient
+    float dapple = fbm(op * vec2(0.16, 0.22) + vec2(uTime * 0.07, 0.0));
+    vec3 baseCol = mix(uShallowColor, uDeepColor, clamp(0.28 + vFarT * 0.64 + (0.52 - dapple) * 0.45, 0.0, 1.0));
+
+    // Subsurface turquoise sunlight transmission through wave crests
+    float sss = pow(clamp(dot(V, normalize(-L + N * 0.48)), 0.0, 1.0), 3.0) * (0.42 + max(0.0, vWaveH) * 2.6);
+    baseCol += vec3(0.08, 0.42, 0.46) * sss * (1.0 - vFarT * 0.45);
+
+    // Schlick Fresnel sunlit coastal sky reflection
+    float ndotv = max(dot(N, V), 0.0);
+    float fresnel = 0.04 + 0.96 * pow(1.0 - ndotv, 4.2);
+    vec3 reflSky = mix(uSkyColor, uSunColor, 0.28 + 0.26 * vFarT);
+    vec3 col = mix(baseCol, reflSky, fresnel * 0.66);
+
+    // Subtle soft sparkling sunlight reflections on gentle ripples (ZERO harsh Voronoi lines!)
+    vec3 H = normalize(L + V);
+    float sparkle = pow(max(dot(N, H), 0.0), 130.0);
+    float sheen = pow(max(dot(N, H), 0.0), 24.0);
+    col += uSunColor * (sparkle * 1.18 + sheen * 0.16);
+
+    // Exponential atmospheric fog + smooth far-horizon alpha feather blending seamlessly into mg_bg_frill_glide.webp!
+    float fogFactor = 1.0 - exp(-uFogDensity * uFogDensity * vCamDist * vCamDist);
+    col = mix(col, uFogColor, clamp(fogFactor * 0.85 + smoothstep(0.55, 0.96, vFarT) * 0.55, 0.0, 1.0));
+    float alpha = 1.0 - smoothstep(0.68, 0.99, vFarT);
+
+    gl_FragColor = vec4(col, alpha);
+  }
+`;
+
+function hash2DGlide(ix, iy) {
+  let h = (Math.imul(ix, 374761393) + Math.imul(iy, 668265263)) ^ 0x165667b1;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+}
+
+function noiseTileGlide(u, v, period) {
+  const x = u * period;
+  const y = v * period;
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const fx = x - x0;
+  const fy = y - y0;
+  const sx = fx * fx * (3 - 2 * fx);
+  const sy = fy * fy * (3 - 2 * fy);
+  const ix0 = ((x0 % period) + period) % period;
+  const ix1 = (ix0 + 1) % period;
+  const iy0 = ((y0 % period) + period) % period;
+  const iy1 = (iy0 + 1) % period;
+  return lerp(
+    lerp(hash2DGlide(ix0, iy0), hash2DGlide(ix1, iy0), sx),
+    lerp(hash2DGlide(ix0, iy1), hash2DGlide(ix1, iy1), sx),
+    sy
+  );
+}
+
+function safeMergeGeos(list, keepColor = false) {
+  const normalized = list
+    .filter(Boolean)
+    .map((g) => {
+      const ng = g.index ? g.toNonIndexed() : g.clone();
+      if (!ng.attributes.normal) ng.computeVertexNormals();
+      if (!ng.attributes.uv) {
+        const cnt = ng.attributes.position.count;
+        ng.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(cnt * 2), 2));
+      }
+      for (const key of Object.keys(ng.attributes)) {
+        if (key !== 'position' && key !== 'normal' && key !== 'uv' && !(keepColor && key === 'color')) {
+          ng.deleteAttribute(key);
+        }
+      }
+      return ng;
+    });
+  if (normalized.length === 0) return null;
+  if (normalized.length === 1) return normalized[0];
+  if (BufferGeometryUtils && typeof BufferGeometryUtils.mergeGeometries === 'function') {
+    const merged = BufferGeometryUtils.mergeGeometries(normalized, false);
+    if (merged) {
+      for (const g of normalized) g.dispose();
+      return merged;
+    }
+  }
+  return normalized[0];
+}
+
+function paintVertexColor(geo, hex) {
+  const col = new THREE.Color(hex);
+  const cnt = geo.attributes.position.count;
+  const arr = new Float32Array(cnt * 3);
+  for (let i = 0; i < cnt; i++) {
+    arr[i * 3] = col.r;
+    arr[i * 3 + 1] = col.g;
+    arr[i * 3 + 2] = col.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+  return geo;
 }
 
 /**
- * Gateway Frill-Glider Rig:
- * Displays `GatewayRig` from `./gateway.js` (with instant sculpted Hydro-Lizard fallback)
- * PLUS expansive, iridescent webbed lizard neck/rib frill membranes & streaming bioluminescent
- * Water-Wing Ribbons — ZERO metal or canvas hang-glider contraptions!
+ * Soft feathered radial-alpha slipstream mist ribbon texture for Gateway's wingtips & tail.
  */
+function createSlipstreamRibbonTexture(w = 256, h = 64) {
+  if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+    const d = new Uint8Array([190, 252, 255, 160]);
+    const t = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat);
+    t.needsUpdate = true;
+    return t;
+  }
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(w, h);
+  const data = img.data;
+  for (let y = 0; y < h; y++) {
+    const v = (y / (h - 1)) * 2 - 1;
+    const edgeFade = Math.exp(-v * v * 4.8) * Math.max(0, 1 - v * v);
+    const coreGlow = Math.exp(-v * v * 14.0);
+    for (let x = 0; x < w; x++) {
+      const u = x / (w - 1);
+      const tailFade = Math.pow(u, 1.55);
+      const tipSoft = Math.sin(Math.min(1, (1 - u) * 7.0) * Math.PI * 0.5);
+      const wisp =
+        0.65 +
+        0.35 * noiseTileGlide(u * 2.5, y / h, 8) * (0.7 + 0.3 * Math.sin(u * 14.0 + v * 3.0));
+      const a = clamp(tailFade * tipSoft * edgeFade * wisp, 0, 1);
+      const p = (y * w + x) * 4;
+      data[p] = Math.round(lerp(178, 255, coreGlow));
+      data[p + 1] = Math.round(lerp(244, 255, coreGlow));
+      data[p + 2] = 255;
+      data[p + 3] = Math.round(a * 225);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/**
+ * Soft radial-alpha glowing spray/mist sprite texture (ZERO hard hexagons or polygons!).
+ */
+function createSoftGlowSpriteTexture(size = 128) {
+  if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+    const d = new Uint8Array([235, 252, 255, 200]);
+    const t = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat);
+    t.needsUpdate = true;
+    return t;
+  }
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(size, size);
+  const data = img.data;
+  for (let y = 0; y < size; y++) {
+    const dy = (y / (size - 1)) * 2 - 1;
+    for (let x = 0; x < size; x++) {
+      const dx = (x / (size - 1)) * 2 - 1;
+      const r2 = dx * dx + dy * dy;
+      const mask = Math.max(0, 1 - r2);
+      const halo = Math.exp(-r2 * 4.2) * mask;
+      const core = Math.exp(-r2 * 16.0);
+      const a = clamp(halo * 0.85 + core * 0.45, 0, 1);
+      const p = (y * size + x) * 4;
+      data[p] = Math.round(lerp(214, 255, core));
+      data[p + 1] = Math.round(lerp(248, 255, core));
+      data[p + 2] = 255;
+      data[p + 3] = Math.round(a * 245);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function createSoftShoreFoamTexture(size = 128) {
+  if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+    const d = new Uint8Array([228, 252, 255, 140]);
+    const t = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat);
+    t.needsUpdate = true;
+    return t;
+  }
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(size, size);
+  const data = img.data;
+  for (let y = 0; y < size; y++) {
+    const dy = (y / (size - 1)) * 2 - 1;
+    for (let x = 0; x < size; x++) {
+      const dx = (x / (size - 1)) * 2 - 1;
+      const r = Math.sqrt(dx * dx + dy * dy);
+      const ringDist = (r - 0.62) / 0.24;
+      const ringBand = Math.exp(-ringDist * ringDist * 2.2) * (r < 0.98 ? 1 : 0);
+      const wisp = noiseTileGlide(x / size, y / size, 10) * 0.65 + noiseTileGlide(x / size, y / size, 20) * 0.35;
+      const a = clamp(ringBand * (0.35 + wisp * 0.85), 0, 1);
+      const p = (y * size + x) * 4;
+      data[p] = 232;
+      data[p + 1] = 251;
+      data[p + 2] = 255;
+      data[p + 3] = Math.round(a * 165);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function createSoftRainbowArcTexture(w = 256, h = 128) {
+  if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+    const d = new Uint8Array([255, 240, 220, 60]);
+    const t = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat);
+    t.needsUpdate = true;
+    return t;
+  }
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(w, h);
+  const data = img.data;
+  const stops = [
+    [251, 113, 133],
+    [253, 186, 116],
+    [253, 224, 71],
+    [74, 222, 128],
+    [56, 189, 248],
+    [192, 132, 252],
+  ];
+  for (let y = 0; y < h; y++) {
+    const ny = 1 - y / (h - 1);
+    for (let x = 0; x < w; x++) {
+      const nx = (x / (w - 1)) * 2 - 1;
+      const r = Math.sqrt(nx * nx + ny * ny);
+      const bandU = (r - 0.62) / 0.28;
+      let a = 0;
+      let rr = 255;
+      let gg = 255;
+      let bb = 255;
+      if (bandU > 0 && bandU < 1 && ny > 0.02) {
+        const radialFade = Math.sin(bandU * Math.PI);
+        const footFade = Math.sin(Math.min(1, ny * 2.8) * Math.PI * 0.5);
+        a = radialFade * radialFade * footFade * 0.42;
+        const pos = (1 - bandU) * (stops.length - 1);
+        const idx = Math.min(stops.length - 2, Math.floor(pos));
+        const f = pos - idx;
+        rr = lerp(stops[idx][0], stops[idx + 1][0], f);
+        gg = lerp(stops[idx][1], stops[idx + 1][1], f);
+        bb = lerp(stops[idx][2], stops[idx + 1][2], f);
+      }
+      const p = (y * w + x) * 4;
+      data[p] = Math.round(rr);
+      data[p + 1] = Math.round(gg);
+      data[p + 2] = Math.round(bb);
+      data[p + 3] = Math.round(clamp(a, 0, 1) * 255);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function createHorizonMistTexture(w = 64, h = 128) {
+  if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+    const d = new Uint8Array([186, 232, 248, 120]);
+    const t = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat);
+    t.needsUpdate = true;
+    return t;
+  }
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0.0, 'rgba(182, 230, 248, 0.0)');
+  g.addColorStop(0.45, 'rgba(205, 238, 250, 0.52)');
+  g.addColorStop(0.72, 'rgba(232, 246, 252, 0.68)');
+  g.addColorStop(1.0, 'rgba(120, 198, 224, 0.0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 class AdaptiveFrillGliderHero {
   constructor(skinId = 'sea_glass_guardian') {
     this.skinId = skinId;
@@ -122,52 +520,61 @@ class AdaptiveFrillGliderHero {
     this.liveRig = null;
 
     const pal = SKIN_PALETTES[skinId] || SKIN_PALETTES.sea_glass_guardian;
+    this.slipstreamTex = createSlipstreamRibbonTexture(256, 64);
+
     this.frillWingMat = new THREE.MeshStandardMaterial({
       color: pal.frill,
       emissive: pal.ribbon,
-      emissiveIntensity: 0.72,
-      roughness: 0.16,
+      emissiveIntensity: 0.65,
+      roughness: 0.18,
       transparent: true,
-      opacity: 0.86,
+      opacity: 0.84,
       side: THREE.DoubleSide,
     });
     this.ribbonMat = new THREE.MeshBasicMaterial({
+      map: this.slipstreamTex,
       color: pal.ribbon,
       transparent: true,
-      opacity: 0.68,
+      opacity: 0.72,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
 
-    // Organic Scalloped Iridescent Lizard Rib/Neck Frill Membranes + Streaming Water-Wing Ribbons!
     this.frillWingsGroup = new THREE.Group();
-    this.wingL = this._buildWebbedFrillMembrane(-1);
-    this.wingR = this._buildWebbedFrillMembrane(1);
+    // GatewayRig already renders her sculpted iridescent frills — keep zero flat cyan paddles!
+    this.wingL = new THREE.Group();
+    this.wingR = new THREE.Group();
     this.frillWingsGroup.add(this.wingL, this.wingR);
 
+    // Soft Feathered Radial-Alpha Slipstream Mist Ribbons trailing gracefully from Gateway's shoulders & tail
     this.ribbons = [];
     for (const sz of [-1, 1]) {
-      const ribGeo = new THREE.PlaneGeometry(2.35, 0.22, 16, 1);
-      ribGeo.translate(-1.18, 0, 0);
+      const ribGeo = new THREE.PlaneGeometry(2.6, 0.36, 18, 1);
+      ribGeo.translate(-1.3, 0, 0);
       const rib = new THREE.Mesh(ribGeo, this.ribbonMat);
-      rib.position.set(-0.08, 0.08, sz * 0.68);
-      rib.rotation.x = Math.PI * 0.35 * sz;
+      rib.position.set(0.05, 0.08, sz * 0.42);
+      rib.rotation.x = Math.PI * 0.16 * sz;
       this.frillWingsGroup.add(rib);
-      this.ribbons.push({ mesh: rib, basePos: ribGeo.attributes.position.array.slice(), side: sz });
+      this.ribbons.push({ mesh: rib, basePos: ribGeo.attributes.position.array.slice(), side: sz, len: 2.6 });
     }
+    const tailRibGeo = new THREE.PlaneGeometry(2.1, 0.28, 14, 1);
+    tailRibGeo.translate(-1.05, 0, 0);
+    const tailRib = new THREE.Mesh(tailRibGeo, this.ribbonMat);
+    tailRib.position.set(-0.38, 0.02, 0);
+    this.frillWingsGroup.add(tailRib);
+    this.ribbons.push({ mesh: tailRib, basePos: tailRibGeo.attributes.position.array.slice(), side: 0, len: 2.1 });
+
     this.group.add(this.frillWingsGroup);
 
-    // Hero Body Carrier (`YXZ`: +90 deg Y faces right along +X; +1.28 rad X pitches Gateway
-    // into a sleek ~73-deg aerodynamic canyon glide!)
     this.bodyCarrier = new THREE.Group();
     this.liveRig = new GatewayRig(this.skinId);
     this._liveMount = new THREE.Group();
     this._liveMount.rotation.order = 'YXZ';
     this._liveMount.rotation.set(1.28, Math.PI * 0.5, 0);
-    this._liveMount.scale.setScalar(1.92);
-    this._liveMount.position.set(-0.95, -0.18, 0);
-    this.frillWingsGroup.scale.setScalar(1.28);
+    this._liveMount.scale.setScalar(1.86);
+    this._liveMount.position.set(-0.24, -0.06, 0);
+    this.frillWingsGroup.scale.setScalar(1.24);
     this._liveMount.add(this.liveRig.group);
     this.bodyCarrier.add(this._liveMount);
     this.fallback = this._buildSculptedFallback(pal);
@@ -208,7 +615,6 @@ class AdaptiveFrillGliderHero {
     head.position.set(0.36, 0.05, 0);
     root.add(head);
 
-    const tail = new THREE.Group();
     let p = root;
     const segs = [];
     for (let i = 0; i < 6; i++) {
@@ -225,7 +631,6 @@ class AdaptiveFrillGliderHero {
       p = sp;
       segs.push(sp);
     }
-    void tail;
     return { root, segs, mats: { matScale, matBelly } };
   }
 
@@ -255,9 +660,10 @@ class AdaptiveFrillGliderHero {
       for (let i = 0; i < pos.count; i++) {
         const bx = base[i * 3];
         const by = base[i * 3 + 1];
-        const u = clamp(-bx / 2.35, 0, 1);
-        pos.setY(i, by + Math.sin(time * 11 - u * 5.2 + r.side) * u * 0.22);
-        pos.setZ(i, Math.cos(time * 8.5 - u * 4.0) * u * 0.12);
+        const u = clamp(-bx / r.len, 0, 1);
+        const plumeScale = 0.65 + u * 0.95;
+        pos.setY(i, by * plumeScale + Math.sin(time * 9.5 - u * 4.8 + r.side) * u * 0.24);
+        pos.setZ(i, Math.cos(time * 7.8 - u * 3.8 + r.side * 0.7) * u * 0.14);
       }
       pos.needsUpdate = true;
     }
@@ -296,35 +702,10 @@ class AdaptiveFrillGliderHero {
   dispose() {
     this._disposed = true;
     this.liveRig?.dispose?.();
+    this.slipstreamTex?.dispose();
     this.frillWingMat.dispose();
     this.ribbonMat.dispose();
   }
-}
-
-function hash2DGlide(ix, iy) {
-  let h = (Math.imul(ix, 374761393) + Math.imul(iy, 668265263)) ^ 0x165667b1;
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
-}
-
-function noiseTileGlide(u, v, period) {
-  const x = u * period;
-  const y = v * period;
-  const x0 = Math.floor(x);
-  const y0 = Math.floor(y);
-  const fx = x - x0;
-  const fy = y - y0;
-  const sx = fx * fx * (3 - 2 * fx);
-  const sy = fy * fy * (3 - 2 * fy);
-  const ix0 = ((x0 % period) + period) % period;
-  const ix1 = (ix0 + 1) % period;
-  const iy0 = ((y0 % period) + period) % period;
-  const iy1 = (iy0 + 1) % period;
-  return lerp(
-    lerp(hash2DGlide(ix0, iy0), hash2DGlide(ix1, iy0), sx),
-    lerp(hash2DGlide(ix0, iy1), hash2DGlide(ix1, iy1), sx),
-    sy
-  );
 }
 
 function createAtmosphericSkyTexture() {
@@ -340,46 +721,13 @@ function createAtmosphericSkyTexture() {
   const ctx = c.getContext('2d');
   const g = ctx.createLinearGradient(0, 0, 0, 256);
   g.addColorStop(0.0, '#134e9b');
-  g.addColorStop(0.22, '#2282cc');
-  g.addColorStop(0.46, '#67c8f5');
-  g.addColorStop(0.66, '#fef3c7');
-  g.addColorStop(0.84, '#fed7aa');
+  g.addColorStop(0.24, '#2282cc');
+  g.addColorStop(0.50, '#67c8f5');
+  g.addColorStop(0.72, '#fef3c7');
+  g.addColorStop(0.90, '#fed7aa');
   g.addColorStop(1.0, '#fde68a');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 512, 256);
-
-  // Lush sunlit cumulus cloud decks floating across the upper & mid canyon sky!
-  for (let i = 0; i < 42; i++) {
-    const cx = (i * 59 + 24) % 512;
-    const cy = 34 + ((i * 31) % 108);
-    const rx = 34 + (i % 5) * 18;
-    const ry = 12 + (i % 3) * 6;
-    const cg = ctx.createRadialGradient(cx, cy - 3, 2, cx, cy, rx);
-    cg.addColorStop(0, 'rgba(255, 253, 246, 0.78)');
-    cg.addColorStop(0.55, 'rgba(240, 249, 255, 0.38)');
-    cg.addColorStop(1, 'rgba(186, 230, 253, 0)');
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.scale(1, ry / rx);
-    ctx.fillStyle = cg;
-    ctx.beginPath();
-    ctx.arc(0, 0, rx, 0, TAU);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  // Distant atmospheric blue-violet mountain range right above the canyon water horizon
-  ctx.fillStyle = 'rgba(84, 134, 182, 0.52)';
-  ctx.beginPath();
-  ctx.moveTo(0, 256);
-  for (let x = 0; x <= 512; x += 14) {
-    const ridgeY = 148 - Math.sin(x * 0.025) * 20 - Math.abs(Math.cos(x * 0.058)) * 18;
-    ctx.lineTo(x, ridgeY);
-  }
-  ctx.lineTo(512, 256);
-  ctx.closePath();
-  ctx.fill();
-
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
@@ -404,19 +752,18 @@ function createMesaStrataTexture(size = 256) {
     const v = y / size;
     for (let x = 0; x < size; x++) {
       const u = x / size;
-      // Domain-warped Zion Sandstone FBM (zero straight stripes, zero plaid!)
-      const wU = u + (noiseTileGlide(u, v, 4) - 0.5) * 0.28;
-      const wV = v + (noiseTileGlide(u + 0.33, v + 0.21, 4) - 0.5) * 0.18;
+      const wU = u + (noiseTileGlide(u, v, 4) - 0.5) * 0.24;
+      const wV = v + (noiseTileGlide(u + 0.33, v + 0.21, 4) - 0.5) * 0.14;
       const grain =
-        noiseTileGlide(wU, wV, 8) * 0.50 +
-        noiseTileGlide(wU, wV, 18) * 0.32 +
+        noiseTileGlide(wU, wV, 8) * 0.48 +
+        noiseTileGlide(wU, wV, 18) * 0.34 +
         noiseTileGlide(u, v, 36) * 0.18;
-      const bedding = 0.5 + 0.5 * Math.sin((wV * 5.0 + grain * 0.65) * TAU);
-      const tBand = clamp(grain * 0.62 + bedding * 0.38, 0, 1);
+      const bedding = 0.5 + 0.5 * Math.sin((wV * 7.0 + grain * 0.55) * TAU);
+      const tBand = clamp(grain * 0.56 + bedding * 0.44, 0, 1);
       const p = (y * size + x) * 4;
-      data[p] = clamp(Math.round(lerp(148, 236, tBand)), 0, 255);
-      data[p + 1] = clamp(Math.round(lerp(72, 152, tBand)), 0, 255);
-      data[p + 2] = clamp(Math.round(lerp(48, 102, tBand)), 0, 255);
+      data[p] = clamp(Math.round(lerp(140, 228, tBand)), 0, 255);
+      data[p + 1] = clamp(Math.round(lerp(68, 144, tBand)), 0, 255);
+      data[p + 2] = clamp(Math.round(lerp(44, 96, tBand)), 0, 255);
       data[p + 3] = 255;
     }
   }
@@ -428,42 +775,9 @@ function createMesaStrataTexture(size = 256) {
   return tex;
 }
 
-function createLagoonRippleTex(size = 256) {
-  if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
-    const d = new Uint8Array([20, 184, 166, 255]);
-    const t = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat);
-    t.wrapS = THREE.RepeatWrapping;
-    t.wrapT = THREE.RepeatWrapping;
-    t.needsUpdate = true;
-    return t;
-  }
-  const c = document.createElement('canvas');
-  c.width = size;
-  c.height = size;
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = '#0d9488';
-  ctx.fillRect(0, 0, size, size);
-  for (let i = 0; i < 96; i++) {
-    const x = (i * 53) % size;
-    const y = (i * 89) % size;
-    const w = 18 + (i % 28);
-    const g = ctx.createLinearGradient(x, y, x + w, y);
-    g.addColorStop(0, 'rgba(165, 243, 252, 0)');
-    g.addColorStop(0.5, 'rgba(207, 250, 254, 0.45)');
-    g.addColorStop(1, 'rgba(165, 243, 252, 0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(x, y, w, 3 + (i % 3));
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
 function createFeatheredCascadeTexture() {
   if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
-    const d = new Uint8Array([235, 250, 255, 255]);
+    const d = new Uint8Array([235, 250, 255, 220]);
     const t = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat);
     t.wrapS = THREE.ClampToEdgeWrapping;
     t.wrapT = THREE.RepeatWrapping;
@@ -478,17 +792,19 @@ function createFeatheredCascadeTexture() {
   const data = img.data;
   for (let y = 0; y < 256; y++) {
     const v = y / 255;
-    const vFade = Math.sin(Math.min(1, v * 5.2) * Math.PI * 0.5) * Math.sin(Math.min(1, (1 - v) * 3.2) * Math.PI * 0.5);
+    const vFade =
+      Math.sin(Math.min(1, v * 5.2) * Math.PI * 0.5) *
+      Math.sin(Math.min(1, (1 - v) * 3.2) * Math.PI * 0.5);
     for (let x = 0; x < 128; x++) {
       const u = (x / 127) * 2 - 1;
-      const edgeFade = Math.exp(-u * u * 4.2);
-      const streak = 0.58 + 0.42 * Math.sin(u * 21.0 + Math.cos(v * 20.0) * 1.3);
-      const a = clamp(vFade * edgeFade * streak, 0, 1);
+      const edgeFade = Math.exp(-u * u * 4.4);
+      const wisp = noiseTileGlide(x / 128, v * 2.5, 8) * 0.55 + noiseTileGlide(x / 128, v * 4.5, 16) * 0.45;
+      const a = clamp(vFade * edgeFade * (0.48 + 0.52 * wisp), 0, 1);
       const p = (y * 128 + x) * 4;
       data[p] = 232;
       data[p + 1] = 251;
       data[p + 2] = 255;
-      data[p + 3] = Math.round(a * 245);
+      data[p + 3] = Math.round(a * 212);
     }
   }
   ctx.putImageData(img, 0, 0);
@@ -499,55 +815,346 @@ function createFeatheredCascadeTexture() {
   return tex;
 }
 
-function buildCraggyMesaGeo(w, h, seed) {
+/**
+ * Soft feathered rising golden updraft wind-wisp texture (fades cleanly to 0 on ALL 4 borders —
+ * ZERO hard vertical cylinder silhouette line!).
+ */
+function createSoftUpdraftTexture(w = 128, h = 256) {
+  if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+    const d = new Uint8Array([253, 224, 71, 80]);
+    const t = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat);
+    t.wrapS = THREE.ClampToEdgeWrapping;
+    t.wrapT = THREE.RepeatWrapping;
+    t.needsUpdate = true;
+    return t;
+  }
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(w, h);
+  const data = img.data;
+  for (let y = 0; y < h; y++) {
+    const v = y / (h - 1);
+    const vFade = Math.sin(v * Math.PI);
+    for (let x = 0; x < w; x++) {
+      const u = (x / (w - 1)) * 2 - 1;
+      const edgeFade = Math.exp(-u * u * 5.2) * Math.max(0, 1 - u * u);
+      const ribbon1 = Math.exp(-Math.pow(u - Math.sin(v * TAU * 2.0) * 0.32, 2) * 18.0);
+      const ribbon2 = Math.exp(-Math.pow(u + Math.cos(v * TAU * 1.5) * 0.28, 2) * 22.0);
+      const mist = noiseTileGlide(x / w, v * 2.0, 6);
+      const a = clamp(vFade * edgeFade * (0.28 + (ribbon1 + ribbon2) * 0.65) * (0.65 + 0.35 * mist), 0, 1);
+      const p = (y * w + x) * 4;
+      data[p] = 255;
+      data[p + 1] = 244;
+      data[p + 2] = 186;
+      data[p + 3] = Math.round(a * 175);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/**
+ * Sleek faceted crystalline water-dew gem (replaces bulky low-poly faceted soccer balls!).
+ */
+function buildWaterDewCrystalGeo() {
   const parts = [];
-  // UV-clean multi-tiered Sedona/Karst sea-stack & mesa with stepped talus & secondary pinnacle!
-  const core = new THREE.CylinderGeometry(w * 0.68, w * 1.32, h, 18, 10);
-  const pos = core.attributes.position;
+  const top = new THREE.ConeGeometry(0.13, 0.28, 6);
+  top.translate(0, 0.14, 0);
+  parts.push(top);
+  const bot = new THREE.ConeGeometry(0.13, 0.18, 6);
+  bot.rotateX(Math.PI);
+  bot.translate(0, -0.09, 0);
+  parts.push(bot);
+  const merged = safeMergeGeos(parts);
+  for (const g of parts) g.dispose();
+  return merged;
+}
+
+/**
+ * Sculpted 3D Coastal Gull / Canyon Swallow (tapered swept arched wings via ExtrudeGeometry +
+ * streamlined body + golden beak — ZERO rectangular box wings or grey plastic cones!).
+ */
+function buildCoastalGullGeo() {
+  const parts = [];
+  const body = paintVertexColor(new THREE.SphereGeometry(0.085, 10, 8), '#f8fafc');
+  body.scale(2.5, 0.72, 0.85);
+  parts.push(body);
+
+  const head = paintVertexColor(new THREE.SphereGeometry(0.065, 8, 6), '#ffffff');
+  head.translate(-0.20, 0.03, 0);
+  parts.push(head);
+
+  const beak = paintVertexColor(new THREE.ConeGeometry(0.022, 0.09, 5), '#f59e0b');
+  beak.rotateZ(Math.PI * 0.5);
+  beak.translate(-0.28, 0.02, 0);
+  parts.push(beak);
+
+  const tail = paintVertexColor(new THREE.ConeGeometry(0.065, 0.24, 4), '#cbd5e1');
+  tail.rotateZ(-Math.PI * 0.5);
+  tail.scale(1.0, 0.22, 1.35);
+  tail.translate(0.26, 0.01, 0);
+  parts.push(tail);
+
+  // Tapered curved gull wings (organic feathered crescent silhouette, zero flat rectangles!)
+  for (const sz of [-1, 1]) {
+    const wShape = new THREE.Shape();
+    wShape.moveTo(-0.08, 0.02);
+    wShape.quadraticCurveTo(-0.04, sz * 0.34, 0.08, sz * 0.68);
+    wShape.quadraticCurveTo(0.16, sz * 0.54, 0.14, sz * 0.26);
+    wShape.quadraticCurveTo(0.11, sz * 0.08, 0.08, 0.0);
+    wShape.closePath();
+    const wing = new THREE.ExtrudeGeometry(wShape, { depth: 0.018, bevelEnabled: false, curveSegments: 8 });
+    wing.rotateX(-Math.PI * 0.5);
+    const wp = wing.attributes.position;
+    for (let i = 0; i < wp.count; i++) {
+      const wz = wp.getZ(i);
+      const span = Math.abs(wz) / 0.68;
+      // Natural arched gull dihedral (rises at elbow, gently droops at dark wingtip)
+      const archY = Math.sin(span * Math.PI * 0.85) * 0.11 - Math.pow(span, 2.2) * 0.06;
+      wp.setY(i, wp.getY(i) + archY + 0.02);
+    }
+    wing.computeVertexNormals();
+    paintVertexColor(wing, '#e2e8f0');
+    parts.push(wing);
+  }
+  const merged = safeMergeGeos(parts, true);
+  for (const g of parts) g.dispose();
+  return merged;
+}
+
+// --- 3 DISTINCT SCULPTED COASTAL ROCK & PELAGIAN RUIN FORMATIONS ---
+
+/**
+ * Formation A: Tall Jagged Coastal Sea-Stack Pillar with deep submerged root base,
+ * wave-cut notch, stratified ledges, natural summit pinnacle, and companion needle stack.
+ */
+function buildSeaStackPillarGeo(seed = 17) {
+  const parts = [];
+  // Extended deep base (height 16.5, bottom plunges well below ocean plane!)
+  const mainSpire = new THREE.CylinderGeometry(0.42, 2.65, 16.5, 14, 14);
+  const pos = mainSpire.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     let x = pos.getX(i);
     let y = pos.getY(i);
     let z = pos.getZ(i);
-    const yn = (y + h * 0.5) / h;
+    const yn = (y + 8.25) / 16.5;
     const ang = Math.atan2(z, x);
-    const step =
-      1.0 -
-      yn * 0.14 +
-      0.16 * Math.sin(yn * 14.0 + seed) +
-      0.14 * Math.cos(ang * 3 + seed * 1.3) +
-      0.08 * Math.sin(ang * 5 - yn * 8.0);
-    x *= step;
-    z *= step * 0.85;
-    if (yn > 0.92) {
-      y += (Math.sin(ang * 2 + seed) * 0.35 + Math.cos(ang * 3) * 0.22) * w * 0.35;
-    }
-    pos.setXYZ(i, x, y, z);
+    const undercut = 1.0 - 0.20 * Math.exp(-Math.pow((yn - 0.32) / 0.09, 2));
+    const strataLedge = 1.0 + 0.16 * Math.sin(yn * 24.0 + seed) + 0.14 * Math.cos(ang * 3 + seed);
+    const lean = Math.sin(yn * Math.PI * 0.78) * 0.45;
+    const capTaper = yn > 0.86 ? lerp(1.0, 0.28, (yn - 0.86) / 0.14) : 1.0;
+    x = x * undercut * strataLedge * capTaper + lean;
+    z = z * undercut * strataLedge * capTaper * 0.84;
+    pos.setXYZ(i, x, y + 3.2, z);
   }
-  core.computeVertexNormals();
-  parts.push(core);
+  mainSpire.computeVertexNormals();
+  parts.push(mainSpire);
 
-  // UV-clean SphereGeometry side rock buttresses (continuous 0..1 UVs, zero broken polyhedron UVs!)
-  for (const dir of [-1, 1]) {
-    const buttress = new THREE.SphereGeometry(w * 0.64, 14, 10);
-    const bp = buttress.attributes.position;
-    for (let k = 0; k < bp.count; k++) {
-      const bx = bp.getX(k);
-      const by = bp.getY(k);
-      const bz = bp.getZ(k);
-      const jag = 1.0 + 0.14 * Math.sin(by * 3.2 + seed + dir);
-      bp.setXYZ(k, bx * 1.15 * jag, by * 1.55 * jag, bz * 0.82 * jag);
+  const needle = new THREE.CylinderGeometry(0.24, 1.65, 11.4, 10, 8);
+  const np = needle.attributes.position;
+  for (let i = 0; i < np.count; i++) {
+    let x = np.getX(i);
+    let y = np.getY(i);
+    let z = np.getZ(i);
+    const yn = (y + 5.7) / 11.4;
+    const ang = Math.atan2(z, x);
+    const jag = 1.0 + 0.14 * Math.sin(yn * 16.0 + seed + 2.1) + 0.12 * Math.cos(ang * 3 - 1.1);
+    x *= jag;
+    z *= jag * 0.85;
+    np.setXYZ(i, x + 2.15, y + 1.2, z - 0.45);
+  }
+  needle.computeVertexNormals();
+  parts.push(needle);
+
+  const merged = safeMergeGeos(parts);
+  for (const p of parts) p.dispose();
+  return merged;
+}
+
+/**
+ * Formation B: Broad Stepped Flat-Topped Sedona Mesa Crag with deep submerged skirt & flat plateau crown.
+ */
+function buildSteppedMesaCragGeo(seed = 329) {
+  const parts = [];
+  const baseMesa = new THREE.CylinderGeometry(3.25, 5.15, 12.6, 16, 12);
+  const pos = baseMesa.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    let x = pos.getX(i);
+    let y = pos.getY(i);
+    let z = pos.getZ(i);
+    const yn = (y + 6.3) / 12.6;
+    const ang = Math.atan2(z, x);
+    const terrace = yn > 0.82 ? 0.84 : yn > 0.56 ? 0.96 : 1.12;
+    const crag = 1.0 + 0.12 * Math.cos(ang * 4 + seed) + 0.08 * Math.sin(ang * 7 - yn * 6.0);
+    x *= terrace * crag * 1.15;
+    z *= terrace * crag * 0.78;
+    pos.setXYZ(i, x, y + 1.8, z);
+  }
+  baseMesa.computeVertexNormals();
+  parts.push(baseMesa);
+
+  const shoulder = new THREE.CylinderGeometry(1.75, 3.05, 8.8, 10, 6);
+  const sp = shoulder.attributes.position;
+  for (let i = 0; i < sp.count; i++) {
+    const x = sp.getX(i);
+    const y = sp.getY(i);
+    const z = sp.getZ(i);
+    const ang = Math.atan2(z, x);
+    const f = 1.0 + 0.14 * Math.sin(ang * 3 + seed);
+    sp.setXYZ(i, x * f - 2.95, y + 0.3, z * f * 0.8 + 0.55);
+  }
+  shoulder.computeVertexNormals();
+  parts.push(shoulder);
+
+  const merged = safeMergeGeos(parts);
+  for (const p of parts) p.dispose();
+  return merged;
+}
+
+/**
+ * Formation C: Weathered Pelagian Sandstone Aqueduct Sea-Arch / Stone Ruin Span
+ * (with deep submerged pier foundations plunging cleanly beneath the ocean plane!).
+ */
+function buildAqueductSeaArchParts() {
+  const stoneParts = [];
+  const bronzeParts = [];
+
+  for (const sx of [-1, 1]) {
+    const px = sx * 3.1;
+    // Deep submerged stepped stone foundation plinth plunging down to y=-4.2
+    const plinth = new THREE.BoxGeometry(2.45, 6.8, 2.25);
+    plinth.translate(px, -0.8, 0);
+    stoneParts.push(plinth);
+
+    const shaft = new THREE.BoxGeometry(1.78, 6.2, 1.72);
+    shaft.translate(px, 4.9, 0);
+    stoneParts.push(shaft);
+
+    const cap = new THREE.BoxGeometry(2.18, 0.65, 2.08);
+    cap.translate(px, 8.15, 0);
+    stoneParts.push(cap);
+
+    const ruinBlock = new THREE.BoxGeometry(1.35, sx > 0 ? 1.55 : 0.95, 1.42);
+    ruinBlock.translate(px, 9.0 + (sx > 0 ? 0.25 : 0), 0);
+    stoneParts.push(ruinBlock);
+
+    for (const ry of [3.2, 6.6, 8.15]) {
+      const collar = new THREE.TorusGeometry(1.26, 0.14, 8, 18);
+      collar.rotateX(Math.PI * 0.5);
+      collar.scale(1.02, 1.0, 0.96);
+      collar.translate(px, ry, 0);
+      bronzeParts.push(collar);
     }
-    buttress.computeVertexNormals();
-    buttress.translate(dir * w * 0.82, -h * 0.22, 0.15 * dir);
-    parts.push(buttress);
   }
 
-  if (BufferGeometryUtils && typeof BufferGeometryUtils.mergeGeometries === 'function') {
-    const normalized = parts.map((g) => (g.index ? g.toNonIndexed() : g));
-    const merged = BufferGeometryUtils.mergeGeometries(normalized, false);
-    if (merged) return merged;
+  const archSegments = 12;
+  const archRadius = 3.1;
+  const archCenterY = 5.45;
+  for (let i = 0; i < archSegments; i++) {
+    const a = ((i + 0.5) / archSegments) * Math.PI;
+    const vx = Math.cos(a) * archRadius;
+    const vy = archCenterY + Math.sin(a) * archRadius;
+    const isKeystone = i === 5 || i === 6;
+    const block = new THREE.BoxGeometry(
+      isKeystone ? 1.05 : 0.94,
+      isKeystone ? 1.38 : 1.08,
+      isKeystone ? 1.92 : 1.66
+    );
+    block.rotateZ(a - Math.PI * 0.5);
+    block.translate(vx, vy, 0);
+    stoneParts.push(block);
   }
-  return core;
+
+  const lintel = new THREE.BoxGeometry(8.2, 0.82, 1.78);
+  lintel.translate(0, 8.92, 0);
+  stoneParts.push(lintel);
+
+  const archBronzeRing = new THREE.TorusGeometry(2.58, 0.16, 10, 26, Math.PI);
+  archBronzeRing.translate(0, archCenterY, 0.0);
+  bronzeParts.push(archBronzeRing);
+
+  const crownMedallion = new THREE.CylinderGeometry(0.68, 0.68, 1.88, 14);
+  crownMedallion.rotateX(Math.PI * 0.5);
+  crownMedallion.translate(0, 9.25, 0);
+  bronzeParts.push(crownMedallion);
+
+  const stoneGeo = safeMergeGeos(stoneParts);
+  const bronzeGeo = safeMergeGeos(bronzeParts);
+  for (const g of stoneParts) g.dispose();
+  for (const g of bronzeParts) g.dispose();
+  return { stoneGeo, bronzeGeo };
+}
+
+/**
+ * Layered 3D crossed dark pine-bough cluster for `biome_foliage_redwood.webp` (`alphaTest: 0.50`,
+ * `transparent: false` — crisp forest pine crowns with ZERO Play-Doh clay & ZERO bright halo!).
+ */
+function buildRedwoodBoughClusterGeo() {
+  const planes = [];
+  const specs = [
+    { rotY: 0.0, y: 2.0, w: 3.4, h: 4.3, tilt: 0.04 },
+    { rotY: Math.PI / 3, y: 2.1, w: 3.3, h: 4.2, tilt: -0.04 },
+    { rotY: (2 * Math.PI) / 3, y: 1.9, w: 3.2, h: 4.1, tilt: 0.05 },
+    { rotY: Math.PI * 0.5, y: 2.9, w: 2.4, h: 3.1, tilt: -0.04 },
+  ];
+  for (const sp of specs) {
+    const p = new THREE.PlaneGeometry(sp.w, sp.h, 2, 2);
+    const pos = p.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const py = pos.getY(i);
+      const vn = (py + sp.h * 0.5) / sp.h;
+      pos.setZ(i, Math.sin(vn * Math.PI * 0.85) * 0.24);
+    }
+    p.rotateX(sp.tilt);
+    p.rotateY(sp.rotY);
+    p.translate(0, sp.y, 0);
+    p.computeVertexNormals();
+    planes.push(p);
+  }
+  const merged = safeMergeGeos(planes);
+  for (const g of planes) g.dispose();
+  return merged;
+}
+
+/**
+ * Rich 7-lobe sunlit billowy cumulus cloud geometry with warm cream tops & cool undersides
+ * (1 draw call per cloud!).
+ */
+function buildMergedCloudGeo() {
+  const puffs = [];
+  const specs = [
+    { x: 0.0, y: 0.24, z: 0.0, rx: 0.92, ry: 0.64, rz: 0.72, col: '#fffdf7' },
+    { x: -0.62, y: 0.08, z: 0.10, rx: 0.74, ry: 0.52, rz: 0.62, col: '#f8fafc' },
+    { x: 0.64, y: 0.10, z: -0.06, rx: 0.78, ry: 0.54, rz: 0.64, col: '#f8fafc' },
+    { x: -1.12, y: -0.10, z: -0.04, rx: 0.56, ry: 0.36, rz: 0.48, col: '#dce6f2' },
+    { x: 1.14, y: -0.10, z: 0.06, rx: 0.58, ry: 0.36, rz: 0.50, col: '#dce6f2' },
+    { x: -0.28, y: -0.18, z: 0.16, rx: 0.82, ry: 0.34, rz: 0.58, col: '#cbd8e8' },
+    { x: 0.34, y: -0.18, z: -0.12, rx: 0.80, ry: 0.34, rz: 0.58, col: '#cbd8e8' },
+  ];
+  for (let s = 0; s < specs.length; s++) {
+    const sp = specs[s];
+    const g = new THREE.SphereGeometry(1.0, 9, 7);
+    const gp = g.attributes.position;
+    for (let i = 0; i < gp.count; i++) {
+      const vx = gp.getX(i);
+      const vy = gp.getY(i);
+      const vz = gp.getZ(i);
+      const n = 1.0 + 0.08 * Math.sin(vx * 4.5 + s) * Math.cos(vz * 4.2);
+      gp.setXYZ(i, vx * sp.rx * n + sp.x, vy * sp.ry * n + sp.y, vz * sp.rz * n + sp.z);
+    }
+    g.computeVertexNormals();
+    paintVertexColor(g, sp.col);
+    puffs.push(g);
+  }
+  const merged = safeMergeGeos(puffs, true);
+  for (const g of puffs) g.dispose();
+  return merged;
 }
 
 function loadGlideWebp(url, isSrgb = true, rx = 1, ry = 1, onReady = null) {
@@ -557,9 +1164,9 @@ function loadGlideWebp(url, isSrgb = true, rx = 1, ry = 1, onReady = null) {
     return loader.load(
       url,
       (t) => {
-        t.wrapS = rx > 1 ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
-        t.wrapT = ry > 1 ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
-        if (rx > 1 || ry > 1) t.repeat.set(rx, ry);
+        t.wrapS = rx !== 1 ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+        t.wrapT = ry !== 1 ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+        if (rx !== 1 || ry !== 1) t.repeat.set(rx, ry);
         t.colorSpace = isSrgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
         t.needsUpdate = true;
         onReady?.(t);
@@ -567,33 +1174,6 @@ function loadGlideWebp(url, isSrgb = true, rx = 1, ry = 1, onReady = null) {
       undefined,
       () => {}
     );
-  } catch {
-    return null;
-  }
-}
-
-function buildGlideEnvMap(webgl) {
-  if (!webgl || typeof THREE.PMREMGenerator !== 'function') return null;
-  try {
-    const pmrem = new THREE.PMREMGenerator(webgl);
-    const s = new THREE.Scene();
-    s.background = new THREE.Color('#56bdf0');
-    const sun = new THREE.Mesh(
-      new THREE.SphereGeometry(8, 12, 8),
-      new THREE.MeshBasicMaterial({ color: '#fffbeb', side: THREE.BackSide })
-    );
-    sun.position.set(10, 14, 8);
-    s.add(sun);
-    const water = new THREE.Mesh(
-      new THREE.PlaneGeometry(40, 40),
-      new THREE.MeshBasicMaterial({ color: '#14b8a6', side: THREE.DoubleSide })
-    );
-    water.rotation.x = -Math.PI * 0.5;
-    water.position.y = -5;
-    s.add(water);
-    const rt = pmrem.fromScene(s, 0.04);
-    pmrem.dispose();
-    return rt.texture;
   } catch {
     return null;
   }
@@ -628,13 +1208,20 @@ export class GlideRenderer {
     this._disposed = false;
     this._dummy = new THREE.Object3D();
     this._col = new THREE.Color();
+    this._wp = { x: 0, y: 0, halfW: 5, halfH: 4 };
+    this._glideFov = FOV;
+    this._glideCamZ = CAM_Z;
+
     this.skyTex = createAtmosphericSkyTexture();
     this.mesaTex = createMesaStrataTexture(256);
     this.mesaTex.repeat.set(2, 2);
     this.cascadeTex = createFeatheredCascadeTexture();
-    this.waterRippleTex = createLagoonRippleTex(256);
-    this.waterRippleTex.repeat.set(10, 4);
-    this.envTex = buildGlideEnvMap(webgl);
+
+    this.glowSpriteTex = createSoftGlowSpriteTexture(128);
+    this.shoreFoamTex = createSoftShoreFoamTexture(128);
+    this.rainbowArcTex = createSoftRainbowArcTexture(256, 128);
+    this.horizonMistTex = createHorizonMistTexture(64, 128);
+    this.updraftTex = createSoftUpdraftTexture(128, 256);
 
     this._initScene();
   }
@@ -649,9 +1236,29 @@ export class GlideRenderer {
 
   prewarm() {
     try {
+      const savedVis = [];
+      this.scene.traverse((o) => {
+        if (!o.visible) {
+          savedVis.push(o);
+          o.visible = true;
+        }
+      });
       this.webgl?.compile?.(this.scene, this.camera);
+      for (const o of savedVis) o.visible = false;
     } catch {
       // Ignore
+    }
+  }
+
+  _updateGlideCamMetrics() {
+    const aspect = this.width / Math.max(1, this.height);
+    const portrait = aspect < 0.85;
+    this._glideFov = portrait ? 50 : 46;
+    this._glideCamZ = portrait ? 11.2 : 9.4;
+    if (this.camera) {
+      this.camera.aspect = aspect;
+      this.camera.fov = this._glideFov;
+      this.camera.updateProjectionMatrix();
     }
   }
 
@@ -659,216 +1266,288 @@ export class GlideRenderer {
     this.width = Math.max(1, width || 390);
     this.height = Math.max(1, height || 620);
     this.dpr = dpr;
-    if (this.camera) {
-      this.camera.aspect = this.width / this.height;
-      this.camera.updateProjectionMatrix();
-    }
+    this._updateGlideCamMetrics();
   }
 
-  _screenToWorld(sx, sy, z = 0) {
-    const dist = CAM_Z - z;
-    const halfH = Math.tan((FOV * 0.5) * DEG) * dist;
+  _screenToWorld(sx, sy, z = 0, out = this._wp) {
+    const dist = this._glideCamZ - z;
+    const halfH = Math.tan((this._glideFov * 0.5) * DEG) * dist;
     const halfW = halfH * (this.width / Math.max(1, this.height));
-    return {
-      x: ((sx / Math.max(1, this.width)) * 2 - 1) * halfW,
-      y: (1 - (sy / Math.max(1, this.height)) * 2) * halfH,
-      halfW,
-      halfH,
-    };
+    out.x = ((sx / Math.max(1, this.width)) * 2 - 1) * halfW;
+    out.y = (1 - (sy / Math.max(1, this.height)) * 2) * halfH;
+    out.halfW = halfW;
+    out.halfH = halfH;
+    return out;
   }
 
   _pxScale(px, z = 0) {
-    const dist = CAM_Z - z;
-    const halfH = Math.tan((FOV * 0.5) * DEG) * dist;
+    const dist = this._glideCamZ - z;
+    const halfH = Math.tan((this._glideFov * 0.5) * DEG) * dist;
     return (px / Math.max(1, this.height)) * (2 * halfH);
   }
 
   _initScene() {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#2578c4');
-    this.scene.fog = new THREE.Fog('#bae6fd', 42, 165);
-    if (this.envTex) this.scene.environment = this.envTex;
+    this.scene.background = new THREE.Color('#1d70b8');
+    this.scene.fog = new THREE.FogExp2('#a5d7ed', 0.0078);
 
     this.camera = new THREE.PerspectiveCamera(FOV, this.width / Math.max(1, this.height), 0.2, 240);
-    this.camera.position.set(0, 0, CAM_Z);
+    this._updateGlideCamMetrics();
+    this.camera.position.set(0, 0, this._glideCamZ);
 
-    this.hemiLight = new THREE.HemisphereLight('#fffbeb', '#14b8a6', 1.45);
+    // Unified Main-Game Lighting: warm golden directional key + cool azure hemisphere bounce + warm rim
+    this.hemiLight = new THREE.HemisphereLight('#7cc8f0', '#28455c', 1.38);
     this.scene.add(this.hemiLight);
 
-    this.sunLight = new THREE.DirectionalLight('#fff7ed', 2.65);
-    this.sunLight.position.set(14, 22, 18);
+    this.sunLight = new THREE.DirectionalLight('#fff1d6', 2.25);
+    this.sunLight.position.set(14, 24, 18);
     this.scene.add(this.sunLight);
 
-    // Multi-Band Cumulus Sky & Layered Gorge Horizon (`assets/textures/mg_canyon_sky.webp`)
-    // Sized & centered at `z = -56` so clouds + distant canyon mountains fill 100% of the sky above the water!
+    this.rimLight = new THREE.DirectionalLight('#fde6b8', 0.85);
+    this.rimLight.position.set(-14, 12, 10);
+    this.scene.add(this.rimLight);
+
+    // Studio-Painted Coastal Arch & Rainbow Waterfall Panorama (`assets/textures/mg_bg_frill_glide.webp`)
     this.skyBackdropMat = new THREE.MeshBasicMaterial({ map: this.skyTex, fog: false, depthWrite: false });
-    this.skyBackdrop = new THREE.Mesh(new THREE.PlaneGeometry(165, 52), this.skyBackdropMat);
-    this.skyBackdrop.position.set(0, 8.8, -56);
+    this.skyBackdrop = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.skyBackdropMat);
+    this.skyBackdrop.position.set(0, 0, -56);
     this.scene.add(this.skyBackdrop);
 
-    this.sunDisc = new THREE.Mesh(
-      new THREE.CircleGeometry(3.2, 28),
-      new THREE.MeshBasicMaterial({ color: '#fffbeb', fog: false, depthWrite: false })
-    );
-    this.sunDisc.position.set(12, 10.5, -52);
-    this.scene.add(this.sunDisc);
-
-    // Parallax 3D PBR Sedona Mesas + Feathered Redwood/Palm Foliage Cards + Shore-Foam Rings!
+    // 3 DISTINCT SCULPTED COASTAL ROCK & RUIN FORMATIONS (Instanced!)
     this.canyonGroup = new THREE.Group();
+
+    this.seaStackMat = new THREE.MeshStandardMaterial({
+      color: '#ffffff',
+      map: this.mesaTex,
+      roughness: 0.78,
+      metalness: 0.04,
+    });
     this.cliffMat = new THREE.MeshStandardMaterial({
       color: '#ffffff',
       map: this.mesaTex,
-      roughness: 0.72,
+      roughness: 0.74,
       metalness: 0.04,
     });
-    this.foliageCardMat = new THREE.MeshStandardMaterial({
-      color: '#ffffff',
-      roughness: 0.65,
-      alphaTest: 0.32,
+    this.archStoneMat = new THREE.MeshStandardMaterial({
+      color: '#f2dec8',
+      map: this.mesaTex,
+      roughness: 0.64,
+      metalness: 0.08,
+    });
+    this.archBronzeMat = new THREE.MeshStandardMaterial({
+      color: '#e5be7e',
+      roughness: 0.28,
+      metalness: 0.84,
+    });
+    this.coniferMat = new THREE.MeshStandardMaterial({
+      color: '#436946',
+      roughness: 0.78,
+      metalness: 0.02,
+      alphaTest: 0.50,
       side: THREE.DoubleSide,
-      transparent: true,
+      transparent: false,
     });
     this.fallsMat = new THREE.MeshBasicMaterial({
       map: this.cascadeTex,
       color: '#f0fdfa',
       transparent: true,
-      opacity: 0.90,
+      opacity: 0.82,
+      side: THREE.DoubleSide,
       depthWrite: false,
     });
-    const mistPlumeMat = new THREE.MeshBasicMaterial({
-      color: '#f0fdfa',
+    this.shoreFoamMat = new THREE.MeshBasicMaterial({
+      map: this.shoreFoamTex,
+      color: '#e6fcff',
       transparent: true,
-      opacity: 0.42,
+      opacity: 0.76,
       blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    const shoreFoamMat = new THREE.MeshBasicMaterial({
-      color: '#f0fdfa',
-      transparent: true,
-      opacity: 0.68,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
 
-    this.canyonPillars = [];
-    for (let i = 0; i < MAX_CANYON_PILLARS; i++) {
-      const p = new THREE.Group();
-      const h = 7.6 + (i % 4) * 2.4;
-      const w = 2.4 + (i % 3) * 0.85;
-      const mesaGeo = buildCraggyMesaGeo(w, h, 300 + i * 29);
-      const mesa = new THREE.Mesh(mesaGeo, this.cliffMat);
-      mesa.position.y = h * 0.5 - 2.2;
-      p.add(mesa);
+    const seaStackGeo = buildSeaStackPillarGeo(17);
+    const mesaCragGeo = buildSteppedMesaCragGeo(329);
+    const seaArchParts = buildAqueductSeaArchParts();
+    const foamQuadGeo = new THREE.PlaneGeometry(10.8, 10.8);
+    foamQuadGeo.rotateX(-Math.PI * 0.49);
+    const treeCrownGeo = buildRedwoodBoughClusterGeo();
+    const fallsCardGeo = new THREE.PlaneGeometry(1.9, 8.2);
 
-      // Whitewater shore-foam collar ring where the mesa meets the sparkling river/lagoon!
-      const foamRing = new THREE.Mesh(new THREE.RingGeometry(w * 1.05, w * 1.55, 24), shoreFoamMat);
-      foamRing.rotation.x = -Math.PI * 0.49;
-      foamRing.position.y = 0.08;
-      p.add(foamRing);
+    this.seaStackInst = new THREE.InstancedMesh(seaStackGeo, this.seaStackMat, NUM_SEA_STACKS);
+    this.mesaCragInst = new THREE.InstancedMesh(mesaCragGeo, this.cliffMat, NUM_MESA_CRAGS);
+    this.seaArchStoneInst = new THREE.InstancedMesh(seaArchParts.stoneGeo, this.archStoneMat, NUM_SEA_ARCHES);
+    this.seaArchBronzeInst = new THREE.InstancedMesh(seaArchParts.bronzeGeo, this.archBronzeMat, NUM_SEA_ARCHES);
+    this.mesaFoamInst = new THREE.InstancedMesh(foamQuadGeo, this.shoreFoamMat, TOTAL_FORMATIONS + NUM_SEA_ARCHES);
+    this.mesaFoamInst.renderOrder = 3;
+    this.mesaTreeInst = new THREE.InstancedMesh(treeCrownGeo, this.coniferMat, NUM_MESA_CRAGS * 3);
+    this.mesaFallsInst = new THREE.InstancedMesh(fallsCardGeo, this.fallsMat, NUM_MESA_CRAGS);
 
-      // Feathered Alpha-Cutout Redwood/Pine Clifftop Botanical Cards (ZERO green pancake caps!)
-      for (let c = 0; c < 3; c++) {
-        const card = new THREE.Mesh(new THREE.PlaneGeometry(w * 1.15, w * 1.28), this.foliageCardMat);
-        card.position.set((c - 1) * w * 0.48, h - 1.55 + (c % 2) * 0.25, (c - 1) * 0.22);
-        card.rotation.y = (c - 1) * 0.35;
-        p.add(card);
-      }
-
-      if (i % 3 === 0) {
-        const wf = new THREE.Mesh(new THREE.PlaneGeometry(1.75, h * 0.88), this.fallsMat);
-        wf.position.set(0.12, h * 0.44 - 1.8, w * 0.96);
-        const mist = new THREE.Mesh(new THREE.SphereGeometry(w * 0.62, 12, 8), mistPlumeMat);
-        mist.scale.set(1.45, 0.52, 0.85);
-        mist.position.set(0.12, 0.25, w * 1.12);
-        p.add(wf, mist);
-      }
-      this.canyonGroup.add(p);
-      this.canyonPillars.push(p);
+    for (const im of [
+      this.seaStackInst,
+      this.mesaCragInst,
+      this.seaArchStoneInst,
+      this.seaArchBronzeInst,
+      this.mesaFoamInst,
+      this.mesaTreeInst,
+      this.mesaFallsInst,
+    ]) {
+      im.frustumCulled = false;
+      this.canyonGroup.add(im);
     }
     this.scene.add(this.canyonGroup);
 
-    // Prismatic Rainbow Mist Arcs hovering in the canyon waterfall spray!
+    // Soft Feathered Prismatic Rainbow Mist Arcs (1 draw call each instead of 5 hard RingGeometry bands!)
     this.rainbows = [];
-    const rainbowCols = ['#fb7185', '#fde047', '#4ade80', '#38bdf8', '#c084fc'];
+    this.rainbowMat = new THREE.MeshBasicMaterial({
+      map: this.rainbowArcTex,
+      color: '#ffffff',
+      transparent: true,
+      opacity: 0.68,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const rainbowGeo = new THREE.PlaneGeometry(11.6, 5.8);
     for (let r = 0; r < MAX_RAINBOWS; r++) {
-      const rg = new THREE.Group();
-      for (let b = 0; b < rainbowCols.length; b++) {
-        const band = new THREE.Mesh(
-          new THREE.RingGeometry(3.4 + b * 0.18, 3.58 + b * 0.18, 28, 1, 0, Math.PI),
-          new THREE.MeshBasicMaterial({
-            color: rainbowCols[b],
-            transparent: true,
-            opacity: 0.24,
-            blending: THREE.AdditiveBlending,
-            side: THREE.DoubleSide,
-            depthWrite: false,
-          })
-        );
-        rg.add(band);
-      }
-      this.scene.add(rg);
-      this.rainbows.push(rg);
+      const rm = new THREE.Mesh(rainbowGeo, this.rainbowMat);
+      this.scene.add(rm);
+      this.rainbows.push(rm);
     }
 
-    // Sparkling Canyon River / Coral Lagoon Water Surface (`mg_whitewater_rapids.webp`, zero grid lines!)
-    this.waterMat = new THREE.MeshStandardMaterial({
-      color: '#ffffff',
-      map: this.waterRippleTex,
-      bumpMap: this.waterRippleTex,
-      bumpScale: 0.12,
-      emissive: '#0891b2',
-      emissiveMap: this.waterRippleTex,
-      emissiveIntensity: 0.28,
-      roughness: 0.10,
-      metalness: 0.20,
+    // Real Animated GLSL Multi-Wave Fresnel Specular Coastal Ocean (ZERO Voronoi hexagon grid, seamless alpha horizon!)
+    this.waterGeo = new THREE.PlaneGeometry(118, 48, 48, 18);
+    this.waterMat = new THREE.ShaderMaterial({
+      vertexShader: GLIDE_OCEAN_VERT,
+      fragmentShader: GLIDE_OCEAN_FRAG,
+      transparent: true,
+      depthWrite: true,
+      uniforms: {
+        uTime: { value: 0 },
+        uScroll: { value: 0 },
+        uDeepColor: { value: new THREE.Color('#064778') },
+        uShallowColor: { value: new THREE.Color('#0f98ab') },
+        uSkyColor: { value: new THREE.Color('#b7e2f5') },
+        uSunColor: { value: new THREE.Color('#fff1d6') },
+        uSunDir: { value: new THREE.Vector3(14, 24, 18).normalize() },
+        uFogColor: { value: new THREE.Color('#a5d7ed') },
+        uFogDensity: { value: 0.0078 },
+      },
     });
-    this.waterGeo = new THREE.PlaneGeometry(110, 44, 48, 16);
     this.waterMesh = new THREE.Mesh(this.waterGeo, this.waterMat);
     this.waterMesh.rotation.x = -Math.PI * 0.49;
-    this.waterMesh.position.set(0, -4.2, -12);
+    this.waterMesh.position.set(0, -4.2, -11.5);
     this.scene.add(this.waterMesh);
 
-    // Mount 1K Seamless PBR WebP Textures (`mg_canyon_sky.webp`, `mg_sedona_cliff_*`, `mg_whitewater_rapids.webp`, `biome_foliage_redwood.webp`)
-    loadGlideWebp('assets/textures/mg_canyon_sky.webp', true, 1, 1, (t) => {
+    // Soft Sunlit Horizon Mist Veil seamlessly blending the 3D ocean into `mg_bg_frill_glide.webp`
+    this.horizonMistMat = new THREE.MeshBasicMaterial({
+      map: this.horizonMistTex,
+      color: '#eef8ff',
+      transparent: true,
+      opacity: 0.68,
+      fog: false,
+      depthWrite: false,
+    });
+    this.horizonMistMesh = new THREE.Mesh(new THREE.PlaneGeometry(140, 9.5), this.horizonMistMat);
+    this.horizonMistMesh.position.set(0, -1.8, -36);
+    this.scene.add(this.horizonMistMesh);
+
+    // Departure Spire Crown (`summitGroup` — hidden when phase !== 'intro') & Arrival Spire (`destTowerGroup`)
+    this.spireMat = new THREE.MeshStandardMaterial({
+      color: '#e8d0b5',
+      map: this.mesaTex,
+      roughness: 0.62,
+      metalness: 0.12,
+    });
+
+    // Mount Studio-Painted Coastal Arch Backdrop & 1K Local PBR WebP Textures
+    loadGlideWebp('assets/textures/mg_bg_frill_glide.webp', true, 1, 1, (t) => {
       if (this._disposed) return;
+      this.skyBgWebp = t;
       this.skyBackdropMat.map = t;
       this.skyBackdropMat.needsUpdate = true;
     });
-    loadGlideWebp('assets/textures/mg_sedona_cliff_albedo.webp', true, 2, 2, (t) => {
+    // Brand-new Studio PBR Stratified Sedona Sandstone Strata (`mg_pbr_sedona_strata`, ZERO Voronoi cracks!)
+    loadGlideWebp('assets/textures/mg_pbr_sedona_strata_albedo.webp', true, 2, 2, (t) => {
       if (this._disposed) return;
+      this.seaStackMat.map = t;
+      this.seaStackMat.needsUpdate = true;
       this.cliffMat.map = t;
       this.cliffMat.needsUpdate = true;
     });
-    loadGlideWebp('assets/textures/mg_sedona_cliff_normal.webp', false, 2, 2, (t) => {
+    loadGlideWebp('assets/textures/mg_pbr_sedona_strata_normal.webp', false, 2, 2, (t) => {
       if (this._disposed) return;
+      this.seaStackMat.normalMap = t;
+      this.seaStackMat.normalScale.set(1.35, 1.35);
+      this.seaStackMat.needsUpdate = true;
       this.cliffMat.normalMap = t;
-      this.cliffMat.normalScale.set(1.25, 1.25);
+      this.cliffMat.normalScale.set(1.35, 1.35);
       this.cliffMat.needsUpdate = true;
     });
-    loadGlideWebp('assets/textures/mg_whitewater_rapids.webp', true, 5, 2, (t) => {
+    loadGlideWebp('assets/textures/arch_canyon_sandstone_albedo.webp', true, 2, 2, (t) => {
       if (this._disposed) return;
-      this.waterWebp = t;
-      this.waterMat.map = t;
-      this.waterMat.bumpMap = t;
-      this.waterMat.emissiveMap = t;
-      this.waterMat.needsUpdate = true;
+      this.archStoneMat.map = t;
+      this.archStoneMat.needsUpdate = true;
+      this.spireMat.map = t;
+      this.spireMat.needsUpdate = true;
+    });
+    loadGlideWebp('assets/textures/arch_canyon_sandstone_normal.webp', false, 2, 2, (t) => {
+      if (this._disposed) return;
+      this.archStoneMat.normalMap = t;
+      this.archStoneMat.normalScale.set(1.15, 1.15);
+      this.archStoneMat.needsUpdate = true;
+      this.spireMat.normalMap = t;
+      this.spireMat.normalScale.set(1.15, 1.15);
+      this.spireMat.needsUpdate = true;
+    });
+    loadGlideWebp('assets/textures/arch_canyon_sandstone_orm.webp', false, 2, 2, (t) => {
+      if (this._disposed) return;
+      this.archStoneMat.roughnessMap = t;
+      this.archStoneMat.needsUpdate = true;
+    });
+    loadGlideWebp('assets/textures/arch_antique_bronze_albedo.webp', true, 2, 1, (t) => {
+      if (this._disposed) return;
+      this.archBronzeMat.map = t;
+      this.archBronzeMat.needsUpdate = true;
+      if (this.gateTorusMat) {
+        this.gateTorusMat.map = t;
+        this.gateTorusMat.needsUpdate = true;
+      }
+    });
+    loadGlideWebp('assets/textures/arch_antique_bronze_normal.webp', false, 2, 1, (t) => {
+      if (this._disposed) return;
+      this.archBronzeMat.normalMap = t;
+      this.archBronzeMat.normalScale.set(1.0, 1.0);
+      this.archBronzeMat.needsUpdate = true;
+      if (this.gateTorusMat) {
+        this.gateTorusMat.normalMap = t;
+        this.gateTorusMat.normalScale.set(1.0, 1.0);
+        this.gateTorusMat.needsUpdate = true;
+      }
+    });
+    loadGlideWebp('assets/textures/arch_antique_bronze_orm.webp', false, 2, 1, (t) => {
+      if (this._disposed) return;
+      this.archBronzeMat.roughnessMap = t;
+      this.archBronzeMat.metalnessMap = t;
+      this.archBronzeMat.needsUpdate = true;
     });
     loadGlideWebp('assets/textures/biome_foliage_redwood.webp', true, 1, 1, (t) => {
       if (this._disposed) return;
-      this.foliageCardMat.map = t;
-      this.foliageCardMat.needsUpdate = true;
+      this.coniferMat.map = t;
+      this.coniferMat.needsUpdate = true;
     });
 
-    // Departure Spire Crown (`summit`) & Arrival Spire + Sunlit Shore (`tower`)
-    const spireMat = new THREE.MeshStandardMaterial({ color: '#64748b', roughness: 0.55, metalness: 0.18 });
     this.summitGroup = new THREE.Group();
-    const sumCol = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 2.3, 14, 16), spireMat);
+    const sumCol = new THREE.Mesh(new THREE.CylinderGeometry(1.85, 2.25, 14, 18), this.spireMat);
     sumCol.position.y = -7.0;
-    this.summitGroup.add(sumCol);
+    const sumCap = new THREE.Mesh(new THREE.TorusGeometry(1.92, 0.14, 8, 22), this.archBronzeMat);
+    sumCap.rotation.x = Math.PI * 0.5;
+    sumCap.position.y = -0.1;
+    this.summitGroup.add(sumCol, sumCap);
+    this.summitGroup.visible = false;
     this.scene.add(this.summitGroup);
 
     this.destTowerGroup = new THREE.Group();
-    const destCol = new THREE.Mesh(new THREE.CylinderGeometry(2.3, 2.7, 22, 18), spireMat);
+    const destCol = new THREE.Mesh(new THREE.CylinderGeometry(2.3, 2.7, 22, 18), this.spireMat);
     destCol.position.y = 2.0;
     const shore = new THREE.Mesh(
       new THREE.CylinderGeometry(4.8, 5.8, 1.2, 16),
@@ -876,37 +1555,37 @@ export class GlideRenderer {
     );
     shore.position.set(-2.6, -0.4, 0.5);
     this.destTowerGroup.add(destCol, shore);
+    this.destTowerGroup.visible = false;
     this.scene.add(this.destTowerGroup);
 
     // Gateway Frill-Glider Hero
     this.hero = new AdaptiveFrillGliderHero(this.skinId);
     this.scene.add(this.hero.group);
 
-    // Golden Thermal Ring Gates
+    // Gilded Antique-Bronze Thermal Ring Gates
     this.gateSlots = [];
+    const gateTorusGeo = new THREE.TorusGeometry(1, 0.10, 12, 30);
+    const gateAuraGeo = new THREE.PlaneGeometry(2.05, 2.05);
+    this.gateTorusMat = new THREE.MeshStandardMaterial({
+      color: '#f7d47c',
+      emissive: '#b45309',
+      emissiveIntensity: 0.42,
+      metalness: 0.84,
+      roughness: 0.26,
+    });
+    const gateAuraMat = new THREE.MeshBasicMaterial({
+      map: this.shoreFoamTex,
+      color: '#67e8f9',
+      transparent: true,
+      opacity: 0.24,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
     for (let i = 0; i < MAX_GATES; i++) {
       const g = new THREE.Group();
-      const torus = new THREE.Mesh(
-        new THREE.TorusGeometry(1, 0.09, 10, 28),
-        new THREE.MeshStandardMaterial({
-          color: '#fde047',
-          emissive: '#f59e0b',
-          emissiveIntensity: 0.85,
-          metalness: 0.78,
-          roughness: 0.2,
-        })
-      );
-      const aura = new THREE.Mesh(
-        new THREE.RingGeometry(0.82, 0.98, 24),
-        new THREE.MeshBasicMaterial({
-          color: '#5efce8',
-          transparent: true,
-          opacity: 0.35,
-          side: THREE.DoubleSide,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-        })
-      );
+      const torus = new THREE.Mesh(gateTorusGeo, this.gateTorusMat);
+      const aura = new THREE.Mesh(gateAuraGeo, gateAuraMat);
       torus.rotation.y = Math.PI * 0.32;
       aura.rotation.y = Math.PI * 0.32;
       g.add(torus, aura);
@@ -915,16 +1594,17 @@ export class GlideRenderer {
       this.gateSlots.push(g);
     }
 
-    // Rising Sunlit Updraft Thermal Columns
+    // Soft Feathered Rising Sunlit Updraft Wind-Wisp Columns (ZERO hard vertical cylinder edge!)
     this.thermalMeshes = [];
-    const thermGeo = new THREE.CylinderGeometry(1, 1.25, 16, 14, 1, true);
+    const thermGeo = new THREE.PlaneGeometry(2.6, 13.5);
     for (let i = 0; i < MAX_THERMALS; i++) {
       const tm = new THREE.Mesh(
         thermGeo,
         new THREE.MeshBasicMaterial({
+          map: this.updraftTex,
           color: '#fde047',
           transparent: true,
-          opacity: 0.14,
+          opacity: 0.32,
           blending: THREE.AdditiveBlending,
           side: THREE.DoubleSide,
           depthWrite: false,
@@ -935,60 +1615,59 @@ export class GlideRenderer {
       this.thermalMeshes.push(tm);
     }
 
-    // Water-Dew Orbs, Dragonfly Kites & Golden Harmonic Seeds (`stage.lanterns`)
+    // Sleek Faceted Crystalline Water-Dew Gems & Golden Harmonic Seeds (`stage.lanterns`)
     this.dewInst = new THREE.InstancedMesh(
-      new THREE.OctahedronGeometry(0.24, 1),
+      buildWaterDewCrystalGeo(),
       new THREE.MeshStandardMaterial({
         color: '#ffffff',
         emissive: '#38bdf8',
-        emissiveIntensity: 0.9,
-        roughness: 0.1,
+        emissiveIntensity: 0.85,
+        metalness: 0.45,
+        roughness: 0.12,
       }),
       MAX_DEW
     );
     this.dewInst.frustumCulled = false;
     this.scene.add(this.dewInst);
 
-    // Squall Clouds & Lightning Strikes (`stage.clouds`)
+    // Sculpted 7-Lobe Cumulus Squall Clouds & Lightning Strikes (1 draw call per active cloud!)
     this.cloudSlots = [];
-    const cloudMat = new THREE.MeshStandardMaterial({ color: '#e2e8f0', roughness: 0.85 });
+    const mergedCloudGeo = buildMergedCloudGeo();
+    const boltGeo = new THREE.CylinderGeometry(0.09, 0.05, 12, 6);
+    const boltMat = new THREE.MeshBasicMaterial({ color: '#fef08a' });
     for (let i = 0; i < MAX_CLOUDS; i++) {
       const cg = new THREE.Group();
-      for (const [ox, oy, sc] of [
-        [0, 0.08, 1.0],
-        [-0.65, -0.05, 0.78],
-        [0.65, -0.04, 0.82],
-      ]) {
-        const puff = new THREE.Mesh(new THREE.SphereGeometry(0.75 * sc, 12, 10), cloudMat.clone());
-        puff.scale.set(1.3, 0.75, 0.85);
-        puff.position.set(ox, oy, 0);
-        cg.add(puff);
-      }
-      const bolt = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.09, 0.05, 12, 6),
-        new THREE.MeshBasicMaterial({ color: '#fef08a' })
+      const body = new THREE.Mesh(
+        mergedCloudGeo,
+        new THREE.MeshStandardMaterial({
+          color: '#ffffff',
+          vertexColors: true,
+          emissive: '#cfe6f7',
+          emissiveIntensity: 0.24,
+          roughness: 0.96,
+        })
       );
+      cg.add(body);
+      const bolt = new THREE.Mesh(boltGeo, boltMat);
       bolt.position.y = -6.0;
       bolt.visible = false;
       cg.add(bolt);
-      cg.userData = { bolt };
+      cg.userData = { body, bolt };
       cg.visible = false;
       this.scene.add(cg);
       this.cloudSlots.push(cg);
     }
 
-    // Canyon Swallows / Seabirds (`stage.gulls`)
-    const birdGeo = new THREE.ConeGeometry(0.16, 0.52, 5);
-    birdGeo.rotateZ(Math.PI * 0.5);
+    // Sculpted 3D Coastal Gulls / Canyon Swallows (`stage.gulls`, ZERO plastic cones!)
     this.birdInst = new THREE.InstancedMesh(
-      birdGeo,
-      new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.45 }),
+      buildCoastalGullGeo(),
+      new THREE.MeshStandardMaterial({ color: '#ffffff', vertexColors: true, roughness: 0.45 }),
       MAX_BIRDS
     );
     this.birdInst.frustumCulled = false;
     this.scene.add(this.birdInst);
 
-    // Rings, Particles & Popups
+    // Rings, Soft Radial-Alpha Glowing Spray/Mist Sprites (ZERO hard hexagons!) & Popups
     this.ringInst = new THREE.InstancedMesh(
       new THREE.TorusGeometry(1, 0.045, 8, 24),
       new THREE.MeshBasicMaterial({
@@ -1001,12 +1680,14 @@ export class GlideRenderer {
       MAX_RINGS
     );
     this.partInst = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(0.08, 6, 6),
+      new THREE.PlaneGeometry(0.34, 0.34),
       new THREE.MeshBasicMaterial({
+        map: this.glowSpriteTex,
         color: '#ffffff',
         transparent: true,
-        opacity: 0.82,
+        opacity: 0.84,
         blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
         depthWrite: false,
       }),
       MAX_PARTICLES
@@ -1048,45 +1729,180 @@ export class GlideRenderer {
     this.scene.background.set(pal.skyTop);
     this.scene.fog.color.set(pal.fog);
     this.sunLight.color.set(pal.sun);
-    this.cliffMat.color.set(bKey === 'alpine_lake' ? '#cbd5e1' : bKey === 'storm_ocean' ? '#94a3b8' : '#ffffff');
+    this.hemiLight.color.set(pal.hemiSky);
+    this.hemiLight.groundColor.set(pal.hemiGnd);
+    this.cliffMat.color.set(pal.cliff);
+    this.seaStackMat.color.set(pal.cliff);
 
     const scroll = Number(stage.scroll) || time * 110;
-    this.cascadeTex.offset.set(0, -(time * 1.35) % 1);
-    this.waterRippleTex.offset.set((scroll * 0.0025) % 1, Math.sin(time * 0.4) * 0.05);
-    if (this.waterWebp) {
-      this.waterWebp.offset.set((scroll * 0.0022) % 1, Math.sin(time * 0.4) * 0.04);
-    }
-    // Animate organic water swells so zero flat plane lines ever appear
-    const wPos = this.waterGeo.attributes.position;
-    for (let i = 0; i < wPos.count; i++) {
-      const wx = wPos.getX(i);
-      const wy = wPos.getY(i);
-      wPos.setZ(i, Math.sin(wx * 0.35 + scroll * 0.02 + time * 1.6) * 0.16 + Math.cos(wy * 0.45 + time * 1.2) * 0.10);
-    }
-    wPos.needsUpdate = true;
+    const aspect = this.width / Math.max(1, this.height);
+    const portrait = aspect < 0.85;
+    this._updateGlideCamMetrics();
 
-    const seaY = stage.seaY ?? this.height * 0.905;
+    // Aspect-cover studio-painted coastal arch & rainbow waterfall panorama
+    const bgDist = this._glideCamZ + 56;
+    const bgH = 2 * Math.tan((this._glideFov * 0.5) * DEG) * bgDist * 1.08;
+    const bgW = bgH * aspect * 1.08;
+    this.skyBackdrop.scale.set(bgW, bgH, 1);
+    this.skyBackdrop.position.set(0, 0, -56);
+    if (this.skyBgWebp) {
+      const imgAspect = 1376 / 768;
+      const quadAspect = bgW / Math.max(0.01, bgH);
+      if (quadAspect < imgAspect) {
+        const repX = clamp(quadAspect / imgAspect, 0.30, 1);
+        const drift = (Math.sin(scroll * 0.00045) * 0.5 + 0.5) * (1 - repX);
+        this.skyBgWebp.repeat.set(repX, 1);
+        this.skyBgWebp.offset.set(drift, 0);
+      } else {
+        const repY = clamp(imgAspect / quadAspect, 0.48, 1);
+        this.skyBgWebp.repeat.set(1, repY);
+        this.skyBgWebp.offset.set(0, (1 - repY) * 0.5);
+      }
+    }
+
+    this.cascadeTex.offset.set(0, -(time * 1.28) % 1);
+    this.updraftTex.offset.set(0, -(time * 0.92) % 1);
+
+    // Update GPU GLSL Fresnel Specular Ocean Shader uniforms (0 CPU vertex loops!)
+    const ou = this.waterMat.uniforms;
+    ou.uTime.value = time;
+    ou.uScroll.value = scroll;
+    ou.uDeepColor.value.set(pal.waterDeep);
+    ou.uShallowColor.value.set(pal.waterShallow);
+    ou.uSkyColor.value.set(pal.waterSky);
+    ou.uSunColor.value.set(pal.sun);
+    ou.uFogColor.value.set(pal.fog);
+
+    const seaY = stage.seaY ?? this.height * 0.89;
     const seaW = this._screenToWorld(this.width * 0.5, seaY, 0);
-    this.waterMesh.position.y = seaW.y - 0.12;
+    const seaWorldY = seaW.y;
+    this.waterMesh.position.y = seaWorldY - 0.18;
+    this.horizonMistMesh.position.y = seaWorldY + 1.35;
+    this.horizonMistMat.color.set(pal.fog);
 
-    // Scroll Parallax 3D Canyon Mesas (aligned at `seaW.y` waterline so shore-foam rings sit on the water!)
-    for (let i = 0; i < MAX_CANYON_PILLARS; i++) {
-      const p = this.canyonPillars[i];
-      const z = -9.5 - (i % 3) * 6.5;
-      const px = (((i * 8.2 - scroll * (0.014 - (i % 3) * 0.0025)) % 96) + 96) % 96 - 48;
-      p.position.set(px, seaW.y - 0.15, z);
+    // Scroll Parallax 3 Distinct Sculpted Coastal Formations (Sea-Stacks, Sedona Mesas & Sandstone Aqueduct Sea-Arches)
+    const dm = this._dummy;
+    const baseScale = portrait ? 0.68 : 0.80;
+    let foamIdx = 0;
+    let mTree = 0;
+    let mFalls = 0;
+
+    // (a) Tall Jagged Coastal Sea-Stack Pillars (`mg_pbr_sedona_strata`, seated deeply into ocean!)
+    for (let i = 0; i < NUM_SEA_STACKS; i++) {
+      const z = -16.5 - (i % 2) * 8.5;
+      const speed = 0.013 - (i % 2) * 0.0025;
+      const px = ((((i * 23.4 + 6.0) - scroll * speed) % 116) + 116) % 116 - 58;
+      const sc = baseScale * (0.86 + (i % 3) * 0.14);
+
+      dm.position.set(px, seaWorldY - 2.35, z);
+      dm.rotation.set(0, i * 1.15, 0);
+      dm.scale.set(sc, sc * (0.94 + (i % 3) * 0.12), sc);
+      dm.updateMatrix();
+      this.seaStackInst.setMatrixAt(i, dm.matrix);
+
+      // Feathered sunlit surf foam collar riding on top of the GLSL ocean waterline
+      const wlY = seaWorldY + 0.16 + (z + 11.5) * -0.031;
+      dm.position.set(px + 0.3 * sc, wlY, z);
+      dm.rotation.set(0, time * 0.12 + i, 0);
+      dm.scale.set(sc * 0.96, 1, sc * 0.96);
+      dm.updateMatrix();
+      this.mesaFoamInst.setMatrixAt(foamIdx++, dm.matrix);
     }
+
+    // (b) Stepped Flat-Topped Sedona Mesa Crags + Waterfalls + Dark Pine Crowns (`mg_pbr_sedona_strata`)
+    for (let i = 0; i < NUM_MESA_CRAGS; i++) {
+      const z = -22.5 - (i % 2) * 6.5;
+      const speed = 0.010 - (i % 2) * 0.0018;
+      const px = ((((i * 24.8 + 14.5) - scroll * speed) % 122) + 122) % 122 - 61;
+      const sc = baseScale * (0.92 + (i % 3) * 0.15);
+      const sy = sc * (0.90 + (i % 3) * 0.12);
+
+      dm.position.set(px, seaWorldY - 2.45, z);
+      dm.rotation.set(0, i * 0.85, 0);
+      dm.scale.set(sc, sy, sc);
+      dm.updateMatrix();
+      this.mesaCragInst.setMatrixAt(i, dm.matrix);
+
+      const wlY = seaWorldY + 0.18 + (z + 11.5) * -0.031;
+      dm.position.set(px, wlY, z);
+      dm.rotation.set(0, -time * 0.08 + i, 0);
+      dm.scale.set(sc * 1.18, 1, sc * 1.18);
+      dm.updateMatrix();
+      this.mesaFoamInst.setMatrixAt(foamIdx++, dm.matrix);
+
+      // Dark Redwood Pine Bough Crown atop flat mesa plateau
+      const topY = seaWorldY - 2.45 + 7.95 * sy;
+      for (const [ox, oz, ts] of [
+        [-1.65, 0.25, 0.92],
+        [0.15, -0.35, 1.08],
+        [1.75, 0.30, 0.86],
+      ]) {
+        dm.position.set(px + ox * sc, topY, z + oz * sc);
+        dm.rotation.set(0, ox + i, 0);
+        dm.scale.setScalar(sc * ts);
+        dm.updateMatrix();
+        this.mesaTreeInst.setMatrixAt(mTree++, dm.matrix);
+      }
+
+      // Cascading feathered waterfall plunging down sunlit mesa face
+      dm.position.set(px + 0.35 * sc, seaWorldY - 1.15 + 3.4 * sy, z + 2.75 * sc);
+      dm.rotation.set(0, 0, 0);
+      dm.scale.set(sc, sy, 1);
+      dm.updateMatrix();
+      this.mesaFallsInst.setMatrixAt(mFalls++, dm.matrix);
+    }
+
+    // (c) Weathered Sandstone Aqueduct Sea-Arch / Stone Ruin Spans (`arch_canyon_sandstone` + `arch_antique_bronze`)
+    for (let i = 0; i < NUM_SEA_ARCHES; i++) {
+      const isNear = i % 2 === 0;
+      const z = isNear ? -10.8 : -19.2;
+      const speed = isNear ? 0.0175 : 0.012;
+      const px = ((((i * 31.0 + 22.0) - scroll * speed) % 124) + 124) % 124 - 62;
+      const sc = baseScale * (isNear ? 0.88 : 1.06);
+
+      dm.position.set(px, seaWorldY - 2.45, z);
+      dm.rotation.set(0, isNear ? 0.14 : -0.18, 0);
+      dm.scale.setScalar(sc);
+      dm.updateMatrix();
+      this.seaArchStoneInst.setMatrixAt(i, dm.matrix);
+      this.seaArchBronzeInst.setMatrixAt(i, dm.matrix);
+
+      const wlY = seaWorldY + 0.15 + (z + 11.5) * -0.031;
+      for (const sx of [-1, 1]) {
+        dm.position.set(px + sx * 3.1 * sc, wlY, z);
+        dm.rotation.set(0, time * 0.1 + i * sx, 0);
+        dm.scale.set(sc * 0.72, 1, sc * 0.72);
+        dm.updateMatrix();
+        this.mesaFoamInst.setMatrixAt(foamIdx++, dm.matrix);
+      }
+    }
+
+    this.seaStackInst.count = NUM_SEA_STACKS;
+    this.mesaCragInst.count = NUM_MESA_CRAGS;
+    this.seaArchStoneInst.count = NUM_SEA_ARCHES;
+    this.seaArchBronzeInst.count = NUM_SEA_ARCHES;
+    this.mesaFoamInst.count = foamIdx;
+    this.mesaTreeInst.count = mTree;
+    this.mesaFallsInst.count = mFalls;
+    this.seaStackInst.instanceMatrix.needsUpdate = true;
+    this.mesaCragInst.instanceMatrix.needsUpdate = true;
+    this.seaArchStoneInst.instanceMatrix.needsUpdate = true;
+    this.seaArchBronzeInst.instanceMatrix.needsUpdate = true;
+    this.mesaFoamInst.instanceMatrix.needsUpdate = true;
+    this.mesaTreeInst.instanceMatrix.needsUpdate = true;
+    this.mesaFallsInst.instanceMatrix.needsUpdate = true;
+
     for (let r = 0; r < MAX_RAINBOWS; r++) {
-      const rg = this.rainbows[r];
-      const rx = (((r * 22 - scroll * 0.012) % 88) + 88) % 88 - 44;
-      rg.position.set(rx, seaW.y + 0.35, -11.5);
+      const rm = this.rainbows[r];
+      const rx = (((r * 24 - scroll * 0.0115) % 96) + 96) % 96 - 48;
+      rm.position.set(rx, seaWorldY + 2.75, -15.5);
     }
 
-    // Summit Departure Spire & Arrival Spire
-    if (stage.summit && stage.summit.x > -180) {
-      const swp = this._screenToWorld(stage.summit.x, stage.summit.y, -1.2);
+    // Summit Departure Spire (STRICTLY hidden during flight: visible ONLY when phase === 'intro')
+    if (stage.phase === 'intro' && stage.summit && stage.summit.x > -140) {
+      const swp = this._screenToWorld(stage.summit.x, stage.summit.y, -2.4);
       this.summitGroup.visible = true;
-      this.summitGroup.position.set(swp.x, swp.y, -1.2);
+      this.summitGroup.position.set(swp.x, swp.y, -2.4);
     } else {
       this.summitGroup.visible = false;
     }
@@ -1095,17 +1911,23 @@ export class GlideRenderer {
       const depthZ = lerp(-48, -2.5, stage.tower.depth || 0);
       const twp = this._screenToWorld(stage.tower.x, seaY, depthZ);
       this.destTowerGroup.visible = true;
-      this.destTowerGroup.position.set(twp.x, seaW.y, depthZ);
+      this.destTowerGroup.position.set(twp.x, seaWorldY, depthZ);
     } else {
       this.destTowerGroup.visible = false;
     }
 
-    // Update Gateway Frill-Glider Hero!
-    const gl = stage.glider || { x: this.width * 0.28, y: this.height * 0.48, vx: 0, vy: 0 };
+    // Update Gateway Frill-Glider Hero — 100% Portrait (412x915) & Desktop (1920x1080) Aspect-Safe!
+    const gl = stage.glider || { x: this.width * (portrait ? 0.36 : 0.28), y: this.height * 0.46, vx: 0, vy: 0 };
     const hwp = this._screenToWorld(gl.x, gl.y, 0.3);
-    const pitch = clamp(Math.atan2(-(gl.vy || 0), 260), -0.62, 0.55) + (gl.flare || 0) * 0.35;
-    const roll = clamp(-(gl.vy || 0) * 0.0014, -0.36, 0.36) + (gl.spin || 0);
-    this.hero.group.position.set(hwp.x, hwp.y, 0.3);
+    const safeHalfW = hwp.halfW * (portrait ? 0.52 : 0.72);
+    const safeHalfH = hwp.halfH * (portrait ? 0.48 : 0.62);
+    const heroX = clamp(hwp.x, -safeHalfW, safeHalfW);
+    const heroY = clamp(hwp.y, -safeHalfH, safeHalfH);
+    this.hero.group.scale.setScalar(portrait ? 0.90 : 1.04);
+
+    const pitch = clamp(Math.atan2(-(gl.vy || 0), 240), -0.62, 0.55) + (gl.flare || 0) * 0.32;
+    const roll = clamp(-(gl.vy || 0) * 0.0014, -0.34, 0.34) + (gl.spin || 0);
+    this.hero.group.position.set(heroX, heroY, 0.3);
     this.hero.group.rotation.set(roll, 0, pitch);
     this.hero.update(dt, time, gl);
 
@@ -1126,7 +1948,7 @@ export class GlideRenderer {
       slot.rotation.z = time * 1.2 + i;
     }
 
-    // Sunlit Updraft Thermals
+    // Soft Feathered Sunlit Updraft Thermals (facing camera cleanly, zero cylinder seam!)
     const thermals = stage.thermals || [];
     for (let i = 0; i < MAX_THERMALS; i++) {
       const tm = this.thermalMeshes[i];
@@ -1138,21 +1960,20 @@ export class GlideRenderer {
       const wp = this._screenToWorld(th.x, this.height * 0.55, -0.5);
       tm.visible = true;
       tm.position.set(wp.x, wp.y, -0.5);
-      tm.scale.set(Math.max(0.4, this._pxScale(th.w || 48, -0.5)), 1, 1);
+      tm.scale.set(Math.max(0.5, this._pxScale(th.w || 48, -0.5) * 0.85), 1, 1);
       tm.material.color.set(pal.thermal);
-      tm.material.opacity = 0.13 * (th.fade ?? 1);
-      tm.rotation.y = time * 2.2 + i;
+      tm.material.opacity = 0.28 * (th.fade ?? 1);
+      tm.rotation.y = 0;
     }
 
     // Water-Dew Streams, Kites & Golden Harmonic Seeds (`stage.lanterns`)
-    const dm = this._dummy;
     const lanterns = stage.lanterns || [];
     let dCnt = 0;
     const dewColors = ['#5efce8', '#fde047', '#7dd3fc', '#f9a8d4'];
     for (let i = 0; i < lanterns.length && dCnt < MAX_DEW; i++) {
       const l = lanterns[i];
       const wp = this._screenToWorld(l.x, l.y, 0.15);
-      const sc = l.type === 'gold' ? 1.45 : l.type === 'kite' ? 1.35 : 0.92;
+      const sc = l.type === 'gold' ? 1.15 : l.type === 'kite' ? 1.08 : 0.86;
       dm.position.set(wp.x, wp.y, 0.15);
       dm.rotation.set(time * 2.2 + i, time * 3.4 + i, 0);
       dm.scale.setScalar(sc);
@@ -1167,7 +1988,8 @@ export class GlideRenderer {
       if (this.dewInst.instanceColor) this.dewInst.instanceColor.needsUpdate = true;
     }
 
-    // Clouds & Telegraph Bolts
+    // Squall Clouds & Telegraph Bolts (1 merged cloud draw call per active cloud!)
+    // Storm-cloud strikes only (`mg_bg_frill_glide.webp` provides studio-painted sky clouds; ZERO lumpy 3D clay clouds!)
     const clouds = stage.clouds || [];
     for (let i = 0; i < MAX_CLOUDS; i++) {
       const slot = this.cloudSlots[i];
@@ -1176,38 +1998,31 @@ export class GlideRenderer {
         continue;
       }
       const c = clouds[i];
-      const wp = this._screenToWorld(c.x, c.y, -0.2);
-      const rx = Math.max(0.6, this._pxScale(c.rx || 56, -0.2));
-      slot.visible = true;
-      slot.position.set(wp.x, wp.y, -0.2);
-      slot.scale.setScalar(rx * 0.72);
-      const isCharge = c.state === 'charge';
       const isStrike = c.state === 'strike';
-      for (let k = 0; k < 3; k++) {
-        const puff = slot.children[k];
-        if (puff?.material) {
-          puff.material.color.set(isStrike ? '#fef08a' : isCharge ? '#cbd5e1' : '#f8fafc');
-        }
-      }
-      slot.userData.bolt.visible = isStrike;
+      slot.visible = isStrike;
+      if (slot.userData.body) slot.userData.body.visible = false;
+      if (!isStrike) continue;
+      const wp = this._screenToWorld(c.x, c.y, -0.2);
+      slot.position.set(wp.x, wp.y, -0.2);
+      slot.userData.bolt.visible = true;
     }
 
-    // Soaring Canyon Swallows / Seabirds
+    // Graceful Distant High-Altitude Coastal Seabirds (sleek 0.38x distant silhouettes, ZERO blocky foreground gulls!)
     const gulls = stage.gulls || [];
     let bCnt = 0;
     for (let i = 0; i < gulls.length && bCnt < MAX_BIRDS; i++) {
       const b = gulls[i];
-      const wp = this._screenToWorld(b.x, b.y, 0.1);
-      dm.position.set(wp.x, wp.y, 0.1);
-      dm.rotation.set(Math.sin(b.phase || time * 8) * 0.45, 0, 0);
-      dm.scale.setScalar(0.95);
+      const wp = this._screenToWorld(b.x, b.y, -3.2);
+      dm.position.set(wp.x, wp.y + 1.35, -3.2);
+      dm.rotation.set(Math.sin(b.phase || time * 7) * 0.38, 0.15, 0);
+      dm.scale.setScalar(0.38);
       dm.updateMatrix();
       this.birdInst.setMatrixAt(bCnt++, dm.matrix);
     }
     this.birdInst.count = bCnt;
     if (bCnt > 0) this.birdInst.instanceMatrix.needsUpdate = true;
 
-    // Rings, Sparkles & Popups
+    // Rings & Soft Radial-Alpha Glowing Spray/Mist Sprites (ZERO hard hexagons!)
     const rings = stage.rings || [];
     let rCnt = 0;
     for (let i = 0; i < rings.length && rCnt < MAX_RINGS; i++) {
@@ -1231,11 +2046,13 @@ export class GlideRenderer {
     const extParts = opts.particles || [];
     let ptCnt = 0;
     for (let i = 0; i < 36 && ptCnt < MAX_PARTICLES; i++) {
-      const age = (time * 2.6 + i * 0.13) % 1;
-      dm.position.set(hwp.x - 0.9 - age * 3.8, hwp.y + Math.sin(time * 8 + i) * 0.16, 0.35);
-      dm.scale.setScalar((1 - age) * 0.75);
+      const age = (time * 2.2 + i * 0.13) % 1;
+      const spreadY = Math.sin(time * 6.5 + i * 1.4) * (0.12 + age * 0.34);
+      dm.position.set(heroX - 0.68 - age * 3.8, heroY + spreadY, 0.35);
+      dm.rotation.set(0, 0, time * 0.8 + i);
+      dm.scale.setScalar(Math.sin(age * Math.PI) * (0.55 + age * 0.65));
       dm.updateMatrix();
-      this._col.set(i % 2 === 0 ? '#5efce8' : '#fde047');
+      this._col.set(i % 3 === 0 ? '#fde68a' : i % 2 === 0 ? '#7df9ff' : '#d6fbff');
       this.partInst.setColorAt(ptCnt, this._col);
       this.partInst.setMatrixAt(ptCnt++, dm.matrix);
     }
@@ -1243,10 +2060,12 @@ export class GlideRenderer {
       const p = extParts[i];
       if (p.x == null || p.y == null) continue;
       const wp = this._screenToWorld(p.x, p.y, 0.35);
+      const lifeRatio = clamp(p.life / Math.max(0.01, p.maxLife || 1), 0, 1);
       dm.position.set(wp.x, wp.y, 0.35);
-      dm.scale.setScalar(clamp(p.life / Math.max(0.01, p.maxLife || 1), 0, 1));
+      dm.rotation.set(0, 0, i * 0.9);
+      dm.scale.setScalar(0.55 + lifeRatio * 0.75);
       dm.updateMatrix();
-      this._col.set(p.color || '#ffffff');
+      this._col.set(p.color || '#e8fcff');
       this.partInst.setColorAt(ptCnt, this._col);
       this.partInst.setMatrixAt(ptCnt++, dm.matrix);
     }
@@ -1280,7 +2099,7 @@ export class GlideRenderer {
     const sh = Number(opts.shake) || 0;
     const sx = sh > 0.01 ? Math.sin(time * 71) * sh * 0.02 : 0;
     const sy = sh > 0.01 ? Math.cos(time * 61) * sh * 0.02 : 0;
-    this.camera.position.set(sx, sy, CAM_Z);
+    this.camera.position.set(sx, sy, this._glideCamZ);
     this.camera.lookAt(sx, sy, 0);
 
     this.webgl.setRenderTarget(null);
@@ -1294,8 +2113,11 @@ export class GlideRenderer {
     this.skyTex?.dispose();
     this.mesaTex?.dispose();
     this.cascadeTex?.dispose();
-    this.waterRippleTex?.dispose();
-    this.envTex?.dispose();
+    this.glowSpriteTex?.dispose();
+    this.shoreFoamTex?.dispose();
+    this.rainbowArcTex?.dispose();
+    this.horizonMistTex?.dispose();
+    this.updraftTex?.dispose();
     for (const p of this.popupPool) {
       p.sprite.material.map?.dispose();
       p.sprite.material.dispose();

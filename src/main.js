@@ -26,6 +26,7 @@ function getWorldCols() {
 const appEl = document.getElementById('app');
 const stageWrap = document.getElementById('stage-wrap');
 const canvas = document.getElementById('game-canvas');
+const stageTransitionVeilEl = document.getElementById('stage-transition-veil');
 const hudEl = document.getElementById('hud');
 const touchControlsEl = document.getElementById('touch-controls');
 
@@ -41,7 +42,20 @@ const timerRingEl = document.getElementById('timer-ring');
 const timerRingArcEl = document.getElementById('timer-ring-arc');
 const dirArrowEl = document.getElementById('dir-arrow');
 const towerBadgeEl = document.getElementById('tower-badge');
+const crownSealsPillEl = document.getElementById('crown-seals-pill');
+const crownSealsCountEl = document.getElementById('crown-seals-count');
+const crownSealChips = [
+  document.getElementById('crown-seal-0'),
+  document.getElementById('crown-seal-1'),
+  document.getElementById('crown-seal-2'),
+];
+const crownSealLbls = [
+  document.getElementById('crown-seal-lbl-0'),
+  document.getElementById('crown-seal-lbl-1'),
+  document.getElementById('crown-seal-lbl-2'),
+];
 const missionStatusPillEl = document.getElementById('mission-status-pill');
+const critterSonarPillEl = document.getElementById('critter-sonar-pill');
 
 const btnCtrlMode = document.getElementById('btn-ctrl-mode');
 const btnMusic = document.getElementById('btn-music');
@@ -111,6 +125,7 @@ const btnZenPill = document.getElementById('btn-zen-pill');
 const zenPillLabelEl = document.getElementById('zen-pill-label');
 const btnTitleMusic = document.getElementById('btn-title-music');
 const btnTitleSound = document.getElementById('btn-title-sound');
+const btnTitleVoice = document.getElementById('btn-title-voice');
 const titleCtrlPickBtns = document.querySelectorAll('[data-ctrl-pick]');
 
 // 3-Channel Audio Mixer Sliders (Title + Pause)
@@ -150,6 +165,8 @@ const metaModeExpeditionEl = document.getElementById('meta-mode-expedition');
 const metaModeDailyEl = document.getElementById('meta-mode-daily');
 const metaModeGauntletEl = document.getElementById('meta-mode-gauntlet');
 const btnModeGauntlet = document.getElementById('btn-mode-gauntlet');
+const metaModeMasterEl = document.getElementById('meta-mode-master');
+const btnModeMaster = document.getElementById('btn-mode-master');
 
 const btnWorlds = document.getElementById('btn-worlds');
 const btnMinigames = document.getElementById('btn-minigames');
@@ -320,6 +337,7 @@ const PROMPT_ICONS = {
   craft: `<svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-craft"/></svg>`,
   key: `<svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-key"/></svg>`,
   curio: `<svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-curio"/></svg>`,
+  lock: `<svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-lock-closed"/></svg>`,
 };
 
 // ================= MEANINGFUL STORY & SPIRE PURIFICATION CUTSCENES =================
@@ -639,6 +657,7 @@ const savedSfxVol = Number.isFinite(initSettings.sfxVolume) ? initSettings.sfxVo
 sound.setZenMode?.(Boolean(initSettings.zenMode));
 sound.setMuted?.(Boolean(initSettings.muted));
 sound.setMusicEnabled?.(initSettings.musicEnabled !== false);
+sound.setVoiceEnabled?.(initSettings.voiceEnabled !== false);
 sound.setMusicVolume?.(savedMusicVol);
 sound.setAmbienceVolume?.(savedAmbVol);
 sound.setSfxVolume?.(savedSfxVol);
@@ -758,6 +777,29 @@ function resolveActionPromptSpec(rawText, hudMode, hudInteractKind = '') {
   const upper = raw.toUpperCase();
   const explicitKind = String(hudInteractKind || '').toLowerCase();
 
+  // 0. Locked Crown / Sealed Fortress Gate / Guarded Sluice MUST take top priority so touch controls are NEVER misrouted!
+  if (
+    hudMode === 'tower' &&
+    (upper.includes('SEALED') ||
+      upper.includes('LOCKED') ||
+      upper.includes('TO UNLOCK') ||
+      upper.includes('BREAK ALL') ||
+      explicitKind === 'locked' ||
+      explicitKind === 'sealed')
+  ) {
+    const cleanLocked = upper
+      .replace(/->/g, '•')
+      .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}▲▼◀▶✓◎]/gu, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return {
+      html: `${PROMPT_ICONS.lock}<span>${cleanLocked}</span>`,
+      interactKind: '',
+      triggerAction: null,
+      subtype: 'locked_crown',
+    };
+  }
+
   // 1. Tower Door / Summit Crown Valve / Core Dive / Sanctum / Vault / Conduit MUST take priority BEFORE 'VALVE'!
   if (hudMode === 'tower') {
     if (
@@ -825,7 +867,15 @@ function resolveActionPromptSpec(rawText, hudMode, hudInteractKind = '') {
     };
   }
 
-  // 4. Interactive Pipe-Valve, Grapple Ring, Station & Powered Elevator Ride
+  // 4. Interactive Pipe-Valve, Sluice Lever, Grapple Ring, Station & Powered Elevator Ride
+  if (upper.includes('SLUICE') || upper.includes('LEVER')) {
+    return {
+      html: `${PROMPT_ICONS.craft}<span>TAP WHIP / PULSE • PULL SLUICE</span>`,
+      interactKind: 'fire',
+      triggerAction: 'whip',
+      subtype: 'valve',
+    };
+  }
   if (upper.includes('VALVE') || upper.includes('PIPE')) {
     return {
       html: `${PROMPT_ICONS.craft}<span>TAP WHIP / PULSE • SPIN VALVE</span>`,
@@ -956,14 +1006,207 @@ function openMutationDraftModal(choices, onPickCallback) {
 
 window.openMutationDraftModal = openMutationDraftModal;
 
-// ================= GAME INSTANCE & CALLBACKS =================
-let prevDirKey = '';
-let prevPromptKey = '';
-let prevMissionStatusRaw = '';
+// ================= GAME INSTANCE & CALLBACKS (ZERO-STALL DIRTY-CHECKED HUD) =================
+const DEFAULT_SEAL_LABELS = [
+  '1: Pipe Pressure',
+  '2: Inner Sanctum',
+  '3: Upper Sluice',
+];
+
+const hudCache = {
+  scoreText: '',
+  hiScoreText: '',
+  gearsText: '',
+  modeLabel: '',
+  timerCaption: '',
+  timerText: '',
+  timerZen: null,
+  timerUrgent: null,
+  ringOffset: '',
+  dirKey: '',
+  towerBadge: '',
+  sealsVisible: false,
+  sealsKey: '',
+  sealCountText: '',
+  sealsUnsealed: false,
+  sealChipLabels: ['', '', ''],
+  sealChipBroken: [false, false, false],
+  sealChipNext: [false, false, false],
+  missionVisible: false,
+  missionRaw: '',
+  altVisible: false,
+  altPct: -1,
+  waterPct: -1,
+  altSinking: false,
+  coreVisible: false,
+  coreTitle: '',
+  coreLocks: '',
+  corePct: -1,
+  coreSub: '',
+  appGameMode: '',
+  puzzleVisible: false,
+  puzzleTitle: '',
+  puzzleSub: '',
+  canPeek: null,
+  isPeeking: null,
+  promptKey: '',
+  promptVisible: false,
+  promptActionable: false,
+  promptLocked: false,
+  interactActive: null,
+  interactKind: null,
+};
+
 let currentPromptAction = null;
 let currentPromptSubtype = '';
-let prevPuzzleTitle = '';
-let prevPuzzleSub = '';
+
+function setInteractContextCached(active, kind) {
+  const a = Boolean(active);
+  const k = a ? String(kind || '') : '';
+  if (hudCache.interactActive === a && hudCache.interactKind === k) return;
+  hudCache.interactActive = a;
+  hudCache.interactKind = k;
+  input.setInteractContext?.(a, k);
+}
+
+function resetHudVisibilityCache() {
+  hudCache.sealsVisible = false;
+  hudCache.missionVisible = false;
+  hudCache.altVisible = false;
+  hudCache.coreVisible = false;
+  hudCache.puzzleVisible = false;
+  hudCache.promptVisible = false;
+  hudCache.promptKey = '';
+  hudCache.promptActionable = false;
+  hudCache.promptLocked = false;
+  hudCache.interactActive = false;
+  hudCache.interactKind = '';
+}
+
+function formatSealShortLabel(rawObj, idx) {
+  const fallback = DEFAULT_SEAL_LABELS[idx] || `Seal ${idx + 1}`;
+  if (!rawObj) return fallback;
+  const rawLabel =
+    typeof rawObj === 'string'
+      ? rawObj
+      : rawObj.shortLabel || rawObj.label || rawObj.title || rawObj.name || '';
+  const cleaned = String(rawLabel)
+    .replace(/^(?:seal\s*#?\s*\d+\s*[:•\-–—]?\s*)/i, '')
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}✓✕]/gu, '')
+    .replace(/\bPipe-Valve\s+Pressure\b/i, 'Pipe Pressure')
+    .replace(/\bInner\s+Aqueduct\s+Sanctum\b/i, 'Inner Sanctum')
+    .replace(/\bUpper\s+Sluice\s+Guardian\b/i, 'Upper Sluice')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return fallback;
+  const compact = cleaned.length > 22 ? `${cleaned.slice(0, 21).trim()}…` : cleaned;
+  return `${idx + 1}: ${compact}`;
+}
+
+function updateCrownSealsHud(hud, titleOpen) {
+  if (!crownSealsPillEl) return;
+  const rawTotal = hud.crownSealsTotal ?? game.crownSealsTotal ?? 0;
+  const total = Math.max(0, Math.min(3, Number(rawTotal) || 0));
+  const showSeals = hud.mode === 'tower' && total > 0 && !titleOpen && !cutsceneState.active;
+
+  if (!showSeals) {
+    if (hudCache.sealsVisible) {
+      hudCache.sealsVisible = false;
+      crownSealsPillEl.classList.add('hidden');
+    }
+    return;
+  }
+
+  if (!hudCache.sealsVisible) {
+    hudCache.sealsVisible = true;
+    crownSealsPillEl.classList.remove('hidden');
+  }
+
+  const rawObjectives = Array.isArray(hud.sealObjectives)
+    ? hud.sealObjectives
+    : Array.isArray(game.sealObjectives)
+      ? game.sealObjectives
+      : null;
+
+  const rawBroken = hud.crownSealsBroken ?? game.crownSealsBroken ?? 0;
+  let brokenCount = Math.max(0, Math.min(total, Number(rawBroken) || 0));
+
+  const states = [false, false, false];
+  const labels = ['', '', ''];
+  let objBrokenSum = 0;
+  let hasExplicitObjFlags = false;
+
+  for (let i = 0; i < 3; i++) {
+    const obj = rawObjectives?.[i];
+    labels[i] = formatSealShortLabel(obj, i);
+    if (obj && typeof obj === 'object') {
+      const explicitFlag =
+        obj.broken ?? obj.solved ?? obj.unlocked ?? obj.complete ?? obj.done;
+      if (explicitFlag !== undefined) {
+        hasExplicitObjFlags = true;
+        states[i] = Boolean(explicitFlag);
+        if (states[i]) objBrokenSum++;
+      } else {
+        states[i] = i < brokenCount;
+      }
+    } else {
+      states[i] = i < brokenCount;
+    }
+  }
+
+  if (hasExplicitObjFlags) {
+    brokenCount = Math.max(brokenCount, Math.min(total, objBrokenSum));
+  }
+
+  const nextKey = `${brokenCount}/${total}|${states[0] ? 1 : 0}${states[1] ? 1 : 0}${states[2] ? 1 : 0}|${labels[0]}|${labels[1]}|${labels[2]}`;
+  if (nextKey === hudCache.sealsKey) return;
+  hudCache.sealsKey = nextKey;
+
+  const allUnsealed = brokenCount >= total;
+  if (allUnsealed !== hudCache.sealsUnsealed) {
+    hudCache.sealsUnsealed = allUnsealed;
+    crownSealsPillEl.classList.toggle('is-unsealed', allUnsealed);
+  }
+
+  const countText = allUnsealed
+    ? `CROWN UNSEALED • ${brokenCount}/${total}`
+    : `CROWN SEALS • ${brokenCount}/${total}`;
+  if (crownSealsCountEl && countText !== hudCache.sealCountText) {
+    hudCache.sealCountText = countText;
+    crownSealsCountEl.textContent = countText;
+  }
+
+  let firstLockedIdx = -1;
+  for (let i = 0; i < total; i++) {
+    if (!states[i]) {
+      firstLockedIdx = i;
+      break;
+    }
+  }
+
+  for (let i = 0; i < 3; i++) {
+    const chip = crownSealChips[i];
+    const lblEl = crownSealLbls[i];
+    if (!chip) continue;
+    chip.classList.toggle('hidden', i >= total);
+    if (i >= total) continue;
+
+    const isBroken = states[i];
+    const isNext = !allUnsealed && i === firstLockedIdx;
+    if (isBroken !== hudCache.sealChipBroken[i]) {
+      hudCache.sealChipBroken[i] = isBroken;
+      chip.classList.toggle('is-broken', isBroken);
+    }
+    if (isNext !== hudCache.sealChipNext[i]) {
+      hudCache.sealChipNext[i] = isNext;
+      chip.classList.toggle('is-next', isNext);
+    }
+    if (lblEl && labels[i] !== hudCache.sealChipLabels[i]) {
+      hudCache.sealChipLabels[i] = labels[i];
+      lblEl.textContent = labels[i];
+    }
+  }
+}
 
 let lastLaunch = {
   mode: 'campaign',
@@ -979,126 +1222,221 @@ const game = new GameEngineClass(
   input,
   {
     onHud(hud) {
-      if (scoreEl) scoreEl.textContent = formatScore(hud.score);
-      if (hiScoreEl) hiScoreEl.textContent = formatScore(hud.hiScore);
-      if (gearsEl) gearsEl.textContent = String(hud.gears ?? progression.getGears?.() ?? 0);
+      const titleOpen = isTitleScreenOpen();
+
+      // 1. Score / Best / Pearls (dirty-checked)
+      if (scoreEl) {
+        const sText = formatScore(hud.score);
+        if (sText !== hudCache.scoreText) {
+          hudCache.scoreText = sText;
+          scoreEl.textContent = sText;
+        }
+      }
+      if (hiScoreEl) {
+        const hiText = formatScore(hud.hiScore);
+        if (hiText !== hudCache.hiScoreText) {
+          hudCache.hiScoreText = hiText;
+          hiScoreEl.textContent = hiText;
+        }
+      }
+      if (gearsEl) {
+        const gText = String(hud.gears ?? progression.getGears?.() ?? 0);
+        if (gText !== hudCache.gearsText) {
+          hudCache.gearsText = gText;
+          gearsEl.textContent = gText;
+        }
+      }
 
       const rType = String(hud.runType || game.runType || lastLaunch.mode || 'campaign').toLowerCase();
       const isPurist = rType.includes('purist');
       renderLivesPips(hud.lives, isPurist);
 
       if (hudModeLabelEl) {
+        let modeLbl = 'GATEWAY';
         if (isPurist) {
           const mult = hud.comboMult || hud.multiplier || 1;
-          hudModeLabelEl.textContent = mult > 1 ? `PURIST • ${mult}X` : 'PURIST ARCADE';
+          modeLbl = mult > 1 ? `PURIST • ${mult}X` : 'PURIST ARCADE';
         } else if (rType.includes('flood')) {
-          hudModeLabelEl.textContent = 'FLASH-FLOOD';
+          modeLbl = 'FLASH-FLOOD';
         } else if (rType.includes('sanctum')) {
-          hudModeLabelEl.textContent = 'SANCTUM TRIAL';
+          modeLbl = 'SANCTUM TRIAL';
         } else if (rType.includes('expedition')) {
-          hudModeLabelEl.textContent = 'EXPEDITION';
+          modeLbl = 'EXPEDITION';
         } else if (rType.includes('daily')) {
-          hudModeLabelEl.textContent = 'DAILY TIDE';
-        } else {
-          hudModeLabelEl.textContent = 'GATEWAY';
+          modeLbl = 'DAILY TIDE';
+        }
+        if (modeLbl !== hudCache.modeLabel) {
+          hudCache.modeLabel = modeLbl;
+          hudModeLabelEl.textContent = modeLbl;
         }
       }
 
+      // 2. Siphon Timer & Ring (dirty-checked, quantized to avoid 60Hz SVG repaint stalls)
       const timerFree = Boolean(hud.zenMode || rType.includes('sanctum')) && hud.mode === 'tower';
       const isUrgent = !timerFree && hud.timer <= 15 && (hud.mode === 'tower' || hud.mode === 'vault');
 
       if (hudTimerCaptionEl) {
-        hudTimerCaptionEl.textContent = timerFree ? 'FLOW' : isPurist ? 'CLOCK' : rType.includes('flood') ? 'SURGE' : 'SIPHON';
+        const cap = timerFree ? 'FLOW' : isPurist ? 'CLOCK' : rType.includes('flood') ? 'SURGE' : 'SIPHON';
+        if (cap !== hudCache.timerCaption) {
+          hudCache.timerCaption = cap;
+          hudTimerCaptionEl.textContent = cap;
+        }
       }
       if (timerEl) {
-        timerEl.textContent = timerFree ? 'CALM' : formatTimerInt(hud.timer);
-        timerEl.classList.toggle('zen', timerFree);
-        timerEl.classList.toggle('urgent', isUrgent);
+        const tText = timerFree ? 'CALM' : formatTimerInt(hud.timer);
+        if (tText !== hudCache.timerText) {
+          hudCache.timerText = tText;
+          timerEl.textContent = tText;
+        }
+        if (timerFree !== hudCache.timerZen) {
+          timerEl.classList.toggle('zen', timerFree);
+          timerRingEl?.classList.toggle('zen', timerFree);
+          hudCache.timerZen = timerFree;
+        }
+        if (isUrgent !== hudCache.timerUrgent) {
+          timerEl.classList.toggle('urgent', isUrgent);
+          timerRingEl?.classList.toggle('urgent', isUrgent);
+          hudCache.timerUrgent = isUrgent;
+        }
       }
 
-      if (timerRingEl && timerRingArcEl) {
-        timerRingEl.classList.toggle('zen', timerFree);
-        timerRingEl.classList.toggle('urgent', isUrgent);
+      if (timerRingArcEl) {
         const limit = Math.max(1, hud.timeLimit || 110);
         const ratio = timerFree ? 1 : Math.max(0, Math.min(1, (hud.timer || 0) / limit));
-        timerRingArcEl.style.strokeDashoffset = (RING_CIRCUMFERENCE * (1 - ratio)).toFixed(2);
+        const quantizedOffset = (Math.round(RING_CIRCUMFERENCE * (1 - ratio) * 2) * 0.5).toFixed(1);
+        if (quantizedOffset !== hudCache.ringOffset) {
+          hudCache.ringOffset = quantizedOffset;
+          timerRingArcEl.style.strokeDashoffset = quantizedOffset;
+        }
       }
 
       if (dirArrowEl) {
         const dirKey = hud.dirHint === '◀' ? 'left' : hud.dirHint === '▶' ? 'right' : 'up';
-        if (dirKey !== prevDirKey) {
-          prevDirKey = dirKey;
+        if (dirKey !== hudCache.dirKey) {
+          hudCache.dirKey = dirKey;
           dirArrowEl.innerHTML = DIR_CHEVRON_SVGS[dirKey];
         }
       }
 
       if (towerBadgeEl) {
         const m = hud.mode;
-        if (m === 'core_descent') towerBadgeEl.textContent = 'CORE';
-        else if (m === 'reef_swim' || m === 'submarine') towerBadgeEl.textContent = 'REEF';
-        else if (m === 'rapids_surf' || m === 'skimmer') towerBadgeEl.textContent = 'SURF';
-        else if (m === 'frill_glide' || m === 'glide') towerBadgeEl.textContent = 'GLIDE';
-        else if (m === 'aqueduct_sanctum' || m === 'puzzle') towerBadgeEl.textContent = 'SANCTUM';
-        else if (m === 'vault') towerBadgeEl.textContent = 'VAULT';
-        else if (rType.includes('daily')) towerBadgeEl.textContent = 'DAILY';
-        else towerBadgeEl.textContent = `S${hud.towerId || 1}`;
+        let badge = `S${hud.towerId || 1}`;
+        if (m === 'core_descent') badge = 'CORE';
+        else if (m === 'reef_swim' || m === 'submarine') badge = 'REEF';
+        else if (m === 'rapids_surf' || m === 'skimmer') badge = 'SURF';
+        else if (m === 'frill_glide' || m === 'glide') badge = 'GLIDE';
+        else if (m === 'aqueduct_sanctum' || m === 'puzzle') badge = 'SANCTUM';
+        else if (m === 'vault') badge = 'VAULT';
+        else if (rType.includes('daily')) badge = 'DAILY';
+        if (badge !== hudCache.towerBadge) {
+          hudCache.towerBadge = badge;
+          towerBadgeEl.textContent = badge;
+        }
       }
 
+      // 3. 3-Seal Hydro-Lock Progression Pill (dirty-checked!)
+      updateCrownSealsHud(hud, titleOpen);
+
+      // 4. Mission Status Pill (dirty-checked)
       if (missionStatusPillEl) {
         const mRaw = hud.mode === 'tower' && hud.missionStatus ? String(hud.missionStatus) : '';
-        if (mRaw) {
-          if (mRaw !== prevMissionStatusRaw) {
-            prevMissionStatusRaw = mRaw;
+        const showMission = Boolean(mRaw && !titleOpen && !cutsceneState.active);
+        if (showMission) {
+          if (mRaw !== hudCache.missionRaw) {
+            hudCache.missionRaw = mRaw;
             missionStatusPillEl.innerHTML = renderMissionStatusMarkup(mRaw);
           }
-          missionStatusPillEl.classList.remove('hidden');
-        } else {
-          prevMissionStatusRaw = '';
+          if (!hudCache.missionVisible) {
+            hudCache.missionVisible = true;
+            missionStatusPillEl.classList.remove('hidden');
+          }
+        } else if (hudCache.missionVisible || hudCache.missionRaw) {
+          hudCache.missionRaw = '';
+          hudCache.missionVisible = false;
           missionStatusPillEl.classList.add('hidden');
         }
       }
 
-      // Altitude & Rising Surge Meter
-      const showAlt = hud.mode === 'tower' && !isTitleScreenOpen();
+      // 5. Altitude & Rising Surge Meter (quantized to 0.5% + dirty-checked)
+      const showAlt = hud.mode === 'tower' && !titleOpen && !cutsceneState.active;
       if (altMeterEl) {
-        altMeterEl.classList.toggle('hidden', !showAlt);
-        const altPct = Math.max(0, Math.min(100, hud.altitudePct ?? 0));
-        const waterPct = Math.max(0, Math.min(100, hud.waterPct ?? 0));
-        if (altFillEl) altFillEl.style.height = `${altPct}%`;
-        if (altPipEl) altPipEl.style.bottom = `${altPct}%`;
-        if (altWaterEl) altWaterEl.style.height = `${waterPct}%`;
-        altMeterEl.classList.toggle('sinking', waterPct > 1);
-      }
-
-      // Reactor Core Descent Telemetry HUD
-      const showCoreHud = hud.mode === 'core_descent' && !isTitleScreenOpen() && !cutsceneState.active;
-      if (coreDescentHudEl) {
-        coreDescentHudEl.classList.toggle('hidden', !showCoreHud);
-        if (showCoreHud) {
-          const cd = game.coreDescent || game.descent || hud.coreDescent || {};
-          const locksHit = cd.crystalsSmashed ?? cd.coresSmashed ?? cd.locksBroken ?? hud.coresSmashed ?? 0;
-          const locksMax = cd.totalCrystals ?? cd.totalCores ?? cd.totalLocks ?? 3;
-          const progPct = Math.max(0, Math.min(100, (cd.progress ?? hud.coreProgress ?? hud.depthPct ?? 0) * 100));
-          if (coreHudTitleEl) coreHudTitleEl.textContent = 'REACTOR CORE DESCENT';
-          if (coreHudLocksEl) coreHudLocksEl.textContent = `SIPHON LOCKS • ${locksHit}/${locksMax}`;
-          if (coreDepthFillEl) coreDepthFillEl.style.width = `${progPct.toFixed(1)}%`;
-          if (coreHudSubEl) {
-            coreHudSubEl.textContent =
-              progPct >= 90
-                ? 'BEDROCK ANCHOR REACHED • PLANTING HARMONIC SEED!'
-                : 'STEER TURBINES • TAIL-WHIP CRYSTAL LOCKS';
+        if (showAlt !== hudCache.altVisible) {
+          hudCache.altVisible = showAlt;
+          altMeterEl.classList.toggle('hidden', !showAlt);
+        }
+        if (showAlt) {
+          const altPct = Math.round(Math.max(0, Math.min(100, hud.altitudePct ?? 0)) * 2) * 0.5;
+          const waterPct = Math.round(Math.max(0, Math.min(100, hud.waterPct ?? 0)) * 2) * 0.5;
+          if (altPct !== hudCache.altPct) {
+            hudCache.altPct = altPct;
+            const pctStr = `${altPct}%`;
+            if (altFillEl) altFillEl.style.height = pctStr;
+            if (altPipEl) altPipEl.style.bottom = pctStr;
+          }
+          if (waterPct !== hudCache.waterPct) {
+            hudCache.waterPct = waterPct;
+            if (altWaterEl) altWaterEl.style.height = `${waterPct}%`;
+          }
+          const sinking = waterPct > 1;
+          if (sinking !== hudCache.altSinking) {
+            hudCache.altSinking = sinking;
+            altMeterEl.classList.toggle('sinking', sinking);
           }
         }
       }
 
-      if (appEl && appEl.dataset.gameMode !== (hud.mode || 'tower')) {
-        appEl.dataset.gameMode = hud.mode || 'tower';
+      // 6. Reactor Core Descent Telemetry HUD (dirty-checked)
+      const showCoreHud = hud.mode === 'core_descent' && !titleOpen && !cutsceneState.active;
+      if (coreDescentHudEl) {
+        if (showCoreHud !== hudCache.coreVisible) {
+          hudCache.coreVisible = showCoreHud;
+          coreDescentHudEl.classList.toggle('hidden', !showCoreHud);
+        }
+        if (showCoreHud) {
+          const cd = game.coreDescent || game.descent || hud.coreDescent || {};
+          const locksHit = cd.crystalsSmashed ?? cd.coresSmashed ?? cd.locksBroken ?? hud.coresSmashed ?? 0;
+          const locksMax = cd.totalCrystals ?? cd.totalCores ?? cd.totalLocks ?? 3;
+          const progPct = Math.round(Math.max(0, Math.min(100, (cd.progress ?? hud.coreProgress ?? hud.depthPct ?? 0) * 100)) * 2) * 0.5;
+          const cTitle = 'REACTOR CORE DESCENT';
+          const cLocks = `SIPHON LOCKS • ${locksHit}/${locksMax}`;
+          const cSub =
+            progPct >= 90
+              ? 'BEDROCK ANCHOR REACHED • PLANTING HARMONIC SEED!'
+              : 'STEER TURBINES • TAIL-WHIP CRYSTAL LOCKS';
+
+          if (coreHudTitleEl && cTitle !== hudCache.coreTitle) {
+            hudCache.coreTitle = cTitle;
+            coreHudTitleEl.textContent = cTitle;
+          }
+          if (coreHudLocksEl && cLocks !== hudCache.coreLocks) {
+            hudCache.coreLocks = cLocks;
+            coreHudLocksEl.textContent = cLocks;
+          }
+          if (coreDepthFillEl && progPct !== hudCache.corePct) {
+            hudCache.corePct = progPct;
+            coreDepthFillEl.style.width = `${progPct}%`;
+          }
+          if (coreHudSubEl && cSub !== hudCache.coreSub) {
+            hudCache.coreSub = cSub;
+            coreHudSubEl.textContent = cSub;
+          }
+        }
       }
 
-      // Aqueduct Sanctum Clue HUD
+      const nextAppMode = hud.mode || 'tower';
+      if (appEl && nextAppMode !== hudCache.appGameMode) {
+        hudCache.appGameMode = nextAppMode;
+        appEl.dataset.gameMode = nextAppMode;
+      }
+
+      // 7. Aqueduct Sanctum Clue HUD (dirty-checked)
       const isSanctumMode = hud.mode === 'puzzle' || hud.mode === 'aqueduct_sanctum';
-      const showPuzzleHud = isSanctumMode && !isTitleScreenOpen() && Boolean(game.puzzleRoom);
+      const showPuzzleHud = isSanctumMode && !titleOpen && Boolean(game.puzzleRoom);
       if (puzzleHudEl) {
+        if (showPuzzleHud !== hudCache.puzzleVisible) {
+          hudCache.puzzleVisible = showPuzzleHud;
+          puzzleHudEl.classList.toggle('hidden', !showPuzzleHud);
+        }
         if (showPuzzleHud) {
           const pr = game.puzzleRoom;
           let pTitle = 'AQUEDUCT SANCTUM';
@@ -1120,14 +1458,20 @@ const game = new GameEngineClass(
           } else if (pr.type === 'blocks') {
             pTitle = `SLUICE BLOCKS • ${pr.moves || 0}/${pr.parMoves || 6}`;
             pSub = 'SLIDE • CLEAR CHANNEL';
+          } else if (pr.type === 'pipes') {
+            pTitle = `PIPE CONDUIT • ${pr.moves || 0}/${pr.parMoves || 6}`;
+            pSub = 'ROTATE • CONNECT FLOW';
+          } else if (pr.type === 'tide_locks') {
+            pTitle = `TIDE LOCKS • ${pr.moves || 0}/${pr.parMoves || 5}`;
+            pSub = 'BALANCE • SLUICE CHAMBERS';
           }
 
-          if (puzzleHudTitleEl && pTitle !== prevPuzzleTitle) {
-            prevPuzzleTitle = pTitle;
+          if (puzzleHudTitleEl && pTitle !== hudCache.puzzleTitle) {
+            hudCache.puzzleTitle = pTitle;
             puzzleHudTitleEl.textContent = pTitle;
           }
-          if (puzzleHudSubEl && pSub !== prevPuzzleSub) {
-            prevPuzzleSub = pSub;
+          if (puzzleHudSubEl && pSub !== hudCache.puzzleSub) {
+            hudCache.puzzleSub = pSub;
             puzzleHudSubEl.textContent = pSub;
           }
 
@@ -1135,53 +1479,83 @@ const game = new GameEngineClass(
             !pr.solved &&
             (pr.showTarget === false || ((pr.type === 'lights' || pr.type === 'bells') && pr.showTarget !== true));
           if (btnPeekClue) {
-            btnPeekClue.classList.toggle('hidden', !canPeekClue);
+            if (canPeekClue !== hudCache.canPeek) {
+              hudCache.canPeek = canPeekClue;
+              btnPeekClue.classList.toggle('hidden', !canPeekClue);
+            }
             const isPeeking = Boolean((pr.peekAlpha || 0) > 0.25 || pr.isPeekingClue);
-            btnPeekClue.classList.toggle('peeking', isPeeking);
-            btnPeekClue.classList.toggle('active', isPeeking);
-            if (peekClueLblEl) peekClueLblEl.textContent = isPeeking ? 'CLUE LIT' : 'PEEK CLUE';
+            if (isPeeking !== hudCache.isPeeking) {
+              hudCache.isPeeking = isPeeking;
+              btnPeekClue.classList.toggle('peeking', isPeeking);
+              btnPeekClue.classList.toggle('active', isPeeking);
+              if (peekClueLblEl) peekClueLblEl.textContent = isPeeking ? 'CLUE LIT' : 'PEEK CLUE';
+            }
           }
-          puzzleHudEl.classList.remove('hidden');
-        } else {
-          puzzleHudEl.classList.add('hidden');
         }
       }
 
-      // Action Prompt Pill
+      // 8. Action Prompt Pill (dirty-checked — zero DOM/regex work unless prompt string changes!)
       if (actionPromptEl) {
         let promptRaw = isSanctumMode ? '' : (hud.actionPrompt || '');
         if (!promptRaw && (hud.mode === 'skimmer' || hud.mode === 'rapids_surf') && (hud.boostMult || 1) > 1) {
           promptRaw = `HYDRO-WAKE ${hud.boostMult}X`;
         }
-        const activeMode = !isSanctumMode && hud.mode !== 'title' && !isTitleScreenOpen() && !cutsceneState.active;
+        const activeMode = !isSanctumMode && hud.mode !== 'title' && !titleOpen && !cutsceneState.active;
 
         if (promptRaw && activeMode) {
-          const spec = resolveActionPromptSpec(promptRaw, hud.mode, hud.interactKind);
           const nextKey = `${hud.mode}|${hud.interactKind || ''}|${promptRaw}`;
-          if (nextKey !== prevPromptKey) {
-            prevPromptKey = nextKey;
+          if (nextKey !== hudCache.promptKey) {
+            hudCache.promptKey = nextKey;
+            const spec = resolveActionPromptSpec(promptRaw, hud.mode, hud.interactKind);
             actionPromptEl.innerHTML = spec.html;
-          }
-          currentPromptAction = spec.triggerAction;
-          currentPromptSubtype = spec.subtype;
-          actionPromptEl.classList.toggle('is-actionable', Boolean(spec.triggerAction));
-          actionPromptEl.classList.toggle('hidden', !spec.html);
+            currentPromptAction = spec.triggerAction;
+            currentPromptSubtype = spec.subtype;
 
-          if (hud.mode === 'tower') {
-            input.setInteractContext?.(Boolean(spec.interactKind), spec.interactKind || '');
-          } else {
-            input.setInteractContext?.(false, '');
+            const isActionable = Boolean(spec.triggerAction);
+            const isLocked = spec.subtype === 'locked_crown';
+            const shouldShow = Boolean(spec.html);
+
+            if (isActionable !== hudCache.promptActionable) {
+              hudCache.promptActionable = isActionable;
+              actionPromptEl.classList.toggle('is-actionable', isActionable);
+            }
+            if (isLocked !== hudCache.promptLocked) {
+              hudCache.promptLocked = isLocked;
+              actionPromptEl.classList.toggle('is-locked', isLocked);
+            }
+            if (shouldShow !== hudCache.promptVisible) {
+              hudCache.promptVisible = shouldShow;
+              actionPromptEl.classList.toggle('hidden', !shouldShow);
+            }
+
+            if (hud.mode === 'tower') {
+              setInteractContextCached(Boolean(spec.interactKind), spec.interactKind || '');
+            } else {
+              setInteractContextCached(false, '');
+            }
           }
         } else {
-          prevPromptKey = '';
-          currentPromptAction = null;
-          currentPromptSubtype = '';
-          actionPromptEl.classList.remove('is-actionable');
-          actionPromptEl.classList.add('hidden');
+          if (hudCache.promptKey || hudCache.promptVisible) {
+            hudCache.promptKey = '';
+            currentPromptAction = null;
+            currentPromptSubtype = '';
+            if (hudCache.promptActionable) {
+              hudCache.promptActionable = false;
+              actionPromptEl.classList.remove('is-actionable');
+            }
+            if (hudCache.promptLocked) {
+              hudCache.promptLocked = false;
+              actionPromptEl.classList.remove('is-locked');
+            }
+            if (hudCache.promptVisible) {
+              hudCache.promptVisible = false;
+              actionPromptEl.classList.add('hidden');
+            }
+          }
           if (hud.mode !== 'tower') {
-            input.setInteractContext?.(false, '');
-          } else if (!promptRaw && !isHeroInInteractZone()) {
-            input.setInteractContext?.(false, '');
+            setInteractContextCached(false, '');
+          } else if (!promptRaw && hudCache.interactActive && !isHeroInInteractZone()) {
+            setInteractContextCached(false, '');
           }
         }
       }
@@ -1211,10 +1585,12 @@ const game = new GameEngineClass(
     onGameOver(victory, score, hiScore, summary = {}) {
       sound.setMusicActive?.(false);
       input.resetState?.();
-      input.setInteractContext?.(false, '');
+      setInteractContextCached(false, '');
+      resetHudVisibilityCache();
       currentPromptAction = null;
       actionPromptEl?.classList.add('hidden');
       puzzleHudEl?.classList.add('hidden');
+      crownSealsPillEl?.classList.add('hidden');
       missionStatusPillEl?.classList.add('hidden');
       altMeterEl?.classList.add('hidden');
       coreDescentHudEl?.classList.add('hidden');
@@ -1461,8 +1837,21 @@ function syncAudioButtons() {
     btnTitleMusic.innerHTML = `${musicSvg}<span>${sound.musicEnabled ? 'MUSIC ON' : 'MUSIC OFF'}</span>`;
     btnTitleMusic.classList.toggle('active', Boolean(sound.musicEnabled));
   }
-  if (gearsEl) gearsEl.textContent = String(progression.getGears?.() ?? 0);
-  if (hiScoreEl) hiScoreEl.textContent = formatScore(progression.getHighScore?.('reboot') ?? 0);
+  if (btnTitleVoice) {
+    const voiceOn = sound.isVoiceEnabled ? sound.isVoiceEnabled() : sound.voiceEnabled !== false;
+    btnTitleVoice.textContent = voiceOn ? 'VOICE ON' : 'VOICE OFF';
+    btnTitleVoice.classList.toggle('active', Boolean(voiceOn));
+  }
+  if (gearsEl) {
+    const gStr = String(progression.getGears?.() ?? 0);
+    hudCache.gearsText = gStr;
+    gearsEl.textContent = gStr;
+  }
+  if (hiScoreEl) {
+    const hiStr = formatScore(progression.getHighScore?.('reboot') ?? 0);
+    hudCache.hiScoreText = hiStr;
+    hiScoreEl.textContent = hiStr;
+  }
   syncAudioMixerUI();
 }
 
@@ -1602,6 +1991,7 @@ function renderCutsceneBeat() {
 
   cutsceneState.fullText = beat.text;
   cutsceneState.charIdx = 0;
+  cutsceneState.lastCharInt = 0;
   if (cutsceneTextEl) cutsceneTextEl.textContent = '';
 
   if (btnCutsceneNext) {
@@ -1630,9 +2020,11 @@ function playStoryCutscene(kind, { previewMode = false, startPct = null, endPct 
   overlayGameOver?.classList.add('hidden');
 
   input.resetState?.();
-  input.setInteractContext?.(false, '');
+  setInteractContextCached(false, '');
+  resetHudVisibilityCache();
   actionPromptEl?.classList.add('hidden');
   puzzleHudEl?.classList.add('hidden');
+  crownSealsPillEl?.classList.add('hidden');
   missionStatusPillEl?.classList.add('hidden');
   altMeterEl?.classList.add('hidden');
   coreDescentHudEl?.classList.add('hidden');
@@ -1641,6 +2033,8 @@ function playStoryCutscene(kind, { previewMode = false, startPct = null, endPct 
   cutsceneState.kind = kind;
   cutsceneState.beatIdx = 0;
   cutsceneState.elapsed = 0;
+  cutsceneState.lastPct = -1;
+  cutsceneState.lastCharInt = 0;
   cutsceneState.previewMode = previewMode;
   cutsceneState.prevMode = game.mode;
   cutsceneState.startPct = Number.isFinite(startPct) ? startPct : null;
@@ -2281,10 +2675,12 @@ function beginRunCommon() {
     renderer.setCutsceneCam?.(null);
   }
   hideAllOverlays();
+  resetHudVisibilityCache();
+  crownSealsPillEl?.classList.add('hidden');
   puzzleHudEl?.classList.add('hidden');
   coreDescentHudEl?.classList.add('hidden');
   input.resetState?.();
-  input.setInteractContext?.(false, '');
+  setInteractContextCached(false, '');
   game.applySettings?.({ ...(progression.getSettings?.() || {}), blasterFxId: getEquippedHydroFxSafe() });
   gearsBeforeRun = progression.getGears?.() ?? 0;
   pushNavGuard();
@@ -2363,12 +2759,14 @@ function returnToTitle() {
   hideAllOverlays();
   clearBanner();
   input.resetState?.();
-  input.setInteractContext?.(false, '');
+  setInteractContextCached(false, '');
+  resetHudVisibilityCache();
   currentPromptAction = null;
   sound.setMiniGameMode?.(null);
   sound.playMenuMusic?.();
   actionPromptEl?.classList.add('hidden');
   puzzleHudEl?.classList.add('hidden');
+  crownSealsPillEl?.classList.add('hidden');
   missionStatusPillEl?.classList.add('hidden');
   altMeterEl?.classList.add('hidden');
   coreDescentHudEl?.classList.add('hidden');
@@ -2807,11 +3205,19 @@ const handleToggleMusic = () => {
   progression.updateSettings?.({ musicEnabled });
   syncAudioButtons();
 };
+const handleToggleVoice = () => {
+  sound.unlock?.();
+  const voiceEnabled = sound.toggleVoice ? sound.toggleVoice() : true;
+  progression.updateSettings?.({ voiceEnabled });
+  syncAudioButtons();
+  if (voiceEnabled) sound.voiceBlip?.('gateway', 0);
+};
 
 btnSound?.addEventListener('click', handleToggleMute);
 btnTitleSound?.addEventListener('click', handleToggleMute);
 btnMusic?.addEventListener('click', handleToggleMusic);
 btnTitleMusic?.addEventListener('click', handleToggleMusic);
+btnTitleVoice?.addEventListener('click', handleToggleVoice);
 
 function triggerPauseToggle() {
   if (game.mode === 'title' || game.mode === 'gameover' || game.mode === 'victory') return;
@@ -2888,12 +3294,67 @@ function handleResize() {
 window.addEventListener('resize', handleResize);
 window.visualViewport?.addEventListener('resize', handleResize);
 
+// ================= STARTUP ASSET PRE-WARMING (ZERO MID-CLIMB STUTTERS) =================
+const PREWARM_STORY_ASSETS = [
+  './assets/textures/story_keyframe_prologue.webp',
+  './assets/textures/story_keyframe_purification.webp',
+  './assets/textures/story_keyframe_finale.webp',
+  './assets/textures/story_portrait_gateway.webp',
+  './assets/textures/story_portrait_naiad.webp',
+  './assets/textures/story_portrait_warden.webp',
+  './assets/textures/story_portrait_guardian.webp',
+];
+const _prewarmedImages = [];
+let startupWarmupFrames = 0;
+let startupVeilDismissed = false;
+
+function dismissStartupTransitionVeil() {
+  if (startupVeilDismissed) return;
+  startupVeilDismissed = true;
+  stageTransitionVeilEl?.classList.add('is-ready');
+}
+
+function prewarmStartupAssets() {
+  // 1. Async decode all neural story keyframe plates & character portraits into GPU image cache
+  const decodeJobs = PREWARM_STORY_ASSETS.map((src) => {
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = src;
+    _prewarmedImages.push(img);
+    if (typeof img.decode === 'function') {
+      return img.decode().catch(() => {});
+    }
+    return Promise.resolve();
+  });
+
+  // 2. Pre-warm renderer shaders, Sanctum puzzle renderer (avoids 900ms PMREM/compile spike on _enterPuzzleRoom!), & initial tower render during startup fade
+  try {
+    renderer.prewarm?.();
+    renderer._ensurePuzzleRenderer?.();
+    game.render();
+  } catch (_) {}
+
+  // 3. Dismiss transition veil once images decode + at least 2 WebGL frames rendered (capped at 360ms)
+  let decodedReady = false;
+  const tryDismiss = () => {
+    if (decodedReady && startupWarmupFrames >= 2) {
+      dismissStartupTransitionVeil();
+    }
+  };
+  Promise.all(decodeJobs).then(() => {
+    decodedReady = true;
+    tryDismiss();
+  });
+  setTimeout(dismissStartupTransitionVeil, 360);
+}
+
 applyControlMode(initSettings.controlMode || 'gesture', false);
 refreshTitleMeta();
 renderLivesPips(3, false);
 loadTitlePreviewTower(0);
 syncTitleShowcaseState();
 handleResize();
+prewarmStartupAssets();
 
 // ================= MAIN 60FPS ANIMATION LOOP =================
 let lastTs = performance.now();
@@ -2902,7 +3363,8 @@ function loop(ts) {
   requestAnimationFrame(loop);
   const rawDt = (ts - lastTs) / 1000;
   lastTs = ts;
-  const dt = Math.max(0, Math.min(0.05, rawDt));
+  // Pass true wall-clock dt up to 0.10s so 120Hz fixed-timestep physics never slows down on brief dips
+  const dt = Math.max(0, Math.min(0.10, rawDt));
 
   // Trigger Act Intro Cutscenes during Story Campaign
   if (
@@ -2921,7 +3383,7 @@ function loop(ts) {
   }
 
   if (cutsceneState.active) {
-    input.setInteractContext?.(false, '');
+    setInteractContextCached(false, '');
     game.time = (game.time || 0) + dt;
     cutsceneState.elapsed += dt;
 
@@ -2937,8 +3399,11 @@ function loop(ts) {
       const curPct = Math.round(sPct + (ePct - sPct) * phase);
       game.purificationProgress = phase;
       renderer.setPurificationProgress?.(phase);
-      if (cutsceneRestorationPctEl) cutsceneRestorationPctEl.textContent = `${curPct}%`;
-      if (cutsceneRestorationFillEl) cutsceneRestorationFillEl.style.width = `${curPct}%`;
+      if (curPct !== cutsceneState.lastPct) {
+        cutsceneState.lastPct = curPct;
+        if (cutsceneRestorationPctEl) cutsceneRestorationPctEl.textContent = `${curPct}%`;
+        if (cutsceneRestorationFillEl) cutsceneRestorationFillEl.style.width = `${curPct}%`;
+      }
     }
 
     game.cutsceneCam = {
@@ -2950,12 +3415,21 @@ function loop(ts) {
 
     if (cutsceneState.charIdx < cutsceneState.fullText.length) {
       cutsceneState.charIdx = Math.min(cutsceneState.fullText.length, cutsceneState.charIdx + dt * 65);
-      if (cutsceneTextEl) {
-        cutsceneTextEl.textContent = cutsceneState.fullText.slice(0, Math.floor(cutsceneState.charIdx));
+      const nextCharInt = Math.floor(cutsceneState.charIdx);
+      if (nextCharInt !== cutsceneState.lastCharInt) {
+        cutsceneState.lastCharInt = nextCharInt;
+        if (cutsceneTextEl) {
+          cutsceneTextEl.textContent = cutsceneState.fullText.slice(0, nextCharInt);
+        }
+        const ch = cutsceneState.fullText.charAt(nextCharInt - 1);
+        if (ch && !/\s/.test(ch)) {
+          const activeBeat = def?.beats?.[cutsceneState.beatIdx];
+          sound.voiceBlip?.(activeBeat?.speaker || 'gateway', nextCharInt);
+        }
       }
     }
   } else if (game.mode === 'title') {
-    input.setInteractContext?.(false, '');
+    setInteractContextCached(false, '');
     game.time = (game.time || 0) + dt;
     game._syncDynamicLedges?.(dt, true);
     const hero = game.gateway || game.player;
@@ -2997,6 +3471,13 @@ function loop(ts) {
   }
 
   game.render();
+
+  if (!startupVeilDismissed) {
+    startupWarmupFrames++;
+    if (startupWarmupFrames >= 2 && _prewarmedImages.every((im) => im.complete)) {
+      dismissStartupTransitionVeil();
+    }
+  }
 }
 
 // Unlock soothing Pelagian Sanctuary Menu Score on first user interaction

@@ -261,11 +261,14 @@ function createGlowDotTexture() {
   canvas.width = 64;
   canvas.height = 64;
   const ctx = canvas.getContext('2d');
-  const g = ctx.createRadialGradient(32, 32, 1, 32, 32, 30);
-  g.addColorStop(0, 'rgba(255, 255, 255, 1)');
-  g.addColorStop(0.28, 'rgba(220, 252, 255, 0.80)');
-  g.addColorStop(0.62, 'rgba(94, 252, 232, 0.24)');
-  g.addColorStop(1, 'rgba(94, 252, 232, 0)');
+  ctx.clearRect(0, 0, 64, 64);
+  // Smooth feathered radial disc reaching 0.0 alpha well before quad edges (ZERO square borders!)
+  const g = ctx.createRadialGradient(32, 32, 1, 32, 32, 27);
+  g.addColorStop(0.0, 'rgba(255, 255, 255, 0.96)');
+  g.addColorStop(0.32, 'rgba(255, 255, 255, 0.68)');
+  g.addColorStop(0.64, 'rgba(255, 255, 255, 0.22)');
+  g.addColorStop(0.86, 'rgba(255, 255, 255, 0.0)');
+  g.addColorStop(1.0, 'rgba(255, 255, 255, 0.0)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 64, 64);
   const tex = new THREE.CanvasTexture(canvas);
@@ -394,12 +397,15 @@ export class GameRenderer {
     this._lastTime = 0;
     this._skyStateProxy = {};
 
-    // Adaptive Dynamic Resolution Scaling for locked 60fps across mobile & desktop
-    this.maxDpr = Math.min((typeof window !== 'undefined' && window.devicePixelRatio) || 1, 1.75);
+    // Adaptive Dynamic Resolution Scaling for locked 60fps across integrated GPUs & mobile
+    this._isIntegratedGpu = false;
+    this.maxDpr = Math.min((typeof window !== 'undefined' && window.devicePixelRatio) || 1, 1.25);
     this.currentDpr = this.maxDpr;
-    this._frameEmaMs = 16.6;
+    this.usePostFX = false; // Single-pass direct hardware ACESFilmic rendering by default!
+    this._frameEmaMs = 12.0;
     this._slowFrameCount = 0;
     this._lastPerfNow = 0;
+    this._shadowTick = 0;
 
     // Delegated specialist stage renderers (`core_descent`, `reef_swim`, `rapids_surf`, `frill_glide`, `aqueduct_sanctum`)
     this.subRenderer = null;
@@ -413,29 +419,92 @@ export class GameRenderer {
       antialias: true,
       powerPreference: 'high-performance',
     });
+    // Detect integrated GPUs (e.g. AMD Radeon(TM) Graphics / Intel UHD / Vega) and cap maxDpr to 1.0 for locked 60fps!
+    try {
+      const gl = this.webgl.getContext();
+      const dbg = gl?.getExtension?.('WEBGL_debug_renderer_info');
+      const gpuStr = String(
+        (dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl?.getParameter?.(gl.RENDERER)) || ''
+      ).toLowerCase();
+      if (
+        gpuStr.includes('radeon (tm) graphics') ||
+        gpuStr.includes('radeon(tm) graphics') ||
+        gpuStr.includes('radeon graphics') ||
+        gpuStr.includes('vega') ||
+        gpuStr.includes('intel(r) uhd') ||
+        gpuStr.includes('intel(r) hd') ||
+        gpuStr.includes('intel(r) iris') ||
+        gpuStr.includes('swiftshader') ||
+        gpuStr.includes('llvmpipe')
+      ) {
+        this._isIntegratedGpu = true;
+        this.maxDpr = Math.min(this.maxDpr, 1.0);
+        this.currentDpr = this.maxDpr;
+      }
+    } catch {}
     this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
-    this.webgl.toneMappingExposure = 1.04;
+    this.webgl.toneMappingExposure = 1.08;
     this.webgl.shadowMap.enabled = true;
-    this.webgl.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.webgl.shadowMap.type = THREE.PCFShadowMap;
     this.webgl.shadowMap.autoUpdate = false;
     this.webgl.setPixelRatio(this.currentDpr);
 
     this._biomeEnvMaps = new Map();
     this._initEnvironment();
+    this.bestiaryPreview = { active: false, family: 'snap_crab', yaw: 0, zoom: 1.0, anim: null };
+    this.wardrobePreview = { yaw: null, zoom: 1.0, anim: null };
+    this._wardrobeYawSmooth = 0;
+    this._bestiaryYawSmooth = 0;
+    this._bestiaryEnemyProxy = [
+      { id: 'bestiary_showcase', type: 'snap_crab', col: 0, floor: 2, dir: 1, vx: 0, vy: 0, alive: true },
+    ];
+
     this._initSharedAssets();
     this._initTowerScene();
     this._initPostProcessing();
     this._loadBlenderAssets();
   }
 
-  _getBiomeEnvMap(biomeKey) {
-    if (this._biomeEnvMaps.has(biomeKey)) {
-      return this._biomeEnvMaps.get(biomeKey);
+  /**
+   * Public API for `@ui_story`'s 3D Interactive Bestiary Inspector (`snap_crab`..`siphon_warden`).
+   * Accepts `{ active, family, yaw, zoom, anim }` or `null` to close.
+   */
+  setBestiaryPreview(opts = null) {
+    if (!opts || opts.active === false) {
+      this.bestiaryPreview.active = false;
+      this.enemyVisuals?.setBestiaryShowcase?.({ active: false });
+      return;
     }
-    const spec = BIOME_LIGHT_RIGS[biomeKey] || BIOME_LIGHT_RIGS.canyon_river;
-    const tex = buildBiomePmremTexture(this.webgl, spec);
-    this._biomeEnvMaps.set(biomeKey, tex);
-    return tex;
+    this.bestiaryPreview.active = true;
+    if (opts.family || opts.type) this.bestiaryPreview.family = opts.family || opts.type;
+    if (opts.yaw != null && Number.isFinite(Number(opts.yaw))) this.bestiaryPreview.yaw = Number(opts.yaw);
+    if (opts.zoom != null && Number.isFinite(Number(opts.zoom))) this.bestiaryPreview.zoom = clamp(Number(opts.zoom), 0.55, 1.85);
+    if (opts.anim !== undefined) this.bestiaryPreview.anim = opts.anim || null;
+  }
+
+  /**
+   * Public API for `@ui_story`'s 360° Pelagian Sanctuary Gateway Turntable & Animation Studio.
+   */
+  setWardrobePreview(opts = null) {
+    if (!opts) {
+      this.wardrobePreview.yaw = null;
+      this.wardrobePreview.zoom = 1.0;
+      this.wardrobePreview.anim = null;
+      return;
+    }
+    if (opts.yaw !== undefined) this.wardrobePreview.yaw = opts.yaw == null ? null : Number(opts.yaw);
+    if (opts.zoom != null && Number.isFinite(Number(opts.zoom))) this.wardrobePreview.zoom = clamp(Number(opts.zoom), 0.6, 1.85);
+    if (opts.anim !== undefined) this.wardrobePreview.anim = opts.anim || null;
+  }
+
+  setWardrobeOrbit(yaw = null, zoom = 1.0, anim = null) {
+    this.setWardrobePreview({ yaw, zoom, anim });
+  }
+
+  _getBiomeEnvMap(_biomeKey) {
+    if (this._sharedEnvTex) return this._sharedEnvTex;
+    this._sharedEnvTex = buildBiomePmremTexture(this.webgl, BIOME_LIGHT_RIGS.canyon_river);
+    return this._sharedEnvTex;
   }
 
   _initEnvironment() {
@@ -548,23 +617,19 @@ export class GameRenderer {
     this.sharedTrailClusterGeo.userData.shared = true;
     this.sharedOrbitalTrailGeo.userData.shared = true;
 
-    // Merged Crystalline Water Droplet Collectible Geometry (1 draw call!)
-    const dropParts = [
-      new THREE.SphereGeometry(0.16, 12, 10),
-      (() => {
-        const cone = new THREE.ConeGeometry(0.145, 0.24, 12);
-        cone.translate(0, 0.14, 0);
-        return cone;
-      })(),
-    ];
-    this.sharedWaterDropGeo = mergeRigidGeos(dropParts);
+    // Sculpted Faceted Pelagian Sapphire Relic Crystal (elongated diamond octahedron, 1 draw call!)
+    const sapphireGeo = new THREE.OctahedronGeometry(0.18, 0);
+    sapphireGeo.scale(0.84, 1.52, 0.84);
+    sapphireGeo.computeVertexNormals();
+    this.sharedWaterDropGeo = sapphireGeo;
     this.sharedWaterDropGeo.userData.shared = true;
     this.sharedWaterDropMat = new THREE.MeshStandardMaterial({
-      color: '#67e8f9',
-      emissive: '#06b6d4',
-      emissiveIntensity: 0.85,
-      roughness: 0.08,
-      metalness: 0.18,
+      color: '#0ea5e9',
+      emissive: '#0369a1',
+      emissiveIntensity: 0.35,
+      roughness: 0.12,
+      metalness: 0.35,
+      flatShading: true,
     });
     this.sharedWaterDropMat.userData.shared = true;
 
@@ -631,6 +696,95 @@ export class GameRenderer {
     this.glbModels = {};
     this._archPropsVersion = 0;
     this._collectibleMats = new Map();
+    this._glbLoadedCount = 0;
+  }
+
+  prewarm() {
+    if (!this._towerSceneCompiled) {
+      this._compileAllTowerShaders();
+      this._towerSceneCompiled = true;
+      this._compiledArchVersion = this._archPropsVersion;
+      this._enemiesGlbCompiled = Boolean(this.enemyVisuals?.isReady?.());
+    }
+  }
+
+  /**
+   * Pre-compiles EVERY WebGL / ANGLE D3D11 shader permutation used by the Spire, all 4 Arch GLBs,
+   * all 7 Enemy GLBs, collectibles, oceanVfx, telegraphs, sparks & instanced particles in ONE fast
+   * startup pass WITH `keyLight.castShadow = true` (matching exact live `USE_SHADOWMAP` shader keys!)
+   * -> ZERO mid-climb ANGLE D3D11 HLSL compile freezes!
+   */
+  _compileAllTowerShaders() {
+    if (!this.webgl || !this.towerScene || !this.towerCam) return;
+    const saved = [];
+    const prevPartCount = this.particleInst ? this.particleInst.count : 0;
+
+    try {
+      this.enemyVisuals?.prewarmAllRigs?.();
+      this._trimEnemyShadows(true);
+    } catch {}
+
+    const prevRt = this.webgl.getRenderTarget();
+    const prevShadowAuto = this.webgl.shadowMap.autoUpdate;
+    const prevShadowNeeds = this.webgl.shadowMap.needsUpdate;
+    const prevToneMapping = this.webgl.toneMapping;
+    const prevScissorTest = this.webgl.getScissorTest();
+    const prevViewport = new THREE.Vector4();
+    const prevScissor = new THREE.Vector4();
+    this.webgl.getViewport(prevViewport);
+    this.webgl.getScissor(prevScissor);
+
+    try {
+      // Render directly to the real MSAA screen backbuffer (`setRenderTarget(null)`) inside a tiny
+      // 16x16 scissor box with `ACESFilmicToneMapping` + `keyLight.castShadow = true` so Three.js
+      // compiles the EXACT live shader keys (`USE_SHADOWMAP` + `ACES_FILMIC_TONE_MAPPING` + `sRGB`)
+      // & ANGLE D3D11 PSOs upfront in ONE pass (NO double compile, ZERO mid-climb HLSL stalls!).
+      this.webgl.setRenderTarget(null);
+      this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
+      this.webgl.setScissorTest(true);
+      this.webgl.setScissor(0, 0, 16, 16);
+      this.webgl.setViewport(0, 0, 16, 16);
+
+      // Step 1: Allocate `keyLight.shadow.map` once cleanly with only current shadow casters (Gateway)
+      if (this.keyLight) this.keyLight.castShadow = true;
+      if (this.keyLight && !this.keyLight.shadow.map) {
+        this.webgl.shadowMap.autoUpdate = false;
+        this.webgl.shadowMap.needsUpdate = true;
+        this.webgl.render(this.towerScene, this.towerCam);
+      }
+
+      // Step 2: Force every scene node visible & unculled and render ONE 16x16 frame with
+      // `shadowMap.needsUpdate = false` (reusing the shadow map!) so ANGLE D3D11 compiles every
+      // exact live shader permutation & uploads every GPU texture upfront at minimal raster cost.
+      if (this.particleInst && prevPartCount === 0) {
+        this.particleInst.count = 1;
+      }
+      this.towerScene.traverse((obj) => {
+        saved.push(obj, obj.visible, obj.frustumCulled);
+        obj.visible = true;
+        obj.frustumCulled = false;
+      });
+      this.webgl.shadowMap.autoUpdate = false;
+      this.webgl.shadowMap.needsUpdate = false;
+      this.webgl.render(this.towerScene, this.towerCam);
+    } catch {
+      // Ignore driver fallback
+    } finally {
+      for (let i = 0; i < saved.length; i += 3) {
+        saved[i].visible = saved[i + 1];
+        saved[i].frustumCulled = saved[i + 2];
+      }
+      if (this.particleInst) {
+        this.particleInst.count = prevPartCount;
+      }
+      this.webgl.shadowMap.autoUpdate = prevShadowAuto;
+      this.webgl.shadowMap.needsUpdate = prevShadowNeeds;
+      this.webgl.toneMapping = prevToneMapping;
+      this.webgl.setViewport(prevViewport);
+      this.webgl.setScissor(prevScissor);
+      this.webgl.setScissorTest(prevScissorTest);
+      this.webgl.setRenderTarget(prevRt);
+    }
   }
 
   _prepareGlbScene(scene) {
@@ -640,14 +794,41 @@ export class GameRenderer {
         obj.geometry.userData.shared = true;
       }
       if (!obj.isMesh || !obj.material) return;
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      for (const m of mats) {
-        if (!m) continue;
-        m.userData = m.userData || {};
-        m.userData.shared = true;
-        if (typeof m.emissiveIntensity === 'number' && m.emissiveIntensity > 1.85) {
-          m.emissiveIntensity = 1.85;
+      const convert = (m) => {
+        if (!m) return m;
+        let out = m;
+        if (m.isMeshPhysicalMaterial) {
+          out = new THREE.MeshStandardMaterial({
+            name: m.name || '',
+            color: m.color ? m.color.clone() : new THREE.Color('#ffffff'),
+            map: m.map || null,
+            normalMap: m.normalMap || null,
+            normalScale: m.normalScale ? m.normalScale.clone() : new THREE.Vector2(1, 1),
+            roughnessMap: m.roughnessMap || null,
+            metalnessMap: m.metalnessMap || null,
+            aoMap: m.aoMap || null,
+            aoMapIntensity: m.aoMapIntensity ?? 1.0,
+            emissive: m.emissive ? m.emissive.clone() : new THREE.Color('#000000'),
+            emissiveMap: m.emissiveMap || null,
+            emissiveIntensity: Math.min(1.85, m.emissiveIntensity ?? 1.0),
+            roughness: typeof m.roughness === 'number' ? m.roughness : 0.4,
+            metalness: typeof m.metalness === 'number' ? m.metalness : 0.2,
+            transparent: Boolean(m.transparent),
+            opacity: typeof m.opacity === 'number' ? m.opacity : 1.0,
+            side: m.side,
+          });
+          m.dispose();
+        } else if (typeof out.emissiveIntensity === 'number' && out.emissiveIntensity > 1.85) {
+          out.emissiveIntensity = 1.85;
         }
+        out.userData = out.userData || {};
+        out.userData.shared = true;
+        return out;
+      };
+      if (Array.isArray(obj.material)) {
+        obj.material = obj.material.map(convert);
+      } else {
+        obj.material = convert(obj.material);
       }
     });
     return scene;
@@ -684,8 +865,9 @@ export class GameRenderer {
 
   _initPostProcessing() {
     this.postfx = null;
+    if (!this.usePostFX) return;
     try {
-      this.postfx = new CinematicPostFX(this.webgl, this.width, this.height, this.currentDpr);
+      this.postfx = new CinematicPostFX(this.webgl, this.width, this.height, this.currentDpr, { enabled: true });
       this.postfx.setBiome(this.biome, this.purificationProgress);
     } catch {
       this.postfx = null;
@@ -693,7 +875,7 @@ export class GameRenderer {
   }
 
   _renderWithComposer(scene, camera, opts) {
-    if (this.postfx) {
+    if (this.usePostFX && this.postfx && !this.postfx.isBypassed) {
       try {
         this.postfx.render(scene, camera, opts);
         return;
@@ -701,6 +883,9 @@ export class GameRenderer {
         this.postfx = null;
       }
     }
+    this.webgl.setRenderTarget(null);
+    this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
+    this.webgl.toneMappingExposure = 1.08 + (opts?.purification ? opts.purification * 0.05 : 0) + (opts?.flash ? opts.flash * 0.14 : 0);
     this.webgl.render(scene, camera);
   }
 
@@ -788,15 +973,16 @@ export class GameRenderer {
     const now = performance.now();
     if (this._lastPerfNow > 0) {
       const frameMs = now - this._lastPerfNow;
-      if (frameMs > 0 && frameMs < 200) {
-        this._frameEmaMs = this._frameEmaMs * 0.92 + frameMs * 0.08;
-        if (this._frameEmaMs > 19.0 && this.currentDpr > 1.0) {
+      if (frameMs > 0 && frameMs < 100) {
+        this._frameEmaMs = this._frameEmaMs * 0.94 + frameMs * 0.06;
+        const minDpr = this._isIntegratedGpu ? 0.72 : 0.85;
+        if (this._frameEmaMs > 18.5 && this.currentDpr > minDpr) {
           this._slowFrameCount++;
-          if (this._slowFrameCount >= 45) {
-            this.currentDpr = this.currentDpr > 1.25 ? 1.25 : 1.0;
+          if (this._slowFrameCount >= 75) {
+            this.currentDpr = Math.max(minDpr, Number((this.currentDpr - 0.08).toFixed(2)));
             this._applyPixelRatio(this.currentDpr);
             this._slowFrameCount = 0;
-            this._frameEmaMs = 16.6;
+            this._frameEmaMs = 12.0;
           }
         } else if (this._slowFrameCount > 0) {
           this._slowFrameCount--;
@@ -809,10 +995,14 @@ export class GameRenderer {
   resize(w, h, dpr = 1) {
     this.width = Math.max(1, w);
     this.height = Math.max(1, h);
-    this.maxDpr = Math.min(dpr, 1.75);
+    const pxArea = this.width * this.height;
+    // Integrated AMD Radeon / Intel UHD GPUs are fill-rate bound at full 1080p (2.07M px):
+    // scale smoothly to 0.78 DPR at >= 1.2M px (~1498x842 w/ MSAA) while keeping portrait 412x915 at 1.0!
+    const dprCap = this._isIntegratedGpu ? (pxArea >= 1200000 ? 0.78 : 1.0) : 1.25;
+    this.maxDpr = Math.min(dpr, dprCap);
     this.currentDpr = this.maxDpr;
     this._slowFrameCount = 0;
-    this._frameEmaMs = 16.6;
+    this._frameEmaMs = 12.0;
     this._applyPixelRatio(this.currentDpr);
 
     const aspect = Math.max(0.38, this.width / this.height);
@@ -868,23 +1058,22 @@ export class GameRenderer {
 
     this.towerCam = new THREE.PerspectiveCamera(50, 390 / 844, 0.15, 280);
 
-    // 5-Biome Daylight / Alpenglow / Twilight / Lagoon / Aurora Rig + 2048x2048 PCFSoftShadowMap
+    // 5-Biome Daylight / Alpenglow / Twilight / Lagoon / Aurora Rig + Smart 1024x1024 PCFShadowMap (tight 8m x 8m hero frustum!)
     this.hemiLight = new THREE.HemisphereLight('#cbeafe', '#a85238', 0.96);
     this.towerScene.add(this.hemiLight);
 
     this.keyLight = new THREE.DirectionalLight('#fff3d1', 2.52);
     this.keyLight.position.set(11.2, 14.5, 11.4);
     this.keyLight.castShadow = true;
-    this.keyLight.shadow.mapSize.set(2048, 2048);
-    this.keyLight.shadow.camera.near = 2.2;
-    this.keyLight.shadow.camera.far = 36.0;
-    this.keyLight.shadow.camera.left = -6.8;
-    this.keyLight.shadow.camera.right = 6.8;
-    this.keyLight.shadow.camera.top = 9.6;
-    this.keyLight.shadow.camera.bottom = -9.6;
-    this.keyLight.shadow.bias = -0.00035;
-    this.keyLight.shadow.normalBias = 0.018;
-    this.keyLight.shadow.radius = 1.85;
+    this.keyLight.shadow.mapSize.set(512, 512);
+    this.keyLight.shadow.camera.near = 3.0;
+    this.keyLight.shadow.camera.far = 24.0;
+    this.keyLight.shadow.camera.left = -3.75;
+    this.keyLight.shadow.camera.right = 3.75;
+    this.keyLight.shadow.camera.top = 3.75;
+    this.keyLight.shadow.camera.bottom = -3.75;
+    this.keyLight.shadow.bias = -0.00055;
+    this.keyLight.shadow.normalBias = 0.022;
     this.towerScene.add(this.keyLight);
     this.towerScene.add(this.keyLight.target);
 
@@ -912,12 +1101,12 @@ export class GameRenderer {
       floorHeight: FLOOR_HEIGHT,
     });
 
-    // Real-Time Planar-Reflecting Living Water (`src/water.js`)
+    // Single-Pass Analytic Fresnel Living Water (`src/water.js` — 0 reflection render passes!)
     this.ocean = new Ocean(this.webgl, {
       towerRadius: TOWER_RADIUS,
       preset: 'canyon_river',
       size: 240,
-      segments: 64,
+      segments: 36,
       waterY: -0.55 * FLOOR_HEIGHT,
     });
     this.ocean.setSize(this.width, this.height, this.currentDpr);
@@ -994,6 +1183,325 @@ export class GameRenderer {
     this._initParticleInstancer(112);
     this.debrisPool = this._buildDebrisPool();
     this.towerScene.add(this.debrisPool.inst);
+
+    // Wave 4: Sanctuary Turntable Pedestal Halo, Rescued Wildlife Lagoon & 3D Boss Hazards Pool
+    this.turntableHalo = this._buildTurntableHalo();
+    this.towerScene.add(this.turntableHalo);
+
+    this.bossHazardGroup = new THREE.Group();
+    this.bossHazardPool = this._buildBossHazardPool(8);
+    this.towerScene.add(this.bossHazardGroup);
+
+    this.wildlifeLagoonGroup = new THREE.Group();
+    this.wildlifeLagoonSlots = [];
+    this._initWildlifeLagoon();
+    this.towerScene.add(this.wildlifeLagoonGroup);
+  }
+
+  _buildTurntableHalo() {
+    const g = new THREE.Group();
+    g.visible = false;
+    const outer = new THREE.Mesh(
+      new THREE.RingGeometry(0.62, 0.78, 36),
+      new THREE.MeshBasicMaterial({
+        color: '#5efce8',
+        transparent: true,
+        opacity: 0.68,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    outer.rotation.x = -Math.PI * 0.5;
+    const inner = new THREE.Mesh(
+      new THREE.RingGeometry(0.42, 0.48, 28),
+      new THREE.MeshBasicMaterial({
+        color: '#fde047',
+        transparent: true,
+        opacity: 0.52,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    inner.rotation.x = -Math.PI * 0.5;
+    inner.position.y = 0.01;
+    g.add(outer, inner);
+    g.userData = { outer, inner };
+    return g;
+  }
+
+  _buildBossHazardPool(maxSlots = 8) {
+    const slots = [];
+    const beamGeo = new THREE.CylinderGeometry(0.32, 0.32, 1.0, 14, 1, true);
+    const coreGeo = new THREE.CylinderGeometry(0.14, 0.14, 1.0, 10);
+    const ringGeo = new THREE.TorusGeometry(0.68, 0.065, 8, 24);
+    ringGeo.rotateX(Math.PI * 0.5);
+    const warnGeo = new THREE.RingGeometry(0.42, 0.84, 24);
+    warnGeo.rotateX(-Math.PI * 0.5);
+
+    for (let i = 0; i < maxSlots; i++) {
+      const root = new THREE.Group();
+      root.visible = false;
+      const beamMat = new THREE.MeshBasicMaterial({
+        color: '#f43f5e',
+        transparent: true,
+        opacity: 0.55,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      const coreMat = new THREE.MeshBasicMaterial({
+        color: '#fef08a',
+        transparent: true,
+        opacity: 0.85,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: '#5efce8',
+        transparent: true,
+        opacity: 0.72,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const warnMat = new THREE.MeshBasicMaterial({
+        color: '#fbbf24',
+        transparent: true,
+        opacity: 0.65,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+
+      const beam = new THREE.Mesh(beamGeo, beamMat);
+      const core = new THREE.Mesh(coreGeo, coreMat);
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      const warn = new THREE.Mesh(warnGeo, warnMat);
+      warn.position.y = 0.06;
+      root.add(beam, core, ring, warn);
+      this.bossHazardGroup.add(root);
+      slots.push({ root, beam, core, ring, warn, beamMat, coreMat, ringMat, warnMat });
+    }
+    return slots;
+  }
+
+  _initWildlifeLagoon() {
+    const splashGeo = new THREE.RingGeometry(0.24, 0.56, 20);
+    splashGeo.rotateX(-Math.PI * 0.5);
+
+    for (let i = 0; i < 12; i++) {
+      const isTurtle = i % 2 === 0;
+      const root = new THREE.Group();
+      root.visible = false;
+      const modelGroup = new THREE.Group();
+
+      // Lightweight procedural stand-in until sea_turtle.glb / river_otter.glb finish loading
+      const fb = new THREE.Mesh(
+        isTurtle ? new THREE.SphereGeometry(0.32, 10, 8) : new THREE.CapsuleGeometry(0.14, 0.44, 6, 8),
+        new THREE.MeshStandardMaterial({
+          color: isTurtle ? '#2dd4bf' : '#855236',
+          roughness: 0.42,
+        })
+      );
+      if (isTurtle) fb.scale.set(1.2, 0.45, 0.95);
+      else fb.rotation.z = Math.PI * 0.5;
+      modelGroup.add(fb);
+
+      const splashMat = new THREE.MeshBasicMaterial({
+        color: '#e0f7ff',
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const splash = new THREE.Mesh(splashGeo, splashMat);
+      root.add(modelGroup, splash);
+      this.wildlifeLagoonGroup.add(root);
+
+      this.wildlifeLagoonSlots.push({
+        root,
+        modelGroup,
+        splash,
+        splashMat,
+        isTurtle,
+        radius: TOWER_RADIUS + 2.6 + (i % 4) * 0.78,
+        speed: (isTurtle ? 0.24 : 0.34) * (i % 4 < 2 ? 1 : -1) * (0.85 + (i % 3) * 0.14),
+        phase: (i * TWO_PI) / 12 + (isTurtle ? 0.15 : 0.42),
+        flipperL: null,
+        flipperR: null,
+        otterTail: null,
+      });
+    }
+
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      const loader = new GLTFLoader();
+      loader.load(
+        'assets/models/sea_turtle.glb',
+        (gltf) => {
+          if (!gltf?.scene) return;
+          for (const slot of this.wildlifeLagoonSlots) {
+            if (!slot.isTurtle) continue;
+            slot.modelGroup.clear();
+            const cl = gltf.scene.clone(true);
+            cl.scale.setScalar(0.88);
+            slot.flipperL = cl.getObjectByName('flipper_L') || null;
+            slot.flipperR = cl.getObjectByName('flipper_R') || null;
+            slot.modelGroup.add(cl);
+          }
+        },
+        undefined,
+        () => {}
+      );
+      loader.load(
+        'assets/models/river_otter.glb',
+        (gltf) => {
+          if (!gltf?.scene) return;
+          for (const slot of this.wildlifeLagoonSlots) {
+            if (slot.isTurtle) continue;
+            slot.modelGroup.clear();
+            const cl = gltf.scene.clone(true);
+            cl.scale.setScalar(0.92);
+            slot.otterTail = cl.getObjectByName('otter_tail') || null;
+            slot.modelGroup.add(cl);
+          }
+        },
+        undefined,
+        () => {}
+      );
+    }
+  }
+
+  _updateWildlifeLagoon(state, time, waterY, visible) {
+    if (!this.wildlifeLagoonGroup) return;
+    if (!visible) {
+      this.wildlifeLagoonGroup.visible = false;
+      return;
+    }
+    const rawCount = Number(
+      state.rescuedCritterCount ??
+        state.critterCount ??
+        state.prog?.getCritterCount?.() ??
+        state.progression?.getCritterCount?.() ??
+        0
+    ) || 0;
+    const purify = Number(state.purificationProgress ?? state.tower?.healing ?? 0) || 0;
+    const activeCount =
+      rawCount > 0 ? clamp(Math.ceil((rawCount / 30) * 12) + 1, 2, 12) : purify > 0.12 ? 2 : 0;
+
+    this.wildlifeLagoonGroup.visible = activeCount > 0;
+    if (activeCount <= 0) return;
+
+    for (let i = 0; i < this.wildlifeLagoonSlots.length; i++) {
+      const slot = this.wildlifeLagoonSlots[i];
+      if (i >= activeCount) {
+        slot.root.visible = false;
+        continue;
+      }
+      slot.root.visible = true;
+      const ang = slot.phase + time * slot.speed;
+      const cx = Math.sin(ang) * slot.radius;
+      const cz = Math.cos(ang) * slot.radius;
+      const dirSign = slot.speed >= 0 ? 1 : -1;
+
+      if (slot.isTurtle) {
+        const bob = Math.sin(time * 2.2 + slot.phase) * 0.08;
+        slot.root.position.set(cx, waterY + 0.04 + bob, cz);
+        slot.modelGroup.rotation.set(0, ang + (dirSign > 0 ? Math.PI * 0.5 : -Math.PI * 0.5), Math.sin(time * 2.4 + i) * 0.08);
+        if (slot.flipperL) slot.flipperL.rotation.x = Math.sin(time * 4.8 + i) * 0.44;
+        if (slot.flipperR) slot.flipperR.rotation.x = -Math.sin(time * 4.8 + i) * 0.44;
+        slot.splashMat.opacity = 0.22 + Math.sin(time * 3 + i) * 0.08;
+        slot.splash.scale.setScalar(1.1 + Math.sin(time * 2.5 + i) * 0.15);
+      } else {
+        // Joyful leaping River Otter arcs splashing cleanly over the lagoon surface!
+        const leapCycle = (time * 1.45 + slot.phase) % TWO_PI;
+        const rawArc = Math.sin(leapCycle);
+        const leapY = rawArc > -0.15 ? Math.max(-0.18, rawArc * 0.88) : -0.18;
+        slot.root.position.set(cx, waterY + 0.05, cz);
+        slot.modelGroup.position.set(0, leapY, 0);
+        slot.modelGroup.rotation.set(
+          rawArc > -0.15 ? -Math.cos(leapCycle) * 0.52 : 0,
+          ang + (dirSign > 0 ? Math.PI * 0.5 : -Math.PI * 0.5),
+          0
+        );
+        if (slot.otterTail) slot.otterTail.rotation.y = Math.sin(time * 9.0 + i) * 0.42;
+        const entrySplash = Math.abs(rawArc) < 0.28 ? 1 - Math.abs(rawArc) / 0.28 : 0;
+        slot.splashMat.opacity = entrySplash * 0.65;
+        slot.splash.scale.setScalar(0.85 + (1 - entrySplash) * 1.35);
+      }
+    }
+  }
+
+  _updateBossHazards(hazards, effCamCol, fh, time, toppleOffY) {
+    if (!this.bossHazardPool) return;
+    const list = hazards || [];
+    for (let i = 0; i < this.bossHazardPool.length; i++) {
+      const slot = this.bossHazardPool[i];
+      if (i >= list.length) {
+        slot.root.visible = false;
+        continue;
+      }
+      const hz = list[i];
+      if (hz.active === false) {
+        slot.root.visible = false;
+        continue;
+      }
+      const col = hz.col ?? hz.targetCol ?? 0;
+      const theta = wrapAngle((col - effCamCol) * COL_ANGLE);
+      if (Math.abs(theta) > 1.72) {
+        slot.root.visible = false;
+        continue;
+      }
+      const floor = hz.floor ?? hz.floorMin ?? 1;
+      const spanFloors = Math.max(1.2, (hz.floorMax != null ? hz.floorMax - floor : hz.heightFloors ?? 4.2));
+      const beamH = spanFloors * fh;
+      const r = TOWER_RADIUS + LEDGE_STAND_OFFSET + 0.14;
+      const px = r * Math.sin(theta);
+      const pz = r * Math.cos(theta);
+      const py = floor * fh + toppleOffY;
+
+      const phase = String(hz.phase || (hz.telegraph > 0 ? 'telegraph' : 'active')).toLowerCase();
+      const isTelegraph = phase === 'telegraph' || phase === 'warn' || phase === 'windup';
+      const isSlam = String(hz.type || hz.kind || '').toLowerCase().includes('slam') || String(hz.type || hz.kind || '').toLowerCase().includes('tentacle');
+      const pulse = 0.5 + 0.5 * Math.sin(time * (isTelegraph ? 22 : 16) + i);
+
+      slot.root.visible = true;
+      slot.root.position.set(px, py, pz);
+      slot.root.rotation.set(0, theta, 0);
+
+      slot.warn.visible = true;
+      slot.warnMat.color.set(isTelegraph ? '#fbbf24' : isSlam ? '#f43f5e' : '#5efce8');
+      slot.warnMat.opacity = isTelegraph ? 0.45 + pulse * 0.42 : 0.72;
+      slot.warn.scale.setScalar(isTelegraph ? 0.85 + pulse * 0.35 : 1.25 + pulse * 0.2);
+
+      if (isTelegraph) {
+        slot.beam.visible = true;
+        slot.beam.position.y = beamH * 0.5;
+        slot.beam.scale.set(0.32, beamH, 0.32);
+        slot.beamMat.color.set('#fbbf24');
+        slot.beamMat.opacity = 0.22 + pulse * 0.18;
+        slot.core.visible = false;
+        slot.ring.visible = false;
+      } else {
+        slot.beam.visible = true;
+        slot.beam.position.y = beamH * 0.5;
+        const w = isSlam ? 1.15 : 0.92;
+        slot.beam.scale.set(w + pulse * 0.18, beamH, w + pulse * 0.18);
+        slot.beamMat.color.set(isSlam ? '#f43f5e' : '#38bdf8');
+        slot.beamMat.opacity = 0.56 + pulse * 0.22;
+
+        slot.core.visible = true;
+        slot.core.position.y = beamH * 0.5;
+        slot.core.scale.set(0.85 + pulse * 0.2, beamH, 0.85 + pulse * 0.2);
+        slot.coreMat.color.set(isSlam ? '#fde047' : '#e0f7ff');
+
+        slot.ring.visible = true;
+        slot.ring.position.y = 0.14 + ((time * 2.8 + i * 0.3) % 1) * Math.min(2.2, beamH * 0.5);
+        slot.ring.scale.setScalar(0.8 + ((time * 2.8 + i * 0.3) % 1) * 1.4);
+        slot.ringMat.color.set(isSlam ? '#fb7185' : '#5efce8');
+      }
+    }
   }
 
   _buildTailWhipVfx() {
@@ -1103,13 +1611,13 @@ export class GameRenderer {
     return g;
   }
 
-  _trimEnemyShadows() {
+  _trimEnemyShadows(includeHidden = false) {
     const root = this.enemyVisuals?.root;
     if (!root) return;
     const kids = root.children;
     for (let i = 0; i < kids.length; i++) {
       const rig = kids[i];
-      if (!rig || !rig.isGroup || !rig.visible) continue;
+      if (!rig || !rig.isGroup || (!includeHidden && !rig.visible)) continue;
       const bodyRoot = rig.userData?.body || rig;
       const sigKey = bodyRoot.children?.[0] || bodyRoot;
       if (rig._shadowTrimKey === sigKey) continue;
@@ -1117,15 +1625,17 @@ export class GameRenderer {
 
       rig.traverse((o) => {
         if (!o.isMesh) return;
-        const m = Array.isArray(o.material) ? o.material[0] : o.material;
-        o.castShadow = Boolean(m && !m.transparent && !m.isMeshBasicMaterial);
+        // Enemies use crisp dark radial AO contact shadow blobs (`enemy_contact_ao`) —
+        // skip directional shadow-map depth draws on enemy sub-meshes to save 20-50 calls/frame!
+        o.castShadow = false;
       });
     }
   }
 
   _initParticleInstancer(maxCount = 112) {
     this._maxParticles = maxCount;
-    this.particleInstGeo = this.sharedParticleGeo.clone();
+    // Soft radial alpha-feathered disc so dust bursts & water splashes look organic (ZERO grey squares!)
+    this.particleInstGeo = new THREE.PlaneGeometry(0.24, 0.24);
     this._particleAlphas = new Float32Array(maxCount);
     this._particleAlphaAttr = new THREE.InstancedBufferAttribute(this._particleAlphas, 1);
     this._particleAlphaAttr.setUsage(THREE.DynamicDrawUsage);
@@ -1133,8 +1643,10 @@ export class GameRenderer {
 
     this.particleInstMat = new THREE.MeshBasicMaterial({
       color: '#ffffff',
+      map: this.glowDotTex,
       transparent: true,
       depthWrite: false,
+      side: THREE.DoubleSide,
     });
     this.particleInstMat.onBeforeCompile = (shader) => {
       shader.vertexShader =
@@ -1195,27 +1707,32 @@ export class GameRenderer {
 
   _buildLandingRing() {
     const g = new THREE.Group();
-    const shadow = new THREE.Mesh(
-      new THREE.CircleGeometry(0.32, 22),
-      new THREE.MeshBasicMaterial({ color: '#041224', transparent: true, opacity: 0.48, depthWrite: false })
-    );
-    shadow.rotation.x = -Math.PI / 2;
+    // Crisp dark ground-contact AO shadow disc directly under Gateway's feet (ZERO glowing cyan hover ring!)
+    const c = document.createElement('canvas');
+    c.width = 64;
+    c.height = 64;
+    const ctx = c.getContext('2d');
+    const grad = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
+    grad.addColorStop(0.0, 'rgba(2, 8, 16, 0.72)');
+    grad.addColorStop(0.55, 'rgba(3, 10, 20, 0.44)');
+    grad.addColorStop(0.82, 'rgba(4, 12, 24, 0.14)');
+    grad.addColorStop(1.0, 'rgba(4, 12, 24, 0.0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 64, 64);
+    const aoTex = new THREE.CanvasTexture(c);
 
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.34, 0.43, 26),
+    const shadow = new THREE.Mesh(
+      new THREE.CircleGeometry(0.36, 20),
       new THREE.MeshBasicMaterial({
-        color: '#5efce8',
+        map: aoTex,
         transparent: true,
-        opacity: 0.76,
-        side: THREE.DoubleSide,
+        opacity: 0.92,
         depthWrite: false,
       })
     );
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.006;
-
-    g.add(shadow, ring);
-    g.userData = { shadow, ring };
+    shadow.rotation.x = -Math.PI / 2;
+    g.add(shadow);
+    g.userData = { shadow, ring: null };
     return g;
   }
 
@@ -1421,31 +1938,20 @@ export class GameRenderer {
           () => new THREE.MeshStandardMaterial({ color: '#e5a945', metalness: 0.86, roughness: 0.22 })
         )
       );
-      const critterCore = new THREE.Group();
-      const fbCritter = new THREE.Mesh(
+      const critterCore = new THREE.Mesh(
         new THREE.CapsuleGeometry(0.11, 0.22, 6, 10),
         this._getCollectibleMat(
           'critterPod:body',
-          () => new THREE.MeshStandardMaterial({ color: '#2dd4bf', roughness: 0.35 })
+          () =>
+            new THREE.MeshStandardMaterial({
+              color: '#2dd4bf',
+              emissive: '#0d9488',
+              emissiveIntensity: 0.45,
+              roughness: 0.28,
+            })
         )
       );
-      fbCritter.rotation.z = Math.PI * 0.5;
-      critterCore.add(fbCritter);
-      if (typeof window !== 'undefined' && typeof fetch === 'function') {
-        const loader = new GLTFLoader();
-        loader.load(
-          'assets/models/sea_turtle.glb',
-          (gltf) => {
-            if (!gltf?.scene) return;
-            critterCore.clear();
-            const cl = gltf.scene.clone(true);
-            cl.scale.setScalar(0.46);
-            critterCore.add(cl);
-          },
-          undefined,
-          () => {}
-        );
-      }
+      critterCore.rotation.z = Math.PI * 0.5;
       g.add(bubble, collar, critterCore);
       g.userData = { holoRing: collar };
     } else if (type === 'curio' || type === 'salvage_part' || type === 'compass_key') {
@@ -1472,15 +1978,23 @@ export class GameRenderer {
       g.add(orb, gimbal);
       g.userData = { holoRing: gimbal };
     } else {
-      // Default Crystalline Water Droplet (`waterDrop` / `gear`)
+      // Sculpted Faceted Pelagian Sapphire Relic Crystal + Carved Antique-Bronze Equator Bezel Ring
       const drop = new THREE.Mesh(this.sharedWaterDropGeo, this.sharedWaterDropMat);
       const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(0.26, 0.018, 6, 20),
+        new THREE.TorusGeometry(0.195, 0.022, 6, 18),
         this._getCollectibleMat(
           'waterDrop:ring',
-          () => new THREE.MeshBasicMaterial({ color: '#bae6fd', transparent: true, opacity: 0.7 })
+          () =>
+            new THREE.MeshStandardMaterial({
+              color: '#b8863b',
+              emissive: '#3b2408',
+              emissiveIntensity: 0.18,
+              metalness: 0.84,
+              roughness: 0.26,
+            })
         )
       );
+      ring.rotation.x = Math.PI * 0.5;
       g.add(drop, ring);
       g.userData = { holoRing: ring };
     }
@@ -1521,7 +2035,11 @@ export class GameRenderer {
     const fx = HYDRO_FX_STYLES[this.blasterFxId] || HYDRO_FX_STYLES.standard_cryo;
     const tintHydro = this.blasterFxId !== 'standard_cryo';
     const dm = this._debrisDummy;
-    dm.rotation.set(0, 0, 0);
+    if (cam && cam.quaternion) {
+      dm.quaternion.copy(cam.quaternion);
+    } else {
+      dm.rotation.set(0, 0, 0);
+    }
     let visCount = 0;
 
     for (let i = 0; i < list.length && visCount < this._maxParticles; i++) {
@@ -1640,13 +2158,19 @@ export class GameRenderer {
 
     const fh = FLOOR_HEIGHT;
     const aspect = this.towerCam.aspect;
-    const isWardrobe = Boolean(state.wardrobeSpotlight && hero);
+    const bestiarySpec = state.bestiaryPreview?.active
+      ? state.bestiaryPreview
+      : this.bestiaryPreview?.active
+      ? this.bestiaryPreview
+      : null;
+    const isBestiary = Boolean(bestiarySpec);
+    const isWardrobe = Boolean(!isBestiary && state.wardrobeSpotlight && hero);
     const cutscene =
-      !isWardrobe && state.cutsceneCam?.active
+      !isWardrobe && !isBestiary && state.cutsceneCam?.active
         ? state.cutsceneCam
-        : !isWardrobe && state.cutscene?.active
+        : !isWardrobe && !isBestiary && state.cutscene?.active
         ? state.cutscene
-        : !isWardrobe && this.cutsceneCam?.active
+        : !isWardrobe && !isBestiary && this.cutsceneCam?.active
         ? this.cutsceneCam
         : null;
     const isPurifying = Boolean(
@@ -1657,6 +2181,7 @@ export class GameRenderer {
     const isCutscene = Boolean(cutscene);
     const isTitleShowcase =
       !isWardrobe &&
+      !isBestiary &&
       !isCutscene &&
       (Boolean(state.titleShowcase) || (state.titleShowcase !== false && state.mode === 'title'));
 
@@ -1688,7 +2213,7 @@ export class GameRenderer {
         : (csKind.includes('2') || csKind.includes('4') ? 2.8 : -2.8) * (1 - csEase) + Math.sin(time * 0.45) * 0.16
       : 0;
 
-    const effCamCol = isWardrobe
+    const effCamCol = isWardrobe || isBestiary
       ? pBaseCol
       : isCutscene
       ? pBaseCol + csOrbitCols
@@ -1696,87 +2221,98 @@ export class GameRenderer {
       ? pBaseCol + Math.sin(time * 0.30) * (0.42 - landBlend * 0.12)
       : camCol;
 
-    // Portrait (`48° -> 55.5°`) vs Tablet/Desktop/Phone-Landscape (`42° -> 39°`)
-    const portraitGameFov = 48 + tallPhoneBlend * 7.5;
-    const landscapeGameFov = 42 - Math.max(0, Math.min(1, (aspect - 1.33) / 0.90)) * 3.0;
-    const gameplayFov = Math.round((portraitGameFov * (1 - landBlend) + landscapeGameFov * landBlend) * 2) * 0.5;
-    const wantFov = isWardrobe ? 44 : isCutscene ? 50 : gameplayFov;
+    // CLOSE-UP ACTION CAMERA (`TOWER_RADIUS = 3.75`, hero stands at `z = 4.21m`):
+    //   - Desktop / Landscape (`aspect >= 1.0`): `fov = 45°`, `camZ = 9.85m` (~5.64m from Gateway)
+    //   - Portrait Phone (`aspect < 1.0`):       `fov = 48°`, `camZ = 11.5m` (~7.29m from Gateway)
+    const isPortrait = aspect < 1.0;
+    const gameplayFov = isPortrait ? 48 : 45;
+    const wantFov = isWardrobe || isBestiary ? 44 : isCutscene ? (isPortrait ? 48 : 45) : gameplayFov;
     if (this.towerCam.fov !== wantFov) {
       this.towerCam.fov = wantFov;
       this.towerCam.updateProjectionMatrix();
     }
 
-    // `camZ` frames 1.28x Gateway heroically while keeping spire at `~65–71%` width on `412x915`
-    // Android Portrait so BOTH flanks of the living Earth Water Biome vista shine clearly!
-    let camZ;
-    if (aspect < 0.92) {
-      camZ = 19.8 + tallPhoneBlend * 6.8; // 19.8m (3:4) -> 26.6m (9:19.5 portrait: ~65% spire + 35% sunlit flanks!)
-    } else {
-      const wideLand = Math.max(0, Math.min(1, (aspect - 1.33) / 0.90));
-      camZ = 16.2 - wideLand * 1.4; // 16.2m tablet -> 14.8m 1080p / 20:9 landscape
-    }
+    let camZ = isPortrait ? 11.5 : 9.85;
 
-    const posOffY = (1.05 + tallPhoneBlend * 0.48) * (1 - landBlend) + 0.32 * landBlend;
-    const tiltUpY = (0.72 + tallPhoneBlend * 0.28) * (1 - landBlend) + 0.38 * landBlend;
-    let camY = camFloor * fh + posOffY;
+    // Anchor gameplay camera vertically directly to Gateway's floor (`hero.floor * fh`) so her soles
+    // always sit cleanly at ~72-75% of viewport height (ZERO bottom clipping on 1080p OR 412x915 portrait!)
+    const rawHeroY = hero ? hero.floor * fh : camFloor * fh;
+    if (this._smoothHeroY === undefined || Math.abs(rawHeroY - this._smoothHeroY) > 4.2) {
+      this._smoothHeroY = rawHeroY;
+    } else {
+      this._smoothHeroY += (rawHeroY - this._smoothHeroY) * Math.min(1, dt * 11.0);
+    }
+    const lookYPlay = this._smoothHeroY + (isPortrait ? 1.24 : 0.93);
+    let camY = this._smoothHeroY + (isPortrait ? 1.40 : 1.09);
     const shake = writeShakeOffset(state.shake, time, this._shakeVec);
 
-    if (isWardrobe) {
+    if (isBestiary) {
+      // Interactive 3D Bestiary Turntable Camera (extra zoom-out headroom for towering `siphon_warden` boss!)
+      const pFloorY = (hero?.floor || 2) * fh;
+      const bFamily = String(bestiarySpec.family || bestiarySpec.type || 'snap_crab').toLowerCase();
+      const isBoss = bFamily.includes('warden') || bFamily.includes('boss');
+      const bZoom = clamp(Number(bestiarySpec.zoom) || 1.0, 0.55, 1.85);
+      const bLand = Math.max(0, Math.min(1, (aspect - 1.05) / 1.0));
+      const baseDist = (isBoss ? 4.45 : 3.15) + bLand * 0.45;
+      const camDist = baseDist / bZoom;
+      const focusY = pFloorY + (isBoss ? 0.92 : 0.58);
+      this.towerCam.position.set(0, focusY + 0.18, TOWER_RADIUS + LEDGE_STAND_OFFSET + camDist);
+      this.towerCam.lookAt(0, focusY, TOWER_RADIUS + LEDGE_STAND_OFFSET);
+    } else if (isWardrobe) {
       const pFloorY = (hero.floor || 0) * fh;
       const wardLand = Math.max(0, Math.min(1, (aspect - 1.05) / 1.0));
-      const wardY = pFloorY + 0.62 + wardLand * 0.08;
-      const wardZ = TOWER_RADIUS + 3.25 + wardLand * 0.55;
+      const wZoom = clamp(Number(state.wardrobeZoom ?? this.wardrobePreview.zoom) || 1.0, 0.6, 1.85);
+      const wardY = pFloorY + 0.66 + wardLand * 0.08;
+      const wardZ = TOWER_RADIUS + LEDGE_STAND_OFFSET + (2.85 + wardLand * 0.50) / wZoom;
       this.towerCam.position.set(0, wardY, wardZ);
-      this.towerCam.lookAt(0, pFloorY + 0.58, TOWER_RADIUS + LEDGE_STAND_OFFSET);
+      this.towerCam.lookAt(0, pFloorY + 0.62, TOWER_RADIUS + LEDGE_STAND_OFFSET);
     } else if (isTitleShowcase) {
-      // Heroic Title Screen Vista framing 1.28x Gateway squarely in the center between Title Crest & CTA!
+      // Close-Up Heroic Title Screen Camera (`~9.6m` desktop / `~11.0m` portrait) framing Gateway squarely in center!
       const pFloorY = (hero?.floor || 0) * fh;
-      const wideLand = Math.max(0, Math.min(1, (aspect - 1.33) / 0.90));
-      const showcaseZ = aspect < 0.92 ? 16.4 + tallPhoneBlend * 5.2 : 13.6 - wideLand * 1.1;
-      const showcaseX = Math.sin(time * 0.30) * 0.48;
-      camY = pFloorY + (1.08 * (1 - landBlend) + 0.94 * landBlend) + Math.sin(time * 0.55) * 0.05;
-      const lookY = pFloorY + (0.98 * (1 - landBlend) + 0.92 * landBlend);
+      const showcaseZ = isPortrait ? 11.0 : 9.6;
+      const showcaseX = Math.sin(time * 0.30) * 0.34;
+      camY = pFloorY + (isPortrait ? 1.24 : 0.96) + Math.sin(time * 0.55) * 0.04;
+      const lookY = pFloorY + (isPortrait ? 1.08 : 0.84);
       camZ = showcaseZ;
       this.towerCam.position.set(showcaseX, camY, showcaseZ);
-      this.towerCam.lookAt(0, lookY, TOWER_RADIUS + LEDGE_STAND_OFFSET * 0.55);
+      this.towerCam.lookAt(0, lookY, TOWER_RADIUS + LEDGE_STAND_OFFSET);
     } else if (isCutscene) {
       const pFloorY = (hero?.floor || 0) * fh;
       const towerTopY = Math.max(18, tower.floors * fh);
-      const heroCloseZ = aspect < 0.85 ? TOWER_RADIUS + 6.4 : TOWER_RADIUS + 4.9;
-      const breatheY = Math.sin(time * 0.85) * 0.07;
+      const heroCloseZ = isPortrait ? 10.6 : 9.0;
+      const breatheY = Math.sin(time * 0.85) * 0.06;
 
       if (csKind.includes('purif') || csKind === 'epilogue') {
-        // Dramatic Spire Purification Crane Zoom-Out as healing water erupts into the watershed!
         const pull = csKind.includes('purif') ? Math.max(0.25, csEase) : Math.max(0, (csEase - 0.35) / 0.65);
-        const cz = lerp(TOWER_RADIUS + 6.2, camZ * 1.28, pull);
-        const cx = Math.sin(time * 0.62) * (2.2 * pull + 0.6);
-        camY = lerp(pFloorY + 1.2, towerTopY * 0.52, pull) + breatheY;
+        const cz = lerp(heroCloseZ, camZ * 1.18, pull);
+        const cx = Math.sin(time * 0.62) * (1.6 * pull + 0.4);
+        camY = lerp(pFloorY + 1.0, towerTopY * 0.48, pull) + breatheY;
         this.towerCam.position.set(cx, camY, cz);
-        this.towerCam.lookAt(0, lerp(pFloorY + 0.8, towerTopY * 0.38, pull), 0);
+        this.towerCam.lookAt(0, lerp(pFloorY + 0.72, towerTopY * 0.36, pull), 0);
       } else {
-        // Sweeping Act Intro Crane Glide from Spire Vista down to Gateway
-        const startY = towerTopY * 0.64;
-        camY = lerp(startY, pFloorY + 1.05, csEase) + breatheY;
-        const cz = lerp(camZ * 1.12, heroCloseZ, csEase);
-        const lookY = lerp(towerTopY * 0.42, pFloorY + 0.68, csEase);
-        this.towerCam.position.set(Math.sin(time * 0.45) * 0.85 * (1 - csEase), camY, cz);
+        const startY = Math.min(towerTopY * 0.55, pFloorY + 6.5);
+        camY = lerp(startY, pFloorY + 0.92, csEase) + breatheY;
+        const cz = lerp(camZ * 1.08, heroCloseZ, csEase);
+        const lookY = lerp(startY - 1.2, pFloorY + 0.68, csEase);
+        this.towerCam.position.set(Math.sin(time * 0.45) * 0.65 * (1 - csEase), camY, cz);
         this.towerCam.lookAt(0, lookY, (TOWER_RADIUS + LEDGE_STAND_OFFSET) * csEase);
       }
     } else {
       this.towerCam.position.set(shake.x, camY + shake.y, camZ);
-      this.towerCam.lookAt(shake.x, camY + tiltUpY + shake.y, 0);
+      this.towerCam.lookAt(shake.x, lookYPlay + shake.y, TOWER_RADIUS + LEDGE_STAND_OFFSET);
     }
 
-    // Apply 5-Biome Daylight / Alpenglow / Sunset / Lagoon / Aurora Lighting + `2048x2048` Tight Shadow Band
+    // Apply 5-Biome Lighting + Smart `1024x1024` Tight `8m x 8m` Shadow Frustum centered directly on Gateway!
     const rigSpec = BIOME_LIGHT_RIGS[biomeKey] || BIOME_LIGHT_RIGS.canyon_river;
     const blackout = Math.max(0, Math.min(1, state.blackoutFactor || 0));
     const lightning = Math.max(0, Math.min(1.5, state.lightningFlash || 0));
     const lightMult = Math.max(0.32, 1 - blackout * 0.65) + lightning * 1.2 + purify * 0.12;
-    const shadowFocusY = isWardrobe
-      ? (hero.floor || 0) * fh + 0.6
+    const heroYFocus = hero ? hero.floor * fh + 0.65 : camY;
+    const shadowFocusY = isWardrobe || isBestiary
+      ? (hero?.floor || 2) * fh + 0.65
       : isTitleShowcase
-      ? (hero?.floor || 0) * fh + 2.4
-      : camY;
+      ? (hero?.floor || 0) * fh + 0.9
+      : heroYFocus;
 
     const skyPreset = this.stormSky?.getBiomeLighting?.(biomeKey) || null;
     this._bgColor.set(skyPreset?.bgColor || rigSpec.bg);
@@ -1798,12 +2334,13 @@ export class GameRenderer {
     this.keyLight.color.set(skyPreset?.keyColor || rigSpec.sunCol);
     this.keyLight.intensity = (skyPreset?.keyIntensity ?? rigSpec.sunInt) * lightMult;
     this.keyLight.castShadow = true;
+    const shadowZCenter = TOWER_RADIUS * 0.65;
     this.keyLight.position.set(
-      rigSpec.sunPos[0],
-      shadowFocusY + rigSpec.sunPos[1],
-      rigSpec.sunPos[2]
+      rigSpec.sunPos[0] * 0.78,
+      shadowFocusY + rigSpec.sunPos[1] * 0.78,
+      shadowZCenter + rigSpec.sunPos[2] * 0.78
     );
-    this.keyLight.target.position.set(0, shadowFocusY, 0);
+    this.keyLight.target.position.set(0, shadowFocusY, shadowZCenter);
     this.keyLight.target.updateMatrixWorld();
 
     this.fillLight.color.set(skyPreset?.fillColor || rigSpec.fillCol);
@@ -1846,14 +2383,7 @@ export class GameRenderer {
       if (this.oceanVfx) {
         this.oceanVfx.rebuildForTower(tower, fh, TOWER_RADIUS);
       }
-      if (!cached.compiled) {
-        try {
-          this.webgl.compile(this.towerScene, this.towerCam);
-        } catch {
-          // Ignore driver fallback
-        }
-        cached.compiled = true;
-      }
+      cached.compiled = true;
     }
 
     const tg = cached.group;
@@ -1936,7 +2466,8 @@ export class GameRenderer {
         this.collectibleGroup.add(slot.mesh);
       }
       const ct = wrapAngle((colItem.col + 0.5 - effCamCol) * COL_ANGLE);
-      if (Math.abs(ct) > 1.56 || Math.abs(colItem.floor - camFloor) > 12) {
+      const focusFloor = hero?.floor != null ? hero.floor : camFloor;
+      if (Math.cos(ct) < 0.16 || Math.abs(colItem.floor - focusFloor) > 2.6) {
         slot.mesh.visible = false;
         continue;
       }
@@ -1966,7 +2497,9 @@ export class GameRenderer {
       const pr = TOWER_RADIUS + standOff;
       const px = pr * Math.sin(pTheta);
       const pz = pr * Math.cos(pTheta);
-      const py = hero.floor * fh + (topple.active ? tg.position.y : 0);
+      // Plant Gateway's soles 0.00m FLUSH on stone treads & elevator decks (accounts for bevel top & IdleBreathe foot bone offset!)
+      const footFlushBias = hero.onGround ? -0.044 : 0;
+      const py = hero.floor * fh + footFlushBias + (topple.active ? tg.position.y : 0);
 
       const inTunnel = Boolean(hero.hidden && hero.tunnelTimer > 0 && !topple.active);
       this.tunnelVortexGroup.visible = inTunnel;
@@ -1977,43 +2510,90 @@ export class GameRenderer {
         this.tunnelVortexGroup.userData.innerRing.rotation.z = -time * 11;
       }
 
-      const heroVisible = !hero.hidden && !topple.active;
+      const heroVisible = !hero.hidden && !topple.active && !isBestiary;
       this.gatewayRig.group.visible = heroVisible;
       this.landingRingGroup.visible = heroVisible && !isWardrobe && !isCutscene && !isTitleShowcase;
       this.shieldBubble.visible = Boolean(heroVisible && hero.shield);
+
+      // Show illuminated Pelagian Turntable Halo underneath Gateway (Wardrobe) or 3D Enemy (Bestiary)
+      if (this.turntableHalo) {
+        this.turntableHalo.visible = isWardrobe || isBestiary;
+        if (this.turntableHalo.visible) {
+          this.turntableHalo.position.set(0, (hero?.floor || 2) * fh + 0.04, TOWER_RADIUS + LEDGE_STAND_OFFSET);
+          this.turntableHalo.userData.outer.rotation.z = time * 0.65;
+          this.turntableHalo.userData.inner.rotation.z = -time * 1.1;
+        }
+      }
 
       if (heroVisible) {
         // 1.28x Hero Visual Stature (`1.185 * 1.28 = 1.517u`, cleanly clearing `1.66u` elevator hoist yokes!)
         const heroScale = isWardrobe ? 1.12 : 1.28;
         this.gatewayRig.group.scale.setScalar(heroScale);
         this.gatewayRig.group.position.set(px, py, pz);
-        this.gatewayRig.group.rotation.y =
-          pTheta + (isWardrobe ? Math.sin(time * 0.85) * 0.55 : isTitleShowcase ? Math.sin(time * 0.65) * 0.22 : 0);
+
+        // Interactive 360° Sanctuary Turntable Orbit (`state.wardrobeOrbitYaw` / `setWardrobePreview`)
+        const reqWardYaw = state.wardrobeOrbitYaw ?? this.wardrobePreview.yaw;
+        if (isWardrobe) {
+          const targetYaw = reqWardYaw != null ? Number(reqWardYaw) : Math.sin(time * 0.85) * 0.55;
+          this._wardrobeYawSmooth += (targetYaw - this._wardrobeYawSmooth) * Math.min(1, dt * 14);
+          this.gatewayRig.group.rotation.y = pTheta + this._wardrobeYawSmooth;
+        } else {
+          this.gatewayRig.group.rotation.y = pTheta + (isTitleShowcase ? Math.sin(time * 0.65) * 0.22 : 0);
+        }
 
         const mf = Math.max(0, Number(hero.muzzleFlash || hero.hydroFlash) || 0);
         const whipT = Math.max(0, Number(hero.tailWhipTimer || hero.whipTimer) || 0);
+        const rawWardAnim = isWardrobe ? (state.wardrobeAnimOverride ?? this.wardrobePreview.anim) : null;
+        const resolvedAnim = rawWardAnim
+          ? String(rawWardAnim).replace(/[\s_-]+/g, '').toLowerCase()
+          : hero.anim || null;
+        const animClipMap = {
+          idle: 'IdleBreathe',
+          idlebreathe: 'IdleBreathe',
+          run: 'FluidRun',
+          fluidrun: 'FluidRun',
+          tailwhip: 'TailWhip',
+          whip: 'TailWhip',
+          frillglide: 'FrillGlide',
+          glide: 'FrillGlide',
+          freeswim: 'FreeSwim',
+          swim: 'FreeSwim',
+          coredive: 'CoreDive',
+          dive: 'CoreDive',
+          celebrate: 'Celebrate',
+          victory: 'Celebrate',
+          hydrocast: 'HydroCast',
+          cast: 'HydroCast',
+          stairclimb: 'StairClimb',
+          wallscamper: 'WallScamper',
+        };
+        const finalAnim = resolvedAnim ? (animClipMap[resolvedAnim] || rawWardAnim || hero.anim || null) : null;
 
         this.gatewayRig.update(dt, {
           time,
-          vx: hero.vx || 0,
+          vx: isWardrobe && finalAnim === 'FluidRun' ? 3.2 : hero.vx || 0,
           vy: hero.vy || 0,
           facing: hero.facing || 1,
-          onGround: Boolean(hero.onGround),
+          onGround: isWardrobe && (finalAnim === 'FrillGlide' || finalAnim === 'FreeSwim' || finalAnim === 'CoreDive') ? false : Boolean(hero.onGround),
           onElevator: hero.onElevator,
           onStairs: Boolean(hero.onStairs),
           stairSlope: hero.stairSlope ?? hero.stairDir ?? 0,
-          wallScamper: Boolean(hero.wallScamper || hero.climbing),
-          isSwimming: Boolean(hero.isSwimming),
-          tailWhipTimer: whipT,
-          frillFlare: hero.frillFlare || 0,
+          wallScamper: Boolean(hero.wallScamper || hero.climbing || finalAnim === 'WallScamper'),
+          isSwimming: Boolean(hero.isSwimming || finalAnim === 'FreeSwim'),
+          coreDive: Boolean(finalAnim === 'CoreDive'),
+          tailWhipTimer: isWardrobe && finalAnim === 'TailWhip' ? 0.3 : whipT,
+          frillFlare: isWardrobe && finalAnim === 'FrillGlide' ? 1.0 : hero.frillFlare || 0,
           squashX: hero.squashX || 1,
           squashY: hero.squashY || 1,
           landImpact: hero.landImpact || 0,
-          muzzleFlash: mf,
+          landSquash: hero.landSquash || 0,
+          skidTimer: hero.skidTimer || 0,
+          stairStepBob: hero.stairStepBob || 0,
+          muzzleFlash: isWardrobe && finalAnim === 'HydroCast' ? 0.14 : mf,
           hurtTimer: hero.hurtTimer || 0,
           invuln: isWardrobe || isCutscene || isTitleShowcase || state.mode === 'title' ? 0 : hero.invuln || 0,
           enteringDoor: hero.enteringDoor || 0,
-          anim: hero.anim || null,
+          anim: finalAnim,
           cutscene: isCutscene && !csKind.includes('epilogue'),
           victory: state.mode === 'victory' || (isCutscene && (csKind === 'epilogue' || csKind.includes('purif'))),
         });
@@ -2088,28 +2668,96 @@ export class GameRenderer {
         const waterFl = state.waterFloor != null ? state.waterFloor : -0.55;
         const lf = hero.landingFloor != null ? hero.landingFloor : waterFl;
         const dist = Math.max(0, (hero.floor - lf) * fh);
-        this.landingRingGroup.position.set(px, lf * fh + 0.035, pz);
-        this.landingRingGroup.scale.setScalar(Math.max(0.55, 1.15 - dist * 0.08));
-        const overWater = lf <= waterFl + 0.08;
-        this.landingRingGroup.userData.ring.material.color.set(overWater ? '#fb7185' : '#5efce8');
-        this.landingRingGroup.userData.ring.material.opacity = Math.max(0.24, 0.78 - dist * 0.11);
+        // Crisp dark ground-contact AO shadow disc flush on stone/elevator surface right under Gateway's soles!
+        this.landingRingGroup.position.set(px, lf * fh - 0.004, pz);
+        const aoScale = Math.max(0.42, 1.0 - dist * 0.14);
+        this.landingRingGroup.scale.setScalar(aoScale);
+        if (this.landingRingGroup.userData.shadow?.material) {
+          const overWater = lf <= waterFl + 0.08;
+          this.landingRingGroup.userData.shadow.material.opacity = overWater
+            ? 0.0
+            : Math.max(0.18, 0.92 - dist * 0.22);
+        }
       }
     }
 
-    // Update 7 Original Articulated Enemies + Barnacle Mortar Projectiles (`src/enemyRig.js`)
+    // Update 7 Original Articulated Enemies + Barnacle Mortar Projectiles (`src/enemyRig.js`) + Wave 4 Bestiary Turntable!
     if (this.enemyVisuals) {
-      this._enemyExtraOpts.enemyProjectiles = state.enemyProjectiles || null;
-      this.enemyVisuals.syncEnemies(
-        state.enemies,
-        effCamCol,
-        fh,
-        TOWER_RADIUS,
-        time,
-        topple.active ? tg.position.y : 0,
-        this._enemyExtraOpts
-      );
-      this._trimEnemyShadows();
+      if (isBestiary) {
+        const bFamily = String(bestiarySpec.family || bestiarySpec.type || 'snap_crab');
+        const bYaw = Number(bestiarySpec.yaw ?? time * 0.65) || 0;
+        this._bestiaryYawSmooth += (bYaw - this._bestiaryYawSmooth) * Math.min(1, dt * 14);
+        const bFloor = hero?.floor ?? 2;
+        if (typeof this.enemyVisuals.setBestiaryShowcase === 'function') {
+          this.enemyVisuals.setBestiaryShowcase({
+            active: true,
+            family: bFamily,
+            yaw: this._bestiaryYawSmooth,
+            zoom: Number(bestiarySpec.zoom) || 1.0,
+            anim: bestiarySpec.anim || null,
+            time,
+            x: 0,
+            y: bFloor * fh,
+            z: TOWER_RADIUS + LEDGE_STAND_OFFSET,
+          });
+        } else {
+          // Instant Frame-0 fallback using live weathered PBR `.glb` rig via `syncEnemies`!
+          const unit = this._bestiaryEnemyProxy[0];
+          unit.type = bFamily;
+          unit.col = effCamCol;
+          unit.floor = bFloor;
+          unit.telegraph = bFamily.includes('warden') ? 0.45 + 0.35 * Math.sin(time * 2.5) : 0;
+          unit.shielded = bFamily.includes('warden');
+          unit.bossPhase = 2;
+          unit.openAmount = bFamily.includes('mortar') ? 0.5 + 0.45 * Math.sin(time * 2.4) : 0;
+          unit.inflatePhase = bFamily.includes('hopper') ? 0.5 + 0.45 * Math.sin(time * 3.0) : 0;
+          unit.slitherPhase = time * 4.2;
+          this._enemyExtraOpts.enemyProjectiles = null;
+          this.enemyVisuals.syncEnemies(
+            this._bestiaryEnemyProxy,
+            effCamCol,
+            fh,
+            TOWER_RADIUS,
+            time,
+            0,
+            this._enemyExtraOpts
+          );
+          if (this.enemyVisuals.root) {
+            this.enemyVisuals.root.visible = true;
+            for (const child of this.enemyVisuals.root.children) {
+              if (child && child.visible && child.isGroup) {
+                child.rotation.y = this._bestiaryYawSmooth;
+              }
+            }
+          }
+        }
+        this._trimEnemyShadows();
+      } else {
+        this.enemyVisuals.setBestiaryShowcase?.({ active: false });
+        this._enemyExtraOpts.enemyProjectiles = state.enemyProjectiles || null;
+        this._enemyExtraOpts.heroFloor = hero?.floor != null ? hero.floor : camFloor;
+        this._enemyExtraOpts.camFloor = this._enemyExtraOpts.heroFloor;
+        this.enemyVisuals.syncEnemies(
+          state.enemies,
+          effCamCol,
+          fh,
+          TOWER_RADIUS,
+          time,
+          topple.active ? tg.position.y : 0,
+          this._enemyExtraOpts
+        );
+        this._trimEnemyShadows();
+      }
     }
+
+    // Wave 4: 3D Telegraphed Boss Hazards (`state.bossHazards` sweeping hydro-beams & tentacle slams)
+    this._updateBossHazards(
+      isWardrobe || isBestiary ? null : state.bossHazards,
+      effCamCol,
+      fh,
+      time,
+      topple.active ? tg.position.y : 0
+    );
 
     // Front-Hemisphere Architectural Accent PointLight (Sanctum Doors & Elevator Cabs)
     if (!isWardrobe) {
@@ -2213,13 +2861,22 @@ export class GameRenderer {
 
     if (this.oceanVfx) {
       this.oceanVfx.setPurification?.(purify);
-      if (isWardrobe || (isTitleShowcase && (hero?.floor || 0) < 0.85)) {
+      const nearWaterOrVfx = (hero?.floor || 0) * fh <= waterY + 2.4;
+      if (isWardrobe || isBestiary || (isTitleShowcase && (hero?.floor || 0) < 0.85) || !nearWaterOrVfx) {
         this.oceanVfx.setVisible?.(false);
       } else {
         this.oceanVfx.setVisible?.(true);
         this.oceanVfx.update(showcaseState, effCamCol, time, dt);
       }
     }
+
+    // Wave 4: Joyful Rescued Sea Turtles & River Otters swimming & leaping in the Title Sanctuary Lagoon!
+    this._updateWildlifeLagoon(
+      state,
+      time,
+      waterY,
+      Boolean(isTitleShowcase && !isWardrobe && !isBestiary && !topple.active)
+    );
 
     this._syncParticles(
       this.particlePool,
@@ -2232,87 +2889,30 @@ export class GameRenderer {
       fh
     );
     this._syncPopups(state.popups, effCamCol, this.popupGroup, this.towerCam, true, fh);
-    this.collectibleGroup.visible = !isWardrobe;
-    if (isWardrobe && this.enemyVisuals?.root) {
+    this.collectibleGroup.visible = !isWardrobe && !isBestiary;
+    if (isWardrobe && !isBestiary && this.enemyVisuals?.root) {
       this.enemyVisuals.root.visible = false;
     }
 
-    // Planar Water Reflection Pass (culls dynamic micro-props so reflection renders sky + vistas + spire cleanly)
-    if (this.ocean) {
-      const prevWeatherVis = this.stormSky?.weatherPoints?.visible ?? false;
-      const prevStreakVis = this.stormSky?.streakLines?.visible ?? false;
-      const prevSprayVis = this.stormSky?.seaSprayPoints?.visible ?? false;
-      const prevFireflyVis = this.stormSky?.fireflyPoints?.visible ?? false;
-      const prevFlankMistVis = this.stormSky?.flankMistMesh?.visible ?? false;
-      const prevEnemyRootVis = this.enemyVisuals?.root?.visible ?? !isWardrobe;
-      const prevHeroVis = this.gatewayRig.group.visible;
-      const prevShieldVis = this.shieldBubble.visible;
-      const prevWhipVis = this.tailWhipVfxGroup.visible;
-      const prevGrappleVis = this.grappleBeam.visible;
-      const prevRingVis = this.landingRingGroup.visible;
-      const prevTunnelVis = this.tunnelVortexGroup.visible;
-      const prevFlashVis = this.muzzleFlashGroup.visible;
-      const prevWardrobeVis = this.wardrobeFxOrb.visible;
-      const prevDebrisVis = this.debrisPool.inst.visible;
-      const prevVfxVis = this.oceanVfx?.group?.visible ?? !isWardrobe;
-      const prevCollectibleVis = this.collectibleGroup.visible;
-      const prevKeyShadow = this.keyLight.castShadow;
-
-      try {
-        this.keyLight.castShadow = false;
-        cached.setReflectionPass?.(true);
-        if (this.enemyVisuals) {
-          if (this.enemyVisuals.setReflectionPass) this.enemyVisuals.setReflectionPass(true);
-          else if (this.enemyVisuals.root) this.enemyVisuals.root.visible = false;
-        }
-        this.stormSky?.setReflectionPass?.(true);
-        this.gatewayRig.group.visible = false;
-        this.shieldBubble.visible = false;
-        this.tailWhipVfxGroup.visible = false;
-        this.grappleBeam.visible = false;
-        this.landingRingGroup.visible = false;
-        this.tunnelVortexGroup.visible = false;
-        this.muzzleFlashGroup.visible = false;
-        this.wardrobeFxOrb.visible = false;
-        this.debrisPool.inst.visible = false;
-        this.oceanVfx?.setVisible?.(false);
-        this.collectibleGroup.visible = false;
-        this.pulseGroup.visible = false;
-        this.particleGroup.visible = false;
-        this.popupGroup.visible = false;
-
-        this.ocean.updateReflection(this.towerScene, this.towerCam);
-      } finally {
-        cached.setReflectionPass?.(false);
-        if (this.enemyVisuals) {
-          if (this.enemyVisuals.setReflectionPass) this.enemyVisuals.setReflectionPass(isWardrobe);
-          if (this.enemyVisuals.root) this.enemyVisuals.root.visible = prevEnemyRootVis;
-        }
-        this.stormSky?.setReflectionPass?.(false);
-        if (this.stormSky?.weatherPoints) this.stormSky.weatherPoints.visible = prevWeatherVis;
-        if (this.stormSky?.streakLines) this.stormSky.streakLines.visible = prevStreakVis;
-        if (this.stormSky?.seaSprayPoints) this.stormSky.seaSprayPoints.visible = prevSprayVis;
-        if (this.stormSky?.fireflyPoints) this.stormSky.fireflyPoints.visible = prevFireflyVis;
-        if (this.stormSky?.flankMistMesh) this.stormSky.flankMistMesh.visible = prevFlankMistVis;
-        this.gatewayRig.group.visible = prevHeroVis;
-        this.shieldBubble.visible = prevShieldVis;
-        this.tailWhipVfxGroup.visible = prevWhipVis;
-        this.grappleBeam.visible = prevGrappleVis;
-        this.landingRingGroup.visible = prevRingVis;
-        this.tunnelVortexGroup.visible = prevTunnelVis;
-        this.muzzleFlashGroup.visible = prevFlashVis;
-        this.wardrobeFxOrb.visible = prevWardrobeVis;
-        this.debrisPool.inst.visible = prevDebrisVis;
-        this.oceanVfx?.setVisible?.(prevVfxVis);
-        this.collectibleGroup.visible = prevCollectibleVis;
-        this.pulseGroup.visible = true;
-        this.particleGroup.visible = true;
-        this.popupGroup.visible = true;
-        this.keyLight.castShadow = prevKeyShadow;
-      }
+    // Pre-compile all exact live shaders ONCE after collectibles, enemies, oceanVfx & arch GLBs are attached,
+    // and incrementally re-warm once when async Arch or Enemy GLBs finish loading -> ZERO mid-climb freezes!
+    const enemiesNowReady = Boolean(this.enemyVisuals?.isReady?.());
+    if (
+      !this._towerSceneCompiled ||
+      (!this._enemiesGlbCompiled && enemiesNowReady) ||
+      this._compiledArchVersion !== this._archPropsVersion
+    ) {
+      this._compileAllTowerShaders();
+      this._towerSceneCompiled = true;
+      this._enemiesGlbCompiled = enemiesNowReady;
+      this._compiledArchVersion = this._archPropsVersion;
     }
 
-    this.webgl.shadowMap.needsUpdate = true;
+    // Single-pass analytic water reflection runs inside `src/water.js` (0 extra scene render passes!)
+    // Update tight 512x512 hero shadow frustum on alternating frames (30Hz shadows = 2x faster GPU, visually identical!)
+    if (((this._shadowTick++ & 1) === 0) || this._shadowTick <= 4) {
+      this.webgl.shadowMap.needsUpdate = true;
+    }
     this._renderWithComposer(this.towerScene, this.towerCam, {
       biome: biomeKey,
       purification: purify,

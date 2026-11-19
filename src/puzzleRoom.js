@@ -8,10 +8,12 @@
 //   1 unit per tile, floor at y = 0, X = x - (cols-1)/2, Z = y - (rows-1)/2.
 //
 // Puzzle types (all deterministically generated from `seed` and verified solvable):
-//  - 'lights': stomp hydro-glyph tiles to toggle self + 4 orthogonal neighbours to match the mural/clue
-//  - 'bells':  chime coloured bronze water-bells in the exact order shown on exterior spire banners
-//  - 'beam':   rotate brass sea-glass mirrors so the hydro-light beam ignites the target crystal
-//  - 'blocks': slide carved sluice blocks onto pressure basins (tap/fire/whip = undo last push)
+//  - 'lights':     stomp hydro-glyph tiles to toggle self + 4 orthogonal neighbours to match the mural/clue
+//  - 'bells':      chime coloured bronze water-bells in the exact order shown on exterior spire banners
+//  - 'beam':       rotate brass sea-glass mirrors so the hydro-light beam ignites the target crystal
+//  - 'blocks':     slide carved sluice blocks onto pressure basins (tap/fire/whip = undo last push)
+//  - 'pipes':      rotate brass hydro-conduit tiles to route pressurized water from intake to outflow
+//  - 'tide_locks': balance coupled sluice chambers to match the carved harmonic water-level targets
 
 const TAU = Math.PI * 2;
 const MOVE_T = 0.145; // crisp single-tile step duration
@@ -27,7 +29,7 @@ const MIRROR_TURN_SPEED = 9; // rad/s
 const BEAM_MAX_PTS = 48;
 const MAX_VFX = 48;
 
-export const PUZZLE_TYPES = ['lights', 'bells', 'beam', 'blocks'];
+export const PUZZLE_TYPES = ['lights', 'bells', 'beam', 'blocks', 'pipes', 'tide_locks'];
 
 export const BELL_COLORS = ['#ff4f64', '#ffb02e', '#3fe07e', '#3ab0ff', '#c77dff'];
 export const BELL_COLOR_NAMES = ['CORAL', 'GOLD', 'EMERALD', 'AZURE', 'VIOLET'];
@@ -38,6 +40,8 @@ const TITLES = {
   bells: ['HARMONIC BELLS', 'Chime water-bells in left-to-right order from the archway crest • Step to doorway to peek'],
   beam: ['SEA-GLASS PRISM', 'Tap or Whip beside a mirror to rotate it • ignite the harmonic crystal'],
   blocks: ['SLUICE BASINS', 'Slide the carved sluice stones onto the basins • tap or whip to undo'],
+  pipes: ['HYDRO-CONDUIT GRID', 'Stand on or beside a brass pipe & tap or whip to rotate • route water north to south'],
+  tide_locks: ['TIDE-LOCK CHAMBERS', 'Tap or Whip beside a sluice chamber to raise it + its linked neighbor to target tide'],
 };
 
 // Directions: 0 east (+x), 1 south (+y, toward doorway), 2 west (-x), 3 north (-y, back wall)
@@ -533,6 +537,291 @@ function genBlocks(rng, d) {
   };
 }
 
+// ------------------------------------------------------------------------------------ pipes (Rotary Hydro-Conduit Grid)
+// Directions: 0 = E (+x), 1 = S (+y), 2 = W (-x), 3 = N (-y)
+const PIPE_BASE_MASK = {
+  straight: 0b0101, // E & W at rot=0
+  elbow: 0b0011,    // E & S at rot=0
+  tee: 0b0111,      // E & S & W at rot=0
+};
+
+export function pipePorts(shape, rot) {
+  const base = PIPE_BASE_MASK[shape] ?? 0b0101;
+  const r = ((rot | 0) & 3);
+  return ((base << r) | (base >>> (4 - r))) & 0b1111;
+}
+
+export function tracePipesDiscrete(p, rots) {
+  const pipes = p.pipes || [];
+  const byCell = new Map();
+  for (let i = 0; i < pipes.length; i++) {
+    byCell.set(`${pipes[i].x},${pipes[i].y}`, i);
+  }
+  const pressurized = new Uint8Array(pipes.length);
+  const src = p.pipeSource || { x: 2, y: 0, dir: 1 };
+  const startIdx = byCell.get(`${src.x},1`);
+  const q = [];
+  if (startIdx !== undefined) {
+    const startPorts = pipePorts(pipes[startIdx].shape, rots[startIdx]);
+    if (startPorts & (1 << 3)) {
+      pressurized[startIdx] = 1;
+      q.push(startIdx);
+    }
+  }
+  while (q.length) {
+    const idx = q.shift();
+    const cell = pipes[idx];
+    const ports = pipePorts(cell.shape, rots[idx]);
+    for (let k = 0; k < 4; k++) {
+      if (!(ports & (1 << k))) continue;
+      const nx = cell.x + DX[k];
+      const ny = cell.y + DY[k];
+      const ni = byCell.get(`${nx},${ny}`);
+      if (ni === undefined || pressurized[ni]) continue;
+      const opp = (k + 2) & 3;
+      const nPorts = pipePorts(pipes[ni].shape, rots[ni]);
+      if (nPorts & (1 << opp)) {
+        pressurized[ni] = 1;
+        q.push(ni);
+      }
+    }
+  }
+  const targets = p.pipeTargets || [{ x: 2, y: 4, dir: 3 }];
+  let targetsLit = 0;
+  for (const t of targets) {
+    const ti = byCell.get(`${t.x},3`);
+    if (ti !== undefined && pressurized[ti]) {
+      const tPorts = pipePorts(pipes[ti].shape, rots[ti]);
+      if (tPorts & (1 << 1)) targetsLit++;
+    }
+  }
+  let litCount = 0;
+  for (let i = 0; i < pressurized.length; i++) if (pressurized[i]) litCount++;
+  return {
+    pressurized,
+    litCount,
+    targetsLit,
+    hit: targets.length > 0 && targetsLit === targets.length,
+  };
+}
+
+function findRotForPorts(shape, requiredMask) {
+  for (let r = 0; r < 4; r++) {
+    const m = pipePorts(shape, r);
+    if ((m & requiredMask) === requiredMask) return r;
+  }
+  return 0;
+}
+
+function genPipes(rng, d) {
+  const cols = 5;
+  const rows = 5;
+  const doorX = 2;
+  const n = 3; // 3x3 conduit grid at x=1..3, y=1..3
+  const minLen = d < 0.4 ? 4 : 5;
+  const maxLen = d < 0.4 ? 6 : 7;
+
+  let path = null;
+  for (let attempt = 0; attempt < 250 && !path; attempt++) {
+    const sx = randInt(rng, 0, 2);
+    const visited = new Set([`0,${sx}`]);
+    const cur = [[sx, 0]];
+    const dfs = (x, y) => {
+      if (y === 2 && cur.length >= minLen && cur.length <= maxLen) return true;
+      if (cur.length >= maxLen) return false;
+      const dirs = shuffle(rng, [0, 1, 2, 3]);
+      for (const k of dirs) {
+        const nx = x + DX[k];
+        const ny = y + DY[k];
+        if (nx < 0 || ny < 0 || nx > 2 || ny > 2) continue;
+        const key = `${ny},${nx}`;
+        if (visited.has(key)) continue;
+        visited.add(key);
+        cur.push([nx, ny]);
+        if (dfs(nx, ny)) return true;
+        cur.pop();
+        visited.delete(key);
+      }
+      return false;
+    };
+    if (dfs(sx, 0)) path = cur;
+  }
+  if (!path) {
+    path = [[0, 0], [1, 0], [1, 1], [2, 1], [2, 2]];
+  }
+
+  const sourceX = 1 + path[0][0];
+  const targetX = 1 + path[path.length - 1][0];
+  const pathIndex = new Map();
+  path.forEach(([gx, gy], idx) => pathIndex.set(`${gx},${gy}`, idx));
+
+  const pipes = [];
+  const pattern = new Array(n * n).fill(0);
+  for (let gy = 0; gy < n; gy++) {
+    for (let gx = 0; gx < n; gx++) {
+      const idx = pathIndex.get(`${gx},${gy}`);
+      let shape;
+      let solRot;
+      if (idx !== undefined) {
+        pattern[gy * n + gx] = 1;
+        // Entry direction from previous node (or North=3 for start)
+        let inDir = 3;
+        if (idx > 0) {
+          const [px, py] = path[idx - 1];
+          const dx = px - gx;
+          const dy = py - gy;
+          inDir = dx === 1 ? 0 : dy === 1 ? 1 : dx === -1 ? 2 : 3;
+        }
+        // Exit direction to next node (or South=1 for end)
+        let outDir = 1;
+        if (idx < path.length - 1) {
+          const [nx, ny] = path[idx + 1];
+          const dx = nx - gx;
+          const dy = ny - gy;
+          outDir = dx === 1 ? 0 : dy === 1 ? 1 : dx === -1 ? 2 : 3;
+        }
+        const mask = (1 << inDir) | (1 << outDir);
+        const opposite = ((inDir + 2) & 3) === outDir;
+        shape = opposite ? 'straight' : (d >= 0.6 && idx > 0 && idx < path.length - 1 && rng() < 0.25 ? 'tee' : 'elbow');
+        solRot = findRotForPorts(shape, mask);
+      } else {
+        shape = rng() < 0.38 ? 'straight' : 'elbow';
+        solRot = randInt(rng, 0, 3);
+      }
+      pipes.push({
+        x: 1 + gx,
+        y: 1 + gy,
+        gx,
+        gy,
+        shape,
+        rot: solRot,
+        solRot,
+        onPath: idx !== undefined,
+        pressurized: false,
+      });
+    }
+  }
+
+  const pipeSource = { x: sourceX, y: 0, dir: 1 };
+  const pipeTargets = [{ x: targetX, y: 4, dir: 3 }];
+  const solution = pipes.map((c) => c.solRot);
+
+  // Scramble path cells so initial puzzle is guaranteed unsolved & fair
+  const pathPipeIndices = pipes
+    .map((c, i) => (c.onPath ? i : -1))
+    .filter((i) => i >= 0);
+  const scrambleCount = clamp(3 + Math.round(d * 3), 2, pathPipeIndices.length);
+  for (let tries = 0; tries < 40; tries++) {
+    for (let i = 0; i < pipes.length; i++) pipes[i].rot = solution[i];
+    const picked = shuffle(rng, pathPipeIndices.slice()).slice(0, scrambleCount);
+    for (const pi of picked) {
+      const delta = pipes[pi].shape === 'straight' ? 1 : randInt(rng, 1, 3);
+      pipes[pi].rot = (pipes[pi].solRot + delta) & 3;
+    }
+    const rots = pipes.map((c) => c.rot);
+    if (!tracePipesDiscrete({ pipes, pipeSource, pipeTargets }, rots).hit) break;
+  }
+
+  return {
+    cols,
+    rows,
+    doorX,
+    solid: [],
+    n,
+    gx: 1,
+    gy: 1,
+    pipes,
+    pipeSource,
+    pipeTargets,
+    solution,
+    clue: { kind: 'pipes', n, sourceX, targetX, pattern },
+  };
+}
+
+// ------------------------------------------------------------------------------------ tide_locks (Multi-Chamber Sluice Balancing)
+const TIDE_LOCK_SLOTS = {
+  3: [
+    [1, 1],
+    [2, 1],
+    [3, 1],
+  ],
+  4: [
+    [0, 1],
+    [1, 1],
+    [3, 1],
+    [4, 1],
+  ],
+};
+
+export function applyTideLockPull(levels, idx, maxLevel = 3) {
+  const mod = maxLevel + 1;
+  const count = levels.length;
+  levels[idx] = (levels[idx] + 1) % mod;
+  levels[(idx + 1) % count] = (levels[(idx + 1) % count] + 1) % mod;
+  return levels;
+}
+
+function genTideLocks(rng, d) {
+  const cols = 5;
+  const rows = 5;
+  const doorX = 2;
+  const maxLevel = 3;
+  const mod = maxLevel + 1;
+  const count = d < 0.5 ? 3 : 4;
+  const slots = TIDE_LOCK_SLOTS[count];
+  const targets = [];
+  for (let i = 0; i < count; i++) {
+    targets.push(randInt(rng, 1, maxLevel));
+  }
+  // Reverse-apply `pulls` valid moves from target so puzzle is 100% guaranteed solvable
+  const pullCount = clamp(2 + Math.round(d * 3), 2, 5);
+  let start = targets.slice();
+  let solution = [];
+  for (let attempt = 0; attempt < 30; attempt++) {
+    start = targets.slice();
+    solution = [];
+    for (let s = 0; s < pullCount; s++) {
+      const ci = Math.floor(rng() * count);
+      solution.push(ci);
+      // Reverse of +1 mod 4 is +3 mod 4
+      start[ci] = (start[ci] + mod - 1) % mod;
+      start[(ci + 1) % count] = (start[(ci + 1) % count] + mod - 1) % mod;
+    }
+    let diffs = 0;
+    for (let i = 0; i < count; i++) if (start[i] !== targets[i]) diffs++;
+    if (diffs >= 2) break;
+  }
+
+  const chambers = slots.map(([x, y], i) => ({
+    id: i,
+    x,
+    y,
+    level: start[i],
+    displayLevel: start[i],
+    target: targets[i],
+    coupledWith: (i + 1) % count,
+    color: BELL_COLORS[i % BELL_COLORS.length],
+    pulseAt: -10,
+  }));
+
+  return {
+    cols,
+    rows,
+    doorX,
+    solid: [],
+    maxLevel,
+    chambers,
+    targets,
+    solution,
+    clue: {
+      kind: 'tide_locks',
+      count,
+      targets: targets.slice(),
+      maxLevel,
+    },
+  };
+}
+
 function resolvePuzzleType(seed = 1, forcedType = null, fallbackType = null) {
   if (forcedType && PUZZLE_TYPES.includes(forcedType)) return forcedType;
   if (fallbackType && PUZZLE_TYPES.includes(fallbackType)) return fallbackType;
@@ -542,7 +831,7 @@ function resolvePuzzleType(seed = 1, forcedType = null, fallbackType = null) {
 // ------------------------------------------------------------------------------------ public API
 /**
  * Builds a deterministic, verified-solvable puzzle description.
- * @param {{ type?: 'lights'|'bells'|'beam'|'blocks'|null, forcedType?: 'lights'|'bells'|'beam'|'blocks'|null, seed?: number|string, difficulty?: number, hideTarget?: boolean }} [o]
+ * @param {{ type?: 'lights'|'bells'|'beam'|'blocks'|'pipes'|'tide_locks'|null, forcedType?: 'lights'|'bells'|'beam'|'blocks'|'pipes'|'tide_locks'|null, seed?: number|string, difficulty?: number, hideTarget?: boolean }} [o]
  */
 export function makePuzzle({
   type = null,
@@ -565,6 +854,8 @@ export function makePuzzle({
   if (resolvedType === 'lights') p = genLights(rng, d, hideTarget);
   else if (resolvedType === 'bells') p = genBells(rng, d, hideTarget);
   else if (resolvedType === 'beam') p = genBeam(rng, d);
+  else if (resolvedType === 'pipes') p = genPipes(rng, d);
+  else if (resolvedType === 'tide_locks') p = genTideLocks(rng, d);
   else p = genBlocks(rng, d);
   let parMoves = 12;
   if (resolvedType === 'lights') {
@@ -574,6 +865,11 @@ export function makePuzzle({
   } else if (resolvedType === 'beam') {
     const flips = (p.mirrors || []).reduce((a, m, i) => a + ((m.rot & 1) !== p.solution[i] ? 1 : 0), 0);
     parMoves = Math.max(8, flips * 5 + 5);
+  } else if (resolvedType === 'pipes') {
+    const turns = (p.pipes || []).reduce((a, c) => a + (c.onPath && c.rot !== c.solRot ? 1 : 0), 0);
+    parMoves = Math.max(10, turns * 4 + 6);
+  } else if (resolvedType === 'tide_locks') {
+    parMoves = Math.max(8, (p.solution?.length || 3) * 4 + 5);
   } else {
     parMoves = Math.max(8, Math.ceil((p.solution?.length || 8) * 1.45) + 3);
   }
@@ -585,7 +881,7 @@ export function makePuzzle({
 /**
  * Pure deterministic exterior clue helper running the exact same RNG & puzzle generation path
  * as `makePuzzle` and `new PuzzleRoom({ seed, difficulty, forcedType, door: { isRune: true } })`.
- * @param {{ seed?: number|string, difficulty?: number, forcedType?: 'lights'|'bells'|'beam'|'blocks'|null, type?: 'lights'|'bells'|'beam'|'blocks'|null }} [o]
+ * @param {{ seed?: number|string, difficulty?: number, forcedType?: 'lights'|'bells'|'beam'|'blocks'|'pipes'|'tide_locks'|null, type?: 'lights'|'bells'|'beam'|'blocks'|'pipes'|'tide_locks'|null }} [o]
  */
 export function peekPuzzleClue({ seed = 1, difficulty = 0, forcedType = null, type = null } = {}) {
   const resolvedType = resolvePuzzleType(seed, forcedType, type);
@@ -608,6 +904,14 @@ export function isPuzzleSolvedState(p, st) {
   if (p.type === 'lights') return st.lit.every((v, i) => v === p.target[i]);
   if (p.type === 'bells') return st.progress >= p.order.length;
   if (p.type === 'beam') return traceBeamDiscrete(p, st.rots.map((r) => r & 1)).hit;
+  if (p.type === 'pipes') {
+    const rots = st.rots || (st.pipes ? st.pipes.map((c) => c.rot) : []);
+    return tracePipesDiscrete(p, rots).hit;
+  }
+  if (p.type === 'tide_locks') {
+    const lvls = st.levels || (st.chambers ? st.chambers.map((c) => c.level) : []);
+    return p.targets.length > 0 && p.targets.every((t, i) => lvls[i] === t);
+  }
   const plateSet = new Set(p.plates.map((q) => q.y * p.cols + q.x));
   return st.blocks.every((b) => plateSet.has(b.y * p.cols + b.x));
 }
@@ -856,6 +1160,34 @@ export class PuzzleRoom {
       this.crystal = { ...p.crystal };
       this.charge = 0;
       this.hitAt = -10;
+    } else if (p.type === 'pipes') {
+      this.n = p.n || 3;
+      this.pipes = p.pipes.map((c) => ({
+        x: c.x,
+        y: c.y,
+        gx: c.gx,
+        gy: c.gy,
+        shape: c.shape,
+        rot: c.rot,
+        solRot: c.solRot,
+        angle: c.rot * (Math.PI / 2),
+        onPath: !!c.onPath,
+        pressurized: false,
+        turnAt: -10,
+      }));
+      this.pipeSource = { ...p.pipeSource };
+      this.pipeTargets = p.pipeTargets.map((t) => ({ ...t }));
+      this.pipesLitCount = 0;
+      this._tracePipes();
+    } else if (p.type === 'tide_locks') {
+      this.maxLevel = p.maxLevel || 3;
+      this.chambers = p.chambers.map((c) => ({
+        ...c,
+        displayLevel: c.level,
+        pulseAt: -10,
+      }));
+      for (const c of this.chambers) this.solid[c.y * this.cols + c.x] = 1;
+      this.chambersMatched = 0;
     } else {
       this.blocks = p.blocks.map((b) => ({
         x: b.x,
@@ -961,6 +1293,18 @@ export class PuzzleRoom {
         m.angle = -Math.PI / 4 + m.rot * (Math.PI / 2);
       });
       this.charge = 1;
+    } else if (p.type === 'pipes') {
+      this.pipes.forEach((c, i) => {
+        c.rot = p.solution[i];
+        c.angle = c.rot * (Math.PI / 2);
+      });
+      this._tracePipes();
+    } else if (p.type === 'tide_locks') {
+      this.chambers.forEach((c) => {
+        c.level = c.target;
+        c.displayLevel = c.target;
+      });
+      this.chambersMatched = this.chambers.length;
     } else {
       this.blocks.forEach((b, i) => {
         b.x = b.px = b.fromX = p.plates[i].x;
@@ -1188,6 +1532,14 @@ export class PuzzleRoom {
       for (const m of this.mirrors) if (m.lit) litCount++;
       const mRatio = this.mirrors.length ? (litCount / this.mirrors.length) * 0.78 : 0;
       this.progressRatio = clamp(this.beam.hit ? 1 : mRatio + (this.charge || 0) * 0.22, 0, 1);
+    } else if (this.type === 'pipes' && this.pipes) {
+      const pathLen = this.pipes.filter((c) => c.onPath).length || 5;
+      this.progressRatio = clamp((this.pipesLitCount || 0) / pathLen, 0, 1);
+    } else if (this.type === 'tide_locks' && this.chambers) {
+      let matched = 0;
+      for (const c of this.chambers) if (c.level === c.target) matched++;
+      this.chambersMatched = matched;
+      this.progressRatio = this.chambers.length ? matched / this.chambers.length : 0;
     } else if (this.plates) {
       this.progressRatio = this.plates.length ? (this.platesOn || 0) / this.plates.length : 0;
     }
@@ -1621,6 +1973,37 @@ export class PuzzleRoom {
       fx.haptic?.(12);
       this._setHud(null, null, `PAR ${this.moves}/${this.parMoves}`);
       sound?.puzzleMirror ? sound.puzzleMirror() : sound?.switchToggle?.();
+    } else if (type === 'pipes') {
+      let pi = this.pipes.findIndex((c) => c.x === po.x && c.y === po.y);
+      if (pi < 0) pi = pick((x, y) => this.pipes.findIndex((c) => c.x === x && c.y === y));
+      if (pi < 0) {
+        this._hop();
+        this._nothingHint('Stand on or beside a brass pipe tile, then tap or whip');
+        return;
+      }
+      po.acts++;
+      const cell = this.pipes[pi];
+      cell.rot = (cell.rot + 1) & 3;
+      cell.turnAt = this.t;
+      this.moves++;
+      this._vfx('rotate', cell.x, cell.y, { life: 0.5, b: pi });
+      this._vfx('conduit_surge', cell.x, cell.y, { life: 0.6, b: pi });
+      fx.haptic?.(12);
+      this._setHud(null, null, `PAR ${this.moves}/${this.parMoves}`);
+      sound?.puzzleMirror ? sound.puzzleMirror() : sound?.switchToggle?.();
+      const res = this._tracePipes();
+      if (res.hit && this.phase === 'play') {
+        this._solve(fx, sound);
+      }
+    } else if (type === 'tide_locks') {
+      const ci = pick((x, y) => this.chambers.findIndex((c) => c.x === x && c.y === y));
+      if (ci < 0) {
+        this._hop();
+        this._nothingHint('Stand beside a sluice chamber, then tap or whip');
+        return;
+      }
+      po.acts++;
+      this._pullTideLock(ci, fx, sound);
     }
   }
 
@@ -1733,6 +2116,67 @@ export class PuzzleRoom {
         const since = this.t - b.ringAt;
         b.swing = since < 3 ? Math.sin(since * 9) * Math.exp(-since * 1.6) * 0.5 : 0;
       }
+    } else if (this.type === 'pipes' && this.pipes) {
+      for (const c of this.pipes) {
+        const target = c.rot * (Math.PI / 2);
+        let want = target;
+        while (want < c.angle - 1e-6) want += TAU;
+        const d = want - c.angle;
+        if (d > 1e-4) c.angle += Math.min(d, MIRROR_TURN_SPEED * 1.15 * dt);
+        if (c.angle > TAU * 2) c.angle -= TAU;
+        if (Math.abs((((c.angle - target) % TAU) + TAU) % TAU) < 1e-3) c.angle = target;
+      }
+    } else if (this.type === 'tide_locks' && this.chambers) {
+      const k = Math.min(1, dt * 9);
+      for (const c of this.chambers) {
+        c.displayLevel += (c.level - c.displayLevel) * k;
+        if (Math.abs(c.displayLevel - c.level) < 0.005) c.displayLevel = c.level;
+      }
+    }
+  }
+
+  _tracePipes() {
+    if (this.type !== 'pipes' || !this.pipes) return { hit: false, litCount: 0 };
+    const rots = this.pipes.map((c) => c.rot);
+    const res = tracePipesDiscrete(
+      { pipes: this.pipes, pipeSource: this.pipeSource, pipeTargets: this.pipeTargets },
+      rots
+    );
+    for (let i = 0; i < this.pipes.length; i++) {
+      this.pipes[i].pressurized = res.pressurized[i] === 1;
+    }
+    this.pipesLitCount = res.litCount;
+    return res;
+  }
+
+  _pullTideLock(ci, fx, sound) {
+    const count = this.chambers.length;
+    const mod = (this.maxLevel || 3) + 1;
+    const nextIdx = (ci + 1) % count;
+    this.chambers[ci].level = (this.chambers[ci].level + 1) % mod;
+    this.chambers[ci].pulseAt = this.t;
+    this.chambers[nextIdx].level = (this.chambers[nextIdx].level + 1) % mod;
+    this.chambers[nextIdx].pulseAt = this.t;
+    this.moves++;
+    this._vfx('conduit_surge', this.chambers[ci].x, this.chambers[ci].y, {
+      life: 0.75,
+      b: ci,
+      color: this.chambers[ci].color,
+    });
+    this._vfx('conduit_surge', this.chambers[nextIdx].x, this.chambers[nextIdx].y, {
+      life: 0.75,
+      b: nextIdx,
+      color: this.chambers[nextIdx].color,
+    });
+    this._fxAt(fx, this.chambers[ci].x, this.chambers[ci].y, 0.85, this.chambers[ci].color, 10, 100);
+    fx.haptic?.(14);
+    sound?.puzzleTile ? sound.puzzleTile(this.chambers[ci].level === this.chambers[ci].target ? 1 : 0) : sound?.switchToggle?.();
+    let matched = 0;
+    for (const c of this.chambers) if (c.level === c.target) matched++;
+    this.chambersMatched = matched;
+    this._setHud(null, null, `${matched}/${count} • ${this.moves}/${this.parMoves}`);
+    if (matched === count && this.phase === 'play') {
+      this._solve(fx, sound);
     }
   }
 

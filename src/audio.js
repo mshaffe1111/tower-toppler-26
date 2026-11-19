@@ -309,6 +309,7 @@ export class SoundEngine {
     this.musicEnabled = true;
     this.ambienceEnabled = true;
     this.sfxEnabled = true;
+    this.voiceEnabled = true;
     this.musicActive = false;
 
     this.masterVolume = 0.92;
@@ -1055,6 +1056,19 @@ export class SoundEngine {
     if (!this.sfxEnabled) this._stopGlideWind();
     this._syncBusGains(false);
     return this.sfxEnabled;
+  }
+
+  toggleVoice() {
+    return this.setVoiceEnabled(!this.voiceEnabled);
+  }
+
+  setVoiceEnabled(enabled) {
+    this.voiceEnabled = Boolean(enabled);
+    return this.voiceEnabled;
+  }
+
+  isVoiceEnabled() {
+    return Boolean(this.voiceEnabled);
   }
 
   setMusicActive(active) {
@@ -2120,6 +2134,91 @@ export class SoundEngine {
     if (!this._canPlay('uiBack', 0.025)) return;
     this._kalimbaChime(this._scaleFreq(2, 0), 0.12, 0.028, 0, 0.04, false);
     this._kalimbaChime(this._scaleFreq(0, 0), 0.15, 0.028, 0.042, -0.04, false);
+  }
+
+  // --- Wave 4: Cutscene Musical Voice-Syllable Cadences, Bio-Skill Tree & Critter Sonar ---
+
+  /**
+   * Ori / Celeste inspired melodic character speech murmurs for cutscene typewriter ticks.
+   * Speakers: 'gateway' | 'naiad' | 'guardian' | 'warden' (warm, non-fatiguing, toggleable).
+   */
+  voiceBlip(speaker = 'gateway', charIndex = 0) {
+    if (!this.voiceEnabled || !this._canPlay('voiceBlip', 0.052)) return;
+    const raw = String(speaker || 'gateway').trim().toLowerCase();
+    const idx = Math.max(0, Math.floor(Number(charIndex) || 0));
+    // Natural phrase cadence contour (gentle lyrical rise-and-fall across words)
+    const phrasePos = (idx + Math.floor(idx / 4) * 2) % 6;
+    const pan = ((idx % 2 === 0 ? -1 : 1) * 0.06);
+
+    if (raw.includes('warden') || raw.includes('syndicate') || raw.includes('boss')) {
+      // Siphon Wardens: deep resonant brass / cello sub-cadence (warm < 700 Hz)
+      const semis = [0, 3, 2, 5, 0, -2];
+      const f = this._vary(130.81 * Math.pow(2, semis[phrasePos] / 12), 0.018);
+      this._warmBodyTone(f, f * 0.96, 0.135, 0.048, 0, 'triangle', 580, true, pan);
+      this._warmBodyTone(f * 2.0, f * 1.96, 0.095, 0.022, 0.006, 'sine', 680, true, pan);
+      return;
+    }
+
+    if (raw.includes('naiad') || raw.includes('ai') || raw.includes('nav')) {
+      // Naiad: soft harmonic bell-synth shimmer
+      const semis = [0, 4, 7, 9, 7, 4];
+      const f = this._vary(587.33 * Math.pow(2, semis[phrasePos] / 12), 0.012);
+      this._warmBodyTone(f, f * 1.006, 0.09, 0.032, 0, 'sine', 2400, true, pan);
+      this._warmBodyTone(f * 1.498, f * 1.5, 0.075, 0.016, 0.008, 'sine', 2800, true, -pan);
+      return;
+    }
+
+    if (raw.includes('guardian') || raw.includes('elder') || raw.includes('otter') || raw.includes('turtle')) {
+      // Earth's Water Guardians: warm mahogany wooden kalimba syllables
+      const semis = [0, 2, 4, 7, 4, 2];
+      const f = this._vary(349.23 * Math.pow(2, semis[phrasePos] / 12), 0.018);
+      this._kalimbaChime(f, 0.125, 0.038, 0, pan, true);
+      this._warmBodyTone(260, 220, 0.045, 0.018, 0, 'sine', 420, false, pan);
+      return;
+    }
+
+    // Gateway (default): crystalline glass-marimba & breathy flute syllable
+    const semis = [0, 2, 4, 7, 9, 7];
+    const f = this._vary(523.25 * Math.pow(2, semis[phrasePos] / 12), 0.016);
+    this._kalimbaChime(f, 0.11, 0.034, 0, pan, true);
+    this._warmBodyTone(f * 0.992, f * 1.01, 0.095, 0.022, 0.006, 'sine', 2200, true, pan);
+    this._silkyWhoosh(0.055, 0.01, 780, 1380, 1.8, 0, pan, false, false);
+  }
+
+  cutsceneVoice(speaker = 'gateway', charIndex = 0) {
+    this.voiceBlip(speaker, charIndex);
+  }
+
+  /**
+   * Permanent Pelagian Bio-Skill Tree unlock harmonic bloom (scales gently with rank 1..3).
+   */
+  skillUnlock(rank = 1) {
+    if (!this._canPlay('skillUnlock', 0.09)) return;
+    const r = clamp(Math.floor(Number(rank) || 1), 1, 4) - 1;
+    this._warmBodyTone(this._scaleFreq(0, -1), this._scaleFreq(0, -1), 0.48, 0.06, 0, 'sine', 380, true);
+    this._silkyWhoosh(0.32, 0.044, 340, 1280, 1.25, 0, 0, true, false);
+    [0, 2, 4, 7].forEach((deg, idx) => {
+      const f = this._scaleFreq(deg + r, 0);
+      this._kalimbaChime(f, 0.46, 0.048, idx * 0.055, (idx - 1.5) * 0.14, true);
+    });
+    this._waterDrop(this._scaleFreq(5 + r, 0), 0.14, 0.03, 0.18, 0, true);
+  }
+
+  /**
+   * Gentle Critter Sonar proximity pulse when Gateway nears a hidden Earth Water-Critter pod.
+   * proximity: 0 (far edge of sensor) .. 1 (right beside pod).
+   */
+  critterRadarPing(proximity = 0.5) {
+    if (!this._canPlay('critterRadarPing', 0.28)) return;
+    const p = clamp(proximity, 0, 1);
+    const deg = p > 0.68 ? 5 : p > 0.35 ? 4 : 2;
+    const f = this._scaleFreq(deg, 0);
+    const vol = 0.024 + p * 0.018;
+    this._waterDrop(f, 0.13, vol, 0, -0.06, true);
+    this._kalimbaChime(f, 0.32, vol * 0.9, 0.015, 0.06, true);
+    if (p > 0.62) {
+      this._waterDrop(this._scaleFreq(deg + 2, 0), 0.11, vol * 0.78, 0.11, 0.08, true);
+    }
   }
 }
 

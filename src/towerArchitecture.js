@@ -68,8 +68,9 @@ const DOOR_W = 0.98;
 const DOOR_H = 1.38;
 const BRICK_PROUD = 0.068;
 const CROWN_RIBS = 10;
-const PROP_SPAN_Y = 1e6;
-const VIS_ALT_WINDOW = 14.8;
+const PROP_SPAN_Y = 9.0;
+const TINY_PROP_SPAN_Y = 9.0;
+const VIS_ALT_WINDOW = 3.1;
 
 // Zero-allocation scratch math objects for per-frame updates & instancing
 const _m4 = new THREE.Matrix4();
@@ -189,21 +190,48 @@ function markSharedSubtree(rootObj) {
       o.geometry.userData = o.geometry.userData || {};
       o.geometry.userData.shared = true;
     }
-    const ms = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
-    for (let i = 0; i < ms.length; i++) {
-      const m = ms[i];
-      if (!m) continue;
-      m.userData = m.userData || {};
-      m.userData.shared = true;
-      if (typeof m.emissiveIntensity === 'number' && m.emissiveIntensity > 1.85) {
-        m.emissiveIntensity = 1.85;
+    if (!o.material) return;
+    const convertMat = (m) => {
+      if (!m) return m;
+      let out = m;
+      if (m.isMeshPhysicalMaterial) {
+        out = new THREE.MeshStandardMaterial({
+          name: m.name || '',
+          color: m.color ? m.color.clone() : new THREE.Color('#ffffff'),
+          map: m.map || null,
+          normalMap: m.normalMap || null,
+          normalScale: m.normalScale ? m.normalScale.clone() : new THREE.Vector2(1, 1),
+          roughnessMap: m.roughnessMap || null,
+          metalnessMap: m.metalnessMap || null,
+          aoMap: m.aoMap || null,
+          aoMapIntensity: m.aoMapIntensity ?? 1.0,
+          emissive: m.emissive ? m.emissive.clone() : new THREE.Color('#000000'),
+          emissiveMap: m.emissiveMap || null,
+          emissiveIntensity: Math.min(1.85, m.emissiveIntensity ?? 1.0),
+          roughness: typeof m.roughness === 'number' ? m.roughness : 0.4,
+          metalness: typeof m.metalness === 'number' ? m.metalness : 0.2,
+          transparent: Boolean(m.transparent),
+          opacity: typeof m.opacity === 'number' ? m.opacity : 1.0,
+          side: m.side,
+        });
+        m.dispose();
+      } else if (typeof out.emissiveIntensity === 'number' && out.emissiveIntensity > 1.85) {
+        out.emissiveIntensity = 1.85;
       }
+      out.userData = out.userData || {};
+      out.userData.shared = true;
       for (const tk of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap']) {
-        if (m[tk]) {
-          m[tk].userData = m[tk].userData || {};
-          m[tk].userData.shared = true;
+        if (out[tk]) {
+          out[tk].userData = out[tk].userData || {};
+          out[tk].userData.shared = true;
         }
       }
+      return out;
+    };
+    if (Array.isArray(o.material)) {
+      o.material = o.material.map(convertMat);
+    } else {
+      o.material = convertMat(o.material);
     }
   });
   return rootObj;
@@ -494,10 +522,10 @@ function buildHexBasaltGeo(radiusHalfW, height, rf, bevel = 0.022) {
 }
 
 // ============================================================================
-// 3. 1024x1024 PROCEDURAL PBR SURFACE GENERATOR FOR ALL 5 EARTH WATER BIOMES
+// 3. FAST 256x256 PROCEDURAL PBR FALLBACK + ASYNC 1K WEBP UPGRADE (ZERO STALLS!)
 // ============================================================================
 
-const SURFACE_TEX_SIZE = 1024;
+const SURFACE_TEX_SIZE = 256;
 const SURFACE_CACHE = new Map();
 
 function createLattice256(px, py, rand) {
@@ -798,45 +826,37 @@ export function getSurfaceMaps1024(rawKind = 'canyon_sandstone', tile = 0.55) {
       : 5;
 
   for (let y = 0; y < N; y++) {
-    const uy0 = y >> 2;
-    const uy1 = (uy0 + 1) & 255;
-    const fy = (y & 3) * 0.25;
+    const uy0 = y & 255;
     const wy0 = uy0 << 8;
-    const wy1 = uy1 << 8;
-    const fyRow = (y & 255) << 8;
+    const fyRow = wy0;
     const yRow = y * N;
 
     for (let x = 0; x < N; x++) {
       const i = yRow + x;
       const i4 = i << 2;
-      const ux0 = x >> 2;
-      const ux1 = (ux0 + 1) & 255;
-      const fx = (x & 3) * 0.25;
+      const ux0 = x & 255;
       const i00 = wy0 + ux0;
-      const i10 = wy0 + ux1;
-      const i01 = wy1 + ux0;
-      const i11 = wy1 + ux1;
 
-      const n8v = (b8[i00] + (b8[i10] - b8[i00]) * fx) * (1 - fy) + (b8[i01] + (b8[i11] - b8[i01]) * fx) * fy;
-      const n16v = (b16[i00] + (b16[i10] - b16[i00]) * fx) * (1 - fy) + (b16[i01] + (b16[i11] - b16[i01]) * fx) * fy;
-      const mid = (b32[i00] + (b32[i10] - b32[i00]) * fx) * (1 - fy) + (b32[i01] + (b32[i11] - b32[i01]) * fx) * fy;
-      const fine = b64[i00] * 0.45 + fine128[fyRow + (x & 255)] * 0.55;
+      const n8v = b8[i00];
+      const n16v = b16[i00];
+      const mid = b32[i00];
+      const fine = b64[i00] * 0.45 + fine128[i00] * 0.55;
       const broad = n8v * 0.58 + n16v * 0.42;
-      const eVal = (edgeBuf[i00] + (edgeBuf[i10] - edgeBuf[i00]) * fx) * (1 - fy) + (edgeBuf[i01] + (edgeBuf[i11] - edgeBuf[i01]) * fx) * fy;
+      const eVal = edgeBuf[i00];
 
       let hHash = (Math.imul(x, 374761393) ^ Math.imul(y, 668265263)) >>> 0;
       hHash = Math.imul(hHash ^ (hHash >>> 13), 1274126177) >>> 0;
       const gNorm = (hHash & 1023) * 0.0009775;
 
-      // Chiseled running-bond sub-ashlar courses
-      const dyRow = (y + ((mid * 5.0) | 0)) & 127;
-      const hDist = dyRow < 64 ? dyRow : 128 - dyRow;
-      const subRow = (y / 128) | 0;
-      const colShift = (subRow & 1) * 128 + ((subRow * 73) & 3) * 32;
-      const dxCol = (x + colShift + ((n16v * 8.0) | 0)) & 255;
-      const vDist = dxCol < 128 ? dxCol : 256 - dxCol;
-      const subMortar = Math.max(hDist < 3 ? 1.0 - hDist / 3 : 0.0, vDist < 3 ? 1.0 - vDist / 3 : 0.0);
-      const subBevel = (hDist < 11 ? (11 - hDist) * 0.026 : 0) + (vDist < 11 ? (11 - vDist) * 0.022 : 0);
+      // Chiseled running-bond sub-ashlar courses (scaled for fast 256x256 instant fallback!)
+      const dyRow = (y + ((mid * 2.0) | 0)) & 31;
+      const hDist = dyRow < 16 ? dyRow : 32 - dyRow;
+      const subRow = y >> 5;
+      const colShift = (subRow & 1) * 32 + ((subRow * 73) & 3) * 8;
+      const dxCol = (x + colShift + ((n16v * 2.0) | 0)) & 63;
+      const vDist = dxCol < 32 ? dxCol : 64 - dxCol;
+      const subMortar = Math.max(hDist < 2 ? 1.0 - hDist * 0.5 : 0.0, vDist < 2 ? 1.0 - vDist * 0.5 : 0.0);
+      const subBevel = (hDist < 4 ? (4 - hDist) * 0.065 : 0) + (vDist < 4 ? (4 - vDist) * 0.055 : 0);
 
       let ht = 0.5;
       let cr = 0.9;
@@ -1125,6 +1145,13 @@ function buildWallAoLightTexture(tower, fh, totalH, clueEntries = null, conduitA
     }
   }
 
+  for (const colItem of tower?.collectibles || []) {
+    if (colItem?.type !== 'critter_pod') continue;
+    const pPhi = ((Number(colItem.col) || 0) + 0.5) * COL_ANGLE;
+    const py = (Number(colItem.floor) || 0) * fh + 0.85;
+    stamp(pPhi, py + 0.95, py - 0.85, COL_ANGLE * 0.86, 0, 0.42, 0.52);
+  }
+
   for (let i = 0; i < W * H; i++) {
     const i4 = i << 2;
     data[i4] = Math.min(255, (aoGrid[i] * 255 + 0.5) | 0);
@@ -1406,6 +1433,60 @@ export function createBlockMaterial({
 // ============================================================================
 // 5. HYDRO-CONDUIT FLOWING WATER SHADER, PORTAL SHADER & PROCEDURAL PROP MAPS
 // ============================================================================
+
+function createSummitAuraMaterial(glowHex, accentHex) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uPurify: { value: 0 },
+      uProximity: { value: 0.45 },
+      uGlow: { value: new THREE.Color(glowHex || '#38bdf8') },
+      uAccent: { value: new THREE.Color(accentHex || '#5efce8') },
+      uGold: { value: new THREE.Color('#fef08a') },
+    },
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      varying vec3 vNrm;
+      varying vec3 vView;
+      void main() {
+        vUv = uv;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vNrm = normalize(normalMatrix * normal);
+        vView = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform float uPurify;
+      uniform float uProximity;
+      uniform vec3 uGlow;
+      uniform vec3 uAccent;
+      uniform vec3 uGold;
+      varying vec2 vUv;
+      varying vec3 vNrm;
+      varying vec3 vView;
+
+      void main() {
+        float ang = vUv.x * 6.2831853;
+        float veil1 = 0.5 + 0.5 * sin(ang * 5.0 - uTime * 1.15 + vUv.y * 4.5);
+        float veil2 = 0.5 + 0.5 * cos(ang * 8.0 + uTime * 0.85 - vUv.y * 6.2);
+        float rise = 0.5 + 0.5 * sin(vUv.y * 12.0 - uTime * 2.6 + sin(ang * 3.0) * 1.2);
+        float verticalFade = smoothstep(0.0, 0.24, vUv.y) * smoothstep(1.0, 0.14, vUv.y);
+        float fresnel = pow(1.0 - abs(dot(normalize(vNrm), normalize(vView))), 1.35);
+        float ribbon = smoothstep(0.28, 0.92, veil1 * 0.58 + veil2 * 0.42) * (0.65 + 0.35 * rise);
+        vec3 baseCol = mix(uGlow, uAccent, veil2);
+        vec3 col = mix(baseCol, uGold, clamp(uPurify * 0.72 + pow(rise, 3.0) * 0.24, 0.0, 1.0));
+        float alpha = verticalFade * (0.22 + 0.68 * fresnel) * (0.28 + 0.72 * ribbon) * (0.34 + 0.34 * uProximity + 0.45 * uPurify);
+        gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.82));
+      }
+    `,
+  });
+}
 
 function createHydroConduitMaterial(deepHex, glowHex) {
   return new THREE.ShaderMaterial({
@@ -1767,16 +1848,24 @@ function createPortalMaterial(glowHex, glow2Hex, aspect = 1.4, isMistPassage = f
       }
       void main() {
         if (uMistMode > 0.5) {
-          // Illuminated vaulted aqueduct passage with shimmering water-caustic glow!
+          // Deep shadowed stone interior passage receding into the spire (NOT a flat bright cyan sheet!)
           vec2 q = vUv;
-          float archMask = smoothstep(0.54, 0.42, length((q - vec2(0.5, 0.62)) * vec2(1.0, 0.85)));
-          float reveal = smoothstep(0.16, 0.0, min(q.x, 1.0 - q.x)) * 0.35;
-          float caustic = fbmMist(vec2(q.x * 4.2 + sin(uTime * 0.45) * 0.4, q.y * 3.6 - uTime * 0.22));
-          float caustic2 = fbmMist(vec2(q.x * 6.4 - uTime * 0.28, q.y * 5.2 + uTime * 0.18) + caustic);
-          float shimmer = smoothstep(0.36, 0.84, caustic * 0.55 + caustic2 * 0.45);
-          float depthGlow = exp(-pow((q.x - 0.5) / 0.36, 2.0)) * smoothstep(0.95, 0.08, q.y);
-          vec3 col = mix(uGlow, uGlow2, clamp(shimmer * 0.72 * depthGlow + archMask * 0.22, 0.0, 1.0));
-          col += uGlow2 * reveal * 0.28;
+          float sideEdge = smoothstep(0.0, 0.26, min(q.x, 1.0 - q.x));
+          float topShadow = smoothstep(1.0, 0.58, q.y);
+          float floorGrad = smoothstep(0.0, 0.34, q.y);
+          // Subtle recessed stone arch-vault ribs receding in depth
+          float archDist = length((q - vec2(0.5, 0.46)) * vec2(1.15, 0.85));
+          float vaultRib = 0.5 + 0.5 * sin(archDist * 26.0);
+          float grain = fbmMist(vec2(q.x * 5.5, q.y * 4.2 + uTime * 0.04));
+          // Deep shadowed slate-navy interior receding into warm/muted architectural depth
+          vec3 deepVoid = vec3(0.012, 0.018, 0.028);
+          vec3 stoneShadow = mix(vec3(0.032, 0.042, 0.058), uGlow * 0.28, 0.45);
+          float recessLight = exp(-pow((q.x - 0.5) / 0.28, 2.0)) * smoothstep(0.92, 0.16, q.y) * floorGrad;
+          vec3 warmDepth = mix(vec3(0.28, 0.20, 0.12), uGlow2 * 0.24, 0.42);
+          vec3 col = mix(deepVoid, stoneShadow, sideEdge * topShadow * (0.45 + 0.32 * grain + 0.14 * vaultRib));
+          col += warmDepth * recessLight * (0.34 + 0.18 * grain);
+          // Darken immediate outer jambs so archway reads deeply recessed behind the 3D stone archivolt
+          col *= smoothstep(0.0, 0.14, min(q.x, 1.0 - q.x)) * smoothstep(1.0, 0.82, q.y);
           gl_FragColor = vec4(col, 1.0);
         } else {
           vec2 p = (vUv - vec2(0.5, 0.5)) * vec2(1.0, uAspect);
@@ -2417,8 +2506,36 @@ function getSharedArchGeometries() {
       }
       return mergeGeometries(parts);
     })(),
-    energyBox: new RoundedBoxGeometry(1.06, 0.78, 0.78, 1, 0.068),
-    energyCore: new THREE.BoxGeometry(0.68, 0.42, 0.82),
+    // Heavy Carved Stone-and-Riveted-Antique-Bronze Pelagian Counterweight Block (ZERO sci-fi Tron crosshair cubes!)
+    energyBox: new RoundedBoxGeometry(0.98, 0.76, 0.76, 2, 0.055),
+    energyCore: (() => {
+      const parts = [];
+      // Twin riveted antique-bronze structural straps wrapping the stone block
+      for (const sy of [-0.24, 0.24]) {
+        const strap = new RoundedBoxGeometry(1.03, 0.085, 0.81, 1, 0.014);
+        strap.translate(0, sy, 0);
+        parts.push(strap);
+      }
+      // 4 Vertical antique-bronze corner reinforcement brackets
+      for (const sx of [-0.465, 0.465]) {
+        for (const sz of [-0.355, 0.355]) {
+          const post = new RoundedBoxGeometry(0.095, 0.78, 0.095, 1, 0.015);
+          post.translate(sx, 0, sz);
+          parts.push(post);
+        }
+      }
+      // Recessed circular carved antique-bronze wave-medallion boss on front & back faces
+      for (const sz of [-0.385, 0.385]) {
+        const ring = new THREE.TorusGeometry(0.16, 0.026, 6, 16);
+        ring.translate(0, 0, sz);
+        parts.push(ring);
+        const boss = new THREE.CylinderGeometry(0.085, 0.10, 0.036, 10);
+        boss.rotateX(Math.PI * 0.5);
+        boss.translate(0, 0, sz);
+        parts.push(boss);
+      }
+      return mergeGeometries(parts);
+    })(),
     flutedPillar: new THREE.CylinderGeometry(0.32, 0.34, 1.0, 12),
     pillarCollar: new RoundedBoxGeometry(0.88, 0.11, 0.76, 1, 0.022),
     pipeSegment: new THREE.CylinderGeometry(0.056, 0.056, 1.0, 8),
@@ -2658,7 +2775,7 @@ function buildTowerMasonryAndAccents(
     coreMat
   );
   core.position.y = totalH * 0.5;
-  core.castShadow = true;
+  core.castShadow = false;
   core.receiveShadow = true;
   core.userData.keepInReflection = true;
   group.add(core);
@@ -2740,11 +2857,13 @@ function buildTowerMasonryAndAccents(
 
   const placeBlock = (a0, a1, y0, hr) => {
     const sp = a1 - a0;
-    if (sp < blockA * 0.12 || hr < 0.06) return;
+    // Skip tiny disconnected sliver bricks (`< 22%` width) and any brick inside an elevator shaft cavity!
+    if (sp < blockA * 0.22 || hr < 0.08) return;
     const midA = (a0 + a1) * 0.5;
-    const inShaft = y0 >= -0.2 && isInChannel(midA, y0 + hr * 0.5, shafts, 0.015);
+    if (y0 >= -0.25 && isInChannel(midA, y0 + hr * 0.5, shafts, 0.025)) return;
     const inConduit = y0 >= 0.1 && isInChannel(midA, y0 + hr * 0.5, conduitChannels, 0.008);
-    const channelRecess = inShaft ? -0.18 : inConduit ? -0.15 : 0;
+    // Keep recessed conduit-niche stones proud of the mortar core cylinder (ZERO dark Swiss-cheese holes!)
+    const channelRecess = inConduit ? -0.055 : 0;
 
     // Graceful flared surf base (y < 2.2 down to -2.4) + sleek upward architectural entasis taper
     const flareBase = y0 < 2.2 ? Math.pow(Math.max(0, 2.2 - y0) / 4.2, 1.45) * 0.36 : 0;
@@ -2767,7 +2886,7 @@ function buildTowerMasonryAndAccents(
     } else {
       c.copy(basePaletteCols[Math.floor(rnd() * basePaletteCols.length)]).multiplyScalar(0.92 + rnd() * 0.18);
     }
-    if (inShaft || inConduit) c.multiplyScalar(0.54);
+    if (inConduit) c.multiplyScalar(0.54);
 
     wallEntries.push({
       m,
@@ -2777,7 +2896,7 @@ function buildTowerMasonryAndAccents(
       phi: ((midA % TWO_PI) + TWO_PI) % TWO_PI,
     });
 
-    if (!inShaft && !inConduit && sp > blockA * 0.42 && y0 > -0.4 && y0 < totalH - 0.6) {
+    if (!inConduit && sp > blockA * 0.42 && y0 > -0.4 && y0 < totalH - 0.6) {
       const surfR = rf + (radialOut - 1) * R;
       if (spec.hasMoss && !isBand && rnd() < 0.14) {
         const ma = a0 + sp * (0.2 + rnd() * 0.6);
@@ -2828,19 +2947,21 @@ function buildTowerMasonryAndAccents(
   };
 
   const gapV = Math.max(0.02, spec.joint * 0.52);
-  const overUnder = (a0, a1, y0, hr, h) => {
-    if (h.y0 - y0 - gapV > 0.06) placeBlock(a0, a1, y0, h.y0 - y0 - gapV);
-    if (y0 + hr - h.y1 - gapV > 0.06) placeBlock(a0, a1, h.y1 + gapV, y0 + hr - h.y1 - gapV);
+  const allCutouts = holes.concat(shafts);
+  const overUnder = (a0, a1, y0, hr, h, nextIdx) => {
+    if (h.y0 - y0 - gapV > 0.08) placeCut(a0, a1, y0, h.y0 - y0 - gapV, nextIdx);
+    if (y0 + hr - h.y1 - gapV > 0.08) placeCut(a0, a1, h.y1 + gapV, y0 + hr - h.y1 - gapV, nextIdx);
   };
 
-  const placeCut = (a0, a1, y0, hr) => {
-    for (const h of holes) {
+  const placeCut = (a0, a1, y0, hr, startIdx = 0) => {
+    for (let idx = startIdx; idx < allCutouts.length; idx++) {
+      const h = allCutouts[idx];
       if (!(y0 + hr > h.y0 && y0 < h.y1)) continue;
       const d0 = angDist(a0, h.a);
       const hs = a0 - d0;
       if (isHex) {
         if (Math.abs(angDist((a0 + a1) * 0.5, h.a)) < h.w + hexHalfA * 0.65) {
-          overUnder(a0, a1, y0, hr, h);
+          overUnder(a0, a1, y0, hr, h, idx + 1);
           return;
         }
         continue;
@@ -2848,9 +2969,9 @@ function buildTowerMasonryAndAccents(
       const L = hs - h.w;
       const Rr = hs + h.w;
       if (a1 <= L || a0 >= Rr) continue;
-      if (a0 < L - jointA * 0.5) placeCut(a0, L - jointA * 0.5, y0, hr);
-      overUnder(Math.max(a0, L), Math.min(a1, Rr), y0, hr, h);
-      if (a1 > Rr + jointA * 0.5) placeCut(Rr + jointA * 0.5, a1, y0, hr);
+      if (a0 < L - jointA * 0.5) placeCut(a0, L - jointA * 0.5, y0, hr, idx + 1);
+      overUnder(Math.max(a0, L), Math.min(a1, Rr), y0, hr, h, idx + 1);
+      if (a1 > Rr + jointA * 0.5) placeCut(Rr + jointA * 0.5, a1, y0, hr, idx + 1);
       return;
     }
     placeBlock(a0, a1, y0, hr);
@@ -2878,7 +2999,7 @@ function buildTowerMasonryAndAccents(
     y0 += hr;
   }
 
-  materializeWallBands(group, bandedMeshes, blockGeo, blockMat, wallEntries, PROP_SPAN_Y, !isHex, false, true, 8);
+  materializeWallBands(group, bandedMeshes, blockGeo, blockMat, wallEntries, PROP_SPAN_Y, !isHex, false, true, 2);
 
   // 3. Sweeping Vertical Architectural Buttress Ribs (Breaks Up Straight Cylinder Silhouette!)
   const buttressMat = createBlockMaterial({
@@ -2997,57 +3118,51 @@ function buildTowerMasonryAndAccents(
     }
   }
   buildBandedInstancedFromList(group, bandedMeshes, G.buttressSeg, buttressMat, buttressSegs, PROP_SPAN_Y, {
-    castShadow: true,
+    castShadow: false,
     keepInReflection: true,
   });
-  buildBandedInstancedFromList(group, bandedMeshes, G.buttressCap, trimMetalMat, buttressCaps, PROP_SPAN_Y, {
-    castShadow: true,
+  buildBandedInstancedFromList(group, bandedMeshes, G.buttressCap, trimMetalMat, buttressCaps, TINY_PROP_SPAN_Y, {
+    castShadow: false,
     keepInReflection: true,
   });
-  buildBandedInstancedFromList(group, bandedMeshes, G.buttressCollar, trimMetalMat, buttressCollars, PROP_SPAN_Y, {
+  buildBandedInstancedFromList(group, bandedMeshes, G.buttressCollar, trimMetalMat, buttressCollars, TINY_PROP_SPAN_Y, {
     castShadow: false,
     keepInReflection: true,
   });
 
-  // 4. Recessed Transparent Glass Hydro-Conduit Tubes + Animated Flowing Water Core!
-  const conduitMat = createHydroConduitMaterial(spec.conduitDeep, spec.conduitGlow);
-  const glassTubeMat = new THREE.MeshStandardMaterial({
-    color: '#e0f7ff',
-    roughness: 0.06,
-    metalness: 0.12,
-    transparent: true,
-    opacity: 0.28,
-    depthWrite: false,
-  });
+  // 4. Solid Opaque Weathered Antique-Bronze Fluted Aqueduct Downspouts (ZERO translucent plastic tubes!)
+  const conduitMat = trimMetalMat.clone();
+  conduitMat.color.set('#8f6942');
+  conduitMat.roughness = 0.34;
+  conduitMat.metalness = 0.76;
+  conduitMat.transparent = false;
+  conduitMat.depthWrite = true;
+  conduitMat.emissive = new THREE.Color('#14b8a6');
+  conduitMat.emissiveIntensity = 0;
   const clampList = [];
-  const conduitWaterParts = [];
-  const conduitGlassParts = [];
+  const conduitPipeParts = [];
 
   for (let c = 0; c < conduitChannels.length; c++) {
     const ch = conduitChannels[c];
     const cPhi = ch.a;
-    // Split vertical conduit cleanly around any doorway opening
-    let segStart = 0.2;
+    // Run vertical downspout continuously down into the submerged foundation (`-0.55 * fh`), splitting cleanly around doorways
+    let segStart = -0.55 * fh;
     const spanEnd = totalH - 0.3;
     const emitConduitSpan = (yA, yB) => {
       const hLen = yB - yA;
       if (hLen < 1.1) return;
       const midY = (yA + yB) * 0.5;
-      const cr = R + 0.02;
+      const cr = R + 0.068;
       const cx = Math.sin(cPhi) * cr;
       const cz = Math.cos(cPhi) * cr;
 
-      const wGeo = new THREE.CylinderGeometry(0.115, 0.125, hLen, 12, 1, true);
-      wGeo.rotateY(cPhi);
-      wGeo.translate(cx, midY, cz);
-      conduitWaterParts.push(wGeo);
+      // Solid opaque 12-flute weathered antique-bronze downspout cylinder
+      const pGeo = new THREE.CylinderGeometry(0.138, 0.146, hLen, 12, 1, false);
+      pGeo.rotateY(cPhi);
+      pGeo.translate(cx, midY, cz);
+      conduitPipeParts.push(pGeo);
 
-      const gGeo = new THREE.CylinderGeometry(0.155, 0.165, hLen, 12, 1, true);
-      gGeo.rotateY(cPhi);
-      gGeo.translate(cx, midY, cz);
-      conduitGlassParts.push(gGeo);
-
-      for (let ry = yA + 0.15; ry <= yB - 0.1; ry += fh) {
+      for (let ry = Math.max(0.28, yA + 0.28); ry <= yB - 0.18; ry += fh) {
         pushInstance(clampList, cx, ry, cz, 0, cPhi, 0, 1, 1, 1);
       }
     };
@@ -3066,15 +3181,14 @@ function buildTowerMasonryAndAccents(
     }
   }
 
-  if (conduitWaterParts.length) {
-    const waterCoreMesh = new THREE.Mesh(mergeGeometries(conduitWaterParts), conduitMat);
-    waterCoreMesh.userData.keepInReflection = true;
-    group.add(waterCoreMesh);
-
-    const glassShellMesh = new THREE.Mesh(mergeGeometries(conduitGlassParts), glassTubeMat);
-    group.add(glassShellMesh);
+  if (conduitPipeParts.length) {
+    const downspoutMesh = new THREE.Mesh(mergeGeometries(conduitPipeParts), conduitMat);
+    downspoutMesh.castShadow = false;
+    downspoutMesh.receiveShadow = true;
+    downspoutMesh.userData.keepInReflection = true;
+    group.add(downspoutMesh);
   }
-  buildBandedInstancedFromList(group, bandedMeshes, G.conduitClamp, trimMetalMat, clampList, PROP_SPAN_Y);
+  buildBandedInstancedFromList(group, bandedMeshes, G.conduitClamp, trimMetalMat, clampList, TINY_PROP_SPAN_Y);
 
   // 5. Arched Colonnade / Aqueduct Blind-Arcade Cornice Bands Every 4 Floors
   const corniceParts = [];
@@ -3126,7 +3240,7 @@ function buildTowerMasonryAndAccents(
   }
   if (corniceParts.length) {
     const corniceMesh = new THREE.Mesh(mergeGeometries(corniceParts), buttressMat);
-    corniceMesh.castShadow = true;
+    corniceMesh.castShadow = false;
     corniceMesh.receiveShadow = true;
     corniceMesh.userData.keepInReflection = true;
     group.add(corniceMesh);
@@ -3230,7 +3344,7 @@ function buildTowerMasonryAndAccents(
       markSharedSubtree(cloned);
       cloned.traverse((o) => {
         if (o.isMesh) {
-          o.castShadow = true;
+          o.castShadow = false;
           o.receiveShadow = true;
         }
       });
@@ -3271,8 +3385,8 @@ function buildTowerMasonryAndAccents(
   // 7. Biome Lanterns & Crystal Accents Materialization
   if (lanternBodyList.length) {
     const lGlowMat = new THREE.MeshBasicMaterial({ color: '#ffbe42' });
-    buildBandedInstancedFromList(group, bandedMeshes, G.templeLantern, trimMetalMat, lanternBodyList, PROP_SPAN_Y);
-    buildBandedInstancedFromList(group, bandedMeshes, G.lanternCore, lGlowMat, lanternGlowList, PROP_SPAN_Y, {
+    buildBandedInstancedFromList(group, bandedMeshes, G.templeLantern, trimMetalMat, lanternBodyList, TINY_PROP_SPAN_Y);
+    buildBandedInstancedFromList(group, bandedMeshes, G.lanternCore, lGlowMat, lanternGlowList, TINY_PROP_SPAN_Y, {
       receiveShadow: false,
     });
   }
@@ -3284,7 +3398,7 @@ function buildTowerMasonryAndAccents(
       roughness: 0.12,
       metalness: 0.25,
     });
-    buildBandedInstancedFromList(group, bandedMeshes, G.crystalCluster, crMat, crystalList, PROP_SPAN_Y);
+    buildBandedInstancedFromList(group, bandedMeshes, G.crystalCluster, crMat, crystalList, TINY_PROP_SPAN_Y);
   }
 
   // 8. Monumental Summit Reactor Core Intake & Arched Aqueduct Crown (`y = totalH .. totalH + 2.6`)
@@ -3352,7 +3466,7 @@ function buildTowerMasonryAndAccents(
   group.add(crownStoneMesh, crownMetalMesh);
   bandedMeshes.push(crownStoneMesh, crownMetalMesh);
 
-  // Summit Harmonic Water-Seed Beacon Sprites
+  // Summit Harmonic Water-Seed Beacon Sprites + Pelagian Summit Crown Aura (Aurora Veil & Counter-Rotating Halo Rings)
   const crownFlames = [];
   for (let i = 0; i < 4; i++) {
     const fl = new THREE.Sprite(
@@ -3368,6 +3482,39 @@ function buildTowerMasonryAndAccents(
     group.add(fl);
     crownFlames.push(fl);
   }
+
+  const summitAuraGroup = new THREE.Group();
+  summitAuraGroup.position.y = totalH + 2.02;
+  const summitAuraMat = createSummitAuraMaterial(spec.conduitGlow, spec.accentGlow);
+  const summitVeilMesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(R * 0.52, R * 0.88, 2.85, 28, 1, true),
+    summitAuraMat
+  );
+  summitVeilMesh.position.y = -0.32;
+  const summitHaloMat = new THREE.MeshStandardMaterial({
+    color: spec.conduitGlow,
+    emissive: spec.conduitGlow,
+    emissiveIntensity: 1.35,
+    roughness: 0.16,
+    metalness: 0.72,
+    transparent: true,
+    opacity: 0.88,
+  });
+  const summitOuterHalo = new THREE.Mesh(new THREE.TorusGeometry(R * 0.62, 0.042, 8, 36), summitHaloMat);
+  summitOuterHalo.rotation.x = Math.PI * 0.5;
+  const summitInnerHalo = new THREE.Mesh(new THREE.TorusGeometry(R * 0.36, 0.032, 8, 28), summitHaloMat);
+  summitInnerHalo.rotation.x = Math.PI * 0.42;
+  summitInnerHalo.position.y = 0.28;
+  summitAuraGroup.add(summitVeilMesh, summitOuterHalo, summitInnerHalo);
+  group.add(summitAuraGroup);
+  const summitAura = {
+    group: summitAuraGroup,
+    veilMat: summitAuraMat,
+    haloMat: summitHaloMat,
+    outerHalo: summitOuterHalo,
+    innerHalo: summitInnerHalo,
+    baseGlowHex: spec.conduitGlow,
+  };
 
   // 9. Flared Submerged River/Lake/Sea Foundation Plinth (`y = -3.2 .. -0.2`)
   const plinthMat = attachWaterlineShader(
@@ -3391,6 +3538,7 @@ function buildTowerMasonryAndAccents(
     conduitMat,
     corePoolMat: corePool.material,
     crownFlames,
+    summitAura,
     turbineRotors,
     totalH,
     mossList,
@@ -3500,7 +3648,8 @@ function resolveClueColOffset(tower, door) {
 
 function normalizeResolvedClue(rawClue, fallbackType = 'lights') {
   if (!rawClue || !rawClue.kind) return { kind: fallbackType };
-  if (rawClue.kind === 'lights') {
+  const k = String(rawClue.kind).trim();
+  if (k === 'lights') {
     const n = Math.max(2, Math.min(5, Number(rawClue.n) || Math.round(Math.sqrt(rawClue.pattern?.length || 9)) || 3));
     const pat = Array.isArray(rawClue.pattern)
       ? rawClue.pattern.slice(0, n * n).map((v) => (v ? 1 : 0))
@@ -3508,7 +3657,7 @@ function normalizeResolvedClue(rawClue, fallbackType = 'lights') {
     while (pat.length < n * n) pat.push(0);
     return { kind: 'lights', n, pattern: pat };
   }
-  if (rawClue.kind === 'bells') {
+  if (k === 'bells') {
     const order = Array.isArray(rawClue.order) ? rawClue.order.slice() : [];
     const colors =
       Array.isArray(rawClue.colors) && rawClue.colors.length === order.length
@@ -3523,7 +3672,59 @@ function normalizeResolvedClue(rawClue, fallbackType = 'lights') {
     }
     return { kind: 'bells', order, colors };
   }
-  return { kind: String(rawClue.kind) };
+  if (k === 'pipes' || k === 'pipe' || k === 'conduit') {
+    const n = Math.max(2, Math.min(5, Number(rawClue.n || rawClue.cols || rawClue.size) || 3));
+    const rawPath = Array.isArray(rawClue.path)
+      ? rawClue.path
+      : Array.isArray(rawClue.route)
+      ? rawClue.route
+      : Array.isArray(rawClue.solutionPath)
+      ? rawClue.solutionPath
+      : null;
+    let path = [];
+    if (rawPath && rawPath.length >= 2) {
+      for (let i = 0; i < rawPath.length; i++) {
+        const pt = rawPath[i];
+        if (Array.isArray(pt) && pt.length >= 2) {
+          path.push([Math.max(0, Math.min(n - 1, Number(pt[0]) | 0)), Math.max(0, Math.min(n - 1, Number(pt[1]) | 0))]);
+        } else if (pt && typeof pt === 'object') {
+          const px = pt.x ?? pt.col ?? 0;
+          const py = pt.y ?? pt.row ?? 0;
+          path.push([Math.max(0, Math.min(n - 1, Number(px) | 0)), Math.max(0, Math.min(n - 1, Number(py) | 0))]);
+        } else if (typeof pt === 'number') {
+          path.push([pt % n, Math.floor(pt / n) % n]);
+        }
+      }
+    }
+    if (path.length < 2) {
+      // Deterministic clean S-curve pressure conduit route across the `n x n` grid
+      path = [[0, 0]];
+      for (let x = 1; x < Math.min(n, 2); x++) path.push([x, 0]);
+      for (let y = 1; y < n; y++) path.push([Math.min(n - 1, 1), y]);
+      for (let x = 2; x < n; x++) path.push([x, n - 1]);
+    }
+    return { kind: 'pipes', n, path };
+  }
+  if (k === 'tide_locks' || k === 'tideLocks' || k === 'sluice' || k === 'locks') {
+    const rawList =
+      rawClue.targets || rawClue.targetLevels || rawClue.levels || rawClue.chambers || null;
+    let targets = [];
+    if (Array.isArray(rawList) && rawList.length > 0) {
+      targets = rawList.slice(0, 5).map((item) => {
+        if (typeof item === 'number') return Math.max(0, item);
+        if (item && typeof item === 'object') return Math.max(0, Number(item.target ?? item.level ?? item.height ?? 1));
+        return 1;
+      });
+    } else if (typeof rawClue.target === 'number') {
+      const t = Math.max(1, rawClue.target);
+      targets = [t, t, t];
+    } else {
+      targets = [2, 3, 1];
+    }
+    const maxLevel = Math.max(3, Number(rawClue.maxLevel || rawClue.max || Math.max(...targets, 3)) || 3);
+    return { kind: 'tide_locks', targets, maxLevel };
+  }
+  return { kind: k };
 }
 
 function collectTowerClueEntries(tower) {
@@ -3608,7 +3809,15 @@ function computeClueEntriesSignature(entries) {
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
     const c = e.clue;
-    const pat = c.pattern ? c.pattern.join('') : c.colors ? c.colors.join(',') : '';
+    const pat = c.pattern
+      ? c.pattern.join('')
+      : c.colors
+      ? c.colors.join(',')
+      : c.path
+      ? c.path.map((p) => `${p[0]}_${p[1]}`).join('-')
+      : c.targets
+      ? `${c.maxLevel || 3}:${c.targets.join(',')}`
+      : '';
     s += `${e.colCenter.toFixed(2)}@${e.floorY.toFixed(2)}:${c.kind}:${c.n || ''}:${pat}|`;
   }
   return s;
@@ -3749,6 +3958,214 @@ function drawClueSteleArtwork(ctx, W, H, clue) {
     return;
   }
 
+  if (clue.kind === 'pipes') {
+    const n = clue.n || 3;
+    const path = Array.isArray(clue.path) && clue.path.length >= 2 ? clue.path : [[0, 0], [1, 0], [1, 1], [2, 1], [2, 2]];
+    const pad = 48;
+    const inner = W - pad * 2;
+    const step = inner / n;
+
+    // Deep Pelagian blueprint background + double brass bezel + corner rivets
+    const bgGrd = ctx.createLinearGradient(0, 0, 0, H);
+    bgGrd.addColorStop(0, '#071426');
+    bgGrd.addColorStop(1, '#0c2038');
+    ctx.fillStyle = bgGrd;
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = '#d49b2a';
+    ctx.lineWidth = 7;
+    ctx.strokeRect(12, 12, W - 24, H - 24);
+    ctx.strokeStyle = 'rgba(94, 242, 255, 0.38)';
+    ctx.lineWidth = 2.5;
+    ctx.strokeRect(24, 24, W - 48, H - 48);
+
+    // Subtle schematic grid sockets
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n; c++) {
+        const cx = pad + (c + 0.5) * step;
+        const cy = pad + (r + 0.5) * step;
+        ctx.fillStyle = '#0d1d34';
+        ctx.strokeStyle = '#254466';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(cx, cy, step * 0.24, 0, TWO_PI);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    // Outer brass pipe casing along route
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#c88e2e';
+    ctx.lineWidth = Math.max(24, step * 0.34);
+    ctx.beginPath();
+    for (let i = 0; i < path.length; i++) {
+      const cx = pad + (path[i][0] + 0.5) * step;
+      const cy = pad + (path[i][1] + 0.5) * step;
+      if (i === 0) ctx.moveTo(cx, cy);
+      else ctx.lineTo(cx, cy);
+    }
+    ctx.stroke();
+
+    // Inner glowing turquoise pressurized hydro-stream
+    ctx.strokeStyle = '#5ef2ff';
+    ctx.lineWidth = Math.max(12, step * 0.17);
+    ctx.stroke();
+
+    // Node collar rings + Inlet (gold valve) & Outlet (emerald crystal)
+    for (let i = 0; i < path.length; i++) {
+      const cx = pad + (path[i][0] + 0.5) * step;
+      const cy = pad + (path[i][1] + 0.5) * step;
+      if (i === 0) {
+        ctx.fillStyle = '#fde047';
+        ctx.strokeStyle = '#b45309';
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.arc(cx, cy, step * 0.28, 0, TWO_PI);
+        ctx.fill();
+        ctx.stroke();
+      } else if (i === path.length - 1) {
+        ctx.fillStyle = '#34d399';
+        ctx.strokeStyle = '#ecfdf5';
+        ctx.lineWidth = 5;
+        const dr = step * 0.28;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - dr);
+        ctx.lineTo(cx + dr, cy);
+        ctx.lineTo(cx, cy + dr);
+        ctx.lineTo(cx - dr, cy);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = '#d8feff';
+        ctx.beginPath();
+        ctx.arc(cx, cy, step * 0.09, 0, TWO_PI);
+        ctx.fill();
+      }
+    }
+    return;
+  }
+
+  if (clue.kind === 'tide_locks') {
+    const targets = Array.isArray(clue.targets) && clue.targets.length ? clue.targets : [2, 3, 1];
+    const maxLvl = Math.max(3, clue.maxLevel || Math.max(...targets, 3));
+    const count = targets.length;
+    const padX = 44;
+    const topY = 82;
+    const botY = H - 46;
+    const colAreaW = W - padX * 2;
+    const slotW = colAreaW / count;
+    const gap = Math.min(22, slotW * 0.16);
+    const barW = slotW - gap;
+    const chamberH = botY - topY;
+
+    ctx.fillStyle = '#061221';
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = '#d49b2a';
+    ctx.lineWidth = 7;
+    ctx.strokeRect(12, 12, W - 24, H - 24);
+    ctx.strokeStyle = 'rgba(94, 242, 255, 0.36)';
+    ctx.lineWidth = 2.5;
+    ctx.strokeRect(24, 24, W - 48, H - 48);
+
+    // Horizontal graduated tide ruler lines across all chambers
+    for (let lvl = 1; lvl <= maxLvl; lvl++) {
+      const ly = botY - (lvl / maxLvl) * chamberH;
+      ctx.strokeStyle = 'rgba(212, 155, 42, 0.38)';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(padX - 10, ly);
+      ctx.lineTo(W - padX + 10, ly);
+      ctx.stroke();
+    }
+
+    const numerals = ['I', 'II', 'III', 'IV', 'V'];
+    for (let k = 0; k < count; k++) {
+      const x0 = padX + k * slotW + gap * 0.5;
+      const cx = x0 + barW * 0.5;
+      const frac = Math.max(0, Math.min(1, targets[k] / maxLvl));
+      const fillH = frac * chamberH;
+      const fillY = botY - fillH;
+
+      // Glass chamber recessed cavity
+      ctx.fillStyle = '#0a1c32';
+      ctx.fillRect(x0, topY, barW, chamberH);
+      ctx.strokeStyle = '#335c82';
+      ctx.lineWidth = 3.5;
+      ctx.strokeRect(x0, topY, barW, chamberH);
+
+      // Luminous turquoise water fill column
+      if (fillH > 2) {
+        const wGrd = ctx.createLinearGradient(0, fillY, 0, botY);
+        wGrd.addColorStop(0.0, '#a5f3fc');
+        wGrd.addColorStop(0.22, '#22d3ee');
+        wGrd.addColorStop(1.0, '#0369a1');
+        ctx.fillStyle = wGrd;
+        ctx.fillRect(x0 + 4, fillY, barW - 8, fillH - 2);
+
+        // Crisp golden target waterline crest
+        ctx.fillStyle = '#fde047';
+        ctx.fillRect(x0 - 4, fillY - 5, barW + 8, 10);
+      }
+
+      // Roman numeral header badge
+      ctx.fillStyle = '#fde047';
+      ctx.font = 'bold 28px Georgia, serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(numerals[k] || String(k + 1), cx, 50);
+    }
+    return;
+  }
+
+  if (clue.kind === 'beam') {
+    ctx.strokeStyle = '#d49b2a';
+    ctx.lineWidth = 7;
+    ctx.strokeRect(12, 12, W - 24, H - 24);
+    ctx.strokeStyle = '#5ef2ff';
+    ctx.lineWidth = 14;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(76, 390);
+    ctx.lineTo(210, 390);
+    ctx.lineTo(210, 145);
+    ctx.lineTo(410, 145);
+    ctx.stroke();
+    ctx.strokeStyle = '#fde047';
+    ctx.lineWidth = 10;
+    ctx.beginPath();
+    ctx.moveTo(175, 425);
+    ctx.lineTo(245, 355);
+    ctx.moveTo(175, 180);
+    ctx.lineTo(245, 110);
+    ctx.stroke();
+    ctx.fillStyle = '#34d399';
+    ctx.beginPath();
+    ctx.moveTo(415, 100);
+    ctx.lineTo(455, 145);
+    ctx.lineTo(415, 190);
+    ctx.lineTo(375, 145);
+    ctx.closePath();
+    ctx.fill();
+    return;
+  }
+
+  if (clue.kind === 'blocks') {
+    ctx.strokeStyle = '#d49b2a';
+    ctx.lineWidth = 7;
+    ctx.strokeRect(12, 12, W - 24, H - 24);
+    ctx.strokeStyle = '#5ef2ff';
+    ctx.lineWidth = 8;
+    ctx.strokeRect(120, 120, 272, 272);
+    ctx.fillStyle = '#0e7490';
+    ctx.fillRect(156, 156, 200, 200);
+    ctx.strokeStyle = '#fde047';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(184, 184, 144, 144);
+    return;
+  }
+
   ctx.strokeStyle = '#d49b2a';
   ctx.lineWidth = 8;
   ctx.strokeRect(12, 12, W - 24, H - 24);
@@ -3769,14 +4186,22 @@ function buildSingleClueStele(entry, fh, ownedTextures) {
 
   const steleR = TOWER_RADIUS + 0.58;
   const isBells = clue.kind === 'bells';
+  const isPipes = clue.kind === 'pipes';
+  const isTideLocks = clue.kind === 'tide_locks';
   const bellCount = isBells ? Math.max(3, clue.colors?.length || clue.order?.length || 3) : 0;
-  const steleW = isBells ? Math.max(1.52, bellCount * 0.34 + 0.28) : 1.38;
+  const lockCount = isTideLocks ? Math.max(3, clue.targets?.length || 3) : 0;
+  const steleW = isBells
+    ? Math.max(1.52, bellCount * 0.34 + 0.28)
+    : isTideLocks
+    ? Math.max(1.48, lockCount * 0.38 + 0.22)
+    : 1.38;
   const steleH = isBells ? 1.24 : 1.38;
 
   const frameParts = [];
   const obsidianHex = '#101a2c';
   const brassHex = '#e0a628';
   const ironHex = '#232c3d';
+  const aquaHex = '#38bdf8';
 
   const slab = new RoundedBoxGeometry(steleW, steleH, 0.095, 1, 0.018);
   slab.translate(0, 0, steleR - 0.048);
@@ -3816,8 +4241,6 @@ function buildSingleClueStele(entry, fh, ownedTextures) {
     hArm.translate(reachX * 0.5, -steleH * 0.38, steleR - 0.06);
     frameParts.push(paintGeoVertexColor(hArm, brassHex));
   }
-
-  g.add(new THREE.Mesh(mergeGeometries(frameParts), getClueFrameMaterial()));
 
   const steleTex = createClueSteleCanvasTex(clue, ownedTextures);
   const faceParts = [];
@@ -3879,8 +4302,108 @@ function buildSingleClueStele(entry, fh, ownedTextures) {
           faceParts.push(raised);
         }
       }
+    } else if (isPipes && Array.isArray(clue.path) && clue.path.length >= 2) {
+      // Sculpted 3D brass pipe segments, elbow flanges, golden inlet valve & faceted outlet crystal!
+      const n = clue.n || 3;
+      const padFrac = 48 / 512;
+      const stepFrac = (1 - padFrac * 2) / n;
+      const toXY = ([gx, gy]) => [
+        (padFrac + (gx + 0.5) * stepFrac - 0.5) * faceW,
+        (0.5 - (padFrac + (gy + 0.5) * stepFrac)) * faceH,
+      ];
+      for (let i = 0; i < clue.path.length; i++) {
+        const [px, py] = toXY(clue.path[i]);
+        if (i === 0) {
+          const inletWheel = new THREE.TorusGeometry(0.068, 0.018, 6, 14);
+          inletWheel.translate(px, py, steleR + 0.036);
+          frameParts.push(paintGeoVertexColor(inletWheel, '#fde047'));
+        } else if (i === clue.path.length - 1) {
+          const outletGem = new THREE.OctahedronGeometry(0.066, 0);
+          outletGem.scale(1, 1, 0.55);
+          outletGem.translate(px, py, steleR + 0.036);
+          frameParts.push(paintGeoVertexColor(outletGem, '#34d399'));
+        } else {
+          const collar = new THREE.TorusGeometry(0.044, 0.015, 6, 12);
+          collar.translate(px, py, steleR + 0.028);
+          frameParts.push(paintGeoVertexColor(collar, brassHex));
+        }
+        if (i > 0) {
+          const [ax, ay] = toXY(clue.path[i - 1]);
+          const dx = px - ax;
+          const dy = py - ay;
+          const segLen = Math.hypot(dx, dy);
+          if (segLen > 0.01) {
+            const pipeTube = new THREE.CylinderGeometry(0.026, 0.026, segLen, 8);
+            pipeTube.rotateZ(Math.atan2(dy, dx) - Math.PI * 0.5);
+            pipeTube.translate((ax + px) * 0.5, (ay + py) * 0.5, steleR + 0.026);
+            frameParts.push(paintGeoVertexColor(pipeTube, brassHex));
+
+            const waterCore = new THREE.CylinderGeometry(0.014, 0.014, segLen * 0.94, 6);
+            waterCore.rotateZ(Math.atan2(dy, dx) - Math.PI * 0.5);
+            waterCore.translate((ax + px) * 0.5, (ay + py) * 0.5, steleR + 0.04);
+            frameParts.push(paintGeoVertexColor(waterCore, aquaHex));
+          }
+        }
+      }
+    } else if (isTideLocks && Array.isArray(clue.targets) && clue.targets.length > 0) {
+      // Sculpted 3D brass sluice dividers + protruding glowing turquoise water-level columns + golden tide-mark bars!
+      const targets = clue.targets;
+      const maxLvl = Math.max(3, clue.maxLevel || 3);
+      const count = targets.length;
+      const padXFrac = 44 / 512;
+      const topFrac = 82 / 512;
+      const botFrac = 46 / 512;
+      const usableW = faceW * (1 - padXFrac * 2);
+      const slotW = usableW / count;
+      const gapW = Math.min((22 / 512) * faceW, slotW * 0.16);
+      const barW = slotW - gapW;
+      const chamberH = faceH * (1 - topFrac - botFrac);
+      const botYLocal = (-0.5 + botFrac) * faceH;
+
+      for (let k = 0; k <= count; k++) {
+        const mx = -usableW * 0.5 + k * slotW;
+        const mullion = new THREE.BoxGeometry(0.026, chamberH + 0.04, 0.044);
+        mullion.translate(mx, botYLocal + chamberH * 0.5, steleR + 0.024);
+        frameParts.push(paintGeoVertexColor(mullion, brassHex));
+      }
+      for (let k = 0; k < count; k++) {
+        const frac = Math.max(0, Math.min(1, targets[k] / maxLvl));
+        const cx = -usableW * 0.5 + (k + 0.5) * slotW;
+        const fillH = Math.max(0.02, frac * chamberH);
+        const u0 = padXFrac + (k * (1 - padXFrac * 2)) / count + (gapW / faceW) * 0.5;
+        const u1 = u0 + barW / faceW;
+        const vBot = botFrac;
+        const vTop = botFrac + frac * (1 - topFrac - botFrac);
+        const waterSlab = remapGeoUvRect(new THREE.BoxGeometry(barW * 0.88, fillH, 0.032), u0, vBot, u1, vTop);
+        waterSlab.translate(cx, botYLocal + fillH * 0.5, steleR + 0.02);
+        faceParts.push(waterSlab);
+
+        const markBar = new THREE.BoxGeometry(barW + 0.028, 0.026, 0.052);
+        markBar.translate(cx, botYLocal + fillH, steleR + 0.032);
+        frameParts.push(paintGeoVertexColor(markBar, '#fde047'));
+      }
+    } else if (clue.kind === 'beam') {
+      for (const [mx, my] of [
+        [-0.12, -0.34],
+        [-0.12, 0.28],
+      ]) {
+        const mirrorBar = new THREE.BoxGeometry(0.24, 0.032, 0.046);
+        mirrorBar.rotateZ(Math.PI * 0.25);
+        mirrorBar.translate(mx, my, steleR + 0.028);
+        frameParts.push(paintGeoVertexColor(mirrorBar, '#fde047'));
+      }
+      const prismGem = new THREE.OctahedronGeometry(0.088, 0);
+      prismGem.scale(1, 1, 0.55);
+      prismGem.translate(0.41, 0.28, steleR + 0.036);
+      frameParts.push(paintGeoVertexColor(prismGem, '#34d399'));
+    } else if (clue.kind === 'blocks') {
+      const sluiceBlock = new RoundedBoxGeometry(0.38, 0.38, 0.052, 1, 0.014);
+      sluiceBlock.translate(0, 0, steleR + 0.028);
+      frameParts.push(paintGeoVertexColor(sluiceBlock, brassHex));
     }
   }
+
+  g.add(new THREE.Mesh(mergeGeometries(frameParts), getClueFrameMaterial()));
 
   const faceMat = new THREE.MeshBasicMaterial({
     map: steleTex,
@@ -4297,6 +4820,7 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
   const sparkEmitters = [];
   const sparkInstancers = [];
   const exitRings = [];
+  const exitSealNodes = [];
   const runeDoors = [];
   const portalMats = [bodyInfo.corePoolMat];
   const forgeLights = [];
@@ -4367,7 +4891,8 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
       portalBuckets.set(pKey, pBucket);
     }
     const pQuad = new THREE.PlaneGeometry(DOOR_W * 0.96, DOOR_H * 0.98);
-    pQuad.translate(0, 0, -0.015);
+    // Recess open archway passage backdrop deep into stone throat so 3D jambs & archivolt frame real depth
+    pQuad.translate(0, 0, isPassageDoor ? -0.24 : -0.06);
     pBucket.parts.push(transformDoorGeo(pQuad, phi, doorCenterY));
 
     // Sculpted Arched Sanctum Doorway Surround: Twin Colonnettes + Semicircular Stone Archivolt + Keystone + Threshold Sill!
@@ -4486,20 +5011,108 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
         crownGrp.position.set(0, DOOR_H * 0.5 + 0.42, 0.18);
         crownGrp.add(new THREE.Mesh(G.exitCrownTines, crownGoldMat));
 
+        const beamMat = new THREE.MeshBasicMaterial({
+          color: '#67e8f9',
+          transparent: true,
+          opacity: 0.2,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
         const beam = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.28, 0.46, 3.8, 14, 1, true),
-          new THREE.MeshBasicMaterial({
-            color: '#67e8f9',
-            transparent: true,
-            opacity: 0.2,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-            side: THREE.DoubleSide,
-          })
+          new THREE.CylinderGeometry(0.28, 0.46, 3.8, 12, 1, true),
+          beamMat
         );
         beam.position.set(0, DOOR_H * 0.5 + 1.95, 0.16);
-        dg.add(exitHalo, crownGrp, beam);
+
+        // 3D Siphon Crown Seal Chains & 3 Glowing Barrier Lock Medallions across sealed Summit Crown Doors!
+        const sealGroup = new THREE.Group();
+        sealGroup.position.set(0, 0, 0.17);
+        const chainMat = new THREE.MeshStandardMaterial({
+          color: '#3b2429',
+          emissive: '#dc2626',
+          emissiveIntensity: 0.48,
+          metalness: 0.84,
+          roughness: 0.34,
+        });
+        const barrierMat = new THREE.MeshBasicMaterial({
+          color: '#f43f5e',
+          transparent: true,
+          opacity: 0.34,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+        const barrierField = new THREE.Mesh(new THREE.PlaneGeometry(DOOR_W * 0.96, DOOR_H * 0.94), barrierMat);
+        barrierField.position.set(0, 0, -0.02);
+        sealGroup.add(barrierField);
+
+        // Twin forged diagonal Siphon Seal Chains crossing in an unmistakable heavy 'X' across the Crown Door!
+        const diagLen = Math.hypot(DOOR_W * 1.06, DOOR_H * 0.88);
+        const diagAng = Math.atan2(DOOR_H * 0.88, DOOR_W * 1.06);
+        for (const sgn of [-1, 1]) {
+          const chainBar = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.036, diagLen, 8), chainMat);
+          chainBar.rotation.z = sgn * (Math.PI * 0.5 - diagAng);
+          chainBar.position.set(0, 0.02, 0.02);
+          sealGroup.add(chainBar);
+          // Forged heavy chain link collars spaced along each diagonal bar
+          for (let li = -2; li <= 2; li++) {
+            const frac = li * 0.18;
+            const link = new THREE.Mesh(new THREE.TorusGeometry(0.056, 0.017, 6, 10), chainMat);
+            link.position.set(
+              frac * DOOR_W * 0.95,
+              0.02 + sgn * frac * DOOR_H * 0.82,
+              0.024
+            );
+            link.rotation.y = li % 2 === 0 ? 0.3 : Math.PI * 0.5;
+            sealGroup.add(link);
+          }
+        }
+
+        // 3 Individual Glowing Lock Medallions (Seal 1, Seal 2, Seal 3) mounted horizontally across the chains
+        const lockNodes = [];
+        const lockX = [-0.28, 0.0, 0.28];
+        const lockY = [0.02, 0.14, 0.02];
+        for (let k = 0; k < 3; k++) {
+          const lk = new THREE.Group();
+          lk.position.set(lockX[k], lockY[k], 0.065);
+          const ringMat = new THREE.MeshStandardMaterial({
+            color: '#fbbf24',
+            emissive: '#ef4444',
+            emissiveIntensity: 1.55,
+            metalness: 0.86,
+            roughness: 0.2,
+          });
+          const coreMat = new THREE.MeshBasicMaterial({
+            color: '#ff6b8b',
+            transparent: true,
+            opacity: 0.94,
+          });
+          const ring = new THREE.Mesh(new THREE.TorusGeometry(0.115, 0.026, 6, 16), ringMat);
+          const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.072, 0), coreMat);
+          lk.add(ring, core);
+          sealGroup.add(lk);
+          lockNodes.push({ group: lk, ringMat, coreMat, core });
+        }
+
+        // Default visibility matches initial tower seal count (hidden only if explicitly unsealed!)
+        const initSeals = Number(
+          tower?.crownSealsTotal ??
+            (Array.isArray(tower?.crownLocks) ? tower.crownLocks.length : 0)
+        ) || 0;
+        sealGroup.visible = initSeals > 0;
+
+        dg.add(exitHalo, crownGrp, beam, sealGroup);
         exitRings.push(crownGrp);
+        exitSealNodes.push({
+          doorId: door.id || null,
+          sealGroup,
+          chainMat,
+          barrierMat,
+          lockNodes,
+          beamMat,
+          crownGoldMat,
+        });
       }
 
       group.add(dg);
@@ -4514,13 +5127,13 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
   }
   if (doorArchParts.length) {
     const archMesh = new THREE.Mesh(mergeGeometries(doorArchParts), ashlarMat);
-    archMesh.castShadow = true;
+    archMesh.castShadow = false;
     archMesh.receiveShadow = true;
     group.add(archMesh);
   }
   if (doorMetalParts.length) {
     const doorTrimMesh = new THREE.Mesh(mergeGeometries(doorMetalParts), trimMetalMat);
-    doorTrimMesh.castShadow = true;
+    doorTrimMesh.castShadow = false;
     group.add(doorTrimMesh);
   }
 
@@ -4615,7 +5228,8 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     chevDn.rotation.x = Math.PI;
     chevDn.position.set(0.54, 0.97, -0.24);
 
-    cab.add(steelMesh, brassMesh, glassMesh, deckGlow, gate, chevUp, chevDn);
+    // Keep open wrought antique-bronze rails & balusters (omit modern blue glassMesh!)
+    cab.add(steelMesh, brassMesh, deckGlow, gate, chevUp, chevDn);
     return { cab, gate, chevUp, chevDn, upMat, dnMat, deckGlowMat };
   };
 
@@ -4719,7 +5333,7 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
       markSharedSubtree(whClone);
       whClone.traverse((o) => {
         if (o.isMesh) {
-          o.castShadow = true;
+          o.castShadow = false;
           o.receiveShadow = true;
         }
       });
@@ -4735,7 +5349,7 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     } else {
       const hood = new THREE.Mesh(new RoundedBoxGeometry(1.3, 0.28, 0.98, 1, 0.025), darkMetalMat);
       hood.position.set(0, 0.22, -0.18);
-      hood.castShadow = true;
+      hood.castShadow = false;
       const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.88, 12), trimMetalMat);
       drum.rotation.z = Math.PI * 0.5;
       drum.position.set(0, 0.26, -0.26);
@@ -4790,10 +5404,17 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
       markSharedSubtree(cabClone);
       cabClone.traverse((o) => {
         if (!o.isMesh) return;
-        const mName = o.material?.name || '';
-        const isGlass = mName.includes('glass');
-        o.castShadow = !isGlass;
-        o.receiveShadow = !isGlass;
+        const mName = String(o.material?.name || '').toLowerCase();
+        const isGlass =
+          mName.includes('glass') ||
+          Boolean(o.material?.transparent && !mName.includes('glow') && !mName.includes('chevron'));
+        if (isGlass) {
+          // Hide modern office-building translucent blue glass panels -> keep wrought antique-bronze rails & balusters!
+          o.visible = false;
+          return;
+        }
+        o.castShadow = false;
+        o.receiveShadow = true;
         // Clone small indicator materials per-cab so each elevator shows its own live direction/power state!
         if (mName === 'mat_chevron_up') {
           upMat = o.material.clone();
@@ -4821,12 +5442,10 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
       pod.add(proc.cab);
     }
 
-    if (!cabLightAssigned) {
-      cabLightAssigned = true;
-      const cabLight = new THREE.PointLight(spec.conduitGlow, 1.55, 6.2);
-      cabLight.position.set(0, 0.85, 0.18);
-      pod.add(cabLight);
-    }
+    // NOTE: Do NOT attach a PointLight inside culled elevator pods — toggling pod.visible
+    // mid-climb changes NUM_POINT_LIGHTS and forces full-scene ANGLE D3D11 shader recompiles!
+    // Elevator glow is handled by emissive `deckGlowMat` + chevrons + permanent `archAccentLight`.
+    cabLightAssigned = true;
 
     const startY = (el.startFloor ?? minFl) * fh;
     const minWorldY = minFl * fh;
@@ -4899,14 +5518,14 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
 
   if (shaftSteelParts.length) {
     const shaftSteelMesh = new THREE.Mesh(mergeGeometries(shaftSteelParts), darkMetalMat);
-    shaftSteelMesh.castShadow = true;
+    shaftSteelMesh.castShadow = false;
     shaftSteelMesh.receiveShadow = true;
     shaftSteelMesh.userData.keepInReflection = true;
     group.add(shaftSteelMesh);
   }
   if (shaftBrassParts.length) {
     const shaftBrassMesh = new THREE.Mesh(mergeGeometries(shaftBrassParts), trimMetalMat);
-    shaftBrassMesh.castShadow = true;
+    shaftBrassMesh.castShadow = false;
     shaftBrassMesh.receiveShadow = true;
     group.add(shaftBrassMesh);
   }
@@ -4968,22 +5587,10 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
   const convMatR = new THREE.MeshStandardMaterial({ map: T.convR, roughness: 0.36, metalness: 0.35 });
   const convMatL = new THREE.MeshStandardMaterial({ map: T.convL, roughness: 0.36, metalness: 0.35 });
   const hazardMat = new THREE.MeshStandardMaterial({ map: T.hazard, roughness: 0.44 });
-  const pillarMat = new THREE.MeshStandardMaterial({
-    color: spec.ledgeTop,
-    emissive: spec.conduitGlow,
-    emissiveIntensity: 0.12,
-    roughness: 0.28,
-    metalness: 0.62,
-  });
-  const sharedBoxMat = new THREE.MeshStandardMaterial({
-    color: '#475569',
-    emissive: '#0891b2',
-    emissiveMap: T.runeBox,
-    emissiveIntensity: 0.88,
-    roughness: 0.28,
-    metalness: 0.68,
-  });
-  const sharedBoxCoreMat = new THREE.MeshBasicMaterial({ color: '#67e8f9' });
+  // Wrap exterior stone bulkhead pillars & pushable Pelagian counterweight blocks in biome PBR stone + antique bronze!
+  const pillarMat = ledgeBodyMat;
+  const sharedBoxMat = ledgeBodyMat;
+  const sharedBoxCoreMat = trimMetalMat;
   const sharedCrumbleIdleMat = new THREE.MeshStandardMaterial({
     color: spec.ledgeBody,
     emissive: '#f59e0b',
@@ -5353,6 +5960,24 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
         batchRefs: [steamDeckBatch[s1], steamCapBatch[s2], steamNozzleBatch[s3]],
         lastGone: false,
       };
+    } else if (l.type === 'siphonBarrier' || l.type === 'barrier' || l.type === 'floodgate') {
+      const bH = Math.max(0.9, (l.h || 1.2) * fh);
+      const bMat = new THREE.MeshBasicMaterial({
+        color: '#f43f5e',
+        transparent: true,
+        opacity: 0.42,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const bField = new THREE.Mesh(new THREE.BoxGeometry(ledgeWidth * 1.04, bH, 0.24), bMat);
+      bField.position.y = bH * 0.5;
+      const bFrame = new THREE.Mesh(new THREE.BoxGeometry(ledgeWidth * 1.08, 0.14, 0.34), darkMetalMat);
+      bFrame.position.y = 0.06;
+      const bCap = new THREE.Mesh(new THREE.BoxGeometry(ledgeWidth * 1.08, 0.14, 0.34), trimMetalMat);
+      bCap.position.y = bH - 0.06;
+      node.add(bField, bFrame, bCap);
+      node.userData = { baseR: ledgeR, baseY: y, phi, type: l.type, barrierField: bField, barrierMat: bMat };
     }
 
     group.add(node);
@@ -5370,7 +5995,7 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     }
   }
 
-  // Materialize Real Staircase & Terrace InstancedMeshes (with `castShadow: true` so 5 risers & handrails cast real shadows!)
+  // Materialize Real Staircase & Terrace InstancedMeshes (`castShadow` on stone treads/flights only — trims skip shadow pass for 60fps!)
   const instTerraceStone = buildBandedInstancedFromList(
     group,
     bandedMeshes,
@@ -5378,7 +6003,7 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     ledgeTopMat,
     terraceStoneBatch,
     PROP_SPAN_Y,
-    { castShadow: true, keepInReflection: true }
+    { castShadow: false, keepInReflection: true }
   );
   const instTerraceMetal = buildBandedInstancedFromList(
     group,
@@ -5387,7 +6012,7 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     trimMetalMat,
     terraceMetalBatch,
     PROP_SPAN_Y,
-    { castShadow: true, keepInReflection: false }
+    { castShadow: false, keepInReflection: false }
   );
   const instFlightRStone = buildBandedInstancedFromList(
     group,
@@ -5396,7 +6021,7 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     ledgeTopMat,
     flightRStoneBatch,
     PROP_SPAN_Y,
-    { castShadow: true, keepInReflection: true }
+    { castShadow: false, keepInReflection: true }
   );
   const instFlightRMetal = buildBandedInstancedFromList(
     group,
@@ -5405,7 +6030,7 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     trimMetalMat,
     flightRMetalBatch,
     PROP_SPAN_Y,
-    { castShadow: true, keepInReflection: false }
+    { castShadow: false, keepInReflection: false }
   );
   const instFlightLStone = buildBandedInstancedFromList(
     group,
@@ -5414,7 +6039,7 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     ledgeTopMat,
     flightLStoneBatch,
     PROP_SPAN_Y,
-    { castShadow: true, keepInReflection: true }
+    { castShadow: false, keepInReflection: true }
   );
   const instFlightLMetal = buildBandedInstancedFromList(
     group,
@@ -5423,37 +6048,37 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     trimMetalMat,
     flightLMetalBatch,
     PROP_SPAN_Y,
-    { castShadow: true, keepInReflection: false }
+    { castShadow: false, keepInReflection: false }
   );
-  buildBandedInstancedFromList(group, bandedMeshes, G.endGuardRail, trimMetalMat, endGuardBatch, PROP_SPAN_Y, {
-    castShadow: true,
+  buildBandedInstancedFromList(group, bandedMeshes, G.endGuardRail, trimMetalMat, endGuardBatch, TINY_PROP_SPAN_Y, {
+    castShadow: false,
   });
 
-  buildBandedInstancedFromList(group, bandedMeshes, G.iceSlab, iceMat, iceSlabBatch, PROP_SPAN_Y);
-  buildBandedInstancedFromList(group, bandedMeshes, G.iceCap, iceTopMat, iceCapBatch, PROP_SPAN_Y);
-  buildBandedInstancedFromList(group, bandedMeshes, G.iceCap, slideMatR, slideRCapBatch, PROP_SPAN_Y);
-  buildBandedInstancedFromList(group, bandedMeshes, G.iceCap, slideMatL, slideLCapBatch, PROP_SPAN_Y);
-  buildBandedInstancedFromList(group, bandedMeshes, G.flutedPillar, pillarMat, pillarShaftBatch, PROP_SPAN_Y, {
-    castShadow: true,
+  buildBandedInstancedFromList(group, bandedMeshes, G.iceSlab, iceMat, iceSlabBatch, TINY_PROP_SPAN_Y);
+  buildBandedInstancedFromList(group, bandedMeshes, G.iceCap, iceTopMat, iceCapBatch, TINY_PROP_SPAN_Y);
+  buildBandedInstancedFromList(group, bandedMeshes, G.iceCap, slideMatR, slideRCapBatch, TINY_PROP_SPAN_Y);
+  buildBandedInstancedFromList(group, bandedMeshes, G.iceCap, slideMatL, slideLCapBatch, TINY_PROP_SPAN_Y);
+  buildBandedInstancedFromList(group, bandedMeshes, G.flutedPillar, pillarMat, pillarShaftBatch, TINY_PROP_SPAN_Y, {
+    castShadow: false,
   });
-  buildBandedInstancedFromList(group, bandedMeshes, G.pillarCollar, ledgeTopMat, pillarCollarBatch, PROP_SPAN_Y);
-  buildBandedInstancedFromList(group, bandedMeshes, G.energyBox, sharedBoxMat, boxCrateBatch, PROP_SPAN_Y, {
-    castShadow: true,
+  buildBandedInstancedFromList(group, bandedMeshes, G.pillarCollar, ledgeTopMat, pillarCollarBatch, TINY_PROP_SPAN_Y);
+  buildBandedInstancedFromList(group, bandedMeshes, G.energyBox, sharedBoxMat, boxCrateBatch, TINY_PROP_SPAN_Y, {
+    castShadow: false,
   });
-  buildBandedInstancedFromList(group, bandedMeshes, G.energyCore, sharedBoxCoreMat, boxCoreBatch, PROP_SPAN_Y, {
+  buildBandedInstancedFromList(group, bandedMeshes, G.energyCore, sharedBoxCoreMat, boxCoreBatch, TINY_PROP_SPAN_Y, {
     receiveShadow: false,
   });
-  buildBandedInstancedFromList(group, bandedMeshes, G.convBase, darkMetalMat, convBaseBatch, PROP_SPAN_Y, {
-    castShadow: true,
+  buildBandedInstancedFromList(group, bandedMeshes, G.convBase, darkMetalMat, convBaseBatch, TINY_PROP_SPAN_Y, {
+    castShadow: false,
   });
-  buildBandedInstancedFromList(group, bandedMeshes, G.convHazard, hazardMat, convHazBatch, PROP_SPAN_Y);
-  buildBandedInstancedFromList(group, bandedMeshes, G.rollerTrio, cableMat, convRollerBatch, PROP_SPAN_Y);
-  buildBandedInstancedFromList(group, bandedMeshes, terraceStoneGeo, ledgeBodyMat, steamDeckBatch, PROP_SPAN_Y, {
-    castShadow: true,
+  buildBandedInstancedFromList(group, bandedMeshes, G.convHazard, hazardMat, convHazBatch, TINY_PROP_SPAN_Y);
+  buildBandedInstancedFromList(group, bandedMeshes, G.rollerTrio, cableMat, convRollerBatch, TINY_PROP_SPAN_Y);
+  buildBandedInstancedFromList(group, bandedMeshes, terraceStoneGeo, ledgeBodyMat, steamDeckBatch, TINY_PROP_SPAN_Y, {
+    castShadow: false,
   });
-  buildBandedInstancedFromList(group, bandedMeshes, terraceMetalGeo, trimMetalMat, steamCapBatch, PROP_SPAN_Y);
-  buildBandedInstancedFromList(group, bandedMeshes, G.steamNozzle, trimMetalMat, steamNozzleBatch, PROP_SPAN_Y);
-  buildBandedInstancedFromList(group, bandedMeshes, G.laserEmitters, trimMetalMat, laserEmitterBatch, PROP_SPAN_Y);
+  buildBandedInstancedFromList(group, bandedMeshes, terraceMetalGeo, trimMetalMat, steamCapBatch, TINY_PROP_SPAN_Y);
+  buildBandedInstancedFromList(group, bandedMeshes, G.steamNozzle, trimMetalMat, steamNozzleBatch, TINY_PROP_SPAN_Y);
+  buildBandedInstancedFromList(group, bandedMeshes, G.laserEmitters, trimMetalMat, laserEmitterBatch, TINY_PROP_SPAN_Y);
 
   if (ledgeMossBatch.length) {
     const lmMat = attachWaterlineShader(
@@ -5461,7 +6086,7 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
       0.7
     );
     stoneMats.push(lmMat);
-    buildBandedInstancedFromList(group, bandedMeshes, G.mossCluster, lmMat, ledgeMossBatch, PROP_SPAN_Y);
+    buildBandedInstancedFromList(group, bandedMeshes, G.mossCluster, lmMat, ledgeMossBatch, TINY_PROP_SPAN_Y);
   }
   if (ledgeCoralBatch.length) {
     const lcMat = attachWaterlineShader(
@@ -5469,7 +6094,7 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
       0.65
     );
     stoneMats.push(lcMat);
-    buildBandedInstancedFromList(group, bandedMeshes, G.coralCluster, lcMat, ledgeCoralBatch, PROP_SPAN_Y);
+    buildBandedInstancedFromList(group, bandedMeshes, G.coralCluster, lcMat, ledgeCoralBatch, TINY_PROP_SPAN_Y);
   }
 
   // 6. Gecko Wall-Scamper Crystal/Moss Strips (`tower.wallStrips`) & Tail-Swing Grapple Rings (`tower.grappleRings`)!
@@ -5593,6 +6218,75 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     switchNodes.push(sm);
   }
 
+  // 7b. Rescued Critter Alcove Lanterns & Bioluminescent Pelagian Fireflies (`critter_pod` Explorer Tells!)
+  const critterAlcoveNodes = [];
+  const rawCritterPods = [];
+  for (const colItem of tower?.collectibles || []) {
+    if (colItem?.type === 'critter_pod') rawCritterPods.push(colItem);
+  }
+  for (const podItem of tower?.critterPods || []) {
+    if (podItem && !rawCritterPods.some((p) => (p.critterId || p.id) && (p.critterId || p.id) === (podItem.critterId || podItem.id))) {
+      rawCritterPods.push(podItem);
+    }
+  }
+  for (let pIdx = 0; pIdx < rawCritterPods.length; pIdx++) {
+    const pod = rawCritterPods[pIdx];
+    const pCol = Number(pod.col) || 0;
+    const pFloor = Number(pod.floor) || 0;
+    // Mount slightly offset to the side of the critter alcove on the spire wall so Gateway & the pod stay 100% clear
+    const sideSign = pIdx % 2 === 0 ? 1 : -1;
+    const lPhi = (pCol + 0.5 + sideSign * 0.34) * COL_ANGLE;
+    const ly = pFloor * fh + 0.96;
+    const lr = R + 0.08;
+
+    const alcoveGrp = new THREE.Group();
+    alcoveGrp.position.set(Math.sin(lPhi) * lr, ly, Math.cos(lPhi) * lr);
+    alcoveGrp.rotation.y = lPhi;
+
+    const bracketMesh = new THREE.Mesh(G.templeLantern, trimMetalMat);
+    const coreMat = new THREE.MeshStandardMaterial({
+      color: '#5efce8',
+      emissive: '#22d3ee',
+      emissiveIntensity: 1.45,
+      roughness: 0.14,
+      metalness: 0.12,
+    });
+    const coreMesh = new THREE.Mesh(G.lanternCore, coreMat);
+    alcoveGrp.add(bracketMesh, coreMesh);
+
+    // 3 subtle orbiting bioluminescent Pelagian firefly sprites around the alcove lantern
+    const fireflies = [];
+    for (let f = 0; f < 3; f++) {
+      const spMat = new THREE.SpriteMaterial({
+        map: T.glowDot,
+        color: f === 1 ? '#fde047' : '#5efce8',
+        transparent: true,
+        opacity: 0.72,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const sp = new THREE.Sprite(spMat);
+      sp.scale.setScalar(0.16 + (f % 2) * 0.05);
+      sp.position.set((f - 1) * 0.18, 0.04, 0.36);
+      alcoveGrp.add(sp);
+      fireflies.push(sp);
+    }
+
+    group.add(alcoveGrp);
+    critterAlcoveNodes.push({
+      id: pod.id || null,
+      critterId: pod.critterId || null,
+      col: pCol,
+      floor: pFloor,
+      phi: lPhi,
+      y: ly,
+      group: alcoveGrp,
+      coreMat,
+      fireflies,
+      phase: pIdx * 1.93 + 0.4,
+    });
+  }
+
   let workbenchProp = null;
   if (tower?.workbench) {
     workbenchProp = buildWorkbenchMesh();
@@ -5635,7 +6329,7 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
         markSharedSubtree(cloned);
         cloned.traverse((o) => {
           if (o.isMesh) {
-            o.castShadow = true;
+            o.castShadow = false;
             o.receiveShadow = true;
           }
         });
@@ -5646,6 +6340,87 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     }
   };
   INTERNAL_GLB_CACHE.listeners.add(onGlbReady);
+
+  // Build 3D Full-Ring Mid-Spire Siphon Barrier Collars for any declared `tower.siphonBarriers` / `tower.barriers` / `tower.crownLocks` with `barrierFloor`!
+  const siphonBarrierNodes = [];
+  const createSiphonBarrierRing = (barrierDef) => {
+    const bFloor = Number(barrierDef?.barrierFloor ?? barrierDef?.floor);
+    if (!Number.isFinite(bFloor)) return null;
+    const bg = new THREE.Group();
+    const by = bFloor * fh;
+    bg.position.set(0, by, 0);
+
+    const ringR = R + LEDGE_OFFSET + 0.04;
+    const bandH = Math.max(0.75, (Number(barrierDef?.heightFloors) || 0.85) * fh);
+
+    const energyMat = new THREE.MeshBasicMaterial({
+      color: '#f43f5e',
+      transparent: true,
+      opacity: 0.34,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const energyCyl = new THREE.Mesh(
+      new THREE.CylinderGeometry(ringR + 0.32, ringR + 0.32, bandH, 32, 1, true),
+      energyMat
+    );
+    energyCyl.position.y = bandH * 0.5;
+
+    const rimMat = new THREE.MeshStandardMaterial({
+      color: '#3b2429',
+      emissive: '#dc2626',
+      emissiveIntensity: 0.55,
+      metalness: 0.85,
+      roughness: 0.32,
+    });
+    const botCollar = new THREE.Mesh(new THREE.TorusGeometry(ringR + 0.30, 0.055, 6, 32), rimMat);
+    botCollar.rotation.x = Math.PI * 0.5;
+    botCollar.position.y = 0.06;
+    const topCollar = new THREE.Mesh(new THREE.TorusGeometry(ringR + 0.30, 0.055, 6, 32), rimMat);
+    topCollar.rotation.x = Math.PI * 0.5;
+    topCollar.position.y = bandH - 0.06;
+
+    // 8 Glowing Lock Beacons spaced around the Siphon Barrier collar
+    const lockBeaconMat = new THREE.MeshBasicMaterial({ color: '#fbbf24' });
+    const lockGeo = new THREE.OctahedronGeometry(0.11, 0);
+    for (let b = 0; b < 8; b++) {
+      const ba = (b / 8) * TWO_PI;
+      const bk = new THREE.Mesh(lockGeo, lockBeaconMat);
+      bk.position.set(Math.sin(ba) * (ringR + 0.36), bandH * 0.5, Math.cos(ba) * (ringR + 0.36));
+      bg.add(bk);
+    }
+
+    bg.add(energyCyl, botCollar, topCollar);
+    group.add(bg);
+    return {
+      id: barrierDef?.id || null,
+      floor: bFloor,
+      sealIndex: Number(barrierDef?.sealIndex ?? barrierDef?.requiresSeal ?? 2) || 2,
+      y: by,
+      group: bg,
+      energyMat,
+      rimMat,
+      retractLerp: 0,
+    };
+  };
+
+  const rawBarriers = [];
+  if (Array.isArray(tower?.siphonBarriers)) rawBarriers.push(...tower.siphonBarriers);
+  if (Array.isArray(tower?.barriers)) rawBarriers.push(...tower.barriers);
+  if (Array.isArray(tower?.crownLocks)) {
+    for (const cl of tower.crownLocks) {
+      if (cl && (cl.barrierFloor != null || cl.floor != null)) rawBarriers.push(cl);
+    }
+  }
+  const seenBarrierFloors = new Set();
+  for (const bDef of rawBarriers) {
+    const flKey = Math.round((Number(bDef?.barrierFloor ?? bDef?.floor) || 0) * 10);
+    if (seenBarrierFloors.has(flKey)) continue;
+    seenBarrierFloors.add(flKey);
+    const node = createSiphonBarrierRing(bDef);
+    if (node) siphonBarrierNodes.push(node);
+  }
 
   const _reflSavedVis = [];
 
@@ -5661,6 +6436,7 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     conduitMat: bodyInfo.conduitMat,
     cylMat: stoneMats[0] || bodyInfo.coreMat,
     crownFlames: bodyInfo.crownFlames,
+    summitAura: bodyInfo.summitAura,
     turbineRotors: bodyInfo.turbineRotors,
     bandedMeshes,
     cullableNodes,
@@ -5671,12 +6447,16 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     conveyorRollers,
     wallStripNodes,
     grappleNodes,
+    critterAlcoveNodes,
     mistSprites,
     sparkEmitters,
     sparkInstancers,
     forgeLights,
     portalMats,
     exitRings,
+    exitSealNodes,
+    siphonBarrierNodes,
+    _createSiphonBarrierRing: createSiphonBarrierRing,
     runeDoors,
     clueUpdater,
     stoneMats,
@@ -5753,8 +6533,8 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
       state?.mode === 'title' ||
       purify > 0.01
   );
-  const camFloor = state?.camFloor != null ? state.camFloor : hero?.floor != null ? hero.floor : 2;
-  const camY = camFloor * fh + 1.5;
+  const camFloor = hero?.floor != null ? hero.floor : state?.camFloor != null ? state.camFloor : 1;
+  const camY = camFloor * fh + 0.95;
   const effCamAngle =
     cachedTower.group.rotation.y !== 0
       ? -cachedTower.group.rotation.y
@@ -5762,7 +6542,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
       ? state.camCol * COL_ANGLE
       : 0;
 
-  // 0. Vertical Row-Band & Back-Wall Sector Frustum Culling (`VIS_ALT_WINDOW = 14.8u` for V3 scale!)
+  // 0. Strict Front-Hemisphere & Vertical Band Frustum Culling (`VIS_ALT_WINDOW = 4.8u`!)
   const banded = cachedTower.bandedMeshes;
   if (banded) {
     const minVisY = camY - VIS_ALT_WINDOW;
@@ -5771,7 +6551,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
       const bm = banded[i];
       const ud = bm.userData;
       const altOk = ud.bandMaxY >= minVisY && ud.bandMinY <= maxVisY;
-      const angOk = ud.sectorPhi === undefined || Math.cos(ud.sectorPhi - effCamAngle) >= -0.42;
+      const angOk = ud.sectorPhi === undefined || Math.cos(ud.sectorPhi - effCamAngle) >= -0.18;
       bm.visible = fullTowerView || (altOk && angOk);
     }
   }
@@ -5782,7 +6562,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
       const cn = cullNodes[i];
       cn.node.visible =
         fullTowerView ||
-        (Math.cos(cn.phi - effCamAngle) >= -0.32 && Math.abs(cn.y - camY) <= VIS_ALT_WINDOW);
+        (Math.cos(cn.phi - effCamAngle) >= 0.16 && Math.abs(cn.y - camY) <= VIS_ALT_WINDOW);
     }
   }
 
@@ -5810,20 +6590,25 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
   }
 
   if (cachedTower.conduitMat) {
-    const u = cachedTower.conduitMat.uniforms;
-    u.uTime.value = time;
-    u.uPurify.value = purify;
-    // Check if any pipe valve is activated to boost conduit pressure
-    let anyPipeActive = false;
-    if (state?.pipeStates) {
-      for (const k in state.pipeStates) {
-        if (state.pipeStates[k]) {
-          anyPipeActive = true;
-          break;
+    if (cachedTower.conduitMat.uniforms) {
+      const u = cachedTower.conduitMat.uniforms;
+      u.uTime.value = time;
+      u.uPurify.value = purify;
+      let anyPipeActive = false;
+      if (state?.pipeStates) {
+        for (const k in state.pipeStates) {
+          if (state.pipeStates[k]) {
+            anyPipeActive = true;
+            break;
+          }
         }
       }
+      u.uFlowDir.value = anyPipeActive ? 1.45 : -1.0;
+    } else if (cachedTower.conduitMat.isMeshStandardMaterial) {
+      // Subtle recessed patina rune glow ONLY when Spire purification > 0.5
+      cachedTower.conduitMat.emissiveIntensity =
+        purify > 0.5 ? (purify - 0.5) * 0.45 * (0.65 + 0.35 * Math.sin(time * 3.2)) : 0;
     }
-    u.uFlowDir.value = anyPipeActive ? 1.45 : -1.0;
   }
 
   // 2. Spin 3D Pelton Hydro-Turbines / Waterwheels!
@@ -5833,7 +6618,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
       const tr = cachedTower.turbineRotors[i];
       const inView =
         fullTowerView ||
-        (Math.cos(tr.phi - effCamAngle) >= -0.45 && Math.abs(tr.y - camY) <= VIS_ALT_WINDOW);
+        (Math.cos(tr.phi - effCamAngle) >= 0.16 && Math.abs(tr.y - camY) <= VIS_ALT_WINDOW);
       tr.holder.visible = inView;
       if (!inView) continue;
       if (tr.wheel) {
@@ -5851,13 +6636,11 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
   T.slideR.offset.x = -(time * 1.15) % 1;
   T.slideL.offset.x = (time * 1.15) % 1;
 
-  if (cachedTower.sharedBoxMat) {
-    cachedTower.sharedBoxMat.emissiveIntensity = 0.72 + 0.35 * Math.sin(time * 5.2);
-  }
+  // Stone-and-antique-bronze Pelagian counterweight blocks use biome PBR stone (`ledgeBodyMat`), no neon pulse!
 
-  // 4. Summit Reactor Beacon & Portal Shaders
+  // 4. Summit Reactor Beacon, Pelagian Summit Crown Aura & Portal Shaders
+  const showCrown = fullTowerView || Math.abs(cachedTower.totalH + 1.5 - camY) <= VIS_ALT_WINDOW + 3.0;
   if (cachedTower.crownFlames) {
-    const showCrown = fullTowerView || Math.abs(cachedTower.totalH + 1.5 - camY) <= VIS_ALT_WINDOW;
     for (let i = 0; i < cachedTower.crownFlames.length; i++) {
       const fl = cachedTower.crownFlames[i];
       fl.visible = showCrown;
@@ -5866,6 +6649,27 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
       fl.position.y = cachedTower.totalH + 1.9 + k * 1.25;
       fl.scale.setScalar((1.35 - k * 0.75) * (1 + purify * 0.8));
       fl.material.opacity = Math.sin(k * Math.PI) * 0.82;
+    }
+  }
+  if (cachedTower.summitAura) {
+    const sa = cachedTower.summitAura;
+    sa.group.visible = showCrown;
+    if (showCrown) {
+      const altProximity = Math.max(0, Math.min(1, camY / Math.max(6, cachedTower.totalH)));
+      const u = sa.veilMat.uniforms;
+      u.uTime.value = time;
+      u.uPurify.value = purify;
+      u.uProximity.value = altProximity;
+      sa.outerHalo.rotation.z = time * (0.45 + purify * 1.2);
+      sa.innerHalo.rotation.z = -time * (0.78 + purify * 1.6);
+      sa.innerHalo.rotation.y = time * 0.35;
+      sa.innerHalo.position.y = 0.28 + Math.sin(time * 2.1) * 0.08;
+      sa.haloMat.emissiveIntensity = 1.15 + 0.35 * Math.sin(time * 2.8) + purify * 0.85;
+      if (purify > 0.25) {
+        sa.haloMat.emissive.set('#fde047');
+      } else {
+        sa.haloMat.emissive.set(sa.baseGlowHex || '#38bdf8');
+      }
     }
   }
   if (cachedTower.portalMats) {
@@ -5915,13 +6719,126 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
     else er.rotation.z = time * (i % 2 === 0 ? 1.8 : -2.4);
   }
 
+  // 5b. 3D Siphon Crown Seal Chains, Glowing Barrier Lock Medallions & Mid-Spire Siphon Barriers!
+  const sealObjectives = state?.sealObjectives || state?.crownLocks || tower?.crownLocks || null;
+  const rawTotal =
+    state?.crownSealsTotal ??
+    tower?.crownSealsTotal ??
+    (Array.isArray(sealObjectives) ? sealObjectives.length : 0);
+  const crownTotal = Math.max(0, Number(rawTotal) || 0);
+  const crownBroken =
+    state?.crownSealsBroken != null
+      ? Math.max(0, Number(state.crownSealsBroken) || 0)
+      : state?.crownSealsRemaining != null && crownTotal > 0
+      ? Math.max(0, crownTotal - Number(state.crownSealsRemaining))
+      : 0;
+  const sealsRemaining =
+    state?.crownSealsRemaining != null
+      ? Math.max(0, Number(state.crownSealsRemaining) || 0)
+      : Math.max(0, crownTotal - crownBroken);
+
+  if (cachedTower.exitSealNodes?.length > 0) {
+    const isSealed = sealsRemaining > 0;
+    const pulse = 0.5 + 0.5 * Math.sin(time * 5.2);
+    for (let i = 0; i < cachedTower.exitSealNodes.length; i++) {
+      const es = cachedTower.exitSealNodes[i];
+      es.sealGroup.visible = isSealed;
+      if (isSealed) {
+        es.barrierMat.opacity = 0.24 + pulse * 0.16;
+        es.chainMat.emissiveIntensity = 0.36 + pulse * 0.34;
+        if (es.beamMat) {
+          es.beamMat.color.set('#f43f5e');
+          es.beamMat.opacity = 0.08 + pulse * 0.05;
+        }
+        if (es.crownGoldMat) {
+          es.crownGoldMat.emissive.set('#ef4444');
+          es.crownGoldMat.emissiveIntensity = 0.75 + pulse * 0.45;
+        }
+        for (let k = 0; k < es.lockNodes.length; k++) {
+          const lk = es.lockNodes[k];
+          let broken = k < crownBroken;
+          if (Array.isArray(sealObjectives) && sealObjectives[k]) {
+            const obj = sealObjectives[k];
+            if (typeof obj.broken === 'boolean') broken = obj.broken;
+            else if (typeof obj.solved === 'boolean') broken = obj.solved;
+            else if (typeof obj.unlocked === 'boolean') broken = obj.unlocked;
+          }
+          lk.group.visible = !broken && (crownTotal === 0 || k < Math.max(1, crownTotal));
+          if (lk.group.visible) {
+            lk.core.rotation.y = time * 2.8 + k * 1.1;
+            lk.core.rotation.x = time * 1.9;
+            lk.ringMat.emissiveIntensity = 1.25 + pulse * 0.65;
+          }
+        }
+      } else {
+        if (es.beamMat) {
+          es.beamMat.color.set('#67e8f9');
+          es.beamMat.opacity = 0.28 + 0.08 * Math.sin(time * 3.0);
+        }
+        if (es.crownGoldMat) {
+          es.crownGoldMat.emissive.set('#06b6d4');
+          es.crownGoldMat.emissiveIntensity = 1.45;
+        }
+      }
+    }
+  }
+
+  // Mid-Spire Siphon Energy Barrier Collars (supports static `tower.siphonBarriers` AND live `state.siphonBarriers`)
+  const liveBarriers = state?.siphonBarriers || state?.barriers || null;
+  if (Array.isArray(liveBarriers) && cachedTower._createSiphonBarrierRing) {
+    for (let i = 0; i < liveBarriers.length; i++) {
+      const lb = liveBarriers[i];
+      const bFl = Number(lb?.barrierFloor ?? lb?.floor);
+      if (!Number.isFinite(bFl)) continue;
+      let found = false;
+      for (let j = 0; j < cachedTower.siphonBarrierNodes.length; j++) {
+        const sn = cachedTower.siphonBarrierNodes[j];
+        if ((lb.id && sn.id === lb.id) || Math.abs(sn.floor - bFl) < 0.25) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        const created = cachedTower._createSiphonBarrierRing(lb);
+        if (created) cachedTower.siphonBarrierNodes.push(created);
+      }
+    }
+  }
+  if (cachedTower.siphonBarrierNodes?.length > 0) {
+    const pulse = 0.5 + 0.5 * Math.sin(time * 6.0);
+    for (let i = 0; i < cachedTower.siphonBarrierNodes.length; i++) {
+      const bn = cachedTower.siphonBarrierNodes[i];
+      let retracted = crownBroken >= bn.sealIndex && crownTotal > 0;
+      if (Array.isArray(liveBarriers)) {
+        for (let j = 0; j < liveBarriers.length; j++) {
+          const lb = liveBarriers[j];
+          const bFl = Number(lb?.barrierFloor ?? lb?.floor);
+          if ((bn.id && lb?.id === bn.id) || (Number.isFinite(bFl) && Math.abs(bn.floor - bFl) < 0.25)) {
+            if (lb.active === false || lb.retracted || lb.unlocked || lb.broken || lb.open) retracted = true;
+            else if (lb.active === true) retracted = false;
+            break;
+          }
+        }
+      }
+      const targetRetract = retracted ? 1 : 0;
+      bn.retractLerp += (targetRetract - bn.retractLerp) * Math.min(1, dt * 6.5);
+      const inAlt = fullTowerView || Math.abs(bn.y - camY) <= VIS_ALT_WINDOW + 1.5;
+      bn.group.visible = inAlt && bn.retractLerp < 0.96;
+      if (bn.group.visible) {
+        bn.group.scale.set(1, Math.max(0.02, 1 - bn.retractLerp), 1);
+        bn.energyMat.opacity = (0.24 + pulse * 0.18) * (1 - bn.retractLerp);
+        bn.rimMat.emissiveIntensity = (0.45 + pulse * 0.40) * (1 - bn.retractLerp);
+      }
+    }
+  }
+
   // 6. Gecko Wall-Scamper Strips & Tail-Swing Grapple Rings Animation
   if (cachedTower.wallStripNodes) {
     for (let i = 0; i < cachedTower.wallStripNodes.length; i++) {
       const ws = cachedTower.wallStripNodes[i];
       ws.group.visible =
         fullTowerView ||
-        (Math.cos(ws.phi - effCamAngle) >= -0.35 && ws.maxY >= camY - VIS_ALT_WINDOW && ws.minY <= camY + VIS_ALT_WINDOW);
+        (Math.cos(ws.phi - effCamAngle) >= 0.16 && ws.maxY >= camY - VIS_ALT_WINDOW && ws.minY <= camY + VIS_ALT_WINDOW);
       if (ws.group.visible && i === 0) {
         ws.padMat.emissiveIntensity = 0.52 + 0.22 * Math.sin(time * 3.6);
       }
@@ -5934,7 +6851,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
       const gr = cachedTower.grappleNodes[i];
       const vis =
         fullTowerView ||
-        (Math.cos(gr.phi - effCamAngle) >= -0.35 && Math.abs(gr.y - camY) <= VIS_ALT_WINDOW);
+        (Math.cos(gr.phi - effCamAngle) >= 0.16 && Math.abs(gr.y - camY) <= VIS_ALT_WINDOW);
       gr.group.visible = vis;
       if (!vis) continue;
       const isTargeted =
@@ -5943,6 +6860,48 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
           (activeTarget.col === gr.col && Math.abs((activeTarget.floor ?? 0) - gr.floor) < 0.5));
       gr.ringPivot.rotation.z = Math.sin(time * 2.2 + i) * (isTargeted ? 0.22 : 0.08);
       gr.ringMat.emissiveIntensity = isTargeted ? 2.1 : 1.05 + 0.28 * Math.sin(time * 3.4 + i);
+    }
+  }
+
+  // 6b. Rescued Critter Alcove Lanterns & Bioluminescent Pelagian Fireflies
+  if (cachedTower.critterAlcoveNodes?.length > 0) {
+    const livePods = state?.critterPods || state?.collectibles || tower?.collectibles || [];
+    for (let i = 0; i < cachedTower.critterAlcoveNodes.length; i++) {
+      const al = cachedTower.critterAlcoveNodes[i];
+      const vis =
+        fullTowerView ||
+        (Math.cos(al.phi - effCamAngle) >= 0.16 && Math.abs(al.y - camY) <= VIS_ALT_WINDOW);
+      al.group.visible = vis;
+      if (!vis) continue;
+
+      let rescued = false;
+      for (let p = 0; p < livePods.length; p++) {
+        const lp = livePods[p];
+        if (!lp || lp.type !== 'critter_pod') continue;
+        if (
+          (al.critterId && lp.critterId === al.critterId) ||
+          (al.id && lp.id === al.id) ||
+          (lp.col === al.col && lp.floor === al.floor)
+        ) {
+          rescued = Boolean(lp.collected || lp.rescued);
+          break;
+        }
+      }
+
+      const breathe = 0.5 + 0.5 * Math.sin(time * (rescued ? 2.1 : 3.2) + al.phase);
+      if (rescued) {
+        al.coreMat.color.set('#fde047');
+        al.coreMat.emissive.set('#f59e0b');
+        al.coreMat.emissiveIntensity = 1.05 + 0.35 * breathe;
+      } else {
+        al.coreMat.color.set('#5efce8');
+        al.coreMat.emissive.set('#22d3ee');
+        al.coreMat.emissiveIntensity = 1.25 + 0.55 * breathe;
+      }
+
+      for (let f = 0; f < al.fireflies.length; f++) {
+        al.fireflies[f].visible = false;
+      }
     }
   }
 
@@ -5989,7 +6948,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
 
     const inView =
       fullTowerView ||
-      (Math.cos(ud.phi - effCamAngle) >= -0.32 && Math.abs(ud.baseY - camY) <= VIS_ALT_WINDOW);
+      (Math.cos(ud.phi - effCamAngle) >= 0.16 && Math.abs(ud.baseY - camY) <= VIS_ALT_WINDOW);
     node.visible = inView;
     if (!inView) continue;
 
@@ -6019,6 +6978,12 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
       if (ud.plume.visible) {
         ud.plume.scale.set(0.88 + Math.sin(time * 30) * 0.2, 0.92 + Math.cos(time * 24) * 0.15, 1);
       }
+    } else if ((l.type === 'siphonBarrier' || l.type === 'barrier' || l.type === 'floodgate') && ud.barrierMat) {
+      const open = Boolean(l.retracted || l.unlocked || l.broken || l.active === false);
+      node.visible = !open;
+      if (!open) {
+        ud.barrierMat.opacity = 0.28 + 0.20 * (0.5 + 0.5 * Math.sin(time * 6.4));
+      }
     }
   }
 
@@ -6033,15 +6998,15 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
     const podY = elFloor * fh + (pUd.podOffsetY || 0);
     pod.position.y = podY;
 
-    const onFront = fullTowerView || Math.cos(pUd.phi - effCamAngle) >= -0.36;
+    const onFront = fullTowerView || Math.cos(pUd.phi - effCamAngle) >= 0.16;
     const shaftInAlt = fullTowerView || (pUd.minY <= camY + VIS_ALT_WINDOW && pUd.maxY >= camY - VIS_ALT_WINDOW);
     const podInAlt = fullTowerView || Math.abs(podY + 0.8 - camY) <= VIS_ALT_WINDOW;
 
     pod.visible = onFront && podInAlt;
-    if (pUd.winchGroup) pUd.winchGroup.visible = onFront && Math.abs(pUd.maxY - camY) <= VIS_ALT_WINDOW + 2.0;
+    if (pUd.winchGroup) pUd.winchGroup.visible = onFront && Math.abs(pUd.maxY - camY) <= VIS_ALT_WINDOW - 0.3;
     if (pUd.cablesMesh) pUd.cablesMesh.visible = onFront && shaftInAlt;
-    if (pUd.cwtCableMesh) pUd.cwtCableMesh.visible = onFront && shaftInAlt;
-    if (pUd.cwtNode) pUd.cwtNode.visible = onFront && shaftInAlt;
+    if (pUd.cwtCableMesh) pUd.cwtCableMesh.visible = false;
+    if (pUd.cwtNode) pUd.cwtNode.visible = false;
 
     if (onFront && shaftInAlt && pUd.update) {
       pUd.update();
@@ -6101,7 +7066,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
     const sy = sw.floor * fh;
     const swInView =
       fullTowerView ||
-      (Math.cos(sPhi - effCamAngle) >= -0.32 && Math.abs(sy - camY) <= VIS_ALT_WINDOW);
+      (Math.cos(sPhi - effCamAngle) >= 0.16 && Math.abs(sy - camY) <= VIS_ALT_WINDOW);
     sm.visible = swInView;
     if (!swInView) continue;
 
@@ -6138,7 +7103,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
     const wy = wb.floor * fh;
     const wbVis =
       fullTowerView ||
-      (Math.cos(wPhi - effCamAngle) >= -0.32 && Math.abs(wy - camY) <= VIS_ALT_WINDOW);
+      (Math.cos(wPhi - effCamAngle) >= -0.05 && Math.abs(wy - camY) <= VIS_ALT_WINDOW);
     wbProp.visible = wbVis;
     if (wbVis) {
       wbProp.position.set(ledgeR * Math.sin(wPhi), wy, ledgeR * Math.cos(wPhi));
@@ -6164,7 +7129,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
     const cy = chest.floor * fh;
     const chestVis =
       fullTowerView ||
-      (Math.cos(cPhi - effCamAngle) >= -0.32 && Math.abs(cy - camY) <= VIS_ALT_WINDOW);
+      (Math.cos(cPhi - effCamAngle) >= -0.05 && Math.abs(cy - camY) <= VIS_ALT_WINDOW);
     chestProp.visible = chestVis;
     if (chestVis) {
       chestProp.position.set(ledgeR * Math.sin(cPhi), cy, ledgeR * Math.cos(cPhi));

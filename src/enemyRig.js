@@ -49,6 +49,94 @@ export const ENEMY_FAMILIES = [
   'siphon_warden',
 ];
 
+// Calibrated readable world-space scales for up-close 9.85m camera (1.42x–1.55x standard, 1.95x colossal Boss!)
+const FAMILY_WORLD_SCALES = [
+  1.50, // 0: snap_crab — chunky waist-to-chest height armored dredger
+  1.42, // 1: gulp_hopper — bold glass-belly amphibian mech (clears 1.50m ceiling cleanly!)
+  1.52, // 2: volt_eel — thick crackling 8-segment conduit moray eel
+  1.48, // 3: rail_skater — sleek manta hydro-strider drone
+  1.44, // 4: barnacle_mortar — formidable 5-petal reef mortar turret
+  1.55, // 5: vent_stalker — prowling dorsal-vent cryo/steam salamander
+  1.95, // 6: siphon_warden — towering Leviathan Act Boss
+];
+
+// Primary hull mesh substrings allowed to cast shadows (keeps shadow pass < 2ms at 60fps!)
+const PRIMARY_SHADOW_HULL_KEYS = [
+  ['carapace', 'fbcrab'], // snap_crab
+  ['hopper_torso', 'fbhopper'], // gulp_hopper
+  ['eel_skull', 'seg_3'], // volt_eel
+  ['manta_hull', 'fbskater'], // rail_skater
+  ['reef_base', 'fbmortar'], // barnacle_mortar
+  ['stalker_torso', 'fbstalker'], // vent_stalker
+  ['warden_mantle', 'fbwarden'], // siphon_warden
+];
+
+export const ENEMY_BESTIARY_META = {
+  snap_crab: {
+    name: 'Snap-Claw Dredger',
+    biome: 'Redwood Canyon Rivers',
+    counterplay: 'Tail-Whip flips it upside-down into a Hydro-Bounce springboard!',
+    cameraDist: 1.55,
+    lookY: 0.32,
+    showcaseScale: 1.15,
+    accentHex: '#22f0e8',
+  },
+  gulp_hopper: {
+    name: 'Gulp-Hopper Drone',
+    biome: 'Redwood Canyon Rivers & Alpine Lakes',
+    counterplay: 'Strike while its glass belly inflates with stolen water before leaping.',
+    cameraDist: 1.62,
+    lookY: 0.36,
+    showcaseScale: 1.12,
+    accentHex: '#38bdf8',
+  },
+  volt_eel: {
+    name: 'Conduit Volt-Eel',
+    biome: 'Crystal Alpine Lakes & Mist Bayous',
+    counterplay: 'Watch its crackling Tesla antennae telegraph before dashing past.',
+    cameraDist: 1.95,
+    lookY: 0.44,
+    showcaseScale: 1.05,
+    accentHex: '#00f5ff',
+  },
+  rail_skater: {
+    name: 'Riptide Rail-Skater',
+    biome: 'Crystal Alpine Lakes & Coral Seas',
+    counterplay: 'Trap it in a Sea-Glass Prism bubble with Hydro-Pulse mid-patrol.',
+    cameraDist: 1.72,
+    lookY: 0.38,
+    showcaseScale: 1.10,
+    accentHex: '#5efce8',
+  },
+  barnacle_mortar: {
+    name: 'Barnacle Geyser-Mortar',
+    biome: 'Emerald Mist Bayous & Coral Seas',
+    counterplay: 'Tail-Whip its popped geyser bubbles right back when its 5 shell valves peel open!',
+    cameraDist: 1.68,
+    lookY: 0.44,
+    showcaseScale: 1.08,
+    accentHex: '#f97316',
+  },
+  vent_stalker: {
+    name: 'Thermal Vent-Stalker',
+    biome: 'Emerald Mist Bayous & Tempest Oceans',
+    counterplay: 'Leap over its dorsal frost/steam plumes and stun with Hydro-Pulse.',
+    cameraDist: 1.66,
+    lookY: 0.30,
+    showcaseScale: 1.12,
+    accentHex: '#fb923c',
+  },
+  siphon_warden: {
+    name: 'Siphon Warden Leviathan',
+    biome: 'Watershed Act Guardian',
+    counterplay: 'Dodge Hydro-Beam & Tentacle Slams, then strike when its Core Exposure reticle flares!',
+    cameraDist: 2.75,
+    lookY: 0.86,
+    showcaseScale: 0.96,
+    accentHex: '#e879f9',
+  },
+};
+
 const GLB_URLS = [
   'assets/models/enemy_snap_crab.glb',
   'assets/models/enemy_gulp_hopper.glb',
@@ -260,6 +348,88 @@ function getSoftGlowTex() {
   );
 }
 
+/**
+ * Dark ambient-occlusion ground contact shadow blob (100% flush under grounded enemies!).
+ */
+function getContactShadowTex() {
+  return cached('tex:contactShadowAO', () =>
+    makeCanvasTex(128, 128, (ctx, w, h) => {
+      const cx = w * 0.5;
+      const cy = h * 0.5;
+      ctx.clearRect(0, 0, w, h);
+      const g = ctx.createRadialGradient(cx, cy, w * 0.04, cx, cy, w * 0.49);
+      g.addColorStop(0.0, 'rgba(5, 10, 18, 0.82)');
+      g.addColorStop(0.42, 'rgba(7, 14, 26, 0.62)');
+      g.addColorStop(0.75, 'rgba(10, 18, 32, 0.24)');
+      g.addColorStop(1.0, 'rgba(10, 18, 32, 0.0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+    })
+  );
+}
+
+function getContactShadowGeo() {
+  return cached('geo:contactShadowDisc', () => {
+    const p = new THREE.PlaneGeometry(1, 1);
+    p.rotateX(-Math.PI * 0.5);
+    return p;
+  });
+}
+
+function getContactShadowMat() {
+  return cached(
+    'mat:contactShadowAO',
+    () =>
+      new THREE.MeshBasicMaterial({
+        map: getContactShadowTex(),
+        transparent: true,
+        opacity: 0.86,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+      })
+  );
+}
+
+function buildContactShadowNode(width, depth, yOff = 0.008) {
+  const m = new THREE.Mesh(getContactShadowGeo(), getContactShadowMat());
+  m.name = 'enemy_contact_ao';
+  m.position.set(0, yOff, 0);
+  m.scale.set(width, 1, depth);
+  m.castShadow = false;
+  m.receiveShadow = false;
+  m.renderOrder = 1;
+  return m;
+}
+
+function getTelegraphRingGeo() {
+  return cached('geo:enemyTelegraphRing', () => {
+    const g = new THREE.TorusGeometry(0.44, 0.032, 8, 28);
+    g.rotateX(Math.PI * 0.5);
+    return g;
+  });
+}
+
+function buildTelegraphRingNode(colorHex = '#ff6b2b', yOff = 0.06, baseScale = 1.0) {
+  const mat = new THREE.MeshBasicMaterial({
+    color: colorHex,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const ring = new THREE.Mesh(getTelegraphRingGeo(), mat);
+  ring.name = 'enemy_telegraph_ring';
+  ring.position.set(0, yOff, 0);
+  ring.scale.setScalar(baseScale);
+  ring.castShadow = false;
+  ring.receiveShadow = false;
+  ring.visible = false;
+  ring.renderOrder = 5;
+  return ring;
+}
+
 function getWaterRippleRingTex() {
   return cached('tex:waterRippleRing', () =>
     makeCanvasTex(128, 128, (ctx, w, h) => {
@@ -411,35 +581,30 @@ function getHydroOrbitRingGeo() {
 function getHydroPrismMaterials(agitated = false, chromeEnv = null) {
   return cached('mat:hydroPrism:' + (agitated ? 'pop' : 'calm'), () => {
     const swirlTex = getHydroSwirlTex(agitated);
-    const prismOuter = new THREE.MeshPhysicalMaterial({
+    const prismOuter = new THREE.MeshStandardMaterial({
       color: agitated ? '#7dd3fc' : '#2dd4bf',
       map: swirlTex,
       emissive: new THREE.Color(agitated ? '#0284c7' : '#0d9488'),
-      emissiveIntensity: agitated ? 0.48 : 0.26,
-      roughness: 0.06,
-      metalness: 0.04,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.04,
-      iridescence: 0.95,
-      iridescenceIOR: 1.33,
+      emissiveIntensity: agitated ? 0.52 : 0.30,
+      roughness: 0.08,
+      metalness: 0.08,
       transparent: true,
-      opacity: agitated ? 0.48 : 0.36,
+      opacity: agitated ? 0.50 : 0.38,
       depthWrite: false,
       flatShading: true,
       envMap: chromeEnv || null,
       envMapIntensity: 1.35,
     });
-    const bubbleInner = new THREE.MeshPhysicalMaterial({
+    const bubbleInner = new THREE.MeshStandardMaterial({
       color: '#38bdf8',
       map: swirlTex,
       emissive: new THREE.Color('#0891b2'),
       emissiveMap: swirlTex,
-      emissiveIntensity: agitated ? 0.45 : 0.25,
-      roughness: 0.04,
-      metalness: 0.02,
-      clearcoat: 1.0,
+      emissiveIntensity: agitated ? 0.45 : 0.28,
+      roughness: 0.06,
+      metalness: 0.05,
       transparent: true,
-      opacity: 0.32,
+      opacity: 0.34,
       side: THREE.BackSide,
       depthWrite: false,
       envMap: chromeEnv || null,
@@ -507,29 +672,54 @@ function upgradeLoadedGlbTemplate(_famId, rootScene, chromeEnv) {
     const enhanceMat = (m) => {
       if (!m) return m;
       const nm = m.name || '';
+      if (nm.includes('glass')) {
+        return new THREE.MeshStandardMaterial({
+          name: nm,
+          color: '#bae6fd',
+          roughness: 0.06,
+          metalness: 0.12,
+          transparent: true,
+          opacity: 0.36,
+          depthWrite: false,
+          envMap: chromeEnv || null,
+          envMapIntensity: 1.45,
+        });
+      }
+      // Convert KHR_materials_clearcoat MeshPhysicalMaterial -> fast MeshStandardMaterial
+      // to eliminate 400-600ms lazy ANGLE D3D11 physical HLSL shader compiles mid-climb!
+      if (m.isMeshPhysicalMaterial) {
+        const std = new THREE.MeshStandardMaterial({
+          name: nm,
+          color: m.color ? m.color.clone() : new THREE.Color('#ffffff'),
+          map: m.map || null,
+          normalMap: m.normalMap || null,
+          normalScale: m.normalScale ? m.normalScale.clone() : new THREE.Vector2(1, 1),
+          roughnessMap: m.roughnessMap || null,
+          metalnessMap: m.metalnessMap || null,
+          aoMap: m.aoMap || m.roughnessMap || null,
+          aoMapIntensity: m.aoMap ? m.aoMapIntensity : 0.88,
+          emissive: m.emissive ? m.emissive.clone() : new THREE.Color('#000000'),
+          emissiveMap: m.emissiveMap || null,
+          emissiveIntensity: m.emissiveIntensity ?? 1.0,
+          roughness: typeof m.roughness === 'number' ? m.roughness : 0.35,
+          metalness: typeof m.metalness === 'number' ? m.metalness : 0.2,
+          transparent: Boolean(m.transparent || nm.includes('water') || nm.includes('bubble') || nm.includes('shield')),
+          opacity: typeof m.opacity === 'number' ? m.opacity : 1.0,
+          depthWrite: !(nm.includes('water') || nm.includes('bubble') || nm.includes('shield')),
+          side: m.side,
+          envMap: chromeEnv || m.envMap || null,
+          envMapIntensity: 0.95,
+        });
+        m.dispose();
+        return std;
+      }
       if (chromeEnv && !m.envMap) {
         m.envMap = chromeEnv;
-        m.envMapIntensity = nm.includes('glass') ? 1.45 : 0.92;
+        m.envMapIntensity = 0.92;
       }
       if (m.roughnessMap && !m.aoMap) {
         m.aoMap = m.roughnessMap;
         m.aoMapIntensity = 0.88;
-      }
-      if (nm.includes('glass')) {
-        return new THREE.MeshPhysicalMaterial({
-          color: '#bae6fd',
-          roughness: 0.04,
-          metalness: 0.05,
-          clearcoat: 1.0,
-          clearcoatRoughness: 0.03,
-          iridescence: 0.65,
-          iridescenceIOR: 1.33,
-          transparent: true,
-          opacity: 0.34,
-          depthWrite: false,
-          envMap: chromeEnv || null,
-          envMapIntensity: 1.5,
-        });
       }
       if (nm.includes('water') || nm.includes('bubble') || nm.includes('shield')) {
         m.transparent = true;
@@ -589,8 +779,9 @@ function ensureEnemyGlbsLoading(chromeEnv = null) {
 // ============================================================================
 function getSharedPbrMat(key, opts, chromeEnv) {
   return cached('mat:shared:' + key, () => {
-    const m = new THREE.MeshPhysicalMaterial({
-      ...opts,
+    const { clearcoat: _c, clearcoatRoughness: _cr, iridescence: _i, iridescenceIOR: _io, ...stdOpts } = opts;
+    const m = new THREE.MeshStandardMaterial({
+      ...stdOpts,
       envMap: chromeEnv || null,
       envMapIntensity: opts.envMapIntensity ?? 1.2,
     });
@@ -615,7 +806,9 @@ function buildSnapCrabRig(chromeEnv) {
   root.add(body);
 
   const hydroCage = buildHydroPrismCageNode(chromeEnv);
-  root.add(hydroCage);
+  const contactShadow = buildContactShadowNode(1.06, 0.90, 0.007);
+  const telegraphRing = buildTelegraphRingNode('#ff9f1c', 0.04, 1.05);
+  root.add(contactShadow, telegraphRing, hydroCage);
 
   // Holographic Hydro-Bounce Springboard Ring (visible above upturned belly when flipped!)
   const bounceRing = new THREE.Mesh(
@@ -662,6 +855,8 @@ function buildSnapCrabRig(chromeEnv) {
     body,
     flipPivot,
     localFrame,
+    contactShadow,
+    telegraphRing,
     hydroCage,
     cryoIce: hydroCage,
     bounceRing,
@@ -770,7 +965,9 @@ function buildGulpHopperRig(chromeEnv) {
   body.add(squashPivot);
 
   const hydroCage = buildHydroPrismCageNode(chromeEnv);
-  root.add(hydroCage);
+  const contactShadow = buildContactShadowNode(0.88, 0.76, 0.007);
+  const telegraphRing = buildTelegraphRingNode('#38bdf8', 0.04, 0.92);
+  root.add(contactShadow, telegraphRing, hydroCage);
 
   // Intake water-suction vortex ring outside mouth during inhale telegraph!
   const inhaleRing = new THREE.Mesh(
@@ -797,6 +994,8 @@ function buildGulpHopperRig(chromeEnv) {
     v3Calibrated: true,
     body,
     squashPivot,
+    contactShadow,
+    telegraphRing,
     hydroCage,
     cryoIce: hydroCage,
     inhaleRing,
@@ -888,7 +1087,9 @@ function buildVoltEelRig(chromeEnv) {
 
   const hydroCage = buildHydroPrismCageNode(chromeEnv);
   hydroCage.scale.set(1.35, 1.0, 1.15);
-  root.add(hydroCage);
+  const telegraphRing = buildTelegraphRingNode('#00f5ff', 0.0, 0.92);
+  telegraphRing.rotation.x = Math.PI * 0.5;
+  root.add(telegraphRing, hydroCage);
 
   const arcFlash = new THREE.Sprite(
     new THREE.SpriteMaterial({
@@ -907,6 +1108,7 @@ function buildVoltEelRig(chromeEnv) {
     familyId: FAM_VOLT_EEL,
     v3Calibrated: true,
     body,
+    telegraphRing,
     hydroCage,
     cryoIce: hydroCage,
     arcFlash,
@@ -967,7 +1169,10 @@ function buildRailSkaterRig(chromeEnv) {
   root.add(body);
 
   const hydroCage = buildHydroPrismCageNode(chromeEnv);
-  root.add(hydroCage);
+  // Projected onto stone terrace directly below skimming hover height (`-0.06 / 1.48`)
+  const contactShadow = buildContactShadowNode(1.04, 0.78, -0.036);
+  const telegraphRing = buildTelegraphRingNode('#38bdf8', 0.24, 1.02);
+  root.add(contactShadow, telegraphRing, hydroCage);
 
   const wakeTrail = new THREE.Sprite(
     new THREE.SpriteMaterial({
@@ -988,6 +1193,8 @@ function buildRailSkaterRig(chromeEnv) {
     familyId: FAM_RAIL_SKATER,
     v3Calibrated: true,
     body,
+    contactShadow,
+    telegraphRing,
     hydroCage,
     cryoIce: hydroCage,
     wakeTrail,
@@ -1061,7 +1268,9 @@ function buildBarnacleMortarRig(chromeEnv) {
   root.add(body);
 
   const hydroCage = buildHydroPrismCageNode(chromeEnv);
-  root.add(hydroCage);
+  const contactShadow = buildContactShadowNode(1.04, 1.04, 0.007);
+  const telegraphRing = buildTelegraphRingNode('#ff7b00', 0.06, 1.02);
+  root.add(contactShadow, telegraphRing, hydroCage);
 
   const pressureHalo = new THREE.Sprite(
     new THREE.SpriteMaterial({
@@ -1082,6 +1291,8 @@ function buildBarnacleMortarRig(chromeEnv) {
     familyId: FAM_BARNACLE_MORTAR,
     v3Calibrated: true,
     body,
+    contactShadow,
+    telegraphRing,
     hydroCage,
     cryoIce: hydroCage,
     pressureHalo,
@@ -1154,7 +1365,9 @@ function buildVentStalkerRig(chromeEnv) {
   root.add(body);
 
   const hydroCage = buildHydroPrismCageNode(chromeEnv);
-  root.add(hydroCage);
+  const contactShadow = buildContactShadowNode(0.86, 1.24, 0.007);
+  const telegraphRing = buildTelegraphRingNode('#fb923c', 0.05, 0.96);
+  root.add(contactShadow, telegraphRing, hydroCage);
 
   // 3 Rising Cryo-Frost / Thermal Steam Plume Puffs above dorsal chimneys!
   const plumes = [];
@@ -1180,6 +1393,8 @@ function buildVentStalkerRig(chromeEnv) {
     familyId: FAM_VENT_STALKER,
     v3Calibrated: true,
     body,
+    contactShadow,
+    telegraphRing,
     hydroCage,
     cryoIce: hydroCage,
     plumes,
@@ -1261,6 +1476,63 @@ function buildSiphonWardenRig(chromeEnv) {
   coreHalo.scale.set(1.25, 1.25, 1);
   body.add(coreHalo);
 
+  // Wave 4: Weak-Point Core Exposure Target Reticle (`en.coreExposed`)
+  const exposedRingOuter = new THREE.Mesh(
+    cached('geo:wardenExposedOuter', () => new THREE.TorusGeometry(0.38, 0.022, 8, 32)),
+    new THREE.MeshBasicMaterial({
+      color: '#5efce8',
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+  );
+  exposedRingOuter.position.set(0, 0.10, 0.30);
+  exposedRingOuter.visible = false;
+
+  const exposedRingInner = new THREE.Mesh(
+    cached('geo:wardenExposedInner', () => new THREE.TorusGeometry(0.24, 0.018, 6, 24)),
+    new THREE.MeshBasicMaterial({
+      color: '#fde047',
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+  );
+  exposedRingInner.position.set(0, 0.10, 0.32);
+  exposedRingInner.visible = false;
+
+  // Wave 4: Hydro-Beam Charge Emitter + Phase 2/3 Overdrive Arc Flare
+  const beamChargeOrb = new THREE.Mesh(
+    cached('geo:wardenBeamOrb', () => new THREE.IcosahedronGeometry(0.16, 1)),
+    new THREE.MeshBasicMaterial({
+      color: '#ff4d8d',
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+  );
+  beamChargeOrb.position.set(0, 0.10, 0.36);
+  beamChargeOrb.visible = false;
+
+  const bossArcSprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: getElectricSparkTex(),
+      color: '#ff5c93',
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+  );
+  bossArcSprite.position.set(0, 0.16, 0.38);
+  bossArcSprite.scale.set(1.15, 1.15, 1);
+  bossArcSprite.visible = false;
+
+  body.add(exposedRingOuter, exposedRingInner, beamChargeOrb, bossArcSprite);
+
   const ud = {
     family: 'siphon_warden',
     familyId: FAM_SIPHON_WARDEN,
@@ -1269,6 +1541,10 @@ function buildSiphonWardenRig(chromeEnv) {
     hydroCage,
     cryoIce: hydroCage,
     coreHalo,
+    exposedRingOuter,
+    exposedRingInner,
+    beamChargeOrb,
+    bossArcSprite,
     wardenBody: null,
     coreOuter: null,
     coreInner: null,
@@ -1333,13 +1609,38 @@ function buildSiphonWardenRig(chromeEnv) {
 function applyCreatureShadowFlags(rig) {
   const ud = rig.userData;
   if (!ud || !ud.body) return;
+  const hullKeys = PRIMARY_SHADOW_HULL_KEYS[ud.familyId] || [];
+  let assignedCast = false;
+  let firstOpaqueMesh = null;
+
   ud.body.traverse((obj) => {
     if (!obj.isMesh || !obj.material) return;
     const m = Array.isArray(obj.material) ? obj.material[0] : obj.material;
-    if (!m || m.isMeshBasicMaterial || m.transparent || m.depthWrite === false) return;
-    obj.castShadow = true;
-    obj.receiveShadow = true;
+    if (!m || m.isMeshBasicMaterial || m.transparent || m.depthWrite === false) {
+      obj.castShadow = false;
+      obj.receiveShadow = false;
+      return;
+    }
+    if (!firstOpaqueMesh) firstOpaqueMesh = obj;
+    const nm = (obj.name || '').toLowerCase();
+    let isPrimaryHull = false;
+    for (let i = 0; i < hullKeys.length; i++) {
+      if (nm.includes(hullKeys[i])) {
+        isPrimaryHull = true;
+        break;
+      }
+    }
+    // Lean 60 FPS shadow budget: ONLY primary hull casts shadow (< 2ms shadow pass!)
+    obj.castShadow = isPrimaryHull;
+    obj.receiveShadow = isPrimaryHull;
+    if (isPrimaryHull) assignedCast = true;
   });
+
+  // Ensure procedural fallback meshes still get 1 clean primary shadow caster
+  if (!assignedCast && firstOpaqueMesh) {
+    firstOpaqueMesh.castShadow = true;
+    firstOpaqueMesh.receiveShadow = true;
+  }
 }
 
 function createRigByFamily(famId, chromeEnv) {
@@ -1458,13 +1759,12 @@ export class EnemyVisualPool {
     const projMat = cached(
       'mat:mortarProjBubble',
       () =>
-        new THREE.MeshPhysicalMaterial({
+        new THREE.MeshStandardMaterial({
           color: '#38bdf8',
           emissive: new THREE.Color('#14f1d9'),
           emissiveIntensity: 1.4,
-          roughness: 0.05,
-          clearcoat: 1.0,
-          iridescence: 0.85,
+          roughness: 0.08,
+          metalness: 0.1,
           transparent: true,
           opacity: 0.84,
           depthWrite: false,
@@ -1480,6 +1780,107 @@ export class EnemyVisualPool {
 
     this._lastTime = null;
     this._inReflection = false;
+    this._heroAnchor = null;
+
+    // Wave 4: Dedicated 3D Bestiary Showcase Turntable (`setBestiaryShowcase`)
+    this._bestiary = {
+      active: false,
+      familyId: FAM_SNAP_CRAB,
+      familyKey: 'snap_crab',
+      yaw: 0,
+      pitch: 0,
+      zoom: 1,
+      x: 0,
+      y: 0,
+      z: 4.21,
+      scale: 1,
+      flourishTimer: 0,
+      flourishKind: 'taunt',
+      autoClock: 0,
+    };
+    this._showcaseGroup = new THREE.Group();
+    this._showcaseGroup.name = 'EnemyBestiaryShowcase';
+    this._showcaseGroup.visible = false;
+    const plinthRing = new THREE.Mesh(
+      cached('geo:bestiaryPlinth', () => {
+        const g = new THREE.TorusGeometry(0.68, 0.022, 8, 40);
+        g.rotateX(Math.PI * 0.5);
+        return g;
+      }),
+      new THREE.MeshBasicMaterial({
+        color: '#22f0e8',
+        transparent: true,
+        opacity: 0.65,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    plinthRing.position.y = 0.02;
+    const plinthDisc = new THREE.Mesh(
+      cached('geo:bestiaryDisc', () => {
+        const g = new THREE.CircleGeometry(0.66, 36);
+        g.rotateX(-Math.PI * 0.5);
+        return g;
+      }),
+      new THREE.MeshBasicMaterial({
+        map: rippleTex,
+        color: '#38bdf8',
+        transparent: true,
+        opacity: 0.28,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      })
+    );
+    plinthDisc.position.y = 0.015;
+    this._showcasePlinthRing = plinthRing;
+    this._showcasePlinthDisc = plinthDisc;
+    this._showcaseRigHolder = new THREE.Group();
+    this._showcaseGroup.add(plinthRing, plinthDisc, this._showcaseRigHolder);
+    this.root.add(this._showcaseGroup);
+    this._showcaseRigs = new Array(FAMILY_COUNT).fill(null);
+    this._showcaseProxy = {
+      type: 'snap_crab',
+      col: 0,
+      floor: 0,
+      baseFloor: 0,
+      dir: 1,
+      isBoss: true,
+      hp: 6,
+      maxHp: 6,
+      bossPhase: 1,
+      telegraph: 0,
+      coreExposed: false,
+      tentacleSlam: 0,
+      beamCharge: 0,
+      flipped: false,
+      inflatePhase: 0.4,
+      slitherPhase: 0,
+      openAmount: 0.2,
+      stunTimer: 0,
+    };
+    this._showcaseAnimState = {
+      seed: 0.37,
+      prevCol: 0,
+      prevFloor: 0,
+      prevHp: 6,
+      gaitPhase: 0,
+      slitherPhase: 0,
+      vy: 0,
+      vx: 1.8,
+      flipProgress: 0,
+      inflateSmooth: 0.4,
+      yawSmooth: 0,
+      hitFlashT: 0,
+      wasStunned: false,
+      cagePopT: 0,
+      landed: true,
+      wobbleT: 9,
+      mortarOpenPrev: 0,
+      slamTriggered: false,
+      wasAlive: true,
+      deathMax: 0,
+    };
   }
 
   /** No-op compatibility hook for callers still invoking `setEra`. */
@@ -1487,6 +1888,29 @@ export class EnemyVisualPool {
 
   whenReady() {
     return ensureEnemyGlbsLoading(this.chromeEnv);
+  }
+
+  /**
+   * Ensures at least 1 pooled rig exists for every enemy family so startup `webgl.compile()`
+   * pre-compiles all enemy shaders under the fade veil (zero mid-climb ANGLE D3D11 stalls!).
+   */
+  prewarmAllRigs() {
+    for (let f = 0; f < FAMILY_COUNT; f++) {
+      const bucket = this._buckets[f];
+      const wantMask = _glbReadyMask & (1 << f);
+      if (bucket.length === 0) {
+        const node = createRigByFamily(f, this.chromeEnv);
+        node.visible = false;
+        this.root.add(node);
+        bucket.push(node);
+      } else if (bucket[0].userData.glbMaskBit !== wantMask) {
+        this.root.remove(bucket[0]);
+        const node = createRigByFamily(f, this.chromeEnv);
+        node.visible = false;
+        this.root.add(node);
+        bucket[0] = node;
+      }
+    }
   }
 
   isReady() {
@@ -1522,6 +1946,160 @@ export class EnemyVisualPool {
   setReflectionPass(isRefl) {
     this._inReflection = Boolean(isRefl);
     if (this.root) this.root.visible = !this._inReflection;
+  }
+
+  /**
+   * Activates, updates, or deactivates the interactive 3D Bestiary Turntable Showcase.
+   * Accepts `{ active, family, yaw, pitch, zoom, taunt, flourish, x, y, z, scale }` or `null`.
+   */
+  setBestiaryShowcase(opts = null) {
+    const b = this._bestiary;
+    if (!opts || opts.active === false) {
+      b.active = false;
+      this._showcaseGroup.visible = false;
+      return;
+    }
+    const nextFamId =
+      typeof opts.family === 'number'
+        ? clamp(Math.floor(opts.family), 0, FAMILY_COUNT - 1)
+        : resolveEnemyFamilyId(opts.family || b.familyKey);
+    const changedFamily = !b.active || nextFamId !== b.familyId;
+    b.active = true;
+    b.familyId = nextFamId;
+    b.familyKey = ENEMY_FAMILIES[nextFamId] || 'snap_crab';
+    if (typeof opts.yaw === 'number') b.yaw = opts.yaw;
+    if (typeof opts.pitch === 'number') b.pitch = clamp(opts.pitch, -0.45, 0.45);
+    if (typeof opts.zoom === 'number') b.zoom = clamp(opts.zoom, 0.55, 2.2);
+    if (typeof opts.x === 'number') b.x = opts.x;
+    if (typeof opts.y === 'number') b.y = opts.y;
+    if (typeof opts.z === 'number') b.z = opts.z;
+    if (typeof opts.scale === 'number') b.scale = clamp(opts.scale, 0.4, 2.5);
+    if (changedFamily) {
+      b.autoClock = 0;
+      b.flourishTimer = 1.65;
+      b.flourishKind = opts.flourish || 'taunt';
+      this._showcaseAnimState.flipProgress = 0;
+      this._showcaseAnimState.slamTriggered = false;
+    }
+    if (opts.taunt || opts.flourish) {
+      this.triggerBestiaryFlourish(opts.flourish || 'taunt');
+    }
+  }
+
+  /** Triggers an immediate expressive taunt / signature combat flourish on the Bestiary Turntable. */
+  triggerBestiaryFlourish(kind = 'taunt') {
+    this._bestiary.flourishTimer = 2.15;
+    this._bestiary.flourishKind = String(kind || 'taunt');
+  }
+
+  _acquireShowcaseRig(famId) {
+    const wantMask = _glbReadyMask & (1 << famId);
+    let rig = this._showcaseRigs[famId];
+    if (rig && rig.userData.glbMaskBit !== wantMask) {
+      this._showcaseRigHolder.remove(rig);
+      rig = null;
+    }
+    if (!rig) {
+      rig = createRigByFamily(famId, this.chromeEnv);
+      this._showcaseRigHolder.add(rig);
+      this._showcaseRigs[famId] = rig;
+    }
+    for (let i = 0; i < FAMILY_COUNT; i++) {
+      if (this._showcaseRigs[i]) {
+        this._showcaseRigs[i].visible = i === famId;
+      }
+    }
+    return rig;
+  }
+
+  /** Steps expressive idle & taunt flourishes on the active 3D Bestiary Showcase Turntable. */
+  updateBestiaryShowcase(time, dt = 1 / 60) {
+    const b = this._bestiary;
+    if (!b.active) {
+      if (this._showcaseGroup.visible) this._showcaseGroup.visible = false;
+      return;
+    }
+    const t = Number(time) || 0;
+    const stepDt = dt > 0 && dt <= 0.1 ? dt : 1 / 60;
+    const famId = b.familyId;
+    const meta = ENEMY_BESTIARY_META[b.familyKey] || ENEMY_BESTIARY_META.snap_crab;
+
+    this._showcaseGroup.visible = true;
+    this._showcaseGroup.position.set(b.x, b.y, b.z);
+    this._showcaseGroup.rotation.set(b.pitch, b.yaw, 0);
+    const totalScale = (meta.showcaseScale || 1.0) * b.scale * b.zoom;
+    this._showcaseGroup.scale.setScalar(totalScale);
+
+    // Subtle pulsing Pelagian turntable ring
+    const ringPulse = 1 + 0.04 * Math.sin(t * 3.2);
+    this._showcasePlinthRing.scale.setScalar(famId === FAM_SIPHON_WARDEN ? 1.48 * ringPulse : ringPulse);
+    this._showcasePlinthDisc.scale.setScalar(famId === FAM_SIPHON_WARDEN ? 1.48 : 1.0);
+    this._showcasePlinthRing.material.color.set(meta.accentHex || '#22f0e8');
+    this._showcasePlinthDisc.rotation.z = t * 0.45;
+
+    b.autoClock += stepDt;
+    if (b.flourishTimer > 0) {
+      b.flourishTimer = Math.max(0, b.flourishTimer - stepDt);
+    } else if (b.autoClock > 4.2) {
+      b.autoClock = 0;
+      b.flourishTimer = 2.0;
+      b.flourishKind = 'taunt';
+    }
+
+    const rig = this._acquireShowcaseRig(famId);
+    const ud = rig.userData;
+    rig.position.set(0, famId === FAM_SIPHON_WARDEN ? 0.64 : famId === FAM_VOLT_EEL ? 0.44 : famId === FAM_RAIL_SKATER ? 0.18 : 0.02, 0);
+    rig.rotation.set(0, 0, 0);
+    rig.scale.setScalar(1);
+    ud.body.scale.setScalar(1);
+    ud.hydroCage.visible = false;
+
+    const flK = b.flourishTimer > 0 ? Math.sin(clamp(1 - b.flourishTimer / 2.15, 0, 1) * Math.PI) : 0;
+    const en = this._showcaseProxy;
+    const st = this._showcaseAnimState;
+    en.type = b.familyKey;
+    en.dir = 1;
+    en.stunTimer = 0;
+    en.flipped = famId === FAM_SNAP_CRAB && b.flourishKind === 'flip' && b.flourishTimer > 0.2;
+    en.telegraph = famId === FAM_SNAP_CRAB ? flK * 0.92 : famId === FAM_SIPHON_WARDEN ? flK * 0.85 : 0;
+    en.inflatePhase = famId === FAM_GULP_HOPPER ? clamp(0.32 + flK * 0.68, 0, 1) : 0.35;
+    en.floor = famId === FAM_GULP_HOPPER && b.flourishTimer > 0 && b.flourishTimer < 0.72 ? Math.sin((b.flourishTimer / 0.72) * Math.PI) * 0.48 : 0;
+    en.baseFloor = 0;
+    en.slitherPhase = t * 5.8;
+    en.openAmount = famId === FAM_BARNACLE_MORTAR ? clamp(0.14 + flK * 0.84, 0, 1) : 0;
+    en.bossPhase = famId === FAM_SIPHON_WARDEN ? (1 + (Math.floor(t * 0.25) % 3)) : 1;
+    en.coreExposed = famId === FAM_SIPHON_WARDEN && ((b.flourishKind === 'exposed' && b.flourishTimer > 0) || (t % 7.5 > 4.8));
+    en.tentacleSlam = famId === FAM_SIPHON_WARDEN && b.flourishKind === 'slam' ? flK : (famId === FAM_SIPHON_WARDEN && flK > 0.35 && !en.coreExposed ? flK : 0);
+    en.beamCharge = famId === FAM_SIPHON_WARDEN && !en.coreExposed ? flK * 0.85 : 0;
+    st.vx = 1.6 + flK * 1.4;
+    st.vy = famId === FAM_GULP_HOPPER && en.floor > 0.05 ? 2.4 : 0;
+
+    if (famId === FAM_SNAP_CRAB) {
+      this._animateSnapCrab(ud, st, en, 0, en.flipped, b.x, b.y, b.z, t, stepDt);
+    } else if (famId === FAM_GULP_HOPPER) {
+      rig.position.y = 0.02 + en.floor * 0.85;
+      this._animateGulpHopper(ud, st, en, 0, false, b.x, b.y, b.z, t, stepDt);
+    } else if (famId === FAM_VOLT_EEL) {
+      this._animateVoltEel(ud, st, en, 0, 3.8, false, t, stepDt);
+    } else if (famId === FAM_RAIL_SKATER) {
+      this._animateRailSkater(ud, st, en, 0, false, t, stepDt);
+      ud.body.rotation.y += Math.sin(t * 1.8) * 0.18 + flK * 0.32;
+    } else if (famId === FAM_BARNACLE_MORTAR) {
+      this._animateBarnacleMortar(ud, st, en, false, b.x, b.y, b.z, t, stepDt);
+    } else if (famId === FAM_VENT_STALKER) {
+      this._animateVentStalker(ud, st, en, 0, false, t, stepDt);
+      if (ud.head) ud.head.rotation.x -= flK * 0.25;
+    } else {
+      this._animateSiphonWarden(ud, st, en, 0, false, b.x, b.y, b.z, t, stepDt);
+    }
+
+    // Focus 1 dynamic rim light cleanly onto the Bestiary Turntable subject
+    const pl0 = this._dynLights[0];
+    pl0.color.set(meta.accentHex || '#22f0e8');
+    pl0.intensity = 3.1 + flK * 1.2;
+    pl0.position.set(b.x + 0.45, b.y + 0.85, b.z + 0.95);
+    this._dynLights[1].intensity = 0;
+    this._dynLights[1].position.set(0, -9999, 0);
   }
 
   /**
@@ -1632,6 +2210,25 @@ export class EnemyVisualPool {
     this._lastTime = t;
     if (!(dt > 0) || dt > 0.1) dt = 1 / 60;
 
+    // Optional Bestiary Turntable override (`extraState.bestiaryPreview` or `setBestiaryShowcase`)
+    if (extraState && extraState.bestiaryPreview !== undefined) {
+      this.setBestiaryShowcase(extraState.bestiaryPreview);
+    }
+    if (this._bestiary.active) {
+      for (let b = 0; b < FAMILY_COUNT; b++) {
+        const bucket = this._buckets[b];
+        for (let j = 0; j < bucket.length; j++) {
+          if (bucket[j].visible) bucket[j].visible = false;
+        }
+      }
+      for (let j = 0; j < PROJECTILE_SLOTS; j++) {
+        if (this._projectileMeshes[j].visible) this._projectileMeshes[j].visible = false;
+      }
+      this.updateBestiaryShowcase(t, dt);
+      return;
+    }
+    if (this._showcaseGroup.visible) this._showcaseGroup.visible = false;
+
     const cols = Math.max(8, Number(extraState?.cols) || Number(COLS) || 20);
     const colAngle = TWO_PI / cols;
     const baseRadius = Number(towerRadius) || 3.75;
@@ -1640,6 +2237,23 @@ export class EnemyVisualPool {
     const radialScale = baseRadius / 3.75;
     const refCamCol = Number(camCol) || 0;
     const dropY = -Math.abs(Number(toppleDropY) || 0);
+
+    // Resolve active camera/hero floor for strict vertical culling (prevents off-screen floors burning draw calls!)
+    let refCamFloor = null;
+    if (extraState && Number.isFinite(Number(extraState.camFloor))) {
+      refCamFloor = Number(extraState.camFloor);
+    } else if (extraState && Number.isFinite(Number(extraState.heroFloor))) {
+      refCamFloor = Number(extraState.heroFloor);
+    } else if (extraState && extraState.player && Number.isFinite(Number(extraState.player.floor))) {
+      refCamFloor = Number(extraState.player.floor);
+    } else if (this.scene) {
+      if (!this._heroAnchor || this._heroAnchor.parent !== this.scene) {
+        this._heroAnchor = this.scene.getObjectByName('GatewayRig') || null;
+      }
+      if (this._heroAnchor && floorH > 0.1) {
+        refCamFloor = (this._heroAnchor.position.y - dropY) / floorH;
+      }
+    }
 
     this._cursors.fill(0);
 
@@ -1668,18 +2282,35 @@ export class EnemyVisualPool {
       const st = this._getEnemyState(en, i);
       const eTheta = wrapAngle((en.col - refCamCol) * colAngle);
 
-      // Family-calibrated radial placement matching `LEDGE_STAND_OFFSET = 0.46` staircase centerline!
+      const isTrueBoss =
+        famId === FAM_SIPHON_WARDEN &&
+        (en.type === 'siphon_warden' ||
+          en.type === 'boss' ||
+          en.type === 'act_boss' ||
+          Boolean(en.isBoss) ||
+          (Number(en.maxHp) || 0) >= 3);
+
+      // Calibrated readable world-space scale (1.42x–1.55x standard enemies, 1.95x colossal Act Bosses!)
+      const famMul =
+        famId === FAM_SIPHON_WARDEN
+          ? isTrueBoss
+            ? FAMILY_WORLD_SCALES[FAM_SIPHON_WARDEN]
+            : 1.28
+          : FAMILY_WORLD_SCALES[famId] || 1.48;
+      const famScale = worldScale * famMul;
+
+      // Family-calibrated radial placement curving cleanly along `towerRadius + 0.46` terraces!
       let baseRadOff = 0.46;
-      if (famId === FAM_BARNACLE_MORTAR) baseRadOff = 0.32;
-      else if (famId === FAM_VOLT_EEL) baseRadOff = 0.48;
+      if (famId === FAM_VOLT_EEL) baseRadOff = 0.48;
       else if (famId === FAM_RAIL_SKATER) baseRadOff = 0.50;
-      else if (famId === FAM_SIPHON_WARDEN) baseRadOff = 0.72;
+      else if (famId === FAM_SIPHON_WARDEN) baseRadOff = isTrueBoss ? 0.82 : 0.64;
       const er = baseRadius + baseRadOff * radialScale;
 
-      let yLocalOff = 0.02 * worldScale;
-      if (famId === FAM_VOLT_EEL) yLocalOff = 0.42 * worldScale;
-      else if (famId === FAM_RAIL_SKATER) yLocalOff = 0.14 * worldScale;
-      else if (famId === FAM_SIPHON_WARDEN) yLocalOff = 0.68 * worldScale;
+      // 100% FLUSH stone grounding (`0.00m` air-gap for all grounded enemies!)
+      let yLocalOff = 0.0;
+      if (famId === FAM_VOLT_EEL) yLocalOff = 0.48 * worldScale;
+      else if (famId === FAM_RAIL_SKATER) yLocalOff = 0.06 * worldScale;
+      else if (famId === FAM_SIPHON_WARDEN) yLocalOff = (isTrueBoss ? 1.36 : 0.88) * worldScale;
 
       const wx = er * Math.sin(eTheta);
       const wy = en.floor * floorH + yLocalOff + dropY;
@@ -1691,7 +2322,7 @@ export class EnemyVisualPool {
           if (Math.abs(eTheta) <= 1.65) {
             this._spawnDeathBurst(
               wx,
-              wy + 0.32 * worldScale,
+              wy + 0.55 * worldScale,
               wz,
               famId === FAM_SIPHON_WARDEN ? '#f0abfc' : '#5efce8'
             );
@@ -1724,9 +2355,11 @@ export class EnemyVisualPool {
         st.vy = damp(st.vy, dFloor / dt, 14, dt);
       }
 
-      // Horizon occlusion culling behind the opaque spire cylinder (wider bound for Siphon Warden & Eel)
-      const cullAngle = famId === FAM_VOLT_EEL || famId === FAM_SIPHON_WARDEN ? 1.82 : 1.64;
-      if (Math.abs(eTheta) > cullAngle) {
+      // Strict vertical + front-arc culling (close-up 9.85m camera frames ~3.8 floors; cull unseen enemies!)
+      const maxFloorDiff = famId === FAM_SIPHON_WARDEN ? 4.4 : 3.8;
+      const minCosTheta = famId === FAM_VOLT_EEL || famId === FAM_SIPHON_WARDEN ? -0.25 : -0.15;
+      const outOfVertBand = refCamFloor !== null && Math.abs(en.floor - refCamFloor) > maxFloorDiff;
+      if (outOfVertBand || Math.cos(eTheta) < minCosTheta) {
         if (!isCagedStun) {
           st.gaitPhase += (Math.abs(st.vx) * 2.8 + 2.2) * dt;
           st.slitherPhase += 5.4 * dt;
@@ -1739,18 +2372,6 @@ export class EnemyVisualPool {
       rig.visible = true;
       rig.position.set(wx, wy, wz);
       rig.rotation.set(0, eTheta, 0);
-
-      // Calibrate scale (Siphon Warden is giant 1.0x as Act Boss, or sleek 0.62x as patrol herald)
-      let famScale = worldScale;
-      if (famId === FAM_SIPHON_WARDEN) {
-        const isTrueBoss =
-          en.type === 'siphon_warden' ||
-          en.type === 'boss' ||
-          en.type === 'act_boss' ||
-          Boolean(en.isBoss) ||
-          (Number(en.maxHp) || 0) >= 3;
-        famScale = worldScale * (isTrueBoss ? 1.04 : 0.62);
-      }
       rig.scale.setScalar(famScale);
 
       if (en.dead && en.deathTimer > 0) {
@@ -1759,10 +2380,13 @@ export class EnemyVisualPool {
         const swell = k < 0.36 ? 1 + 0.42 * (k / 0.36) : 1.42 * (1 - (k - 0.36) / 0.64);
         ud.body.scale.setScalar(Math.max(0.01, swell));
         ud.hydroCage.visible = false;
+        if (ud.telegraphRing) ud.telegraphRing.visible = false;
+        if (ud.contactShadow) ud.contactShadow.visible = false;
         continue;
       }
       st.deathMax = 0;
       ud.body.scale.setScalar(1);
+      if (ud.contactShadow) ud.contactShadow.visible = true;
 
       // Update Translucent Swirling Hydro-Bubble / Sea-Glass Prism Stun Cage
       this._updateHydroPrismCage(ud, st, stunRem, isCagedStun, t, dt);
@@ -1773,7 +2397,8 @@ export class EnemyVisualPool {
       } else if (famId === FAM_GULP_HOPPER) {
         this._animateGulpHopper(ud, st, en, eTheta, isCagedStun, wx, wy, wz, t, dt);
       } else if (famId === FAM_VOLT_EEL) {
-        this._animateVoltEel(ud, st, en, eTheta, er, isCagedStun, t, dt);
+        // Divide by `famScale` so 8-segment eel hugs exact `er` tower curvature at 2.18x world scale!
+        this._animateVoltEel(ud, st, en, eTheta, er / Math.max(0.5, famScale), isCagedStun, t, dt);
       } else if (famId === FAM_RAIL_SKATER) {
         this._animateRailSkater(ud, st, en, eTheta, isCagedStun, t, dt);
       } else if (famId === FAM_BARNACLE_MORTAR) {
@@ -1781,7 +2406,7 @@ export class EnemyVisualPool {
       } else if (famId === FAM_VENT_STALKER) {
         this._animateVentStalker(ud, st, en, eTheta, isCagedStun, t, dt);
       } else {
-        this._animateSiphonWarden(ud, st, en, eTheta, isCagedStun, t, dt);
+        this._animateSiphonWarden(ud, st, en, eTheta, isCagedStun, wx, wy, wz, t, dt);
       }
 
       // Dynamic 2-PointLight Pool Priority Selection
@@ -1792,8 +2417,10 @@ export class EnemyVisualPool {
         let candPri = 0;
 
         if (famId === FAM_SIPHON_WARDEN) {
-          candHex = 0xe879f9;
-          candInt = 4.2 + 0.6 * Math.sin(t * 6.5);
+          const bPhase = Math.max(1, Number(en.bossPhase) || 1);
+          const exposed = Boolean(en.coreExposed || en.exposedTimer > 0 || en.vulnerable);
+          candHex = exposed ? 0x22f0e8 : bPhase >= 3 ? 0xff2a5f : bPhase === 2 ? 0xf59e0b : 0xe879f9;
+          candInt = (exposed ? 5.2 : 4.2 + (bPhase - 1) * 0.7) + 0.6 * Math.sin(t * (6.5 + bPhase * 2));
           candPri = 14 + frontWeight * 4;
         } else if (isFlippedCrab) {
           candHex = 0x14f1d9;
@@ -1848,7 +2475,18 @@ export class EnemyVisualPool {
 
     // Sync optional deflectable Barnacle Mortar bubbles (`extraState.enemyProjectiles`)
     const projs = extraState?.enemyProjectiles || enemies?.enemyProjectiles || null;
-    this.syncProjectiles(projs, refCamCol, colAngle, baseRadius, floorH, radialScale, worldScale, t, dropY);
+    this.syncProjectiles(
+      projs,
+      refCamCol,
+      colAngle,
+      baseRadius,
+      floorH,
+      radialScale,
+      worldScale,
+      t,
+      dropY,
+      refCamFloor
+    );
 
     // Update 2 permanent dynamic PointLights
     const pl0 = this._dynLights[0];
@@ -1881,7 +2519,7 @@ export class EnemyVisualPool {
       } else {
         const p = 1 - b.timer / b.duration;
         b.sprite.position.set(b.x, b.y, b.z);
-        b.sprite.scale.setScalar(0.36 + p * 1.45);
+        b.sprite.scale.setScalar(0.55 + p * 2.35);
         b.sprite.material.opacity = (1 - p) * 0.94;
       }
     }
@@ -1896,30 +2534,43 @@ export class EnemyVisualPool {
       } else {
         const p = 1 - s.timer / s.duration;
         s.mesh.position.set(s.x, s.y + 0.03, s.z);
-        s.mesh.scale.setScalar(0.32 + p * 1.35);
+        s.mesh.scale.setScalar(0.48 + p * 2.15);
         s.mesh.material.opacity = (1 - p) * 0.88;
       }
     }
   }
 
-  syncProjectiles(projs, refCamCol, colAngle, baseRadius, floorH, radialScale, worldScale, t, dropY) {
+  syncProjectiles(
+    projs,
+    refCamCol,
+    colAngle,
+    baseRadius,
+    floorH,
+    radialScale,
+    worldScale,
+    t,
+    dropY,
+    refCamFloor = null
+  ) {
     let used = 0;
     if (Array.isArray(projs)) {
       for (let i = 0; i < projs.length && used < PROJECTILE_SLOTS; i++) {
         const pr = projs[i];
         if (!pr || pr.dead) continue;
+        if (refCamFloor !== null && Math.abs(pr.floor - refCamFloor) > 4.0) continue;
         const th = wrapAngle((pr.col - refCamCol) * colAngle);
-        if (Math.abs(th) > 1.65) continue;
+        if (Math.cos(th) < -0.15) continue;
         const r = baseRadius + 0.56 * radialScale;
         const pm = this._projectileMeshes[used++];
         pm.visible = true;
         pm.position.set(
           r * Math.sin(th),
-          pr.floor * floorH + 0.42 * worldScale + dropY,
+          pr.floor * floorH + 0.68 * worldScale + dropY,
           r * Math.cos(th)
         );
+        const projScale = worldScale * 1.25;
         const wob = 1 + 0.14 * Math.sin(t * 14 + i * 2.1);
-        pm.scale.set(worldScale * wob, worldScale * (2 - wob), worldScale * wob);
+        pm.scale.set(projScale * wob, projScale * (2 - wob), projScale * wob);
         pm.rotation.set(t * 2.4, th + t * 3.1, 0);
       }
     }
@@ -2001,9 +2652,8 @@ export class EnemyVisualPool {
     const targetYaw = isFlipped ? 0 : clamp(dir * 0.28 - eTheta * 0.35, -0.58, 0.58);
     st.yawSmooth = damp(st.yawSmooth, targetYaw, 8, dt);
     ud.body.rotation.y = st.yawSmooth;
-    ud.body.position.y = isFlipped
-      ? 0.02 + Math.abs(Math.sin(t * 9 + st.seed * 4)) * 0.02
-      : Math.abs(Math.sin(st.gaitPhase)) * 0.028;
+    // 100% FLUSH stone contact (feet stay at exact 0.00m; legs articulate cleanly!)
+    ud.body.position.y = 0;
 
     // Glowing Hydro-Bounce Springboard Ring above upturned belly!
     ud.bounceRing.visible = st.flipProgress > 0.55;
@@ -2068,10 +2718,22 @@ export class EnemyVisualPool {
     ud.sparkSprite.visible = sparkActive;
     if (ud.clawSparkMesh) ud.clawSparkMesh.visible = sparkActive;
     if (sparkActive) {
-      ud.sparkSprite.material.opacity = 0.55 + 0.45 * Math.sin(t * 38);
+      ud.sparkSprite.material.opacity = 0.65 + 0.35 * Math.sin(t * 38);
       ud.sparkSprite.material.rotation = t * 14;
-      const sc = 0.35 + snapCycle * 0.45;
+      const sc = 0.48 + snapCycle * 0.52;
       ud.sparkSprite.scale.set(sc, sc, 1);
+    }
+
+    // Bold glowing attack wind-up telegraph ring around snapping pincers!
+    if (ud.telegraphRing) {
+      const showTele = !isFlipped && snapCycle > 0.32;
+      ud.telegraphRing.visible = showTele;
+      if (showTele) {
+        const pulse = 0.96 + snapCycle * 0.36 + Math.sin(t * 24) * 0.06;
+        ud.telegraphRing.scale.setScalar(pulse);
+        ud.telegraphRing.material.color.setHex(snapCycle > 0.72 ? 0x22f0e8 : 0xff9f1c);
+        ud.telegraphRing.material.opacity = 0.35 + snapCycle * 0.58;
+      }
     }
   }
 
@@ -2148,6 +2810,24 @@ export class EnemyVisualPool {
       ud.body.rotation.y = damp(ud.body.rotation.y, targetYaw, 9, dt);
       ud.body.rotation.z = airborne ? clamp(-dir * 0.14, -0.2, 0.2) : 0;
     }
+
+    // Grounded contact shadow tightens when airborne, stays flush on stone when landed!
+    if (ud.contactShadow) {
+      const hopShrink = airborne ? clamp(1 - heightAboveLedge * 0.45, 0.42, 0.92) : 1.0 + st.inflateSmooth * 0.12;
+      ud.contactShadow.scale.set(0.88 * hopShrink, 1, 0.76 * hopShrink);
+    }
+
+    // Bold glowing pre-leap belly-inflation telegraph ring!
+    if (ud.telegraphRing) {
+      const showTele = !isStunned && !airborne && st.inflateSmooth > 0.54;
+      ud.telegraphRing.visible = showTele;
+      if (showTele) {
+        const k = clamp((st.inflateSmooth - 0.54) / 0.46, 0, 1);
+        ud.telegraphRing.scale.setScalar(0.86 + k * 0.42 + Math.sin(t * 22) * 0.05);
+        ud.telegraphRing.material.color.setHex(k > 0.65 ? 0xfbbf24 : 0x38bdf8);
+        ud.telegraphRing.material.opacity = 0.32 + k * 0.58;
+      }
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -2170,8 +2850,8 @@ export class EnemyVisualPool {
       }
     }
 
-    const segSpacing = 0.162;
-    const waveAmp = isStunned ? 0.03 : 0.145;
+    const segSpacing = 0.148;
+    const waveAmp = isStunned ? 0.025 : 0.135;
     const waveFreq = 0.84;
 
     // Sample 9 spine stations (8 segments + look-ahead nose point) wrapped onto the curved spire cylinder!
@@ -2236,7 +2916,22 @@ export class EnemyVisualPool {
       ud.arcFlash.visible = crackle;
       if (crackle) {
         ud.arcFlash.material.rotation = t * 19;
-        ud.arcFlash.material.opacity = 0.55 + 0.4 * Math.sin(t * 45);
+        ud.arcFlash.material.opacity = 0.62 + 0.38 * Math.sin(t * 45);
+      }
+    }
+
+    // Bold crackling electric discharge telegraph ring around Volt-Eel head!
+    if (ud.telegraphRing) {
+      const prox = smooth(0.85, 0.16, Math.abs(eTheta));
+      const rawTele = typeof en.telegraph === 'number' ? en.telegraph : prox;
+      const showTele = !isStunned && rawTele > 0.34;
+      ud.telegraphRing.visible = showTele;
+      if (showTele && segs[0]) {
+        ud.telegraphRing.position.copy(segs[0].position);
+        const pulse = 0.62 + rawTele * 0.45 + Math.sin(t * 28) * 0.08;
+        ud.telegraphRing.scale.setScalar(pulse);
+        ud.telegraphRing.material.color.setHex(rawTele > 0.72 ? 0xe0f2fe : 0x00f5ff);
+        ud.telegraphRing.material.opacity = 0.34 + rawTele * 0.56;
       }
     }
   }
@@ -2293,10 +2988,23 @@ export class EnemyVisualPool {
       }
       ud.wakeTrail.visible = true;
       ud.wakeTrail.scale.set(0.8 + Math.sin(t * 14) * 0.15, 0.38, 1);
+
+      if (ud.telegraphRing) {
+        const prox = smooth(0.75, 0.15, Math.abs(eTheta));
+        const tele = typeof en.telegraph === 'number' ? en.telegraph : prox;
+        const showTele = tele > 0.38;
+        ud.telegraphRing.visible = showTele;
+        if (showTele) {
+          ud.telegraphRing.scale.setScalar(0.92 + tele * 0.38 + Math.sin(t * 24) * 0.06);
+          ud.telegraphRing.material.color.setHex(tele > 0.7 ? 0xff4d6d : 0x38bdf8);
+          ud.telegraphRing.material.opacity = 0.30 + tele * 0.55;
+        }
+      }
     } else {
       if (ud.jetL) ud.jetL.visible = false;
       if (ud.jetR) ud.jetR.visible = false;
       ud.wakeTrail.visible = false;
+      if (ud.telegraphRing) ud.telegraphRing.visible = false;
     }
   }
 
@@ -2366,6 +3074,22 @@ export class EnemyVisualPool {
     ud.pressureHalo.material.opacity = isStunned ? 0.15 : 0.32 + openAmt * 0.58;
     const hSc = 0.72 + openAmt * 0.55;
     ud.pressureHalo.scale.set(hSc, hSc, 1);
+
+    // Bold ground pressure warning ring shifting volcanic orange -> blinding cyan before bubble pop!
+    if (ud.telegraphRing) {
+      const showTele = !isStunned && openAmt > 0.28;
+      ud.telegraphRing.visible = showTele;
+      if (showTele) {
+        const k = clamp((openAmt - 0.28) / 0.72, 0, 1);
+        ud.telegraphRing.scale.setScalar(0.95 + k * 0.48 + Math.sin(t * 26) * 0.05);
+        ud.telegraphRing.material.color.setRGB(
+          mix(1.0, 0.15, k),
+          mix(0.45, 0.95, k),
+          mix(0.06, 0.98, k)
+        );
+        ud.telegraphRing.material.opacity = 0.34 + k * 0.62;
+      }
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -2417,81 +3141,201 @@ export class EnemyVisualPool {
       sp.scale.set(pSc, pSc, 1);
       sp.material.opacity = Math.sin(life * Math.PI) * 0.55;
     }
+
+    // Bold cryo/thermal vent surge telegraph ring around dorsal stalker!
+    if (ud.telegraphRing) {
+      const prox = smooth(0.82, 0.15, Math.abs(eTheta));
+      const surge = typeof en.telegraph === 'number' ? en.telegraph : prox * (0.5 + 0.5 * Math.sin(t * 4.5 + st.seed * 6));
+      const showTele = !isStunned && surge > 0.34;
+      ud.telegraphRing.visible = showTele;
+      if (showTele) {
+        ud.telegraphRing.scale.setScalar(0.92 + surge * 0.42 + Math.sin(t * 20) * 0.05);
+        ud.telegraphRing.material.color.setHex(surge > 0.68 ? 0x67e8f9 : 0xfb923c);
+        ud.telegraphRing.material.opacity = 0.32 + surge * 0.58;
+      }
+    }
   }
 
   // --------------------------------------------------------------------------
-  // 7. `siphon_warden` — Act Boss Leviathan-Mech (Gimbal Core, 4 Shields, 4 Kraken Arms!)
+  // 7. `siphon_warden` — 3-Phase Boss Escalation, Core Exposure, Beam Charge & Tentacle Slam!
   // --------------------------------------------------------------------------
-  _animateSiphonWarden(ud, st, en, eTheta, isStunned, t, dt) {
-    const phase = Math.max(1, Number(en.bossPhase) || 1);
-    const phaseBoost = 1 + (phase - 1) * 0.38;
+  _animateSiphonWarden(ud, st, en, eTheta, isStunned, wx, wy, wz, t, dt) {
+    // Resolve 3-Phase Boss Escalation from explicit `en.bossPhase` OR HP percentage!
+    let phase = Number(en.bossPhase) || 0;
+    if (!(phase >= 1)) {
+      const hpRatio = en.maxHp > 0 ? (Number(en.hp) || 0) / Number(en.maxHp) : 1;
+      phase = hpRatio <= 0.34 ? 3 : hpRatio <= 0.67 ? 2 : 1;
+    }
+    phase = clamp(Math.round(phase), 1, 3);
+    const phaseBoost = phase === 3 ? 2.05 : phase === 2 ? 1.45 : 1.0;
+
     const rawTele = typeof en.telegraph === 'number' ? clamp(en.telegraph, 0, 1) : 0;
-    const isShielded = Boolean(en.shielded);
+    const beamAmt = clamp(
+      Math.max(
+        Number(en.beamCharge) || 0,
+        en.beamActive ? 1.0 : 0,
+        en.attackType === 'hydro_beam' ? rawTele : 0
+      ),
+      0,
+      1
+    );
+    const slamAmt = clamp(
+      Math.max(
+        Number(en.tentacleSlam) || 0,
+        Number(en.slamPhase) || 0,
+        en.attackType === 'tentacle_slam' ? rawTele : 0
+      ),
+      0,
+      1
+    );
+    const coreExposed = Boolean(en.coreExposed || en.exposedTimer > 0 || en.vulnerable);
+    const isShielded = !coreExposed && Boolean(en.shielded);
     const hitJolt = st.hitFlashT > 0 ? Math.sin((st.hitFlashT / 0.26) * Math.PI) : 0;
 
+    // Trigger ground shockwave splash ring at exact Tentacle Slam impact crest!
+    if (slamAmt > 0.82 && !st.slamTriggered) {
+      st.slamTriggered = true;
+      this._spawnSplashRing(wx, wy - 0.55, wz, phase >= 3 ? '#ff4d8d' : '#22f0e8');
+    } else if (slamAmt < 0.35) {
+      st.slamTriggered = false;
+    }
+
     if (!isStunned) {
-      // Commanding hovering bob & gaze toward Gateway
-      ud.body.position.y = Math.sin(t * 2.4 * phaseBoost + st.seed * TWO_PI) * 0.08;
-      ud.body.position.z = -hitJolt * 0.14;
+      const phaseJitter = phase >= 3 ? Math.sin(t * 46) * 0.024 : phase === 2 ? Math.sin(t * 28) * 0.01 : 0;
+      const slamDip = slamAmt > 0.65 ? -((slamAmt - 0.65) / 0.35) * 0.22 : slamAmt * 0.14;
+      ud.body.position.set(
+        phaseJitter,
+        Math.sin(t * 2.4 * phaseBoost + st.seed * TWO_PI) * 0.08 + slamDip,
+        -hitJolt * 0.16 + beamAmt * 0.10
+      );
       const targetYaw = clamp(-eTheta * 0.55, -0.68, 0.68);
+      const slamPitch = slamAmt < 0.62 ? -slamAmt * 0.42 : ((slamAmt - 0.62) / 0.38) * 0.48;
       ud.body.rotation.set(
-        rawTele * 0.18 - hitJolt * 0.22,
+        rawTele * 0.16 + slamPitch - hitJolt * 0.24,
         damp(ud.body.rotation.y, targetYaw, 6, dt),
-        Math.sin(t * 1.6 + st.seed * 4) * 0.05
+        Math.sin(t * 1.6 * phaseBoost + st.seed * 4) * (0.05 + (phase - 1) * 0.03)
       );
 
-      // Twin counter-rotating gimbal siphon rings
-      const coreSpin = (2.4 + rawTele * 5.5) * phaseBoost;
+      // Twin counter-rotating 12-tooth geared astrolabe gimbal rings
+      const coreSpin = (2.4 + rawTele * 5.2 + beamAmt * 6.5) * phaseBoost;
       if (ud.coreOuter) {
         ud.coreOuter.rotation.z = t * coreSpin;
-        ud.coreOuter.rotation.y = Math.sin(t * 1.8) * 0.32;
+        ud.coreOuter.rotation.y = coreExposed ? 0.08 * Math.sin(t * 8) : Math.sin(t * 1.8 * phaseBoost) * 0.36;
       }
       if (ud.coreInner) {
-        ud.coreInner.rotation.x = -t * coreSpin * 1.35;
-        ud.coreInner.rotation.z = t * 1.9;
+        ud.coreInner.rotation.x = coreExposed ? 0.12 * Math.cos(t * 8) : -t * coreSpin * 1.35;
+        ud.coreInner.rotation.z = t * 1.9 * phaseBoost;
       }
       if (ud.singularity) {
-        const beat = 1.0 + 0.18 * Math.sin(t * 9.5 * phaseBoost) + rawTele * 0.28;
+        const beat =
+          (coreExposed ? 1.38 : 1.0) +
+          0.18 * Math.sin(t * (9.5 + phase * 3.0)) +
+          Math.max(rawTele, beamAmt) * 0.32;
         ud.singularity.scale.setScalar(beat);
       }
 
-      // 4 Orbiting Articulated Aegis Kite-Shield Plates (`shield_0..3`)
+      // 4 Orbiting Bladed Aegis Halberd-Shields: lock tight when shielded, flare WIDE when `coreExposed`!
       if (ud.shieldOrbit) {
-        ud.shieldOrbit.rotation.z = t * 1.35 * phaseBoost;
+        ud.shieldOrbit.rotation.z = t * (coreExposed ? 0.55 : 1.35 * phaseBoost);
       }
       for (let i = 0; i < ud.shields.length; i++) {
         const sh = ud.shields[i];
         const sa = (i * TWO_PI) / 4 + Math.PI * 0.25;
-        const rad = isShielded ? 0.30 : 0.58 + rawTele * 0.16 + Math.sin(t * 3.2 + i) * 0.04;
-        sh.position.set(Math.cos(sa) * rad, Math.sin(sa) * rad, isShielded ? 0.14 : 0.02);
-        sh.rotation.y = rawTele * 0.55;
+        const rad = coreExposed
+          ? 0.86 + Math.sin(t * 6 + i) * 0.04
+          : isShielded
+            ? 0.30
+            : 0.58 + rawTele * 0.16 + (phase - 1) * 0.04 + Math.sin(t * 3.2 + i) * 0.04;
+        sh.position.set(
+          Math.cos(sa) * rad,
+          Math.sin(sa) * rad,
+          coreExposed ? -0.16 : isShielded ? 0.16 : 0.02
+        );
+        sh.rotation.y = coreExposed ? 1.15 : rawTele * 0.55 + (phase >= 2 ? 0.22 : 0);
       }
 
-      // 4 Multi-Segment Kraken-Mech Siphon Tentacles sweeping & lunging on telegraph!
+      // 4 Segmented Kraken-Mech Tentacles: dramatic overhead wind-up -> violent forward slam!
       for (let i = 0; i < ud.tentacles.length; i++) {
         const tn = ud.tentacles[i];
         const sx = i % 2 === 0 ? -1 : 1;
         const wave = Math.sin(t * 3.4 * phaseBoost + i * 1.35);
-        tn.rotation.set(
-          rawTele * 0.55 + wave * 0.16,
-          sx * (-rawTele * 0.42 + Math.cos(t * 2.6 + i) * 0.18),
-          sx * wave * 0.22
-        );
+        let pitchX = rawTele * 0.52 + wave * (0.16 + (phase - 1) * 0.06);
+        let spreadY = sx * (-rawTele * 0.40 + Math.cos(t * 2.6 * phaseBoost + i) * 0.18);
+        if (slamAmt > 0.04) {
+          // 0..0.60: rear high overhead (-0.95 rad); 0.60..1.0: whip violently forward-down (+1.12 rad)!
+          pitchX = slamAmt < 0.6 ? mix(wave * 0.15, -0.98, slamAmt / 0.6) : mix(-0.98, 1.12, (slamAmt - 0.6) / 0.4);
+          spreadY = sx * (slamAmt < 0.6 ? 0.35 : -0.55);
+        } else if (coreExposed) {
+          pitchX = -0.35 + wave * 0.22;
+          spreadY = sx * 0.55;
+        }
+        tn.rotation.set(pitchX, spreadY, sx * wave * (0.22 + (phase - 1) * 0.07));
         if (ud.tentacleTips[i]) {
-          ud.tentacleTips[i].rotation.x = rawTele * 0.48 + Math.cos(t * 4.8 + i) * 0.28;
+          ud.tentacleTips[i].rotation.x =
+            slamAmt > 0.6 ? 0.95 : rawTele * 0.48 + Math.cos(t * 4.8 * phaseBoost + i) * 0.28;
         }
       }
     }
 
-    // Core halo shifts from royal violet-aqua to blazing crimson-gold on boss telegraph / Phase 3!
+    // Weak-Point Core Exposure Double Target Reticle (`exposedRingOuter` & `exposedRingInner`)
+    if (ud.exposedRingOuter && ud.exposedRingInner) {
+      const showExp = coreExposed && !isStunned;
+      ud.exposedRingOuter.visible = showExp;
+      ud.exposedRingInner.visible = showExp;
+      if (showExp) {
+        const pulse = 1.0 + 0.14 * Math.sin(t * 14);
+        ud.exposedRingOuter.scale.setScalar(pulse);
+        ud.exposedRingOuter.rotation.z = t * 3.2;
+        ud.exposedRingOuter.material.opacity = 0.72 + 0.25 * Math.sin(t * 14);
+        ud.exposedRingInner.scale.setScalar(1.16 - 0.12 * Math.sin(t * 14));
+        ud.exposedRingInner.rotation.z = -t * 5.2;
+        ud.exposedRingInner.material.opacity = 0.85;
+      }
+    }
+
+    // Hydro-Beam Charge Emitter (`beamChargeOrb`)
+    if (ud.beamChargeOrb) {
+      const showBeam = (beamAmt > 0.08 || (rawTele > 0.35 && !coreExposed)) && !isStunned;
+      ud.beamChargeOrb.visible = showBeam;
+      if (showBeam) {
+        const bMag = Math.max(beamAmt, rawTele);
+        const bSc = 0.45 + bMag * 1.45 + Math.sin(t * 36) * 0.12;
+        ud.beamChargeOrb.scale.setScalar(bSc);
+        ud.beamChargeOrb.rotation.set(t * 7, t * 9, 0);
+        ud.beamChargeOrb.material.color.setHex(phase >= 3 ? 0xff2a5f : 0x38bdf8);
+        ud.beamChargeOrb.material.opacity = 0.45 + bMag * 0.48;
+      }
+    }
+
+    // Phase 2 / Phase 3 Overdrive Arc Sparks (`bossArcSprite`)
+    if (ud.bossArcSprite) {
+      const showArc = !isStunned && (phase >= 2 || rawTele > 0.4 || slamAmt > 0.4);
+      const flicker = showArc && Math.sin(t * (28 + phase * 11) + st.seed * 7) > (phase >= 3 ? -0.45 : 0.15);
+      ud.bossArcSprite.visible = flicker;
+      if (flicker) {
+        ud.bossArcSprite.material.color.setHex(phase >= 3 ? 0xff3b6b : phase === 2 ? 0xfbbf24 : 0x38bdf8);
+        ud.bossArcSprite.material.rotation = t * 18;
+        ud.bossArcSprite.material.opacity = 0.62 + 0.32 * Math.sin(t * 42);
+        const aSc = 0.95 + phase * 0.22;
+        ud.bossArcSprite.scale.set(aSc, aSc, 1);
+      }
+    }
+
+    // Core halo shifts distinctly across Phase 1 (violet), Phase 2 (amber-magenta), Phase 3 (crimson), Exposed (cyan-gold), & Hit (white)!
     if (hitJolt > 0.05) {
       ud.coreHalo.material.color.setHex(0xffffff);
-    } else if (rawTele > 0.35 || phase >= 3) {
+    } else if (coreExposed) {
+      ud.coreHalo.material.color.setHex(0x22f0e8);
+    } else if (phase >= 3 || beamAmt > 0.45) {
+      ud.coreHalo.material.color.setHex(0xff2a5f);
+    } else if (phase === 2 || rawTele > 0.35) {
       ud.coreHalo.material.color.setHex(0xf97316);
     } else {
       ud.coreHalo.material.color.setHex(0xe879f9);
     }
-    ud.coreHalo.material.opacity = isStunned ? 0.25 : 0.68 + 0.22 * Math.sin(t * 8.5) + rawTele * 0.25;
+    ud.coreHalo.material.opacity = isStunned
+      ? 0.22
+      : (coreExposed ? 0.95 : 0.68) + 0.22 * Math.sin(t * (8.5 + phase * 2)) + rawTele * 0.22;
   }
 
   /**
@@ -2513,11 +3357,24 @@ export class EnemyVisualPool {
         bucket[i].traverse((obj) => {
           if (obj.isSprite && obj.material) {
             obj.material.dispose();
+          } else if (obj.name === 'enemy_telegraph_ring' && obj.material) {
+            obj.material.dispose();
           }
         });
       }
       bucket.length = 0;
     }
+    for (let i = 0; i < this._showcaseRigs.length; i++) {
+      if (this._showcaseRigs[i]) {
+        this._showcaseRigs[i].traverse((obj) => {
+          if (obj.isSprite && obj.material) obj.material.dispose();
+          else if (obj.name === 'enemy_telegraph_ring' && obj.material) obj.material.dispose();
+        });
+      }
+    }
+    this._showcasePlinthRing?.material?.dispose();
+    this._showcasePlinthDisc?.material?.dispose();
+    this._showcaseRigs.fill(null);
     this._dynLights.length = 0;
     this._deathBursts.length = 0;
     this._splashRings.length = 0;

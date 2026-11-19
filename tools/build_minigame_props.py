@@ -395,6 +395,35 @@ def assign_spherical_uvs(bm, scale=1.0):
             loop[uv_layer].uv = (u * scale, v * scale)
 
 
+def assign_planar_xy_uvs(bm):
+    """Map Three.js side profile `(tx, ty)` (Blender `(x, z)`) cleanly onto `[0, 1] x [0, 1]`."""
+    uv_layer = bm.loops.layers.uv.verify()
+    if not bm.verts:
+        return
+    xs = [v.co.x for v in bm.verts]
+    zs = [v.co.z for v in bm.verts]
+    min_x, max_x = min(xs), max(xs)
+    min_z, max_z = min(zs), max(zs)
+    span_x = max(1e-5, max_x - min_x)
+    span_z = max(1e-5, max_z - min_z)
+    for f in bm.faces:
+        for loop in f.loops:
+            u = (loop.vert.co.x - min_x) / span_x
+            v = (loop.vert.co.z - min_z) / span_z
+            loop[uv_layer].uv = (u, v)
+
+
+def assign_hull_uvs(bm, scale=2.0):
+    """Map submarine fuselage lengthwise along X and circumferentially around YZ."""
+    uv_layer = bm.loops.layers.uv.verify()
+    for f in bm.faces:
+        for loop in f.loops:
+            co = loop.vert.co
+            u = ((co.x + 1.25) / 2.45) * scale
+            v = (0.5 + math.atan2(co.z, -co.y) / (2.0 * math.pi)) * scale
+            loop[uv_layer].uv = (u, v)
+
+
 def make_empty_node(name, pos=(0.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0), parent=None):
     obj = bpy.data.objects.new(name, None)
     obj.empty_display_size = 0.05
@@ -406,10 +435,15 @@ def make_empty_node(name, pos=(0.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0), parent=None)
     return obj
 
 
-def finalize_mesh_obj(name, bm, materials, pos=(0.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0), parent=None, subdiv_levels=0, smooth=True, uv_scale=1.0):
+def finalize_mesh_obj(name, bm, materials, pos=(0.0, 0.0, 0.0), rot=(0.0, 0.0, 0.0), parent=None, subdiv_levels=0, smooth=True, uv_scale=1.0, uv_mode="spherical"):
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-    assign_spherical_uvs(bm, scale=uv_scale)
+    if uv_mode == "planar_xy":
+        assign_planar_xy_uvs(bm)
+    elif uv_mode == "hull":
+        assign_hull_uvs(bm, scale=uv_scale)
+    else:
+        assign_spherical_uvs(bm, scale=uv_scale)
 
     mesh = bpy.data.meshes.new(name + "_Mesh")
     bm.to_mesh(mesh)
@@ -628,56 +662,152 @@ def export_glb_and_inspect(filepath, export_apply=False):
 def build_core_reactor_props():
     """
     `assets/models/core_reactor_props.glb` for `core_descent`:
-      1. `reactor_turbine`: 5 hydrofoil blades + 1 shattered passage gap around angle 0 (+X)
+      1. `reactor_turbine`: Sculpted 5-blade curved bronze-and-copper hydrofoil rotor,
+         riveted hub collar, glowing cyan stator bearing ring & beveled bronze shroud
       2. `siphon_crystal_lock`: Glowing crimson-violet Siphon Crystal Core gripped by 3 bronze claws
       3. `harmonic_seed_anchor`: Pearlescent & sea-glass Lotus Bedrock Receptacle
     """
     reset_scene()
     metal_alb, metal_nrm = create_siphon_metal_maps(128)
-    mat_titanium = make_mat("mat_titanium", "#1e293b", roughness=0.34, metallic=0.88, albedo_img=metal_alb, normal_img=metal_nrm, normal_strength=0.45)
-    mat_bronze = make_mat("mat_bronze", "#c68a3e", roughness=0.26, metallic=0.90)
-    mat_siphon_crystal = make_mat("mat_siphon_crystal", "#f43f5e", roughness=0.10, metallic=0.15, coat=1.0, emission_hex="#fb7185", emission_strength=1.75)
-    mat_aqua_glow = make_mat("mat_aqua_glow", "#5efce8", roughness=0.12, emission_hex="#22d3ee", emission_strength=1.65)
+    mat_verdigris = make_mat("mat_verdigris_bronze", "#3d7a74", roughness=0.34, metallic=0.78, normal_img=metal_nrm, normal_strength=0.40)
+    mat_bronze = make_mat("mat_bronze", "#dfa047", roughness=0.24, metallic=0.88, coat=0.35, normal_img=metal_nrm, normal_strength=0.30)
+    mat_copper = make_mat("mat_copper", "#c86d3b", roughness=0.28, metallic=0.86, coat=0.25, normal_img=metal_nrm, normal_strength=0.35)
+    mat_siphon_crystal = make_mat("mat_siphon_crystal", "#f43f5e", roughness=0.10, metallic=0.15, coat=1.0, emission_hex="#fb7185", emission_strength=1.85)
+    mat_aqua_glow = make_mat("mat_aqua_glow", "#5efce8", roughness=0.10, emission_hex="#22d3ee", emission_strength=1.80)
     mat_pearl = make_mat("mat_pearl", "#e6f7f5", roughness=0.18, metallic=0.22, coat=0.9)
 
     root = make_empty_node("CoreReactorRoot", (0.0, 0.0, 0.0))
 
-    # 1. `reactor_turbine` (XY plane rotor: 6 sectors, sector 0 at +X is broken stub = safe dive passage!)
+    # 1. `reactor_turbine` (XY plane rotor; 5 curved swept hydrofoil blades at `ang = b_idx * TAU / 5`)
     turb_grp = make_empty_node("reactor_turbine", (0.0, 0.0, 0.0), parent=root)
     bm_t = bmesh.new()
-    # Central turbine hub & glowing bearing ring
-    add_swept_curve(bm_t, [(0.0, 0.0, -0.26), (0.0, 0.0, 0.0), (0.0, 0.0, 0.28)], [0.42, 0.56, 0.34], segs=16, up_t3=(0.0, 1.0, 0.0), mat_idx=1)
-    add_swept_curve(bm_t, [(0.0, 0.0, -0.06), (0.0, 0.0, 0.06)], [0.60, 0.60], segs=16, up_t3=(0.0, 1.0, 0.0), mat_idx=3)
-    # Outer bronze/titanium shroud ring
-    shroud_pts = []
-    for k in range(25):
-        ang = (k / 24.0) * (math.pi * 2.0)
-        shroud_pts.append((math.cos(ang) * 2.42, math.sin(ang) * 2.42, 0.0))
-    add_swept_curve(bm_t, shroud_pts, 0.11, segs=8, up_t3=(0.0, 0.0, 1.0), cap_start=True, cap_end=True, mat_idx=0)
 
-    # 5 evenly spaced hydrofoil blades (`b_idx = 0..4`, `ang = b_idx * TAU / 5`) matching `game.js` `bladeCount: 5` 1:1!
+    # Central stepped bronze & copper bullet-nose hub
+    add_swept_curve(
+        bm_t,
+        [(0.0, 0.0, -0.34), (0.0, 0.0, -0.18), (0.0, 0.0, 0.0), (0.0, 0.0, 0.18), (0.0, 0.0, 0.38)],
+        [0.36, 0.56, 0.62, 0.54, 0.24],
+        segs=20,
+        up_t3=(0.0, 1.0, 0.0),
+        mat_idx=1,
+    )
+    # Glowing cyan hydrodynamic stator bearing ring around hub equator
+    add_swept_curve(
+        bm_t,
+        [(0.0, 0.0, -0.09), (0.0, 0.0, 0.09)],
+        [0.66, 0.66],
+        segs=20,
+        up_t3=(0.0, 1.0, 0.0),
+        mat_idx=4,
+    )
+    # 10 riveted copper bolts + 12 meshing brass hub gear teeth circling the turbine core
+    for rv in range(10):
+        ra = (rv / 10.0) * (math.pi * 2.0)
+        rx_b, ry_b = math.cos(ra) * 0.44, math.sin(ra) * 0.44
+        add_ellipsoid(bm_t, (rx_b, ry_b, 0.22), (0.055, 0.055, 0.045), u_segs=8, v_segs=6, mat_idx=2)
+        add_ellipsoid(bm_t, (rx_b, ry_b, -0.22), (0.055, 0.055, 0.045), u_segs=8, v_segs=6, mat_idx=2)
+    for gt in range(12):
+        ga = (gt / 12.0) * (math.pi * 2.0)
+        add_bevel_box(
+            bm_t,
+            (math.cos(ga) * 0.67, math.sin(ga) * 0.67, 0.16),
+            (0.14, 0.09, 0.11),
+            bevel=0.012,
+            rot_t3=(0.0, 0.0, ga),
+            mat_idx=1,
+        )
+
+    # Outer sculpted bronze & verdigris stator housing ring + glowing cyan & crimson danger studs
+    for r_ring, tube_r, z_off, m_id in (
+        (2.44, 0.14, 0.0, 1),
+        (2.54, 0.08, 0.14, 0),
+        (2.54, 0.08, -0.14, 0),
+        (2.30, 0.055, 0.0, 4),
+        (2.48, 0.045, 0.22, 3),
+    ):
+        pts = [
+            (math.cos((k / 28.0) * math.pi * 2.0) * r_ring, math.sin((k / 28.0) * math.pi * 2.0) * r_ring, z_off)
+            for k in range(29)
+        ]
+        add_swept_curve(bm_t, pts, tube_r, segs=8, up_t3=(0.0, 0.0, 1.0), cap_start=True, cap_end=True, mat_idx=m_id)
+
+    for lg in range(10):
+        la = (lg / 10.0) * (math.pi * 2.0) + 0.314
+        add_bevel_box(
+            bm_t,
+            (math.cos(la) * 2.46, math.sin(la) * 2.46, 0.0),
+            (0.24, 0.22, 0.36),
+            bevel=0.025,
+            rot_t3=(0.0, 0.0, la),
+            mat_idx=2 if lg % 2 == 0 else 1,
+        )
+
+    # 5 thick, curved, cambered, beveled bronze-and-copper hydrofoil blades (`b_idx = 0..4`, exact `TAU / 5`)
+    foil_profile = [
+        (0.50, 0.00),
+        (0.38, 0.13),
+        (0.10, 0.18),
+        (-0.22, 0.13),
+        (-0.50, 0.02),
+        (-0.24, -0.07),
+        (0.12, -0.09),
+        (0.38, -0.09),
+    ]
+    stations = [
+        (0.56, 0.34, 0.34, 0.56, 0.00),
+        (0.92, 0.48, 0.32, 0.46, 0.06),
+        (1.36, 0.58, 0.28, 0.34, 0.12),
+        (1.80, 0.56, 0.24, 0.24, 0.10),
+        (2.14, 0.44, 0.20, 0.18, 0.02),
+        (2.34, 0.28, 0.15, 0.14, -0.04),
+    ]
     for b_idx in range(5):
         ang = (b_idx * math.pi * 2.0) / 5.0
         ca, sa = math.cos(ang), math.sin(ang)
-        for seg in range(4):
-            r_mid = 0.72 + seg * 0.42
-            w_blade = 0.32 + seg * 0.06
-            pitch = 0.34 - seg * 0.04
-            add_bevel_box(
-                bm_t,
-                (ca * r_mid, sa * r_mid, math.sin(seg * 0.4) * 0.03),
-                (0.46, w_blade, 0.075),
-                bevel=0.012,
-                rot_t3=(ca * pitch, sa * pitch, ang),
-                mat_idx=0 if seg < 3 else 1,
-            )
-    finalize_mesh_obj("turbine_rotor", bm_t, [mat_titanium, mat_bronze, mat_siphon_crystal, mat_aqua_glow], parent=turb_grp)
+        blade_rings = []
+        for r_st, chord, thick, twist, sweep in stations:
+            ct, st = math.cos(twist), math.sin(twist)
+            cx_st = ca * r_st - sa * sweep
+            cy_st = sa * r_st + ca * sweep
+            ring = []
+            for fu, fv in foil_profile:
+                loc_t = fu * chord * ct - fv * thick * st
+                loc_z = fu * chord * st + fv * thick * ct
+                wx = cx_st - sa * loc_t
+                wy = cy_st + ca * loc_t
+                wz = loc_z
+                ring.append((wx, wy, wz))
+            blade_rings.append(ring)
+        add_loft_rings(bm_t, blade_rings, closed=True, cap_start=True, cap_end=True, mat_idx=[0, 1, 1, 2, 2])
+
+        # Riveted bronze root collar cuff & glowing cyan leading-edge hydro-channel accent
+        add_bevel_box(
+            bm_t,
+            (ca * 0.68, sa * 0.68, 0.0),
+            (0.22, 0.38, 0.24),
+            bevel=0.02,
+            rot_t3=(0.0, 0.0, ang),
+            mat_idx=1,
+        )
+        vane_pts = []
+        for r_st, chord, _thick, twist, sweep in stations[1:5]:
+            ct, st = math.cos(twist), math.sin(twist)
+            loc_t = 0.46 * chord * ct
+            loc_z = 0.46 * chord * st
+            vane_pts.append((ca * r_st - sa * (sweep + loc_t), sa * r_st + ca * (sweep + loc_t), loc_z))
+        add_swept_curve(bm_t, vane_pts, 0.032, segs=6, up_t3=(0.0, 0.0, 1.0), mat_idx=4)
+
+    finalize_mesh_obj(
+        "turbine_rotor",
+        bm_t,
+        [mat_verdigris, mat_bronze, mat_copper, mat_siphon_crystal, mat_aqua_glow],
+        parent=turb_grp,
+    )
 
     # 2. `siphon_crystal_lock`
     lock_grp = make_empty_node("siphon_crystal_lock", (5.0, 0.0, 0.0), parent=root)
     bm_l = bmesh.new()
-    # Central jagged Siphon crystal cluster
-    add_swept_curve(bm_l, [(0.0, -0.58, 0.0), (0.0, 0.0, 0.0), (0.0, 0.62, 0.0)], [0.04, 0.36, 0.03], segs=6, mat_idx=2)
+    add_swept_curve(bm_l, [(0.0, -0.58, 0.0), (0.0, 0.0, 0.0), (0.0, 0.62, 0.0)], [0.04, 0.36, 0.03], segs=6, mat_idx=3)
     for k in range(4):
         ka = (k * math.pi * 0.5) + 0.35
         kx, kz = math.cos(ka), math.sin(ka)
@@ -686,27 +816,25 @@ def build_core_reactor_props():
             [(0.0, -0.1, 0.0), (kx * 0.32, 0.18, kz * 0.32), (kx * 0.46, 0.42, kz * 0.46)],
             [0.14, 0.16, 0.02],
             segs=5,
-            mat_idx=2,
+            mat_idx=3,
         )
-    # 3 curved bronze & titanium siphon containment claws
     for c_idx in range(3):
         ca_ang = (c_idx * math.pi * 2.0) / 3.0
         cx, cz = math.cos(ca_ang), math.sin(ca_ang)
         add_swept_curve(
             bm_l,
             [(cx * 0.64, -0.24, cz * 0.64), (cx * 0.52, 0.0, cz * 0.52), (cx * 0.34, 0.32, cz * 0.34)],
-            [0.08, 0.065, 0.035],
+            [0.085, 0.070, 0.038],
             segs=7,
             mat_idx=1,
         )
-    add_swept_curve(bm_l, [(0.0, -0.18, 0.0), (0.0, -0.10, 0.0)], [0.58, 0.58], segs=14, mat_idx=0)
-    finalize_mesh_obj("crystal_lock_body", bm_l, [mat_titanium, mat_bronze, mat_siphon_crystal], parent=lock_grp)
+    add_swept_curve(bm_l, [(0.0, -0.18, 0.0), (0.0, -0.10, 0.0)], [0.58, 0.58], segs=14, mat_idx=2)
+    finalize_mesh_obj("crystal_lock_body", bm_l, [mat_verdigris, mat_bronze, mat_copper, mat_siphon_crystal], parent=lock_grp)
 
     # 3. `harmonic_seed_anchor`
     anc_grp = make_empty_node("harmonic_seed_anchor", (-5.0, 0.0, 0.0), parent=root)
     bm_a = bmesh.new()
-    add_swept_curve(bm_a, [(0.0, -0.35, 0.0), (0.0, 0.0, 0.0), (0.0, 0.18, 0.0)], [1.55, 1.32, 0.92], segs=18, mat_idx=4)
-    # 8 sculpted sea-glass & bronze lotus petals
+    add_swept_curve(bm_a, [(0.0, -0.35, 0.0), (0.0, 0.0, 0.0), (0.0, 0.18, 0.0)], [1.55, 1.32, 0.92], segs=18, mat_idx=5)
     for p_idx in range(8):
         pa = (p_idx * math.pi * 2.0) / 8.0
         px_d, pz_d = math.cos(pa), math.sin(pa)
@@ -715,11 +843,15 @@ def build_core_reactor_props():
             [(px_d * 0.42, 0.08, pz_d * 0.42), (px_d * 0.95, 0.38, pz_d * 0.95), (px_d * 1.28, 0.82, pz_d * 1.28)],
             [(0.18, 0.05), (0.24, 0.06), (0.04, 0.02)],
             segs=8,
-            mat_idx=4 if p_idx % 2 == 0 else 1,
+            mat_idx=5 if p_idx % 2 == 0 else 1,
         )
-    # Central glowing Harmonic Water Seed orb
-    add_ellipsoid(bm_a, (0.0, 0.58, 0.0), (0.34, 0.46, 0.34), u_segs=14, v_segs=10, mat_idx=3)
-    finalize_mesh_obj("seed_anchor_body", bm_a, [mat_titanium, mat_bronze, mat_siphon_crystal, mat_aqua_glow, mat_pearl], parent=anc_grp)
+    add_ellipsoid(bm_a, (0.0, 0.58, 0.0), (0.34, 0.46, 0.34), u_segs=14, v_segs=10, mat_idx=4)
+    finalize_mesh_obj(
+        "seed_anchor_body",
+        bm_a,
+        [mat_verdigris, mat_bronze, mat_copper, mat_siphon_crystal, mat_aqua_glow, mat_pearl],
+        parent=anc_grp,
+    )
 
     return export_glb_and_inspect(os.path.join(OUT_MODELS_DIR, "core_reactor_props.glb"), export_apply=False)
 
@@ -1053,17 +1185,668 @@ def build_aqueduct_sanctum_props():
     return export_glb_and_inspect(os.path.join(OUT_MODELS_DIR, "puzzle_props.glb"), export_apply=False)
 
 
+def create_pelagian_hull_maps(size=256):
+    """Riveted weathered marine-teal & bronze Pelagian submarine hull plate albedo + normal maps."""
+    alb = bpy.data.images.new("PelagianHull_Albedo", width=size, height=size, alpha=False)
+    nrm = bpy.data.images.new("PelagianHull_Normal", width=size, height=size, alpha=False)
+    nrm.colorspace_settings.name = "Non-Color"
+    apx = [0.0] * (size * size * 4)
+    npx = [0.0] * (size * size * 4)
+    hmap = [0.0] * (size * size)
+
+    c_teal_hi = hex_srgb("#1d9aa8")
+    c_teal_mid = hex_srgb("#0f6b7d")
+    c_teal_lo = hex_srgb("#0a4656")
+    c_patina = hex_srgb("#2cb5a6")
+    c_seam = hex_srgb("#062630")
+    c_rivet = hex_srgb("#d4a24e")
+
+    cols_u, rows_v = 4, 4
+    for y in range(size):
+        v = y / float(size)
+        fv = (v * rows_v) % 1.0
+        rv = int(v * rows_v)
+        for x in range(size):
+            u = x / float(size)
+            u_shift = (u + (0.125 if (rv % 2 == 1) else 0.0)) % 1.0
+            fu = (u_shift * cols_u) % 1.0
+            cu = int(u_shift * cols_u)
+
+            n_base = _fbm(u * 6.0, v * 6.0)
+            panel_tint = (_hash2(cu + 3, rv + 11) - 0.5) * 0.16
+            col = lerp3(c_teal_lo, c_teal_hi, clamp01(0.45 + n_base * 0.55 + panel_tint))
+            if n_base > 0.62:
+                col = lerp3(col, c_patina, (n_base - 0.62) * 0.85)
+            h = n_base * 0.22 + panel_tint * 0.3
+
+            # Recessed hull plate seam groove
+            edge_u = min(fu, 1.0 - fu)
+            edge_v = min(fv, 1.0 - fv)
+            edge_d = min(edge_u, edge_v)
+            if edge_d < 0.045:
+                st = 1.0 - edge_d / 0.045
+                col = lerp3(col, c_seam, st * 0.78)
+                h -= st * 0.65
+            elif edge_d < 0.075:
+                # Subtle bevel highlight along plate edge
+                col = lerp3(col, c_patina, 0.22)
+                h += 0.14
+
+            # Raised brass rivets near panel borders
+            riv_u = (fu * 4.0) % 1.0 - 0.5
+            riv_v = (fv * 4.0) % 1.0 - 0.5
+            near_border = (0.07 < edge_u < 0.17) or (0.07 < edge_v < 0.17)
+            if near_border:
+                rd = math.hypot(riv_u, riv_v)
+                if rd < 0.22:
+                    rt = 1.0 - rd / 0.22
+                    col = lerp3(col, c_rivet, rt * 0.68)
+                    h += rt * 0.58
+
+            hmap[y * size + x] = h
+            idx = (y * size + x) * 4
+            apx[idx], apx[idx + 1], apx[idx + 2], apx[idx + 3] = col[0], col[1], col[2], 1.0
+
+    for y in range(size):
+        ym, yp = (y - 1) % size, (y + 1) % size
+        for x in range(size):
+            xm, xp = (x - 1) % size, (x + 1) % size
+            dx = (hmap[y * size + xp] - hmap[y * size + xm]) * 1.15
+            dy = (hmap[yp * size + x] - hmap[ym * size + x]) * 1.15
+            nx, ny = -dx, -dy
+            inv = 1.0 / math.sqrt(nx * nx + ny * ny + 1.0)
+            idx = (y * size + x) * 4
+            npx[idx], npx[idx + 1], npx[idx + 2], npx[idx + 3] = (
+                0.5 + 0.5 * nx * inv,
+                0.5 + 0.5 * ny * inv,
+                0.5 + 0.5 * inv,
+                1.0,
+            )
+
+    alb.pixels = apx
+    nrm.pixels = npx
+    alb.pack()
+    nrm.pack()
+    return alb, nrm
+
+
+def create_tropical_fish_maps(size=128, variant="angelfish"):
+    """Hand-painted vibrant banded tropical coral-reef fish albedo + scale normal maps."""
+    alb = bpy.data.images.new(f"ReefFish_{variant}_Albedo", width=size, height=size, alpha=False)
+    nrm = bpy.data.images.new(f"ReefFish_{variant}_Normal", width=size, height=size, alpha=False)
+    nrm.colorspace_settings.name = "Non-Color"
+    apx = [0.0] * (size * size * 4)
+    npx = [0.0] * (size * size * 4)
+    hmap = [0.0] * (size * size)
+
+    if variant == "angelfish":
+        # Royal Emperor / Regal Angelfish: golden-saffron + deep cobalt-indigo + electric turquoise bands
+        c_gold = hex_srgb("#fcd34d")
+        c_amber = hex_srgb("#f97316")
+        c_cobalt = hex_srgb("#1d4ed8")
+        c_aqua = hex_srgb("#22d3ee")
+        c_white = hex_srgb("#fef9c3")
+        eye_u, eye_v, eye_r = 0.77, 0.56, 0.055
+    else:
+        # Sunset Coral Reef Wrasse: luminous coral-tangerine + emerald-teal + sunshine-yellow stripes
+        c_gold = hex_srgb("#fb7185")
+        c_amber = hex_srgb("#fb923c")
+        c_cobalt = hex_srgb("#0d9488")
+        c_aqua = hex_srgb("#5efce8")
+        c_white = hex_srgb("#fde047")
+        eye_u, eye_v, eye_r = 0.80, 0.57, 0.052
+
+    c_pupil = hex_srgb("#090d16")
+    c_iris = hex_srgb("#fef08a")
+
+    for y in range(size):
+        v = y / float(size)
+        for x in range(size):
+            u = x / float(size)
+            # Subtle overlapping fish scale relief
+            su = (u * 22.0) % 1.0 - 0.5
+            sv = (v * 14.0 + (0.5 if int(u * 22.0) % 2 else 0.0)) % 1.0 - 0.5
+            scale_h = max(0.0, 0.42 - math.hypot(su, sv)) * 0.45
+
+            if variant == "angelfish":
+                # Curved vertical regal bands
+                wave = u * 3.4 - math.sin((v - 0.5) * 3.2) * 0.22
+                stripe = math.sin(wave * math.pi * 2.0)
+                if u < 0.24:
+                    # Translucent golden-orange crescent tail fin
+                    col = lerp3(c_amber, c_gold, clamp01((v - 0.2) * 1.5))
+                elif v > 0.74 or v < 0.26:
+                    # Sweeping dorsal & anal fins with electric aqua margin
+                    edge_f = min(abs(v - 0.96), abs(v - 0.04))
+                    col = lerp3(c_cobalt, c_aqua, smoothstep(0.0, 0.14, 0.18 - edge_f))
+                    col = lerp3(col, c_gold, 0.35 * clamp01(stripe))
+                else:
+                    # Bold tropical stripes on body
+                    if stripe > 0.25:
+                        col = lerp3(c_gold, c_amber, clamp01(1.0 - v))
+                    elif stripe > -0.15:
+                        col = lerp3(c_aqua, c_white, 0.45)
+                    else:
+                        col = lerp3(c_cobalt, c_aqua, 0.22 * v)
+                # Golden face mask
+                if u > 0.72:
+                    col = lerp3(col, c_gold, smoothstep(0.72, 0.86, u))
+            else:
+                # Diagonal sunset wrasse stripes + teal head
+                diag = u * 3.2 + (v - 0.5) * 1.65
+                band = math.sin(diag * math.pi * 2.0)
+                if u < 0.22:
+                    col = lerp3(c_white, c_amber, smoothstep(0.05, 0.22, u))
+                elif u > 0.70:
+                    col = lerp3(c_cobalt, c_aqua, smoothstep(0.35, 0.85, v))
+                else:
+                    if band > 0.15:
+                        col = lerp3(c_amber, c_gold, clamp01(v))
+                    elif band > -0.25:
+                        col = lerp3(c_white, c_gold, 0.45)
+                    else:
+                        col = lerp3(c_cobalt, c_aqua, 0.35 + 0.35 * v)
+                # Shimmering dorsal crest highlight
+                if v > 0.72:
+                    col = lerp3(col, c_white, smoothstep(0.72, 0.92, v) * 0.7)
+
+            # Crisp golden eye + glossy dark pupil + white catchlight
+            ed = math.hypot((u - eye_u) * 1.0, (v - eye_v) * 1.15)
+            if ed < eye_r:
+                if ed < eye_r * 0.55:
+                    col = c_pupil
+                    if math.hypot(u - (eye_u + 0.012), v - (eye_v + 0.014)) < eye_r * 0.18:
+                        col = (1.0, 1.0, 1.0)
+                else:
+                    col = c_iris
+                scale_h += 0.35
+
+            # Belly brightening & scale shimmer
+            col = lerp3(col, (min(1.0, col[0] + 0.12), min(1.0, col[1] + 0.12), min(1.0, col[2] + 0.12)), scale_h * 0.8)
+            hmap[y * size + x] = scale_h
+            idx = (y * size + x) * 4
+            apx[idx], apx[idx + 1], apx[idx + 2], apx[idx + 3] = col[0], col[1], col[2], 1.0
+
+    for y in range(size):
+        ym, yp = (y - 1) % size, (y + 1) % size
+        for x in range(size):
+            xm, xp = (x - 1) % size, (x + 1) % size
+            dx = (hmap[y * size + xp] - hmap[y * size + xm]) * 0.85
+            dy = (hmap[yp * size + x] - hmap[ym * size + x]) * 0.85
+            nx, ny = -dx, -dy
+            inv = 1.0 / math.sqrt(nx * nx + ny * ny + 1.0)
+            idx = (y * size + x) * 4
+            npx[idx], npx[idx + 1], npx[idx + 2], npx[idx + 3] = (
+                0.5 + 0.5 * nx * inv,
+                0.5 + 0.5 * ny * inv,
+                0.5 + 0.5 * inv,
+                1.0,
+            )
+
+    alb.pixels = apx
+    nrm.pixels = npx
+    alb.pack()
+    nrm.pack()
+    return alb, nrm
+
+
+def _build_reef_angelfish_obj(mat_angel):
+    """Sculpted organic deep-bodied tropical Emperor Angelfish (`+X` forward, planar-XY UV mapped)."""
+    bm = bmesh.new()
+    # Streamlined deep disc body lofted from tail peduncle (-0.28) to sculpted snout (+0.34)
+    # `(x, y_center, half_height_y, half_thick_z)`
+    stations = [
+        (-0.26, 0.00, 0.048, 0.020),
+        (-0.18, 0.01, 0.145, 0.044),
+        (-0.07, 0.015, 0.225, 0.068),
+        (0.05, 0.015, 0.245, 0.078),
+        (0.16, 0.005, 0.195, 0.068),
+        (0.25, -0.01, 0.115, 0.048),
+        (0.32, -0.02, 0.042, 0.022),
+    ]
+    rings = []
+    segs = 12
+    for sx, syc, hy, hz in stations:
+        ring = []
+        for s in range(segs):
+            a = (2.0 * math.pi * s) / segs
+            ring.append((sx, syc + math.sin(a) * hy, math.cos(a) * hz))
+        rings.append(ring)
+    add_loft_rings(bm, rings, closed=True, cap_start=True, cap_end=True, mat_idx=0)
+
+    # Sweeping trailing curved dorsal fin (top)
+    dorsal_pts = [
+        (0.08, 0.21, 0.0),
+        (-0.04, 0.30, 0.0),
+        (-0.20, 0.35, 0.0),
+        (-0.34, 0.31, 0.0),
+    ]
+    add_swept_curve(bm, dorsal_pts, [(0.016, 0.085), (0.013, 0.095), (0.010, 0.065), (0.005, 0.018)], segs=6, mat_idx=0)
+
+    # Sweeping trailing anal fin (bottom)
+    anal_pts = [
+        (0.04, -0.20, 0.0),
+        (-0.08, -0.28, 0.0),
+        (-0.22, -0.32, 0.0),
+        (-0.33, -0.28, 0.0),
+    ]
+    add_swept_curve(bm, anal_pts, [(0.015, 0.078), (0.012, 0.085), (0.009, 0.058), (0.005, 0.016)], segs=6, mat_idx=0)
+
+    # Forked crescent caudal tail fin (upper & lower lobes)
+    add_swept_curve(bm, [(-0.24, 0.01, 0.0), (-0.36, 0.11, 0.0), (-0.46, 0.18, 0.0)], [(0.014, 0.052), (0.010, 0.048), (0.005, 0.014)], segs=6, mat_idx=0)
+    add_swept_curve(bm, [(-0.24, -0.01, 0.0), (-0.36, -0.11, 0.0), (-0.46, -0.18, 0.0)], [(0.014, 0.052), (0.010, 0.048), (0.005, 0.014)], segs=6, mat_idx=0)
+
+    # Paired delicate pectoral side fins
+    for sz in (-1.0, 1.0):
+        add_swept_curve(
+            bm,
+            [(0.12, -0.05, sz * 0.062), (0.04, -0.09, sz * 0.135), (-0.05, -0.12, sz * 0.175)],
+            [(0.012, 0.042), (0.008, 0.048), (0.004, 0.018)],
+            segs=6,
+            mat_idx=0,
+        )
+
+    return finalize_mesh_obj("reef_angelfish", bm, [mat_angel], pos=(0.0, 0.0, 0.0), subdiv_levels=1, uv_mode="planar_xy")
+
+
+def _build_reef_wrasse_obj(mat_wrasse):
+    """Sculpted organic sleek Sunset Coral Reef Wrasse (`+X` forward, planar-XY UV mapped)."""
+    bm = bmesh.new()
+    stations = [
+        (-0.30, 0.00, 0.036, 0.018),
+        (-0.18, 0.005, 0.095, 0.044),
+        (-0.04, 0.01, 0.138, 0.066),
+        (0.10, 0.01, 0.142, 0.072),
+        (0.22, 0.005, 0.108, 0.056),
+        (0.32, -0.005, 0.055, 0.032),
+        (0.38, -0.01, 0.020, 0.014),
+    ]
+    rings = []
+    segs = 12
+    for sx, syc, hy, hz in stations:
+        ring = []
+        for s in range(segs):
+            a = (2.0 * math.pi * s) / segs
+            ring.append((sx, syc + math.sin(a) * hy, math.cos(a) * hz))
+        rings.append(ring)
+    add_loft_rings(bm, rings, closed=True, cap_start=True, cap_end=True, mat_idx=0)
+
+    # Continuous graceful scalloped dorsal crest fin
+    add_swept_curve(
+        bm,
+        [(0.18, 0.12, 0.0), (0.04, 0.18, 0.0), (-0.12, 0.17, 0.0), (-0.25, 0.10, 0.0)],
+        [(0.012, 0.048), (0.010, 0.055), (0.009, 0.048), (0.005, 0.020)],
+        segs=6,
+        mat_idx=0,
+    )
+    # Ventral fin
+    add_swept_curve(
+        bm,
+        [(0.06, -0.12, 0.0), (-0.08, -0.16, 0.0), (-0.22, -0.10, 0.0)],
+        [(0.011, 0.042), (0.009, 0.045), (0.005, 0.018)],
+        segs=6,
+        mat_idx=0,
+    )
+    # Flowing fan tail fin
+    add_swept_curve(bm, [(-0.28, 0.0, 0.0), (-0.41, 0.075, 0.0), (-0.50, 0.12, 0.0)], [(0.012, 0.048), (0.009, 0.055), (0.004, 0.024)], segs=6, mat_idx=0)
+    add_swept_curve(bm, [(-0.28, 0.0, 0.0), (-0.41, -0.075, 0.0), (-0.50, -0.12, 0.0)], [(0.012, 0.048), (0.009, 0.055), (0.004, 0.024)], segs=6, mat_idx=0)
+
+    # Paired pectoral fins
+    for sz in (-1.0, 1.0):
+        add_swept_curve(
+            bm,
+            [(0.14, -0.03, sz * 0.062), (0.04, -0.06, sz * 0.145), (-0.06, -0.07, sz * 0.175)],
+            [(0.011, 0.038), (0.008, 0.042), (0.004, 0.016)],
+            segs=6,
+            mat_idx=0,
+        )
+
+    return finalize_mesh_obj("reef_wrasse", bm, [mat_wrasse], pos=(0.0, 0.0, 0.0), subdiv_levels=0, uv_mode="planar_xy")
+
+
+def build_pelagian_sub():
+    """
+    `assets/models/pelagian_sub.glb` — AAA Pixar/Ghibli Pelagian Nautilus Bio-Submersible (`+X` forward)
+    PLUS 2 sculpted organic banded tropical reef fish meshes (`reef_angelfish`, `reef_wrasse`):
+      - `sub_hull`: Riveted weathered marine-teal paneled hull, 3 warm glowing amber brass portholes per flank,
+                    riveted bronze structural bands, armored keel spine, twin copper hydro-pods & bow sonar lens!
+      - `sub_canopy`: Translucent crystal sea-glass bubble canopy with slender arched bronze ribs
+      - `sub_fin_L` & `sub_fin_R`: Swept bronze-and-seaglass hydrofoil dive wings
+      - `sub_propeller`: 4-blade beveled brass stern hydro-propeller
+      - `reef_angelfish` & `reef_wrasse`: Detached by `subRenderer.js` into single-draw-call `InstancedMesh` shoals!
+    """
+    reset_scene()
+    hull_alb, hull_nrm = create_pelagian_hull_maps(256)
+    _alb, metal_nrm = create_siphon_metal_maps(128)
+    angel_alb, angel_nrm = create_tropical_fish_maps(128, "angelfish")
+    wrasse_alb, wrasse_nrm = create_tropical_fish_maps(128, "wrasse")
+
+    mat_enamel = make_mat(
+        "mat_sub_enamel",
+        "#ffffff",
+        roughness=0.28,
+        metallic=0.42,
+        coat=0.65,
+        albedo_img=hull_alb,
+        normal_img=hull_nrm,
+        normal_strength=0.65,
+    )
+    mat_brass = make_mat("mat_sub_brass", "#dfa042", roughness=0.24, metallic=0.88, coat=0.35, normal_img=metal_nrm, normal_strength=0.35)
+    mat_copper = make_mat("mat_sub_copper", "#bf6534", roughness=0.30, metallic=0.86, coat=0.25, normal_img=metal_nrm, normal_strength=0.38)
+    mat_aqua_glow = make_mat("mat_sub_glow", "#5efce8", roughness=0.08, emission_hex="#22d3ee", emission_strength=1.95)
+    mat_amber_port = make_mat("mat_sub_porthole", "#ffedd5", roughness=0.08, coat=1.0, emission_hex="#f59e0b", emission_strength=2.35)
+    mat_glass = make_mat("mat_sub_canopy", "#d8f8ff", roughness=0.06, metallic=0.08, coat=1.0, emission_hex="#38bdf8", emission_strength=0.18, alpha=0.30)
+
+    mat_angelfish = make_mat("mat_reef_angelfish", "#ffffff", roughness=0.26, metallic=0.22, coat=0.55, albedo_img=angel_alb, normal_img=angel_nrm, normal_strength=0.45)
+    mat_wrasse = make_mat("mat_reef_wrasse", "#ffffff", roughness=0.26, metallic=0.22, coat=0.55, albedo_img=wrasse_alb, normal_img=wrasse_nrm, normal_strength=0.45)
+
+    root = make_empty_node("PelagianSubRoot", (0.0, 0.0, 0.0))
+
+    # 1. `sub_hull`: Sleek curved hydrodynamic Pelagian Nautilus fuselage + bronze ribs + warm amber portholes
+    bm = bmesh.new()
+    hull_pts = [
+        (-1.24, -0.02, 0.0),
+        (-0.96, -0.06, 0.0),
+        (-0.56, -0.14, 0.0),
+        (-0.08, -0.19, 0.0),
+        (0.42, -0.17, 0.0),
+        (0.84, -0.10, 0.0),
+        (1.10, -0.02, 0.0),
+    ]
+    hull_rads = [
+        (0.14, 0.13),
+        (0.28, 0.22),
+        (0.42, 0.30),
+        (0.49, 0.33),
+        (0.46, 0.31),
+        (0.32, 0.23),
+        (0.14, 0.14),
+    ]
+    add_swept_curve(bm, hull_pts, hull_rads, segs=18, mat_idx=0)
+
+    # Sculpted riveted bronze keel spine hugging underside + 3 flush circumferential hull ribs
+    keel_pts = [(-0.88, -0.26, 0.0), (-0.32, -0.44, 0.0), (0.36, -0.43, 0.0), (0.82, -0.28, 0.0)]
+    add_swept_curve(bm, keel_pts, [(0.04, 0.055), (0.06, 0.075), (0.06, 0.072), (0.035, 0.05)], segs=8, mat_idx=1)
+
+    for rx_band, ry_c, ry_r, rz_r in (
+        (-0.62, -0.13, 0.30, 0.42),
+        (-0.12, -0.19, 0.34, 0.50),
+        (0.46, -0.16, 0.31, 0.46),
+    ):
+        band_pts = [
+            (rx_band, ry_c + math.cos((k / 18.0) * math.pi * 2.0) * ry_r, math.sin((k / 18.0) * math.pi * 2.0) * rz_r)
+            for k in range(19)
+        ]
+        add_swept_curve(bm, band_pts, 0.024, segs=6, up_t3=(1.0, 0.0, 0.0), mat_idx=1)
+
+    # 3 Warm Glowing Amber Brass Portholes flush on BOTH outer flanks (`z = ±0.46..0.50`)!
+    for sz in (-1.0, 1.0):
+        for px_p, py_p, pz_p, pr_p in (
+            (-0.38, -0.12, sz * 0.44, 0.088),
+            (0.08, -0.14, sz * 0.49, 0.098),
+            (0.54, -0.11, sz * 0.42, 0.084),
+        ):
+            p_ring = [
+                (px_p + math.cos((k / 12.0) * math.pi * 2.0) * pr_p, py_p + math.sin((k / 12.0) * math.pi * 2.0) * pr_p, pz_p)
+                for k in range(13)
+            ]
+            add_swept_curve(bm, p_ring, 0.024, segs=6, up_t3=(0.0, 0.0, sz), mat_idx=1)
+            add_ellipsoid(bm, (px_p, py_p, pz_p + sz * 0.014), (pr_p * 0.84, pr_p * 0.84, 0.036), u_segs=10, v_segs=6, mat_idx=4)
+
+    # Riveted brass cockpit coaming collar framing the translucent dome
+    collar_pts = [
+        (0.10 + math.cos((k / 20.0) * math.pi * 2.0) * 0.56, 0.05, math.sin((k / 20.0) * math.pi * 2.0) * 0.44)
+        for k in range(21)
+    ]
+    add_swept_curve(bm, collar_pts, 0.055, segs=8, up_t3=(0.0, 1.0, 0.0), mat_idx=1)
+
+    # Sculpted nose sonar headlamp ring + glowing cyan sonar crystal lens at +X bow
+    nose_ring = [
+        (1.06, -0.02 + math.cos((k / 14.0) * math.pi * 2.0) * 0.19, math.sin((k / 14.0) * math.pi * 2.0) * 0.19)
+        for k in range(15)
+    ]
+    add_swept_curve(bm, nose_ring, 0.044, segs=7, up_t3=(1.0, 0.0, 0.0), mat_idx=1)
+    add_ellipsoid(bm, (1.11, -0.02, 0.0), (0.08, 0.16, 0.16), u_segs=12, v_segs=8, mat_idx=3)
+
+    # Twin lateral sculpted copper & bronze hydro-ballast pontoons (`z = ±0.46`)
+    for sz in (-1.0, 1.0):
+        pod_pts = [(-0.76, -0.26, sz * 0.42), (-0.22, -0.29, sz * 0.46), (0.36, -0.26, sz * 0.44), (0.72, -0.20, sz * 0.34)]
+        pod_rads = [(0.05, 0.05), (0.12, 0.10), (0.11, 0.095), (0.045, 0.045)]
+        add_swept_curve(bm, pod_pts, pod_rads, segs=10, mat_idx=2)
+        glow_pts = [(-0.50, -0.25, sz * 0.53), (0.06, -0.26, sz * 0.56), (0.48, -0.23, sz * 0.50)]
+        add_swept_curve(bm, glow_pts, 0.022, segs=6, mat_idx=3)
+
+    # Swept curved hydrodynamic dorsal & ventral stabilizer hydrofoils (sleek organic curve, zero blocky wedges!)
+    add_swept_curve(
+        bm,
+        [(-0.54, 0.14, 0.0), (-0.74, 0.28, 0.0), (-0.98, 0.36, 0.0), (-1.18, 0.38, 0.0)],
+        [(0.028, 0.11), (0.022, 0.10), (0.015, 0.07), (0.008, 0.025)],
+        segs=8,
+        mat_idx=1,
+    )
+    add_swept_curve(
+        bm,
+        [(-0.50, -0.32, 0.0), (-0.76, -0.40, 0.0), (-1.04, -0.41, 0.0)],
+        [(0.024, 0.085), (0.018, 0.075), (0.009, 0.025)],
+        segs=8,
+        mat_idx=2,
+    )
+    # Compact rear brass periscope / acoustic snorkel behind the canopy
+    add_swept_curve(
+        bm,
+        [(-0.46, 0.14, 0.0), (-0.48, 0.44, 0.0), (-0.36, 0.48, 0.0)],
+        [0.038, 0.032, 0.042],
+        segs=8,
+        mat_idx=1,
+    )
+    add_ellipsoid(bm, (-0.33, 0.48, 0.0), (0.028, 0.032, 0.032), u_segs=8, v_segs=6, mat_idx=3)
+
+    shroud_pts = [
+        (-1.30, -0.02 + math.cos((k / 16.0) * math.pi * 2.0) * 0.27, math.sin((k / 16.0) * math.pi * 2.0) * 0.27)
+        for k in range(17)
+    ]
+    add_swept_curve(bm, shroud_pts, 0.046, segs=7, up_t3=(1.0, 0.0, 0.0), mat_idx=1)
+    finalize_mesh_obj(
+        "sub_hull",
+        bm,
+        [mat_enamel, mat_brass, mat_copper, mat_aqua_glow, mat_amber_port],
+        parent=root,
+        uv_scale=2.0,
+        uv_mode="hull",
+    )
+
+    # 2. `sub_canopy`: Translucent sea-glass bubble dome over cockpit + 2 slender bronze meridian ribs
+    bm_c = bmesh.new()
+    add_ellipsoid(bm_c, (0.10, 0.06, 0.0), (0.55, 0.48, 0.43), u_segs=18, v_segs=12, mat_idx=0, hemi_top_only=True)
+    rib_pts = [
+        (0.10 + math.cos(a) * 0.56, 0.06 + math.sin(a) * 0.49, 0.0)
+        for a in [math.pi * (k / 10.0) for k in range(11)]
+    ]
+    add_swept_curve(bm_c, rib_pts, 0.024, segs=6, up_t3=(0.0, 0.0, 1.0), mat_idx=1)
+    # Subtle rear canopy arch rib (keeps front/side view of Gateway crystal clear!)
+    rear_rib = [
+        (0.10 - 0.26 * math.sin(a), 0.06 + math.sin(a) * 0.44, math.cos(a) * 0.43)
+        for a in [math.pi * (k / 10.0) for k in range(11)]
+    ]
+    add_swept_curve(bm_c, rear_rib, 0.018, segs=6, up_t3=(1.0, 0.0, 0.0), mat_idx=1)
+    finalize_mesh_obj("sub_canopy", bm_c, [mat_glass, mat_brass], parent=root)
+
+    # 3. `sub_fin_L` & `sub_fin_R`: Articulated curved bronze-and-seaglass side hydro-fins
+    for side, sz in (("L", -1.0), ("R", 1.0)):
+        bm_f = bmesh.new()
+        add_swept_curve(
+            bm_f,
+            [(0.0, 0.0, 0.0), (-0.06, -0.02, sz * 0.26), (-0.22, -0.04, sz * 0.54), (-0.38, -0.04, sz * 0.72)],
+            [(0.14, 0.032), (0.18, 0.028), (0.13, 0.022), (0.04, 0.012)],
+            segs=8,
+            mat_idx=0,
+        )
+        add_swept_curve(
+            bm_f,
+            [(0.08, 0.0, sz * 0.06), (0.02, -0.01, sz * 0.34), (-0.14, -0.03, sz * 0.60)],
+            0.018,
+            segs=6,
+            mat_idx=1,
+        )
+        finalize_mesh_obj(f"sub_fin_{side}", bm_f, [mat_brass, mat_aqua_glow], pos=(0.08, -0.18, sz * 0.44), parent=root)
+
+    # 4. `sub_propeller`: 4-blade brass stern hydro-propeller (`pos = (-1.28, -0.02, 0.0)`)
+    bm_p = bmesh.new()
+    add_swept_curve(bm_p, [(-0.08, 0.0, 0.0), (0.10, 0.0, 0.0)], [0.04, 0.09], segs=10, mat_idx=0)
+    for b_idx in range(4):
+        ang = (b_idx * math.pi * 2.0) / 4.0
+        cy, cz = math.cos(ang), math.sin(ang)
+        add_bevel_box(
+            bm_p,
+            (0.0, cy * 0.14, cz * 0.14),
+            (0.028, 0.18, 0.085),
+            bevel=0.006,
+            rot_t3=(ang, 0.45 * cy, 0.45 * cz),
+            mat_idx=0,
+        )
+    finalize_mesh_obj("sub_propeller", bm_p, [mat_brass], pos=(-1.28, -0.02, 0.0), parent=root)
+
+    # 5. Embedded organic sculpted tropical reef fish (`reef_angelfish` & `reef_wrasse`)
+    _build_reef_angelfish_obj(mat_angelfish)
+    _build_reef_wrasse_obj(mat_wrasse)
+
+    # 6. REAL 3D Sculpted Coral Reef Formations (ZERO flat 2D cardboard sticker billboards!)
+    coral_nrm = create_travertine_stone_normal(128)
+    mat_staghorn = make_mat("mat_coral_staghorn", "#f472b6", roughness=0.58, emission_hex="#fb7185", emission_strength=0.14, normal_img=coral_nrm, normal_strength=0.55)
+    mat_table = make_mat("mat_coral_table", "#2dd4bf", roughness=0.52, emission_hex="#14b8a6", emission_strength=0.14, normal_img=coral_nrm, normal_strength=0.50)
+    mat_sponge = make_mat("mat_coral_sponge", "#fb923c", roughness=0.62, emission_hex="#f59e0b", emission_strength=0.16, normal_img=coral_nrm, normal_strength=0.60)
+    mat_manta = make_mat("mat_reef_manta", "#2b6f96", roughness=0.28, metallic=0.16, coat=0.65, emission_hex="#14809c", emission_strength=0.22)
+
+    # 6a. `reef_staghorn`: Multi-branching 3D staghorn antler coral cluster
+    bm_st = bmesh.new()
+    add_ellipsoid(bm_st, (0.0, 0.08, 0.0), (0.42, 0.16, 0.38), u_segs=10, v_segs=6, mat_idx=0)
+    branches = [
+        (0.0, 0.0, 0.08, 0.95, 0.05),
+        (0.45, 0.3, 0.34, 0.85, 0.16),
+        (1.35, -0.2, 0.42, 0.78, 0.22),
+        (2.25, 0.25, -0.32, 0.88, 0.28),
+        (3.15, -0.3, -0.44, 0.76, -0.18),
+        (4.10, 0.15, -0.22, 0.82, -0.34),
+        (5.25, -0.1, 0.28, 0.74, -0.28),
+    ]
+    for ang, bend_z, tip_x, h_br, tip_z in branches:
+        bx0, bz0 = math.cos(ang) * 0.14, math.sin(ang) * 0.14
+        bx1, bz1 = bx0 + tip_x * 0.52, bz0 + tip_z * 0.52
+        bx2, bz2 = bx0 + tip_x, bz0 + tip_z
+        add_swept_curve(
+            bm_st,
+            [(bx0, 0.05, bz0), (bx1, h_br * 0.52, bz1), (bx2, h_br, bz2)],
+            [0.095, 0.068, 0.032],
+            segs=7,
+            mat_idx=0,
+        )
+        # Secondary antler fork sprouting off mid-branch
+        fk_x = bx1 + math.cos(ang + 0.85) * 0.28
+        fk_z = bz1 + math.sin(ang + 0.85) * 0.28
+        add_swept_curve(
+            bm_st,
+            [(bx1, h_br * 0.48, bz1), ((bx1 + fk_x) * 0.5, h_br * 0.74, (bz1 + fk_z) * 0.5), (fk_x, h_br * 0.92, fk_z)],
+            [0.062, 0.044, 0.024],
+            segs=6,
+            mat_idx=0,
+        )
+    finalize_mesh_obj("reef_staghorn", bm_st, [mat_staghorn], pos=(0.0, 0.0, 0.0))
+
+    # 6b. `reef_table_coral`: Tiered organic sea-mushroom / table coral colony with ruffled undulating rims
+    bm_tb = bmesh.new()
+    tiers = [
+        (0.0, 0.0, 0.0, 0.48, 0.56),
+        (0.26, 0.14, 0.16, 0.72, 0.44),
+        (-0.24, 0.22, -0.14, 0.34, 0.36),
+    ]
+    for tx, tz, ty0, h_t, rad_t in tiers:
+        add_swept_curve(bm_tb, [(tx, ty0, tz), (tx * 0.9, ty0 + h_t * 0.55, tz * 0.9), (tx, ty0 + h_t, tz)], [0.14, 0.11, 0.16], segs=8, mat_idx=0)
+        plate_rings = []
+        for ir, (frac, y_off) in enumerate(((0.18, -0.05), (0.62, 0.02), (1.00, 0.06), (0.96, 0.11), (0.48, 0.10))):
+            ring = []
+            for k in range(14):
+                ka = (k / 14.0) * math.pi * 2.0
+                ruffle = 1.0 + 0.14 * math.sin(ka * 5.0 + ir * 0.8) + 0.08 * math.cos(ka * 3.0)
+                ry_wave = 0.045 * math.sin(ka * 4.0) * frac
+                ring.append((tx + math.cos(ka) * rad_t * frac * ruffle, ty0 + h_t + y_off + ry_wave, tz + math.sin(ka) * rad_t * frac * ruffle))
+            plate_rings.append(ring)
+        add_loft_rings(bm_tb, plate_rings, closed=True, cap_start=True, cap_end=True, mat_idx=0)
+    finalize_mesh_obj("reef_table_coral", bm_tb, [mat_table], pos=(0.0, 0.0, 0.0))
+
+    # 6c. `reef_tube_sponge`: Clustered 3D fluted tube-sponges + ridged brain-coral boulder base
+    bm_sp = bmesh.new()
+    # Ridged brain-coral mound at base
+    add_ellipsoid(bm_sp, (0.0, 0.20, 0.0), (0.48, 0.28, 0.44), u_segs=14, v_segs=8, mat_idx=0)
+    tubes = [
+        (0.02, 0.02, 0.04, 0.96, 0.13),
+        (0.24, 0.14, 0.16, 0.72, 0.105),
+        (-0.22, 0.16, -0.10, 0.68, 0.10),
+        (-0.14, -0.20, 0.18, 0.56, 0.095),
+        (0.20, -0.18, -0.16, 0.52, 0.09),
+    ]
+    for ox, oz, lean_x, h_sp, r_sp in tubes:
+        add_swept_curve(
+            bm_sp,
+            [(ox, 0.12, oz), (ox + lean_x * 0.45, h_sp * 0.52, oz * 1.08), (ox + lean_x, h_sp, oz * 1.15), (ox + lean_x * 1.02, h_sp + 0.04, oz * 1.16)],
+            [r_sp * 0.82, r_sp * 1.05, r_sp * 0.92, r_sp * 0.58],
+            segs=9,
+            mat_idx=0,
+        )
+    finalize_mesh_obj("reef_tube_sponge", bm_sp, [mat_sponge], pos=(0.0, 0.0, 0.0))
+
+    # 6d. `reef_manta`: Graceful sculpted 3D Reef Manta Ray (`+X` forward, swept organic wings + whip tail!)
+    bm_m = bmesh.new()
+    manta_stations = [
+        (-0.42, 0.0, 0.025, 0.045),
+        (-0.22, 0.0, 0.048, 0.16),
+        (0.02, 0.01, 0.075, 0.34),
+        (0.24, 0.005, 0.068, 0.26),
+        (0.42, -0.005, 0.038, 0.13),
+    ]
+    m_rings = []
+    for sx, syc, hy, hz in manta_stations:
+        ring = [(sx, syc + math.sin((2.0 * math.pi * s) / 10.0) * hy, math.cos((2.0 * math.pi * s) / 10.0) * hz) for s in range(10)]
+        m_rings.append(ring)
+    add_loft_rings(bm_m, m_rings, closed=True, cap_start=True, cap_end=True, mat_idx=0)
+    # Graceful sweeping manta wings (`±Z`)
+    for sz in (-1.0, 1.0):
+        add_swept_curve(
+            bm_m,
+            [(0.08, 0.0, sz * 0.22), (0.04, 0.05, sz * 0.62), (-0.12, 0.08, sz * 1.08), (-0.34, 0.03, sz * 1.42)],
+            [(0.28, 0.048), (0.24, 0.036), (0.14, 0.022), (0.03, 0.009)],
+            segs=8,
+            mat_idx=0,
+        )
+        # Cephalic feeding lobes at snout
+        add_swept_curve(
+            bm_m,
+            [(0.34, -0.01, sz * 0.10), (0.50, -0.02, sz * 0.13), (0.60, -0.01, sz * 0.10)],
+            [(0.028, 0.035), (0.022, 0.028), (0.010, 0.012)],
+            segs=6,
+            mat_idx=0,
+        )
+    # Slender graceful whip tail
+    add_swept_curve(bm_m, [(-0.36, 0.0, 0.0), (-0.75, -0.03, 0.0), (-1.18, 0.02, 0.0)], [0.028, 0.015, 0.005], segs=6, mat_idx=0)
+    finalize_mesh_obj("reef_manta", bm_m, [mat_manta], pos=(0.0, 0.0, 0.0), subdiv_levels=1)
+
+    return export_glb_and_inspect(os.path.join(OUT_MODELS_DIR, "pelagian_sub.glb"), export_apply=False)
+
+
 def main():
+    import sys
+    argv = sys.argv
+    core_only = "--core-only" in argv
+    sub_and_core = "--sub-and-core" in argv
     report = {"assets": [], "removed_obsolete": []}
     report["assets"].append(build_core_reactor_props())
-    report["assets"].append(build_sea_turtle())
-    report["assets"].append(build_river_otter())
-    report["assets"].append(build_siphon_cage())
-    report["assets"].append(build_reef_fish_1())
-    report["assets"].append(build_reef_fish_2())
-    report["assets"].append(build_siphon_surge_mine())
-    report["assets"].append(build_reef_grotto_arch())
-    report["assets"].append(build_aqueduct_sanctum_props())
+    if sub_and_core:
+        report["assets"].append(build_pelagian_sub())
+    elif not core_only:
+        report["assets"].append(build_pelagian_sub())
+        report["assets"].append(build_sea_turtle())
+        report["assets"].append(build_river_otter())
+        report["assets"].append(build_siphon_cage())
+        report["assets"].append(build_aqueduct_sanctum_props())
 
     print(json.dumps(report, indent=2))
 

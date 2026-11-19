@@ -594,15 +594,22 @@ export class GatewayRig {
     this._prevYaw = 0.38;
     this._bankRoll = 0;
     this._stairOffset = 0;
+    this._pelvisBindY = 0.53;
     this._headLookYaw = 0;
     this._headLookPitch = 0;
     this._frillFlare = 0;
     this._castBlend = 0;
     this._recoil = 0;
     this._landTimer = 0;
+    this._landSquash = 0;
+    this._landSquashVel = 0;
+    this._skidBlend = 0;
+    this._skidDir = 1;
+    this._stairBobSmooth = 0;
     this._whipHoldTimer = 0;
     this._wasOnGround = true;
     this._lastVy = 0;
+    this._prevVx = 0;
 
     // 7-Bone 2nd-order spring-damped dynamic lizard tail state
     this._tailYawVel = 0;
@@ -941,6 +948,10 @@ export class GatewayRig {
     this._wireBoneAliasesAndAttachments(boneByName);
     this.bones.root = rigMotionRoot;
     this.bones.Root = boneByName.Root || rigMotionRoot;
+    if (boneByName.Pelvis) {
+      this._pelvisBindY = boneByName.Pelvis.position.y;
+    }
+    clonedScene.position.set(0, 0, 0);
 
     // Bind all 18 baked Blender NLA clips into `THREE.AnimationMixer`
     this.mixer = new THREE.AnimationMixer(clonedScene);
@@ -1117,14 +1128,57 @@ export class GatewayRig {
     const speed = Math.abs(vx);
     const speedNorm = THREE.MathUtils.clamp(speed / 4.8, 0, 1);
 
-    // Detect landing & takeoff transitions
-    if (!this._wasOnGround && onGround && this._lastVy < -1.6) {
-      this._landTimer = 0.24;
+    // Physical weight telemetry from 120Hz physics (`@physics_puzzles_lead`) + fallback inference
+    const extLandSquash = THREE.MathUtils.clamp(
+      Number(ps.landSquash ?? ps.landImpact) || 0,
+      0,
+      1.35
+    );
+    const extSkidTimer = Math.max(0, Number(ps.skidTimer) || 0);
+    const hasExtStairBob = ps.stairStepBob !== undefined && ps.stairStepBob !== null;
+    const extStairBob = Number(ps.stairStepBob) || 0;
+
+    // Detect heavy landing impact transitions (for impact crouch, knee bend, frill & tail whip!)
+    if (!this._wasOnGround && onGround && this._lastVy < -1.5) {
+      const impactMag = THREE.MathUtils.clamp((-this._lastVy - 1.2) / 11.5, 0.28, 1.0);
+      this._landTimer = 0.22 + impactMag * 0.10;
+      this._landSquash = Math.max(this._landSquash, impactMag);
+      this._landSquashVel = Math.max(this._landSquashVel, impactMag * 4.5);
+      // Heavy downward inertia whip impulse into 7-bone tail spring
+      this._tailPitchVel -= impactMag * 12.5;
+    }
+    if (extLandSquash > this._landSquash) {
+      const deltaImp = extLandSquash - this._landSquash;
+      this._landSquash = extLandSquash;
+      this._tailPitchVel -= deltaImp * 9.5;
     }
     this._wasOnGround = onGround;
     this._lastVy = vy;
     if (this._landTimer > 0) this._landTimer = Math.max(0, this._landTimer - safeDt);
     if (this._whipHoldTimer > 0) this._whipHoldTimer = Math.max(0, this._whipHoldTimer - safeDt);
+
+    // 2nd-order damped spring recovery on landing impact compression (`_landSquash`)
+    const squashTarget = onGround ? extLandSquash * 0.85 : 0;
+    const sqAccel = (squashTarget - this._landSquash) * 125.0 - this._landSquashVel * 14.5;
+    this._landSquashVel += sqAccel * safeDt;
+    this._landSquash = THREE.MathUtils.clamp(
+      this._landSquash + this._landSquashVel * safeDt,
+      -0.14,
+      1.15
+    );
+    const landComp = Math.max(0, this._landSquash);
+
+    // Turn-around counter-steer skid detection (`skidTimer` OR high-speed reversal!)
+    const autoSkid = onGround && !onStairs && speed > 1.25 && vx * dir < -0.35;
+    const isSkidding = onGround && (extSkidTimer > 0.015 || autoSkid);
+    if (isSkidding) {
+      this._skidDir = vx !== 0 ? (vx > 0 ? 1 : -1) : -dir;
+    }
+    const targetSkid = isSkidding
+      ? THREE.MathUtils.clamp(Math.max(extSkidTimer * 5.2, autoSkid ? speedNorm : 0), 0.35, 1.0)
+      : 0;
+    this._skidBlend = damp(this._skidBlend, targetSkid, isSkidding ? 22 : 12, safeDt);
+    this._prevVx = vx;
 
     // 1. Select & Cross-Fade Skeletal Animation Clip (`0.10s–0.18s`)
     const explicitClip = opts?.clip || ps.clip || ps.anim;
@@ -1236,10 +1290,14 @@ export class GatewayRig {
     const motionRoot = this._motionRoot || this._standInGroup;
     if (motionRoot) {
       motionRoot.rotation.set(0, this._yaw, 0);
-      const sx = THREE.MathUtils.clamp(Number(ps.squashX) || 1, 0.88, 1.12);
-      const sy = THREE.MathUtils.clamp(Number(ps.squashY) || 1, 0.88, 1.12);
+      // Combine caller squash/stretch with physical landing impact compression
+      const baseSx = THREE.MathUtils.clamp(Number(ps.squashX) || 1, 0.86, 1.16);
+      const baseSy = THREE.MathUtils.clamp(Number(ps.squashY) || 1, 0.84, 1.16);
+      const sx = THREE.MathUtils.clamp(baseSx * (1 + landComp * 0.085), 0.84, 1.22);
+      const sy = THREE.MathUtils.clamp(baseSy * (1 - landComp * 0.095), 0.78, 1.20);
       motionRoot.scale.set(sx, sy, sx);
-      motionRoot.position.set(0, this._stairOffset, -doorBlend * 0.34);
+      // EXACT y = 0.000 feet grounding — ZERO upward hover offset!
+      motionRoot.position.set(0, 0, -doorBlend * 0.34);
     }
 
     // Invulnerability bioluminescent pulse shimmer
@@ -1250,28 +1308,119 @@ export class GatewayRig {
       this.mainMat.emissiveIntensity = 0.95;
     }
 
-    // 3. Additive Spine Turn-Banking & Hurt Flinch
+    // 3. Additive Spine Turn-Banking, Skid Lean, Landing Impact Compression & Hurt Flinch
     const b = this.bones;
     const surfBank = Number(ps.surfBank) || 0;
-    const targetBank = THREE.MathUtils.clamp(-yawVel * 0.022 + surfBank * 0.38, -0.34, 0.34);
-    this._bankRoll = damp(this._bankRoll, targetBank, 12, safeDt);
+    const skidLean = this._skidBlend * this._skidDir;
+    const targetBank = THREE.MathUtils.clamp(
+      -yawVel * 0.022 + surfBank * 0.38 + skidLean * 0.34,
+      -0.46,
+      0.46
+    );
+    this._bankRoll = damp(this._bankRoll, targetBank, 14, safeDt);
     const hurtPitch = hurtTimer > 0 ? -0.35 * Math.min(1, hurtTimer / 0.25) : 0;
+    const fallPitch = !onGround && vy < -2.2 ? THREE.MathUtils.clamp((-vy - 2.2) * 0.022, 0, 0.26) : 0;
+    const landTorsoPitch = landComp * 0.28;
+    const skidTorsoPitch = this._skidBlend * 0.16;
+    const totalTorsoPitch = hurtPitch + landTorsoPitch + skidTorsoPitch + fallPitch;
 
-    this._addBoneLocalEuler(b.Spine1, hurtPitch * 0.4, 0, this._bankRoll * 0.35);
-    this._addBoneLocalEuler(b.Spine2, hurtPitch * 0.3, 0, this._bankRoll * 0.35);
-    this._addBoneLocalEuler(b.Chest, hurtPitch * 0.3, 0, this._bankRoll * 0.30);
+    this._addBoneLocalEuler(b.Spine1, totalTorsoPitch * 0.42, skidLean * 0.14, this._bankRoll * 0.38);
+    this._addBoneLocalEuler(b.Spine2, totalTorsoPitch * 0.32, skidLean * 0.12, this._bankRoll * 0.34);
+    this._addBoneLocalEuler(b.Chest, totalTorsoPitch * 0.26, skidLean * 0.10, this._bankRoll * 0.28);
 
-    // 4. Real 5-Riser Staircase Foot-Planting Offset & Ankle Adaptation
-    const stairActive = onGround && onStairs && speed > 0.1 ? 1 : 0;
-    const stepOsc = Math.sin(this._stridePhase) * 0.042 * stairActive * (stairSlope >= 0 ? 1 : -0.7);
-    this._stairOffset = damp(this._stairOffset, stepOsc, 18, safeDt);
+    // 3b. Heavy Landing Compression (`landSquash`) + Skid Crouch Pelvis Drop & Deep Knee Bend!
+    // Feet stay pinned at exact `y = 0.000` while hips absorb weight and knees flex deeply.
+    const stairActive = onGround && onStairs && speed > 0.08 ? 1 : 0;
+    const rawStairBob = stairActive
+      ? hasExtStairBob
+        ? THREE.MathUtils.clamp(extStairBob, -1.0, 1.0)
+        : Math.sin(this._stridePhase * 1.15) * 0.5
+      : 0;
+    this._stairBobSmooth = damp(this._stairBobSmooth, rawStairBob, 24, safeDt);
+
+    if (b.Pelvis) {
+      const landPelvisDrop = -landComp * 0.135;
+      const skidPelvisDrop = -this._skidBlend * 0.055;
+      // Subtle pelvis compression on riser push-off (never floats root off stone!)
+      const stairPelvisDelta = stairActive ? this._stairBobSmooth * 0.048 - 0.018 : 0;
+      const pelvisDeltaY = landPelvisDrop + skidPelvisDrop + stairPelvisDelta;
+      if (this._glbApplied) {
+        b.Pelvis.position.y += pelvisDeltaY;
+      } else {
+        b.Pelvis.position.y = this._pelvisBindY + pelvisDeltaY;
+      }
+      if (stairActive) {
+        // Weight shift roll onto planted foot per 30cm stone riser!
+        const weightShift = Math.sin(this._stridePhase) * 0.095;
+        this._addBoneLocalEuler(b.Pelvis, 0.05 * (stairSlope >= 0 ? 1 : -0.6), 0, weightShift);
+      }
+    }
+
+    if (landComp > 0.015) {
+      // Deep athletic knee & hip bend with flat dorsiflexed soles on stone!
+      this._addBoneLocalEuler(b.ThighL, -0.58 * landComp, 0, -0.08 * landComp);
+      this._addBoneLocalEuler(b.ThighR, -0.58 * landComp, 0, 0.08 * landComp);
+      this._addBoneLocalEuler(b.ShinL, 0.96 * landComp, 0, 0);
+      this._addBoneLocalEuler(b.ShinR, 0.96 * landComp, 0, 0);
+      this._addBoneLocalEuler(b.AnkleL, -0.38 * landComp, 0, 0);
+      this._addBoneLocalEuler(b.AnkleR, -0.38 * landComp, 0, 0);
+      // Arms spread slightly for landing balance
+      this._addBoneLocalEuler(b.UpperArmL, 0.18 * landComp, 0, 0.28 * landComp);
+      this._addBoneLocalEuler(b.UpperArmR, 0.18 * landComp, 0, -0.28 * landComp);
+    }
+
+    if (this._skidBlend > 0.02) {
+      // Turn-around braced leg plant (lead leg braces forward, rear leg bends behind!)
+      const sb = this._skidBlend;
+      const leadL = this._skidDir > 0;
+      const leadThigh = leadL ? b.ThighL : b.ThighR;
+      const leadShin = leadL ? b.ShinL : b.ShinR;
+      const leadAnkle = leadL ? b.AnkleL : b.AnkleR;
+      const trailThigh = leadL ? b.ThighR : b.ThighL;
+      const trailShin = leadL ? b.ShinR : b.ShinL;
+      this._addBoneLocalEuler(leadThigh, -0.44 * sb, 0, 0);
+      this._addBoneLocalEuler(leadShin, -0.16 * sb, 0, 0);
+      this._addBoneLocalEuler(leadAnkle, 0.28 * sb, 0, 0);
+      this._addBoneLocalEuler(trailThigh, 0.34 * sb, 0, 0);
+      this._addBoneLocalEuler(trailShin, 0.52 * sb, 0, 0);
+      // Athletic arm counter-sweep during skid
+      this._addBoneLocalEuler(b.UpperArmL, -0.26 * sb * this._skidDir, 0, 0.24 * sb);
+      this._addBoneLocalEuler(b.UpperArmR, 0.26 * sb * this._skidDir, 0, -0.24 * sb);
+    }
+
+    // 4. Discrete 5-Riser Stair Stepping (`onStairs` / `stairStepBob` — 30cm stone treads!)
     if (stairActive > 0) {
-      const slopeSign = stairSlope >= 0 ? 1 : -1;
-      const lLead = Math.sin(this._stridePhase);
-      this._addBoneLocalEuler(b.AnkleL, lLead * 0.16 * slopeSign, 0, 0);
-      this._addBoneLocalEuler(b.FootL, -lLead * 0.14 * slopeSign, 0, 0);
-      this._addBoneLocalEuler(b.AnkleR, -lLead * 0.16 * slopeSign, 0, 0);
-      this._addBoneLocalEuler(b.FootR, lLead * 0.14 * slopeSign, 0, 0);
+      const ascending = stairSlope >= 0;
+      const slopeSign = ascending ? 1 : -1;
+      // Combine continuous stride cycle with physics `stairStepBob` pulse for crisp riser lift!
+      const bobBoost = hasExtStairBob ? Math.abs(this._stairBobSmooth) * 0.55 : 0.35;
+      const lCycle = Math.sin(this._stridePhase);
+      const lLift = Math.max(0, lCycle) * (0.45 + bobBoost);
+      const rLift = Math.max(0, -lCycle) * (0.45 + bobBoost);
+
+      if (ascending) {
+        // High unmistakable knee lift onto each 30cm stone riser + flat tread foot plant!
+        this._addBoneLocalEuler(b.ThighL, -0.58 * lLift, 0, 0);
+        this._addBoneLocalEuler(b.ShinL, 0.86 * lLift, 0, 0);
+        this._addBoneLocalEuler(b.AnkleL, -0.24 * lLift + lCycle * 0.16, 0, 0);
+        this._addBoneLocalEuler(b.FootL, -lCycle * 0.14, 0, 0);
+
+        this._addBoneLocalEuler(b.ThighR, -0.58 * rLift, 0, 0);
+        this._addBoneLocalEuler(b.ShinR, 0.86 * rLift, 0, 0);
+        this._addBoneLocalEuler(b.AnkleR, -0.24 * rLift - lCycle * 0.16, 0, 0);
+        this._addBoneLocalEuler(b.FootR, lCycle * 0.14, 0, 0);
+      } else {
+        // Controlled downhill knee-cushioning bend on each 30cm step descent
+        this._addBoneLocalEuler(b.ThighL, -0.24 * lLift, 0, 0);
+        this._addBoneLocalEuler(b.ShinL, 0.52 * (0.35 + lLift), 0, 0);
+        this._addBoneLocalEuler(b.AnkleL, lCycle * 0.16 * slopeSign, 0, 0);
+        this._addBoneLocalEuler(b.FootL, -lCycle * 0.14 * slopeSign, 0, 0);
+
+        this._addBoneLocalEuler(b.ThighR, -0.24 * rLift, 0, 0);
+        this._addBoneLocalEuler(b.ShinR, 0.52 * (0.35 + rLift), 0, 0);
+        this._addBoneLocalEuler(b.AnkleR, -lCycle * 0.16 * slopeSign, 0, 0);
+        this._addBoneLocalEuler(b.FootR, lCycle * 0.14 * slopeSign, 0, 0);
+      }
     }
 
     // 5. Head & Soulful Eye Look-At + Natural Double-Blink Cycle
@@ -1302,19 +1451,28 @@ export class GatewayRig {
       this._addBoneLocalEuler(b.EyelidR, blink * 0.72, 0, 0);
     }
 
-    // 6. Dynamic Aquatic Head-Frill Flare & Aero-Flutter
+    // 6. Dynamic Aquatic Head-Frill Flare, Landing Whip & Aero-Flutter
     const extFlare = Number(ps.frillFlare) || 0;
     const targetFlare = Math.max(
       extFlare,
-      isGliding ? 0.45 : !onGround ? 0.28 : muzzleFlash > 0.01 || whipTimer > 0.01 ? 0.38 : 0.0
+      isGliding
+        ? 0.48
+        : !onGround
+          ? 0.28 + THREE.MathUtils.clamp(-vy * 0.025, 0, 0.28)
+          : muzzleFlash > 0.01 || whipTimer > 0.01
+            ? 0.38
+            : this._skidBlend * 0.26
     );
     this._frillFlare = damp(this._frillFlare, targetFlare, 14, safeDt);
-    const flutter = (!onGround || isGliding ? Math.sin(time * 24) * 0.06 : 0) + this._frillFlare;
+    // Landing impact whips head-frills sharply downward with inertia then rebounds!
+    const frillLandDip = -landComp * 0.42;
+    const flutter =
+      (!onGround || isGliding ? Math.sin(time * 24) * 0.065 : 0) + this._frillFlare + frillLandDip;
     if (Math.abs(flutter) > 0.005) {
       this._addBoneLocalEuler(b.FrillL1, flutter * 0.55, 0, 0);
-      this._addBoneLocalEuler(b.FrillL2, flutter * 0.75, 0, 0);
+      this._addBoneLocalEuler(b.FrillL2, flutter * 0.78, 0, 0);
       this._addBoneLocalEuler(b.FrillR1, flutter * 0.55, 0, 0);
-      this._addBoneLocalEuler(b.FrillR2, flutter * 0.75, 0, 0);
+      this._addBoneLocalEuler(b.FrillR2, flutter * 0.78, 0, 0);
     }
 
     // 7. Upper-Body Run-And-Cast Additive Layer + Hydro-Caster Palm Flash
@@ -1343,16 +1501,16 @@ export class GatewayRig {
     }
 
     // 8. 2nd-Order Spring-Damped 7-Bone Dynamic Lizard Tail Physics (`Tail1`..`Tail7`)!
-    const tailSpringK = 85.0;
-    const tailDamp = 9.5;
-    const yawImpulse = THREE.MathUtils.clamp(yawVel * 0.038, -0.55, 0.55);
-    const pitchImpulse = THREE.MathUtils.clamp(-vy * 0.032, -0.38, 0.38);
+    const tailSpringK = 92.0;
+    const tailDamp = 9.2;
+    const yawImpulse = THREE.MathUtils.clamp(yawVel * 0.042 + skidLean * 0.34, -0.62, 0.62);
+    const pitchImpulse = THREE.MathUtils.clamp(-vy * 0.036 - landComp * 0.52, -0.62, 0.52);
 
     this._tailYawVel += ((yawImpulse - this._tailYawLag) * tailSpringK - this._tailYawVel * tailDamp) * safeDt;
-    this._tailYawLag = THREE.MathUtils.clamp(this._tailYawLag + this._tailYawVel * safeDt, -0.55, 0.55);
+    this._tailYawLag = THREE.MathUtils.clamp(this._tailYawLag + this._tailYawVel * safeDt, -0.62, 0.62);
 
     this._tailPitchVel += ((pitchImpulse - this._tailPitchLag) * tailSpringK - this._tailPitchVel * tailDamp) * safeDt;
-    this._tailPitchLag = THREE.MathUtils.clamp(this._tailPitchLag + this._tailPitchVel * safeDt, -0.42, 0.42);
+    this._tailPitchLag = THREE.MathUtils.clamp(this._tailPitchLag + this._tailPitchVel * safeDt, -0.58, 0.52);
 
     const swimExtra = Number(ps.swimPhase) || 0;
     for (let ti = 1; ti <= 7; ti++) {

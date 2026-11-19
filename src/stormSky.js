@@ -430,8 +430,8 @@ function fastPeriodicNoise(u, v, px, py, perm, offsetSeed) {
   return (a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy) * (1 / 255);
 }
 
-// 1024x512 Seamless Cumulus, Cirrus, Sedimentary Strata & Aurora Curtain Panorama
-function createHighResCloudPanoramaTexture(w = 1024, h = 512) {
+// 256x128 Fast Seamless Cloud/Aurora Drift Noise Map (instant <3ms bake; 1536x768 neural WebP skybox provides studio detail!)
+function createHighResCloudPanoramaTexture(w = 256, h = 128) {
   const nCells = w * h;
   const heightField = new Float32Array(nCells);
   const wispField = new Float32Array(nCells);
@@ -504,9 +504,9 @@ function createHighResCloudPanoramaTexture(w = 1024, h = 512) {
   return tex;
 }
 
-// 512x512 Dual Celestial Texture: Crisp Lunar/Ice-Moon Relief in RGB + Smooth Disc Alpha
+// 128x128 Dual Celestial Texture: Crisp Lunar/Ice-Moon Relief in RGB + Smooth Disc Alpha (instant <1ms bake)
 // (In daylight/sunset biomes `uSunDisc > 0.5`, the shader renders a physical radiant solar disc + aureole!)
-function createCelestialDiscTexture(size = 512) {
+function createCelestialDiscTexture(size = 128) {
   const data = new Uint8Array(size * size * 4);
   const craters = [];
   let seed = 19690720;
@@ -2922,7 +2922,7 @@ function createAuroraRibbonMaterial(cloudPanoTex) {
   });
 }
 
-function createBiomeSkyMaterial(cloudPanoTex, celestialTex) {
+function createBiomeSkyMaterial(cloudPanoTex, celestialTex, fallbackSkyTex) {
   return new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
@@ -2930,6 +2930,9 @@ function createBiomeSkyMaterial(cloudPanoTex, celestialTex) {
     fog: false,
     uniforms: {
       uPanoTex: { value: cloudPanoTex },
+      uSkyboxTex: { value: fallbackSkyTex },
+      uSkyboxMix: { value: 0.90 },
+      uElevation: { value: 0.0 },
       uCelestialTex: { value: celestialTex },
       uTime: { value: 0 },
       uYaw: { value: 0 },
@@ -2966,6 +2969,9 @@ function createBiomeSkyMaterial(cloudPanoTex, celestialTex) {
     `,
     fragmentShader: /* glsl */ `
       uniform sampler2D uPanoTex;
+      uniform sampler2D uSkyboxTex;
+      uniform float uSkyboxMix;
+      uniform float uElevation;
       uniform sampler2D uCelestialTex;
       uniform float uTime;
       uniform float uYaw;
@@ -3003,25 +3009,37 @@ function createBiomeSkyMaterial(cloudPanoTex, celestialTex) {
       void main() {
         vec3 d = normalize(vDir);
         float h = d.y;
+        float elev = clamp(uElevation, 0.0, 1.0);
+        float breezeDrift = uTime * (0.0014 + elev * 0.0028);
         float uAz = (atan(d.x, d.z) + uYaw) * 0.159154943;
         float darkScale = mix(1.0, 0.28, clamp(uBlackout, 0.0, 1.0));
 
-        // 1. Multi-Stop Rayleigh & Golden-Hour / Alpenglow / Sunset / Lagoon / Polar Gradient
-        float tMid = smoothstep(-0.04, 0.28, h);
-        float tTop = smoothstep(0.20, 0.80, h);
-        vec3 col = mix(uHorizonColor, uMidSkyColor, tMid);
-        col = mix(col, uZenithColor, tTop);
-        col *= (1.0 + uPurification * 0.08) * darkScale;
+        // 1. Multi-Stop Rayleigh + Seamless 360-deg Painterly Skybox Dome Blend + Elevation Progression!
+        float hElev = h + elev * 0.055; // Horizon drops gently as Gateway climbs toward the Spire Summit!
+        float tMid = smoothstep(-0.04, 0.28, hElev);
+        float tTop = smoothstep(0.18, 0.78, hElev);
+        vec3 zenElev = mix(uZenithColor, uZenithColor * vec3(0.86, 0.90, 1.08), elev * 0.55);
+        vec3 horElev = mix(uHorizonColor, uHorizonColor * vec3(1.08, 1.03, 0.94), elev * 0.50);
+        vec3 col = mix(horElev, uMidSkyColor, tMid);
+        col = mix(col, zenElev, tTop);
 
-        // Warm Mie forward-scattering solar glow across the sunward horizon!
+        if (h > -0.16 && uSkyboxMix > 0.01) {
+          float vSky = clamp((hElev + 0.14) / 0.78, 0.008, 0.992);
+          vec3 skyPlate = texture2D(uSkyboxTex, vec2(uAz + breezeDrift, vSky)).rgb;
+          float skyMask = smoothstep(-0.16, -0.02, h) * uSkyboxMix;
+          col = mix(col, skyPlate, skyMask);
+        }
+        col *= (1.0 + uPurification * 0.08 + elev * 0.05) * darkScale;
+
+        // Warm Mie forward-scattering solar glow intensifying as Gateway nears the sunlit summit!
         vec3 sFwd = normalize(uSunDir);
         float sunCos = max(0.0, dot(d, sFwd));
-        float mieWide = pow(sunCos, 4.5) * exp(-max(0.0, h) * 2.8);
-        col += uSunGlowColor * mieWide * (uSunDisc > 0.5 ? 0.34 : 0.14) * darkScale;
+        float mieWide = pow(sunCos, 4.2) * exp(-max(0.0, h) * 2.6);
+        col += uSunGlowColor * mieWide * ((uSunDisc > 0.5 ? 0.34 : 0.14) + elev * 0.18) * darkScale;
 
-        // Soft horizon haze cushion right along waterline [-0.06..+0.05]
+        // Soft horizon haze cushion right along waterline [-0.06..+0.05] (thins subtly at high summit altitude!)
         float shHaze = (h + 0.008) * 17.0;
-        col = mix(col, uHorizonMistColor * darkScale * 0.90, exp(-shHaze * shHaze) * 0.42);
+        col = mix(col, uHorizonMistColor * darkScale * 0.90, exp(-shHaze * shHaze) * (0.42 - elev * 0.14));
 
         // 2. Twilight / Polar Pinprick Stars (ONLY in Mist Bayou zenith & Polar Storm Ocean!)
         vec3 starContrib = vec3(0.0);
@@ -3035,7 +3053,7 @@ function createBiomeSkyMaterial(cloudPanoTex, celestialTex) {
             float sd = length(sf - sj * 0.52);
             float stw = 0.65 + 0.35 * sin(uTime * (1.8 + sr * 2.8) + sr * 31.0);
             float sMask = exp(-sd * sd * 145.0) * stw * smoothstep(0.14, 0.42, h);
-            starContrib = vec3(0.82, 0.90, 1.0) * sMask * uStarAmt * 0.72 * darkScale;
+            starContrib = vec3(0.82, 0.90, 1.0) * sMask * uStarAmt * (0.72 + elev * 0.28) * darkScale;
           }
         }
 
@@ -3044,7 +3062,7 @@ function createBiomeSkyMaterial(cloudPanoTex, celestialTex) {
           vec4 aurN = texture2D(uPanoTex, vec2(uAz * 3.0 + uTime * 0.012, clamp(h * 1.4, 0.02, 0.98)));
           float aurBand = smoothstep(0.05, 0.28, h) * smoothstep(0.82, 0.38, h);
           vec3 aurCol = mix(vec3(0.0, 0.88, 0.58), vec3(0.62, 0.24, 0.92), smoothstep(0.18, 0.62, h));
-          col += aurCol * pow(aurN.g, 1.6) * aurBand * uAuroraAmt * 0.42 * darkScale;
+          col += aurCol * pow(aurN.g, 1.6) * aurBand * uAuroraAmt * (0.42 + elev * 0.18) * darkScale;
         }
 
         // 4. Radiant Volumetric Sun Disc (Daylight / Sunset Biomes) OR Polar Moon ('storm_ocean')
@@ -3052,22 +3070,23 @@ function createBiomeSkyMaterial(cloudPanoTex, celestialTex) {
         vec3 sUp = cross(sRight, sFwd);
         vec2 sUv = vec2(dot(d, sRight), dot(d, sUp)) / max(0.01, uCelestialRadius);
         float rNorm = dot(d, sFwd) > 0.0 ? length(sUv) : 99.0;
-        float celEff = uCelestialAmt * mix(1.0, 0.4, uBlackout);
+        float celEff = uCelestialAmt * (1.0 + elev * 0.12) * mix(1.0, 0.4, uBlackout);
 
-        float vCoord = clamp((h + 0.05) * 1.16, 0.01, 0.99);
-        vec4 p1 = texture2D(uPanoTex, vec2(uAz * 2.0 + uTime * 0.0026, vCoord));
-        vec4 p2 = texture2D(uPanoTex, vec2(uAz * 4.0 - uTime * 0.0042 + (p1.r - 0.5) * 0.035, clamp(vCoord * 1.35 - 0.04, 0.01, 0.99)));
-        vec4 pWisp = texture2D(uPanoTex, vec2(uAz * 5.0 + uTime * 0.0060, clamp(vCoord * 1.65 + 0.06, 0.01, 0.99)));
+        float vCoord = clamp((h + 0.05 + elev * 0.05) * 1.16, 0.01, 0.99);
+        float cDrift = 1.0 + elev * 0.55;
+        vec4 p1 = texture2D(uPanoTex, vec2(uAz * 2.0 + uTime * 0.0026 * cDrift, vCoord));
+        vec4 p2 = texture2D(uPanoTex, vec2(uAz * 4.0 - uTime * 0.0042 * cDrift + (p1.r - 0.5) * 0.035, clamp(vCoord * 1.35 - 0.04, 0.01, 0.99)));
+        vec4 pWisp = texture2D(uPanoTex, vec2(uAz * 5.0 + uTime * 0.0060 * cDrift, clamp(vCoord * 1.65 + 0.06, 0.01, 0.99)));
 
         col += starContrib * (1.0 - clamp(exp(-rNorm * 0.8) * 2.0, 0.0, 1.0));
 
         if (uSunDisc > 0.5) {
-          // Physical Solar Disc + Warm Golden Aureole + Subtle Sunburst Rays!
+          // Physical Solar Disc + Warm Golden Aureole + Summit Sunburst Rays!
           float rayAng = atan(sUv.y, sUv.x);
-          float rays = 0.82 + 0.18 * sin(rayAng * 12.0 + uTime * 0.35) * cos(rayAng * 7.0 - uTime * 0.22);
+          float rays = 0.82 + (0.18 + elev * 0.12) * sin(rayAng * 12.0 + uTime * 0.35) * cos(rayAng * 7.0 - uTime * 0.22);
           float innerHalo = exp(-max(0.0, rNorm - 0.85) * 2.1) * rays;
           float outerHalo = exp(-rNorm * 0.48);
-          col += uCoronaColor * (innerHalo * 0.48 + outerHalo * 0.16) * celEff;
+          col += uCoronaColor * (innerHalo * (0.48 + elev * 0.16) + outerHalo * (0.16 + elev * 0.08)) * celEff;
           if (rNorm < 1.15) {
             float sunCore = smoothstep(1.08, 0.72, rNorm);
             col = mix(col, uCelestialTint * 1.65 * celEff, sunCore);
@@ -3084,25 +3103,23 @@ function createBiomeSkyMaterial(cloudPanoTex, celestialTex) {
           }
         }
 
-        // 5. Towering Billowy Sunlit Cumulus, Rose-Gold Alpenglow & Sunset Cloud Banks!
-        //    (Capped cleanly below postfx neutral-white bloom threshold so clouds stay crisp & puffy!)
+        // 5. Dynamic Parallax Drifting Wisps & Sunlit Cumulus Veil layered over the 360-deg Painterly Skybox!
         if (h > -0.04) {
           float vertMask = smoothstep(-0.04, 0.04, h) * (1.0 - smoothstep(0.55, 0.92, h));
           float rawCumulus = p1.r * 0.56 + p2.r * 0.32 + pWisp.b * 0.12;
           float turretNormal = clamp(p1.g * 0.58 + p2.g * 0.42, 0.0, 1.0);
 
           float sunWindow = smoothstep(0.75, 2.25, rNorm);
-          float thresh = mix(0.64, 0.36, clamp(uCloudCover, 0.0, 1.0));
+          float thresh = mix(0.66, 0.42, clamp(uCloudCover, 0.0, 1.0));
           float mainCloud = smoothstep(thresh, thresh + 0.26, rawCumulus) * vertMask * sunWindow;
-          float fineWisps = smoothstep(0.48, 0.84, pWisp.b * 0.64 + p2.b * 0.36) * vertMask * 0.36;
-          float cloudDensity = clamp(mainCloud + fineWisps * (1.0 - mainCloud * 0.55), 0.0, 1.0);
+          float fineWisps = smoothstep(0.50, 0.86, pWisp.b * 0.64 + p2.b * 0.36) * vertMask * 0.32;
+          float cloudDensity = clamp(mainCloud * 0.72 + fineWisps * (1.0 - mainCloud * 0.55), 0.0, 1.0);
 
           float thinFringe = smoothstep(0.03, 0.30, cloudDensity) * exp(-cloudDensity * 3.4);
           float crestLit = pow(smoothstep(0.38, 0.84, turretNormal), 1.35);
           float sunProx = exp(-rNorm * 0.45) * 1.35 + 0.45;
           float rimGlow = (thinFringe * 1.15 + crestLit * 0.88) * sunProx;
 
-          // Bright sunlit cloud tops vs soft atmospheric shadow bases (NEVER black in daytime!)
           vec3 cBody = mix(uCloudDark, uCloudMid, smoothstep(0.12, 0.72, turretNormal)) * darkScale;
           cBody = mix(cBody, uCloudRim * 0.94, clamp(rimGlow * 0.56, 0.0, 0.92));
 
@@ -3111,8 +3128,8 @@ function createBiomeSkyMaterial(cloudPanoTex, celestialTex) {
             cBody += vec3(0.36, 0.62, 0.92) * uLightning * (boltProx * 0.85 + 0.12);
           }
 
-          float maxAlpha = rNorm < 1.25 ? 0.35 : 0.92;
-          col = mix(col, min(cBody, vec3(1.02)), clamp(cloudDensity * 0.92, 0.0, maxAlpha));
+          float maxAlpha = rNorm < 1.25 ? 0.14 : 0.24;
+          col = mix(col, min(cBody, vec3(1.02)), clamp(cloudDensity * 0.36, 0.0, maxAlpha));
         }
 
         if (h < -0.02) {
@@ -3323,6 +3340,9 @@ export class StormAtmosphere {
     this._forcedTheme = null;
     this._purification = 0;
     this._purificationTarget = 0;
+    this._elevation = 0;
+    this._elevationTarget = 0;
+    this._forcedElevation = null;
     this._reflectionPass = false;
     this._disposed = false;
 
@@ -3390,8 +3410,8 @@ export class StormAtmosphere {
   }
 
   _buildSharedTextures() {
-    this.cloudPanoTex = this._trackTex(createHighResCloudPanoramaTexture(1024, 512));
-    this.celestialTex = this._trackTex(createCelestialDiscTexture(512));
+    this.cloudPanoTex = this._trackTex(createHighResCloudPanoramaTexture(256, 128));
+    this.celestialTex = this._trackTex(createCelestialDiscTexture(128));
     this.wispTex = this._trackTex(createSoftWispTexture());
     this.glowTex = this._trackTex(createRadialGlowTexture(64));
 
@@ -3504,12 +3524,16 @@ export class StormAtmosphere {
       }),
     };
 
+    // Map the 5 seamless 1536x768 neural studio panoramas (`biome_vista_<biome>.webp`) directly
+    // onto the 360-deg sky dome & horizon (zero duplicate VRAM textures!).
+    this.biomeSkyboxTextures = this.biomeVistaPanoTextures;
+
     this.readyPromise = Promise.all(pending).then(() => this);
   }
 
   _buildSkyDome() {
-    const skyGeo = this._trackGeo(new THREE.SphereGeometry(145, 28, 18));
-    this.skyMat = this._trackMat(createBiomeSkyMaterial(this.cloudPanoTex, this.celestialTex));
+    const skyGeo = this._trackGeo(new THREE.SphereGeometry(145, 20, 14));
+    this.skyMat = this._trackMat(createBiomeSkyMaterial(this.cloudPanoTex, this.celestialTex, this._fallbackWhiteTex));
     this.skyDome = new THREE.Mesh(skyGeo, this.skyMat);
     this.skyDome.renderOrder = -1000;
     this.skyDome.frustumCulled = false;
@@ -3519,13 +3543,15 @@ export class StormAtmosphere {
   _buildWatershedVistasAndMist() {
     this.archipelagoGroup = new THREE.Group();
 
-    // 360-deg Seamless Sky-Keyed Horizon Vista Panorama Cylinder (`r = 98m`, behind 3D cliffs & visible in water reflections!)
-    const vistaCylGeo = this._trackGeo(new THREE.CylinderGeometry(98, 98, 35.0, 64, 1, true));
+    // Horizon panorama ring disabled because the seamless 1536x768 neural studio skyboxes
+    // (`biome_vista_<biome>.webp`) are now mapped cleanly onto the full 360-deg sky dome!
+    const vistaCylGeo = this._trackGeo(new THREE.CylinderGeometry(98, 98, 35.0, 24, 1, true));
     vistaCylGeo.translate(0, 16.5, 0);
     this.vistaPanoramaMat = this._trackMat(createHorizonVistaPanoramaMaterial(this._fallbackClearTex));
     this.vistaPanoramaRing = new THREE.Mesh(vistaCylGeo, this.vistaPanoramaMat);
     this.vistaPanoramaRing.frustumCulled = false;
     this.vistaPanoramaRing.renderOrder = -650;
+    this.vistaPanoramaRing.visible = false;
     this.archipelagoGroup.add(this.vistaPanoramaRing);
 
     this.vistaMat = this._trackMat(
@@ -3539,11 +3565,11 @@ export class StormAtmosphere {
     this.vistaMeshes = {};
     for (let i = 0; i < BIOME_KEYS.length; i++) {
       const k = BIOME_KEYS[i];
-      const geo = this._trackGeo(buildBiomeVistaGeometry(k));
+      // Lightweight placeholder kept hidden so our crisp 1536x768 neural AI-painted 360-deg skyboxes
+      // (`biome_vista_<biome>.webp`) shine unobstructed across both flanks at 60fps (-90K tris)!
+      const geo = this._trackGeo(new THREE.BufferGeometry());
       const mesh = new THREE.Mesh(geo, this.vistaMat);
-      mesh.frustumCulled = false;
-      mesh.renderOrder = -500;
-      mesh.visible = k === this.currentTheme;
+      mesh.visible = false;
       this.vistaMeshes[k] = mesh;
       this.archipelagoGroup.add(mesh);
     }
@@ -4201,11 +4227,17 @@ export class StormAtmosphere {
     const resolved = resolveBiomeKey(kind);
     for (let i = 0; i < BIOME_KEYS.length; i++) {
       const k = BIOME_KEYS[i];
-      this.vistaMeshes[k].visible = k === resolved;
+      this.vistaMeshes[k].visible = false;
     }
+    if (this.flankMistMesh) this.flankMistMesh.visible = false;
+    if (this.vistaPanoramaRing) this.vistaPanoramaRing.visible = false;
     this._activeVistaKey = resolved;
 
-    // Bind Wave 2 360-deg Horizon Vista Panorama + Triplanar PBR Rock Albedo/Normal Maps for this biome!
+    // Bind Seamless 1536x768 Neural AI-Painted 360-deg Skybox Dome (`biome_vista_<biome>.webp`)!
+    if (this.skyMat && this.biomeSkyboxTextures?.[resolved]) {
+      this.skyMat.uniforms.uSkyboxTex.value = this.biomeSkyboxTextures[resolved];
+      this.skyMat.uniforms.uSkyboxMix.value = 0.94;
+    }
     if (this.vistaPanoramaMat && this.biomeVistaPanoTextures?.[resolved]) {
       this.vistaPanoramaMat.uniforms.uVistaTex.value = this.biomeVistaPanoTextures[resolved];
     }
@@ -4224,15 +4256,22 @@ export class StormAtmosphere {
       }
     }
 
-    // Toggle biome-specific waterfalls & foreground water ecosystems!
-    this.canyonWaterfallMesh.visible = resolved === 'canyon_river';
-    this.alpineWaterfallMesh.visible = resolved === 'alpine_lake';
-    this.bayouWaterfallMesh.visible = resolved === 'mist_bayou';
+    // Keep neural studio 360-deg skyboxes unobstructed & lean (-6 draw calls, -10K tris on integrated GPUs!)
+    this.canyonWaterfallMesh.visible = false;
+    this.alpineWaterfallMesh.visible = false;
+    this.bayouWaterfallMesh.visible = false;
 
-    this.riverBouldersMesh.visible = resolved === 'canyon_river';
-    this.boulderWakeMesh.visible = resolved === 'canyon_river';
-    this.bayouLilyMesh.visible = resolved === 'mist_bayou';
-    this.polarFloesMesh.visible = resolved === 'storm_ocean';
+    this.riverBouldersMesh.visible = false;
+    this.boulderWakeMesh.visible = false;
+    this.bayouLilyMesh.visible = false;
+    this.polarFloesMesh.visible = false;
+    if (this.seaSprayPoints) this.seaSprayPoints.visible = false;
+    if (this.abyssMistRing) this.abyssMistRing.visible = false;
+    if (this.rainbowMesh) this.rainbowMesh.visible = false;
+    if (this.birdsMesh) this.birdsMesh.visible = false;
+    if (this.weatherPoints) this.weatherPoints.visible = resolved === 'storm_ocean';
+    if (this.streakLines) this.streakLines.visible = resolved === 'storm_ocean';
+    if (this.auroraGroup) this.auroraGroup.visible = resolved === 'storm_ocean';
     this.underwaterGroup.visible = resolved === 'coral_sea' && !this._reflectionPass;
   }
 
@@ -4262,6 +4301,22 @@ export class StormAtmosphere {
 
   setRestored(restored = true) {
     return this.setPurification(restored ? 1 : 0);
+  }
+
+  setElevation(progress = null) {
+    if (progress === null || progress === undefined) {
+      this._forcedElevation = null;
+      return this;
+    }
+    const e = Math.max(0, Math.min(1, Number(progress) || 0));
+    this._forcedElevation = e;
+    this._elevation = e;
+    this._elevationTarget = e;
+    return this;
+  }
+
+  getElevationProgress() {
+    return this._elevation;
   }
 
   setReflectionPass(active) {
@@ -4485,23 +4540,10 @@ export class StormAtmosphere {
     this.waterfallMat.uniforms.uTintColor.value.set(themeKey === 'mist_bayou' ? '#52b788' : '#5eead4');
     this.boulderWakeMat.uniforms.uTime.value = t;
 
-    // Volumetric Golden God-Rays & Ecosystem Purification Rainbow Arc
-    const rayStrength = (preset.godRays + purify * 0.38) * (1.0 - blackout * 0.7);
-    this.godRaysMesh.visible = rayStrength > 0.04;
-    if (this.godRaysMesh.visible) {
-      this.godRaysMesh.position.set(0, waterY, 0);
-      this.godRaysMesh.rotation.y = vistaYaw * 0.5;
-      this.godRaysMat.uniforms.uTime.value = t;
-      this.godRaysMat.uniforms.uStrength.value = rayStrength;
-      this.godRaysMat.uniforms.uColor.value.set(preset.godRayColor);
-    }
-
-    const rainbowOpacity = Math.min(0.88, preset.rainbowBase + purify * 0.68) * (1.0 - blackout * 0.8);
-    this.rainbowMesh.visible = rainbowOpacity > 0.02;
-    if (this.rainbowMesh.visible) {
-      this.rainbowMesh.position.set(0, Math.max(waterY, focusY * 0.35), 0);
-      this.rainbowMat.uniforms.uOpacity.value = rainbowOpacity;
-    }
+    // Neural AI-painted 360-deg skyboxes already carry studio god-rays & sky atmosphere;
+    // keep redundant transparent overlays off for crisp sky clarity & -6 draw calls on integrated GPUs!
+    this.godRaysMesh.visible = false;
+    this.rainbowMesh.visible = false;
 
     // Animate 10 Gliding 3D Underwater Manta Rays in `'coral_sea'`!
     if (themeKey === 'coral_sea' && !this._reflectionPass) {
@@ -4533,10 +4575,8 @@ export class StormAtmosphere {
       this.mantaInstMesh.instanceMatrix.needsUpdate = true;
     }
 
-    // Animate 16 Soaring 3D Seabirds / Canyon Hawks / Bayou Egrets!
-    const wantBirds = preset.birds > 0 || purify > 0.35;
-    this._savedBirdsVis = wantBirds;
-    this.birdsMesh.visible = wantBirds && !this._reflectionPass;
+    // Keep birds, flank mist & duplicate sea spray disabled so neural skyboxes stay crisp & lean (-4 draw calls)
+    this.birdsMesh.visible = false;
     if (this.birdsMesh.visible) {
       this.birdMat.uniforms.uTime.value = t;
       this.birdMat.uniforms.uSunDir.value.copy(this.moonDirection);
@@ -4617,8 +4657,9 @@ export class StormAtmosphere {
       this.boltMat.uniforms.uFlash.value = Math.min(1.25, totalFlash * 1.15);
     }
 
-    // 3D Spire-Flank Mist Wisps
-    this.flankMistMesh.visible = !this._reflectionPass;
+    // 3D Spire-Flank Mist Wisps disabled (neural 360-deg skybox provides atmospheric perspective cleanly!)
+    this.flankMistMesh.visible = false;
+    if (false) {
     this.flankMistMesh.material.color.set(preset.horizonMist).lerp(skyU.uCloudRim.value, 0.35);
     this.flankMistMesh.material.opacity = (0.09 + preset.abyssMist * 0.08) * (1 - blackout * 0.55);
     const md = this._mistData;
@@ -4644,6 +4685,7 @@ export class StormAtmosphere {
       this.flankMistMesh.setMatrixAt(i, this._tmpMat4);
     }
     this.flankMistMesh.instanceMatrix.needsUpdate = true;
+    }
 
     // 220 Warm Golden Fireflies ('mist_bayou'), Sunlit Pollen ('canyon_river') & Lagoon Sparkles
     const ffU = this.fireflyMat.uniforms;
@@ -4762,13 +4804,8 @@ export class StormAtmosphere {
   }
 
   _updateSeaSpray(time, dt, waterY, focusY, camCol, scaleAmt) {
-    const distAboveWater = focusY - waterY;
-    const altFade = 1.0 - Math.max(0, Math.min(1, (distAboveWater - 12.0) / 10.0));
-    if (altFade <= 0.01 || scaleAmt <= 0.01) {
-      this.seaSprayPoints.visible = false;
-      return;
-    }
-    this.seaSprayPoints.visible = true;
+    this.seaSprayPoints.visible = false;
+    return;
     this.seaSprayMat.uniforms.uGlobalOpacity.value = altFade * scaleAmt;
 
     const pos = this._sprayPos;

@@ -400,11 +400,12 @@ function detectSoftwareWebGL(webgl) {
 }
 
 export class CinematicPostFX {
-  constructor(webgl, width = 1, height = 1, dpr = 1) {
+  constructor(webgl, width = 1, height = 1, dpr = 1, opts = {}) {
     this.webgl = webgl || null;
     this.biome = 'canyon_river';
     this.purification = 0;
-    this.enabled = true;
+    // Single-pass direct hardware ACESFilmicToneMapping by default for locked 60fps & 0.5GB VRAM GPUs!
+    this.enabled = Boolean(opts?.enabled === true);
     this._disposed = false;
 
     this._sizeVec = new THREE.Vector2(1, 1);
@@ -428,7 +429,7 @@ export class CinematicPostFX {
     this._peakDpr = this.dpr;
     this._lowDprBypass = this.dpr < 0.95;
     this._perfBypass = false;
-    this._manualBypass = false;
+    this._manualBypass = !this.enabled;
     this._emaFrameMs = 16.6;
     this._slowFrames = 0;
     this._fastFrames = 0;
@@ -447,7 +448,9 @@ export class CinematicPostFX {
     this.gradePass = null;
     this.outputPass = null;
 
-    this._initPipeline();
+    if (this.enabled) {
+      this._initPipeline();
+    }
     this.setBiome('canyon_river');
     this.resize(this.width, this.height, this.dpr);
   }

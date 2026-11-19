@@ -467,21 +467,33 @@ function normalizeEnemy(en, idx = 0) {
     maxFloor: en.maxFloor !== undefined && en.maxFloor !== null ? Number(en.maxFloor) : null,
     ...(en.harmless ? { harmless: true } : {}),
     ...(en.bossTitle ? { bossTitle: String(en.bossTitle) } : {}),
+    ...(en.isLockKeeper ? { isLockKeeper: true } : {}),
+    ...(en.sealId ? { sealId: String(en.sealId) } : {}),
     ...(en.minCol !== undefined ? { minCol: wrapCol(en.minCol) } : {}),
     ...(en.maxCol !== undefined ? { maxCol: wrapCol(en.maxCol) } : {})
   };
 }
 
 function computeLedgeSpanAt(ledges, col, floor) {
-  const hasTile = (c) =>
-    ledges.some(
+  const hasTile = (c) => {
+    const wc = wrapCol(c);
+    const blocked = ledges.some(
+      (b) =>
+        (b.type === 'box' || b.type === 'pillar' || b.type === 'laserGate') &&
+        wrapCol(b.col) === wc &&
+        (b.h ? b.floor < floor + 1.2 && b.floor + b.h > floor + 0.15 : Math.abs(b.floor - floor) < 0.5)
+    );
+    if (blocked) return false;
+    return ledges.some(
       (l) =>
         l.type !== 'box' &&
         l.type !== 'pillar' &&
         l.type !== 'laserGate' &&
+        l.type !== 'phaseBlock' &&
         Math.abs(l.floor - floor) < 0.25 &&
-        wrapCol(l.col) === wrapCol(c)
+        wrapCol(l.col) === wc
     );
+  };
   const startTile = Math.floor(wrapFloatCol(col));
   if (!hasTile(startTile)) {
     return { onRealTile: false, startCol: startTile, length: 0 };
@@ -638,7 +650,7 @@ function sanitizeEnemySpawns(enemies, doors, elevators, spawn, ledges, totalFloo
 // DETERMINISTIC EXTERIOR SANCTUM-DOOR CLUE DERIVATION (1:1 WITH src/puzzleRoom.js)
 // ============================================================================
 
-const RUNE_PUZZLE_TYPES = new Set(['lights', 'bells', 'beam', 'blocks']);
+const RUNE_PUZZLE_TYPES = new Set(['lights', 'bells', 'beam', 'blocks', 'pipes', 'tide_locks']);
 const RUNE_BELL_COLORS = ['#ff4f64', '#ffb02e', '#3fe07e', '#3ab0ff', '#c77dff'];
 const RUNE_BELL_COLOR_NAMES = ['CORAL', 'GOLD', 'EMERALD', 'AZURE', 'VIOLET'];
 
@@ -761,6 +773,81 @@ export function deriveRuneDoorClue({
     };
   }
 
+  if (type === 'pipes') {
+    const n = 3;
+    const minLen = d < 0.4 ? 4 : 5;
+    const maxLen = d < 0.4 ? 6 : 7;
+    const DX = [1, 0, -1, 0];
+    const DY = [0, 1, 0, -1];
+    const randIntLocal = (a, b) => a + Math.floor(rng() * (b - a + 1));
+    let path = null;
+    for (let attempt = 0; attempt < 250 && !path; attempt++) {
+      const sx = randIntLocal(0, 2);
+      const visited = new Set([`0,${sx}`]);
+      const cur = [[sx, 0]];
+      const dfs = (x, y) => {
+        if (y === 2 && cur.length >= minLen && cur.length <= maxLen) return true;
+        if (cur.length >= maxLen) return false;
+        const dirs = shuffleWithRng(rng, [0, 1, 2, 3]);
+        for (const k of dirs) {
+          const nx = x + DX[k];
+          const ny = y + DY[k];
+          if (nx < 0 || ny < 0 || nx > 2 || ny > 2) continue;
+          const key = `${ny},${nx}`;
+          if (visited.has(key)) continue;
+          visited.add(key);
+          cur.push([nx, ny]);
+          if (dfs(nx, ny)) return true;
+          cur.pop();
+          visited.delete(key);
+        }
+        return false;
+      };
+      if (dfs(sx, 0)) path = cur;
+    }
+    if (!path) path = [[0, 0], [1, 0], [1, 1], [2, 1], [2, 2]];
+    const sourceX = 1 + path[0][0];
+    const targetX = 1 + path[path.length - 1][0];
+    const pattern = new Array(n * n).fill(0);
+    for (const [gx, gy] of path) pattern[gy * n + gx] = 1;
+    return {
+      kind: 'pipes',
+      type: 'pipes',
+      n,
+      sourceX,
+      targetX,
+      pattern,
+      col: dc,
+      floor: df,
+      clueColOffset,
+      ...(doorId ? { doorId: String(doorId) } : {}),
+      seed: puzzleSeed,
+      difficulty: d
+    };
+  }
+
+  if (type === 'tide_locks') {
+    const maxLevel = 3;
+    const count = d < 0.5 ? 3 : 4;
+    const targets = [];
+    for (let i = 0; i < count; i++) {
+      targets.push(1 + Math.floor(rng() * maxLevel));
+    }
+    return {
+      kind: 'tide_locks',
+      type: 'tide_locks',
+      count,
+      targets,
+      maxLevel,
+      col: dc,
+      floor: df,
+      clueColOffset,
+      ...(doorId ? { doorId: String(doorId) } : {}),
+      seed: puzzleSeed,
+      difficulty: d
+    };
+  }
+
   return {
     kind: type,
     type,
@@ -875,7 +962,8 @@ function finalizeTower({
   wallStrips = [],
   grappleRings = [],
   collectibles = [],
-  enemies = []
+  enemies = [],
+  crownSeals = []
 }) {
   const normElevators = elevators.map((el, idx) => ({
     id: String(el.id || `lift_${idx + 1}`),
@@ -1012,6 +1100,7 @@ function finalizeTower({
       ...(resolvedPuzzleSeed !== undefined ? { puzzleSeed: resolvedPuzzleSeed } : {}),
       ...(resolvedPuzzleDifficulty !== undefined ? { puzzleDifficulty: resolvedPuzzleDifficulty } : {}),
       ...(d.clueColOffset !== undefined ? { clueColOffset: Number(d.clueColOffset) } : {}),
+      ...(d.sealId ? { sealId: String(d.sealId) } : {}),
       tunnelStyle: d.tunnelStyle === 'sparkArch' ? 'sparkArch' : 'stone'
     };
   });
@@ -1038,6 +1127,8 @@ function finalizeTower({
       group: sw.group || sw.pipeGroup || 'red',
       pipeGroup: sw.pipeGroup || (sw.mode === 'pipeValve' ? sw.group || 'pipeA' : null),
       mode: sw.mode || 'toggle',
+      ...(sw.sealId ? { sealId: String(sw.sealId) } : {}),
+      ...(sw.requiresLockKeeper ? { requiresLockKeeper: true } : {}),
       ...(sw.targetWaterFloor !== undefined ? { targetWaterFloor: Number(sw.targetWaterFloor) } : {})
     };
   });
@@ -1117,6 +1208,18 @@ function finalizeTower({
   const resolvedTheme = BIOME_PALETTES[theme] ? theme : 'canyon_river';
   const resolvedPalette = palette || BIOME_PALETTES[resolvedTheme];
 
+  const normCrownSeals = (crownSeals || []).map((s, idx) => ({
+    id: String(s.id || `seal_${idx + 1}`),
+    index: Number(s.index ?? idx + 1),
+    label: String(s.label || `Seal ${idx + 1}`),
+    shortLabel: String(s.shortLabel || `Seal ${idx + 1}: ${s.label || 'Lock'}`),
+    hint: String(s.hint || ''),
+    kind: String(s.kind || (idx === 0 ? 'pipe_valves' : idx === 1 ? 'sanctum' : 'upper_sluice')),
+    ...(s.pipeGroup ? { pipeGroup: String(s.pipeGroup) } : {}),
+    ...(s.doorId ? { doorId: String(s.doorId) } : {}),
+    ...(s.switchId ? { switchId: String(s.switchId) } : {})
+  }));
+
   return {
     id: Number(id),
     act: Number(act || Math.min(5, Math.ceil(Number(id || 1) / 2))),
@@ -1126,6 +1229,8 @@ function finalizeTower({
     casual: Boolean(casual),
     casualMission: casualMission ? { ...casualMission } : null,
     dailyModifier: dailyModifier ? { ...dailyModifier } : null,
+    crownSeals: normCrownSeals,
+    crownSealsTotal: normCrownSeals.length,
     clue: primaryClue,
     runeDoors,
     vaultDoor,
@@ -1177,25 +1282,76 @@ function finalizeTower({
 // ============================================================================
 
 export function createCampaignTowers() {
+  // Helper defining the 3 mandatory Crown Seals every Campaign Spire requires!
+  const makeThreeSeals = ({ s1Label, s1Hint, s2Label, s2Hint, s2DoorId, s3Label, s3Hint, s3SwitchId }) => [
+    {
+      id: 'seal_1',
+      index: 1,
+      label: s1Label,
+      shortLabel: `Seal 1: ${s1Label}`,
+      hint: s1Hint,
+      kind: 'pipe_valves',
+      pipeGroup: 'pipeA'
+    },
+    {
+      id: 'seal_2',
+      index: 2,
+      label: s2Label,
+      shortLabel: `Seal 2: ${s2Label}`,
+      hint: s2Hint,
+      kind: 'sanctum',
+      doorId: s2DoorId
+    },
+    {
+      id: 'seal_3',
+      index: 3,
+      label: s3Label,
+      shortLabel: `Seal 3: ${s3Label}`,
+      hint: s3Hint,
+      kind: 'upper_sluice',
+      switchId: s3SwitchId
+    }
+  ];
+
   // --------------------------------------------------------------------------
   // ACT I — REDWOOD CANYON RIVERS ('canyon_river', Spires 1 & 2)
   // --------------------------------------------------------------------------
 
-  // SPIRE 1: SUNLIT GORGE SLUICE (18 floors — Real Staircases, Snap-Crab Springboards & Mosaic Sanctum)
+  // SPIRE 1: SUNLIT GORGE SLUICE (20 floors — True 360° Cylindrical Puzzle Fortress:
+  // Max 1F stepped accent, TWO +10-col Cross-Tower Interior Tunnels forced by stone bulkheads,
+  // Dead-end fork, Snap-Crab Springboard Valve Loft (Seal 1), Mandatory Rotary Pipes Sanctum
+  // + Mid-Spire Siphon Barrier (Seal 2), Canyon Lock-Keeper & Upper Sluice (Seal 3))
   const s1Ledges = [];
-  span(s1Ledges, 0, 18, 4, 'solid');                 // Wide 4-col spawn quay [18,19,0,1]
-  stairFlight(s1Ledges, 0, 2, 3, 1, 4, 'solid');     // Smooth 3-floor staircase 2->3->4 onto [5,6,7,8] at f=3!
-  stairFlight(s1Ledges, 3, 9, 2, 1, 4, 'solid');     // Staircase 9->10 onto [11,12,13,14] at f=5!
-  // Elevator at col 15 (f=5..9) -> terrace at f=9 [16,17,18,19]
-  span(s1Ledges, 9, 16, 4, 'solid');
-  // Sanctum side-spur at f=9 [12,13,14] reachable via 1-col hop left from 16->14
-  span(s1Ledges, 9, 12, 3, 'solid');
-  stairFlight(s1Ledges, 9, 0, 3, 1, 4, 'solid');     // Staircase 0->1->2 onto [3,4,5,6] at f=12!
-  tile(s1Ledges, 5, 12, 'box');                      // Siphon crate shattered with Tail-Whip or Hydro-Pulse
-  // Hydro-conduit shortcut or staircase climb f=12 -> f=16
-  stairFlight(s1Ledges, 12, 7, 2, 1, 3, 'solid');    // [9,10,11] at f=14
-  stairFlight(s1Ledges, 14, 12, 2, 1, 5, 'solid');   // Crown terrace [14,15,16,17,18] at f=16!
-  span(s1Ledges, 17, 19, 2, 'solid');                // Bonus Harmonic Seed perch [19,0] at f=17
+  span(s1Ledges, 0, 18, 4, 'solid');                    // Spawn Quay [18,19,0,1]
+  span(s1Ledges, 1, 15, 2, 'solid');                    // Dead-end left decoy fork [15,16] at f=1 (Gear + one-way drop!)
+  stairFlight(s1Ledges, 0, 2, 1, 1, 3, 'solid');        // Short 1F stepped accent onto [3,4,5] at f=1
+  tile(s1Ledges, 6, 1, 'pillar', { h: 3 });             // Exterior Stone Bulkhead forces Cross-Tower Tunnel #1 (5 -> 15)!
+  // Opposite side of spire (f=1): [14,15,16] blocked right by bulkhead at col 17
+  span(s1Ledges, 1, 14, 3, 'solid');
+  tile(s1Ledges, 17, 1, 'pillar', { h: 3 });
+  // Jump left across dead elevator shaft col 13 onto Snap-Crab Courtyard [7..12] at f=2!
+  span(s1Ledges, 2, 7, 6, 'solid');                     // [7,8,9,10,11,12] at f=2
+  tile(s1Ledges, 8, 2, 'box');                          // Siphon Clamp Box guarding Pipe-Valve 1 at col 7
+  // High Valve Loft at f=5 (+3F above f=2 — requires flipping Snap-Crab & bouncing off carapace!)
+  span(s1Ledges, 5, 8, 4, 'solid');                     // [8,9,10,11] at f=5 (clear of col 13 lift shaft!)
+  tile(s1Ledges, 9, 5, 'box');                          // Siphon Clamp Box guarding Pipe-Valve 2 at col 10
+  // Unpowered Main Lift s1_lift1 at col 13 (f=2..9) -> Mid-Spire Aqueduct Ring at f=9
+  span(s1Ledges, 9, 9, 4, 'solid');                     // Sanctum Courtyard [9,10,11,12] at f=9
+  span(s1Ledges, 8, 6, 2, 'solid');                     // Left one-way drop scout spur [6,7] at f=8 (Gear + Rail-Skater)
+  span(s1Ledges, 9, 14, 5, 'solid');                    // East Mid-Spire Deck [14,15,16,17,18] at f=9
+  // Mid-Spire Full Siphon Barrier (retracted ONLY when Inner Aqueduct Sanctum Seal 2 is solved!)
+  tile(s1Ledges, 18, 9, 'laserGate', { switchGroup: 'seal_2', h: 3 });
+  span(s1Ledges, 10, 19, 2, 'phaseBlock', { switchGroup: 'seal_2', inverted: false });
+  // Upper Spire Strategic Ascent (broken chasms, crumble bridge, Cross-Tower Tunnel #2, Counterweight Lift)
+  span(s1Ledges, 10, 1, 3, 'solid');                    // [1,2,3] at f=10
+  span(s1Ledges, 11, 5, 2, 'crumble');                  // Crumbling bridge [5,6] at f=11 (1-col running jump over col 4!)
+  span(s1Ledges, 12, 8, 3, 'solid');                    // [8,9,10] at f=12 (1-col jump / Grapple Ring across col 7!)
+  tile(s1Ledges, 11, 12, 'pillar', { h: 3 });           // Bulkhead forces Cross-Tower Tunnel #2 (10 -> 0 on f=12)!
+  span(s1Ledges, 12, 19, 4, 'solid');                   // Opposite side [19,0,1,2] at f=12
+  tile(s1Ledges, 2, 12, 'steamVent', { phasePeriod: 3.1, phaseOffset: 0.0 }); // Timed Hydro-Geyser + Lift s1_lift2 at col 3!
+  // Summit Crown Arena at f=16: [4..12]
+  span(s1Ledges, 16, 4, 9, 'solid');                    // [4,5,6,7,8,9,10,11,12] at f=16
+  span(s1Ledges, 17, 13, 2, 'solid');                   // Bonus Harmonic Seed perch [13,14] at f=17
 
   const t1 = finalizeTower({
     id: 1,
@@ -1204,58 +1360,87 @@ export function createCampaignTowers() {
     name: 'SUNLIT GORGE SLUICE',
     subtitle: 'ACT I • REDWOOD CANYON RIVERS',
     theme: 'canyon_river',
-    floors: 18,
-    timeLimit: 105,
-    parTime: 40,
+    floors: 20,
+    timeLimit: 260,
+    parTime: 115,
     spawn: { col: 0, floor: 0 },
     ledges: s1Ledges,
     elevators: [
-      { id: 's1_lift1', col: 15, minFloor: 5, maxFloor: 9, startFloor: 5, speed: 1.8 }
+      { id: 's1_lift1', col: 13, minFloor: 2, maxFloor: 9, startFloor: 2, speed: 1.9, pipeGroup: 'pipeA', powered: false },
+      { id: 's1_lift2', col: 3, minFloor: 12, maxFloor: 16, startFloor: 12, speed: 1.95 }
     ],
     doors: [
-      { id: 's1_c1a', col: 7, floor: 3, targetId: 's1_c1b', tunnelStyle: 'sparkArch' },
-      { id: 's1_c1b', col: 17, floor: 9, targetId: 's1_c1a', tunnelStyle: 'sparkArch' },
-      { id: 's1_sanctum', col: 13, floor: 9, isRune: true, puzzleType: 'lights', puzzleSeed: 11011 },
-      { id: 's1_crown', col: 16, floor: 16, isExit: true }
+      { id: 's1_t1a', col: 5, floor: 1, targetId: 's1_t1b', tunnelStyle: 'stone' },
+      { id: 's1_t1b', col: 15, floor: 1, targetId: 's1_t1a', tunnelStyle: 'stone' },
+      { id: 's1_t2a', col: 10, floor: 12, targetId: 's1_t2b', tunnelStyle: 'stone' },
+      { id: 's1_t2b', col: 0, floor: 12, targetId: 's1_t2a', tunnelStyle: 'stone' },
+      { id: 's1_sanctum', col: 10, floor: 9, isRune: true, puzzleType: 'pipes', puzzleSeed: 11011, puzzleDifficulty: 0.3, sealId: 'seal_2' },
+      { id: 's1_crown', col: 10, floor: 16, isExit: true }
     ],
-    switches: [],
-    grappleRings: [{ id: 's1_ring1', col: 15.2, floor: 10.3 }],
+    switches: [
+      { id: 's1_pipe1', col: 7, floor: 2, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's1_pipe2', col: 10, floor: 5, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's1_seal3_sluice', col: 5, floor: 16, group: 'seal_3', mode: 'sluiceSeal', sealId: 'seal_3', requiresLockKeeper: true }
+    ],
+    grappleRings: [
+      { id: 's1_ring1', col: 7.0, floor: 12.6 }
+    ],
+    crownSeals: makeThreeSeals({
+      s1Label: 'Pipe-Valve Pressure',
+      s1Hint: 'Tunnel across spire, flip Snap-Crab & spin both Copper Pipe-Valves',
+      s2Label: 'Inner Aqueduct Sanctum',
+      s2Hint: 'Solve the Mid-Spire Rotary Pipe Sanctum to retract the Siphon Barrier',
+      s2DoorId: 's1_sanctum',
+      s3Label: 'Upper Sluice Guardian',
+      s3Hint: 'Defeat the Canyon Lock-Keeper & pull the Upper Sluice Lever',
+      s3SwitchId: 's1_seal3_sluice'
+    }),
     collectibles: [
-      { id: 's1_g1', col: 3, floor: 1, type: 'gear' },
-      { id: 's1_g2', col: 12, floor: 5, type: 'gear' },
-      { id: 's1_g3', col: 18, floor: 9, type: 'gear' },
-      { id: 's1_g4', col: 4, floor: 12, type: 'gear' },
-      { id: 's1_g5', col: 15, floor: 16, type: 'gear' },
-      { id: 's1_log', col: 12, floor: 9, type: 'relic', relicId: 'relic_t1' },
-      { id: 's1_seed', col: 19, floor: 17, type: 'starCore' },
-      { id: 's1_cr1', col: 14, floor: 5, type: 'critter_pod', critterId: 'critter_s1_1', species: 'River Otter', biome: 'canyon_river' },
-      { id: 's1_cr2', col: 14, floor: 9, type: 'critter_pod', critterId: 'critter_s1_2', species: 'River Otter', biome: 'canyon_river' },
-      { id: 's1_cr3', col: 0, floor: 17, type: 'critter_pod', critterId: 'critter_s1_3', species: 'River Otter', biome: 'canyon_river' }
+      { id: 's1_g1', col: 15, floor: 1, type: 'gear' },
+      { id: 's1_g2', col: 8, floor: 5, type: 'gear' },
+      { id: 's1_g3', col: 6, floor: 8, type: 'gear' },
+      { id: 's1_g4', col: 1, floor: 12, type: 'gear' },
+      { id: 's1_g5', col: 7, floor: 16, type: 'gear' },
+      { id: 's1_log', col: 9, floor: 9, type: 'relic', relicId: 'relic_t1' },
+      { id: 's1_seed', col: 13, floor: 17, type: 'starCore' },
+      { id: 's1_cr1', col: 11, floor: 5, type: 'critter_pod', critterId: 'critter_s1_1', species: 'River Otter', biome: 'canyon_river' },
+      { id: 's1_cr2', col: 11, floor: 9, type: 'critter_pod', critterId: 'critter_s1_2', species: 'River Otter', biome: 'canyon_river' },
+      { id: 's1_cr3', col: 14, floor: 17, type: 'critter_pod', critterId: 'critter_s1_3', species: 'River Otter', biome: 'canyon_river' }
     ],
     enemies: [
-      { type: 'snap_crab', col: 6.5, floor: 3, dir: 1, speed: 1.5 },
-      { type: 'gulp_hopper', col: 13.5, floor: 5, dir: -1, speed: 1.5 },
-      { type: 'rail_skater', col: 18.0, floor: 9, dir: 1, speed: 1.6, axis: 'h' },
-      { type: 'snap_crab', col: 4.5, floor: 12, dir: -1, speed: 1.6 },
-      { type: 'volt_eel', col: 10.5, floor: 14.4, dir: 1, speed: 1.7, amp: 0.3 }
+      { type: 'snap_crab', col: 9.5, floor: 2, dir: 1, speed: 1.35 },
+      { type: 'gulp_hopper', col: 15.5, floor: 9, dir: -1, speed: 1.45 },
+      { type: 'rail_skater', col: 6.5, floor: 8, dir: 1, speed: 1.5, axis: 'h' },
+      { type: 'volt_eel', col: 2.5, floor: 11.4, dir: 1, speed: 1.65, amp: 0.3 },
+      { type: 'siphon_warden', col: 8.5, floor: 16.4, dir: -1, speed: 1.85, hp: 2, maxHp: 2, isLockKeeper: true, bossTitle: 'CANYON LOCK-KEEPER', sealId: 'seal_3' }
     ]
   });
 
-  // SPIRE 2: REDWOOD CATARACT DAM (20 floors — Pipe-Valve Lift, Floodgate Swim, Vault & Act I Siphon Warden)
+  // SPIRE 2: REDWOOD CATARACT DAM (21 floors — Act I Boss: Floodgate Swim + Cross-Tower Tunnel + Crab Loft,
+  // Mandatory Tide-Locks Sanctum + Siphon Barrier, Act I Redwood Siphon Warden & Upper Sluice)
   const s2Ledges = [];
-  span(s2Ledges, 0, 18, 4, 'solid');                 // Spawn [18,19,0,1]
-  stairFlight(s2Ledges, 0, 2, 2, 1, 4, 'solid');     // [4,5,6,7] at f=2 (Floodgate Valve at col 6, f=2!)
-  // Broken bridge chasm cols 8..10 at f=2 (can cross via Floodgate Water swim OR 1-col stepping stone at col 9, f=3!)
-  span(s2Ledges, 3, 9, 2, 'crumble');                // Stepping stones [9,10] at f=3 (plus Floodgate raises clean water to f=2.2!)
-  span(s2Ledges, 3, 12, 4, 'solid');                 // [12,13,14,15] at f=3 (Pipe-Valve at col 14 powers Lift at col 16!)
-  // Pipe-powered mechanical elevator at col 16 (f=3..8)
-  span(s2Ledges, 8, 17, 4, 'solid');                 // [17,18,19,0] at f=8
-  stairFlight(s2Ledges, 8, 1, 3, 1, 4, 'solid');     // [4,5,6,7] at f=11 (Core Vault at col 6, f=11)
-  stairFlight(s2Ledges, 11, 8, 3, 1, 4, 'solid');    // [11,12,13,14] at f=14
-  // Geyser Vent boost at col 14, f=14 or staircase to f=18!
-  tile(s2Ledges, 15, 15, 'steamVent', { phasePeriod: 3.2, phaseOffset: 0.2 });
-  stairFlight(s2Ledges, 14, 15, 4, 1, 5, 'solid');   // Crown Dam Terrace [19,0,1,2,3] at f=18!
-  span(s2Ledges, 19, 4, 2, 'solid');                 // [4,5] at f=19
+  span(s2Ledges, 0, 18, 4, 'solid');                    // Spawn [18,19,0,1]
+  stairFlight(s2Ledges, 0, 2, 2, 1, 5, 'solid');        // 2F stepped rise onto [4,5,6,7,8] at f=2 (FloodValve 6, Crab 5.5)
+  span(s2Ledges, 5, 6, 3, 'solid');                     // High Valve Loft [6,7,8] at f=5 (Crab Springboard!)
+  tile(s2Ledges, 7, 5, 'box');                          // Crate guarding Pipe-Valve 2 at col 8
+  span(s2Ledges, 3, 9, 2, 'crumble');                   // Floodgate crumble crossing [9,10] at f=3
+  span(s2Ledges, 3, 11, 5, 'solid');                    // [11,12,13,14,15] at f=3 (Pipe-Valve 1 at 14)
+  // Pipe-powered Dam Lift s2_lift_pipe at col 16 (f=3..9)
+  span(s2Ledges, 9, 17, 6, 'solid');                    // Mid-Spire Dam Plaza [17,18,19,0,1,2] at f=9 (Core Vault at 19)
+  span(s2Ledges, 9, 12, 4, 'solid');                    // Sanctum Spur [12,13,14,15] at f=9
+  tile(s2Ledges, 2, 9, 'laserGate', { switchGroup: 'seal_2', h: 3 });
+  span(s2Ledges, 10, 3, 2, 'phaseBlock', { switchGroup: 'seal_2', inverted: false });
+  span(s2Ledges, 10, 5, 4, 'solid');                    // [5,6,7,8] at f=10
+  tile(s2Ledges, 9, 10, 'pillar', { h: 3 });            // Bulkhead forces Cross-Tower Tunnel (8 -> 18 on f=10)!
+  span(s2Ledges, 10, 17, 3, 'solid');                   // Opposite side [17,18,19] at f=10 -> dead-end fork left [15,16] at f=11!
+  span(s2Ledges, 11, 15, 2, 'solid');
+  span(s2Ledges, 11, 1, 2, 'crumble');                  // Jump across col 0 -> crumble [1,2] at f=11 -> [4,5,6] at f=12
+  span(s2Ledges, 12, 4, 3, 'solid');
+  stairFlight(s2Ledges, 12, 7, 2, 1, 4, 'solid');       // Short 2F accent onto [9,10,11,12] at f=14
+  tile(s2Ledges, 12, 14, 'steamVent', { phasePeriod: 3.1, phaseOffset: 0.2 });
+  // Counterweight Lift s2_lift2 at col 13 (f=14..18)
+  span(s2Ledges, 18, 14, 9, 'solid');                   // Crown Dam Arena [14,15,16,17,18,19,0,1,2] at f=18!
+  span(s2Ledges, 19, 3, 2, 'solid');                    // Bonus perch [3,4] at f=19
 
   const t2 = finalizeTower({
     id: 2,
@@ -1264,43 +1449,60 @@ export function createCampaignTowers() {
     name: 'REDWOOD CATARACT DAM',
     subtitle: 'ACT I BOSS • RIVER FLOODGATE CITADEL',
     theme: 'canyon_river',
-    floors: 20,
-    timeLimit: 115,
-    parTime: 44,
+    floors: 21,
+    timeLimit: 280,
+    parTime: 125,
     spawn: { col: 0, floor: 0 },
     ledges: s2Ledges,
     elevators: [
-      { id: 's2_lift_pipe', col: 16, minFloor: 3, maxFloor: 8, startFloor: 3, speed: 1.9, pipeGroup: 'pipeA', powered: false }
+      { id: 's2_lift_pipe', col: 16, minFloor: 3, maxFloor: 9, startFloor: 3, speed: 1.9, pipeGroup: 'pipeA', powered: false },
+      { id: 's2_lift2', col: 13, minFloor: 14, maxFloor: 18, startFloor: 14, speed: 2.0 }
     ],
     doors: [
-      { id: 's2_vault', col: 6, floor: 11, isVault: true },
-      { id: 's2_c1a', col: 13, floor: 14, targetId: 's2_c1b', tunnelStyle: 'sparkArch' },
-      { id: 's2_c1b', col: 0, floor: 18, targetId: 's2_c1a', tunnelStyle: 'sparkArch' },
-      { id: 's2_crown', col: 2, floor: 18, isExit: true }
+      { id: 's2_t1a', col: 8, floor: 10, targetId: 's2_t1b', tunnelStyle: 'stone' },
+      { id: 's2_t1b', col: 18, floor: 10, targetId: 's2_t1a', tunnelStyle: 'stone' },
+      { id: 's2_sanctum', col: 13, floor: 9, isRune: true, puzzleType: 'tide_locks', puzzleSeed: 22022, puzzleDifficulty: 0.35, sealId: 'seal_2' },
+      { id: 's2_vault', col: 19, floor: 9, isVault: true },
+      { id: 's2_crown', col: 1, floor: 18, isExit: true }
     ],
     switches: [
       { id: 's2_flood1', col: 6, floor: 2, group: 'flood', mode: 'floodValve', targetWaterFloor: 2.35 },
-      { id: 's2_pipe1', col: 14, floor: 3, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve' }
+      { id: 's2_pipe1', col: 14, floor: 3, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's2_pipe2', col: 8, floor: 5, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's2_seal3_sluice', col: 15, floor: 18, group: 'seal_3', mode: 'sluiceSeal', sealId: 'seal_3', requiresLockKeeper: true }
     ],
-    grappleRings: [{ id: 's2_ring1', col: 9.5, floor: 3.6 }],
+    grappleRings: [
+      { id: 's2_ring1', col: 9.5, floor: 3.9 },
+      { id: 's2_ring2', col: 16.0, floor: 10.2 }
+    ],
+    crownSeals: makeThreeSeals({
+      s1Label: 'Dam Pipe Pressure',
+      s1Hint: 'Open Floodgate, bounce up to Valve 2 & pressurize the Dam Lift',
+      s2Label: 'Tide-Lock Sanctum',
+      s2Hint: 'Balance the Mid-Spire Tide-Lock Chambers to retract the Dam Gate',
+      s2DoorId: 's2_sanctum',
+      s3Label: 'Redwood Warden Seal',
+      s3Hint: 'Defeat the Redwood Siphon Warden & pull the Upper Sluice Lever',
+      s3SwitchId: 's2_seal3_sluice'
+    }),
     collectibles: [
       { id: 's2_g1', col: 5, floor: 2, type: 'gear' },
       { id: 's2_g2', col: 13, floor: 3, type: 'gear' },
-      { id: 's2_g3', col: 19, floor: 8, type: 'gear' },
-      { id: 's2_g4', col: 12, floor: 14, type: 'gear' },
-      { id: 's2_g5', col: 1, floor: 18, type: 'gear' },
-      { id: 's2_log', col: 5, floor: 11, type: 'relic', relicId: 'relic_t2' },
-      { id: 's2_seed', col: 4, floor: 19, type: 'starCore' },
+      { id: 's2_g3', col: 15, floor: 11, type: 'gear' },
+      { id: 's2_g4', col: 10, floor: 14, type: 'gear' },
+      { id: 's2_g5', col: 18, floor: 18, type: 'gear' },
+      { id: 's2_log', col: 18, floor: 9, type: 'relic', relicId: 'relic_t2' },
+      { id: 's2_seed', col: 3, floor: 19, type: 'starCore' },
       { id: 's2_cr1', col: 7, floor: 2, type: 'critter_pod', critterId: 'critter_s2_1', species: 'River Otter', biome: 'canyon_river' },
-      { id: 's2_cr2', col: 7, floor: 11, type: 'critter_pod', critterId: 'critter_s2_2', species: 'River Otter', biome: 'canyon_river' },
-      { id: 's2_cr3', col: 5, floor: 19, type: 'critter_pod', critterId: 'critter_s2_3', species: 'River Otter', biome: 'canyon_river' }
+      { id: 's2_cr2', col: 14, floor: 9, type: 'critter_pod', critterId: 'critter_s2_2', species: 'River Otter', biome: 'canyon_river' },
+      { id: 's2_cr3', col: 4, floor: 19, type: 'critter_pod', critterId: 'critter_s2_3', species: 'River Otter', biome: 'canyon_river' }
     ],
     enemies: [
-      { type: 'snap_crab', col: 13.5, floor: 3, dir: -1, speed: 1.6 },
-      { type: 'barnacle_mortar', col: 19.5, floor: 8, dir: -1, firePeriod: 3.6 },
-      { type: 'gulp_hopper', col: 5.5, floor: 11, dir: 1, speed: 1.65 },
-      { type: 'rail_skater', col: 12.5, floor: 14, dir: 1, speed: 1.75, axis: 'h' },
-      { type: 'siphon_warden', col: 11.5, floor: 17.8, dir: -1, speed: 2.0, hp: 3 }
+      { type: 'snap_crab', col: 5.5, floor: 2, dir: 1, speed: 1.45 },
+      { type: 'snap_crab', col: 12.5, floor: 3, dir: -1, speed: 1.55 },
+      { type: 'barnacle_mortar', col: 1.0, floor: 9, dir: -1, firePeriod: 3.5 },
+      { type: 'rail_skater', col: 10.5, floor: 14, dir: 1, speed: 1.7, axis: 'h' },
+      { type: 'siphon_warden', col: 18.5, floor: 18.3, dir: -1, speed: 2.0, hp: 3, maxHp: 3, isLockKeeper: true, bossTitle: 'REDWOOD SIPHON WARDEN', sealId: 'seal_3' }
     ]
   });
 
@@ -1308,20 +1510,28 @@ export function createCampaignTowers() {
   // ACT II — CRYSTAL ALPINE LAKES ('alpine_lake', Spires 3 & 4)
   // --------------------------------------------------------------------------
 
-  // SPIRE 3: MIRROR TARN AQUEDUCT (20 floors — Gecko Wall-Scamper Crystal Strips & Harmonic Bells Sanctum)
+  // SPIRE 3: MIRROR TARN AQUEDUCT (21 floors — Running Jumps + Gecko Crystal Strips + Cross-Tower +10 Tunnel,
+  // Mandatory Harmonic Bells Sanctum, Alpine Lock-Keeper)
   const s3Ledges = [];
   span(s3Ledges, 0, 18, 4, 'solid');
-  stairFlight(s3Ledges, 0, 2, 3, 1, 3, 'solid');     // [5,6,7] at f=3
-  // Gecko Crystal Wall-Strip at col 8 (f=3..7) + backup stair/lift so player scampers right up crystal vein!
-  span(s3Ledges, 7, 9, 4, 'ice');                    // [9,10,11,12] at f=7
-  tile(s3Ledges, 10, 7, 'solid');
-  stairFlight(s3Ledges, 7, 13, 3, 1, 4, 'solid');    // [16,17,18,19] at f=10 (Bells Sanctum at col 18, f=10)
-  // Mechanical Lift at col 0 (f=10..14)
-  span(s3Ledges, 14, 1, 4, 'solid');                 // [1,2,3,4] at f=14
-  // Second Gecko Crystal Wall-Strip at col 5 (f=14..17)
-  span(s3Ledges, 17, 6, 3, 'ice');                   // [6,7,8] at f=17
-  stairFlight(s3Ledges, 17, 9, 1, 1, 5, 'solid');    // Crown Aqueduct [10,11,12,13,14] at f=18!
-  span(s3Ledges, 19, 15, 2, 'solid');
+  stairFlight(s3Ledges, 0, 2, 2, 1, 3, 'solid');        // 2F accent onto [4,5,6] at f=2
+  span(s3Ledges, 3, 8, 3, 'solid');                     // 1-col jump gap at col 7 -> [8,9,10] at f=3 (Pipe-Valve 1 at 9)
+  // Gecko Crystal Wall-Strip at col 11 (f=3..7) -> High Glacier Terrace [12..16] at f=7
+  span(s3Ledges, 7, 12, 5, 'ice');
+  tile(s3Ledges, 12, 7, 'solid');
+  tile(s3Ledges, 15, 7, 'solid');                       // Pipe-Valve 2 at (15, 7)
+  // Pipe-powered Lift s3_lift1 at col 17 (f=7..11) -> Mid-Spire Tarn Plaza [18..2] at f=11
+  span(s3Ledges, 11, 18, 5, 'solid');                   // [18,19,0,1,2] at f=11 (Bells Sanctum at 19)
+  tile(s3Ledges, 2, 11, 'pillar', { h: 3 });            // Exterior Bulkhead forces +10 Cross-Tower Tunnel (1 -> 11 on f=11)!
+  span(s3Ledges, 11, 10, 4, 'solid');                   // Opposite side [10,11,12,13] at f=11
+  span(s3Ledges, 12, 7, 2, 'solid');                    // Dead-end west scout ledge [7,8] at f=12 (Gear)
+  // Mid-Spire Siphon Barrier (Seal 2) on opposite side col 13 -> Sanctum-Powered Lift s3_lift2 at col 15 (f=12..16)!
+  tile(s3Ledges, 13, 11, 'laserGate', { switchGroup: 'seal_2', h: 3 });
+  span(s3Ledges, 12, 14, 1, 'phaseBlock', { switchGroup: 'seal_2', inverted: false });
+  // Upper Spire (f=16..18): arrives from Sanctum-Powered Lift s3_lift2 at col 15!
+  span(s3Ledges, 16, 16, 4, 'solid');                   // [16,17,18,19] at f=16
+  stairFlight(s3Ledges, 16, 0, 2, 1, 7, 'solid');       // 2F accent -> Crown Aqueduct [2,3,4,5,6,7,8] at f=18!
+  span(s3Ledges, 19, 9, 2, 'solid');                    // Bonus perch [9,10] at f=19
 
   const t3 = finalizeTower({
     id: 3,
@@ -1330,61 +1540,85 @@ export function createCampaignTowers() {
     name: 'MIRROR TARN AQUEDUCT',
     subtitle: 'ACT II • CRYSTAL ALPINE LAKES',
     theme: 'alpine_lake',
-    floors: 20,
-    timeLimit: 110,
-    parTime: 42,
+    floors: 21,
+    timeLimit: 280,
+    parTime: 125,
     spawn: { col: 0, floor: 0 },
     ledges: s3Ledges,
     elevators: [
-      { id: 's3_lift1', col: 0, minFloor: 10, maxFloor: 14, startFloor: 10, speed: 1.85 }
+      { id: 's3_lift1', col: 17, minFloor: 7, maxFloor: 11, startFloor: 7, speed: 1.9, pipeGroup: 'pipeA', powered: false },
+      { id: 's3_lift2', col: 15, minFloor: 12, maxFloor: 16, startFloor: 12, speed: 1.95, pipeGroup: 'seal_2', powered: false }
     ],
     wallStrips: [
-      { id: 's3_gecko1', col: 8, minFloor: 3, maxFloor: 7 },
-      { id: 's3_gecko2', col: 5, minFloor: 14, maxFloor: 17 }
+      { id: 's3_gecko1', col: 11, minFloor: 3, maxFloor: 7 }
     ],
     doors: [
-      { id: 's3_sanctum', col: 18, floor: 10, isRune: true, puzzleType: 'bells', puzzleSeed: 33033 },
-      { id: 's3_crown', col: 12, floor: 18, isExit: true }
+      { id: 's3_t1a', col: 1, floor: 11, targetId: 's3_t1b', tunnelStyle: 'stone' },
+      { id: 's3_t1b', col: 11, floor: 11, targetId: 's3_t1a', tunnelStyle: 'stone' },
+      { id: 's3_sanctum', col: 19, floor: 11, isRune: true, puzzleType: 'bells', puzzleSeed: 33033, puzzleDifficulty: 0.38, sealId: 'seal_2' },
+      { id: 's3_crown', col: 7, floor: 18, isExit: true }
     ],
-    switches: [],
+    switches: [
+      { id: 's3_pipe1', col: 9, floor: 3, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's3_pipe2', col: 15, floor: 7, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's3_seal3_sluice', col: 3, floor: 18, group: 'seal_3', mode: 'sluiceSeal', sealId: 'seal_3', requiresLockKeeper: true }
+    ],
+    crownSeals: makeThreeSeals({
+      s1Label: 'Glacier Pipe Pressure',
+      s1Hint: 'Jump chasm to Valve 1, Gecko-Scamper Crystal Vein & spin Valve 2',
+      s2Label: 'Harmonic Bells Sanctum',
+      s2Hint: 'Solve Mid-Spire Water-Bells, tunnel across spire & ride the Glacier Lift',
+      s2DoorId: 's3_sanctum',
+      s3Label: 'Alpine Lock-Keeper',
+      s3Hint: 'Defeat the Alpine Lock-Keeper & pull the Upper Sluice Lever',
+      s3SwitchId: 's3_seal3_sluice'
+    }),
     collectibles: [
-      { id: 's3_g1', col: 6, floor: 3, type: 'gear' },
-      { id: 's3_g2', col: 11, floor: 7, type: 'gear' },
-      { id: 's3_g3', col: 17, floor: 10, type: 'gear' },
-      { id: 's3_g4', col: 3, floor: 14, type: 'gear' },
-      { id: 's3_g5', col: 11, floor: 18, type: 'gear' },
-      { id: 's3_log', col: 19, floor: 10, type: 'relic', relicId: 'relic_t3' },
-      { id: 's3_seed', col: 15, floor: 19, type: 'starCore' },
-      { id: 's3_cr1', col: 7, floor: 3, type: 'critter_pod', critterId: 'critter_s3_1', species: 'Alpine Newt', biome: 'alpine_lake' },
-      { id: 's3_cr2', col: 9, floor: 7, type: 'critter_pod', critterId: 'critter_s3_2', species: 'Alpine Newt', biome: 'alpine_lake' },
-      { id: 's3_cr3', col: 16, floor: 19, type: 'critter_pod', critterId: 'critter_s3_3', species: 'Alpine Newt', biome: 'alpine_lake' }
+      { id: 's3_g1', col: 8, floor: 3, type: 'gear' },
+      { id: 's3_g2', col: 14, floor: 7, type: 'gear' },
+      { id: 's3_g3', col: 7, floor: 12, type: 'gear' },
+      { id: 's3_g4', col: 18, floor: 16, type: 'gear' },
+      { id: 's3_g5', col: 5, floor: 18, type: 'gear' },
+      { id: 's3_log', col: 18, floor: 11, type: 'relic', relicId: 'relic_t3' },
+      { id: 's3_seed', col: 9, floor: 19, type: 'starCore' },
+      { id: 's3_cr1', col: 10, floor: 3, type: 'critter_pod', critterId: 'critter_s3_1', species: 'Alpine Newt', biome: 'alpine_lake' },
+      { id: 's3_cr2', col: 13, floor: 7, type: 'critter_pod', critterId: 'critter_s3_2', species: 'Alpine Newt', biome: 'alpine_lake' },
+      { id: 's3_cr3', col: 10, floor: 19, type: 'critter_pod', critterId: 'critter_s3_3', species: 'Alpine Newt', biome: 'alpine_lake' }
     ],
     enemies: [
-      { type: 'gulp_hopper', col: 6.5, floor: 3, dir: -1, speed: 1.65 },
-      { type: 'vent_stalker', col: 11.5, floor: 7.8, dir: 1, speed: 1.8, axis: 'v', minFloor: 6.5, maxFloor: 9.2 },
-      { type: 'snap_crab', col: 16.5, floor: 10, dir: 1, speed: 1.7 },
-      { type: 'rail_skater', col: 2.5, floor: 14, dir: -1, speed: 1.8, axis: 'h' },
-      { type: 'volt_eel', col: 8.5, floor: 17.5, dir: 1, speed: 1.85, amp: 0.35 }
+      { type: 'gulp_hopper', col: 5.5, floor: 2, dir: -1, speed: 1.6 },
+      { type: 'vent_stalker', col: 13.5, floor: 8.0, dir: 1, speed: 1.8, axis: 'v', minFloor: 6.8, maxFloor: 9.4 },
+      { type: 'snap_crab', col: 11.5, floor: 11, dir: 1, speed: 1.65 },
+      { type: 'rail_skater', col: 17.5, floor: 16, dir: -1, speed: 1.75, axis: 'h' },
+      { type: 'siphon_warden', col: 5.5, floor: 18.4, dir: 1, speed: 1.95, hp: 2, maxHp: 2, isLockKeeper: true, bossTitle: 'ALPINE LOCK-KEEPER', sealId: 'seal_3' }
     ]
   });
 
-  // SPIRE 4: ALPENGLOW SPILLWAY SPIRE (21 floors — Mountain Winds, Tail-Grapple Chasms, Vault & Act II Warden)
+  // SPIRE 4: ALPENGLOW SPILLWAY SPIRE (22 floors — Act II Boss: Mountain Wind + Crab Springboard,
+  // Grapple Chasm, +10 Cross-Tower Tunnel, Mandatory Sea-Glass Prism Sanctum, Glacier Siphon Warden)
   const s4Ledges = [];
   span(s4Ledges, 0, 18, 4, 'solid');
-  stairFlight(s4Ledges, 0, 2, 3, 1, 4, 'solid');     // Real 3D 5-riser stairs onto [5,6,7,8] at f=3
-  tile(s4Ledges, 6, 3, 'ice');                       // Glacier patch on flat terrace (not stair!)
+  stairFlight(s4Ledges, 0, 2, 2, 1, 2, 'solid');        // 2F accent onto [4,5] at f=2
+  span(s4Ledges, 3, 6, 4, 'solid');                     // Step/jump up to [6,7,8,9] at f=3 (Snap-Crab 6.5, ice at 8)
   tile(s4Ledges, 8, 3, 'ice');
-  // Tail-Grapple Swing Ring across cols 9..11 (also 2-col stepping pad at col 10, f=3 so always fair!)
-  span(s4Ledges, 3, 10, 2, 'solid');
-  span(s4Ledges, 4, 12, 4, 'solid');                 // [12,13,14,15] at f=4
-  // Pipe-Valve at col 14, f=4 activates Spillway Lift at col 16 (f=4..9)
-  span(s4Ledges, 9, 17, 4, 'solid');                 // [17,18,19,0] at f=9
-  stairFlight(s4Ledges, 9, 1, 3, 1, 4, 'solid');     // [4,5,6,7] at f=12 (Core Vault at col 5, f=12)
-  // Doorway shelter f=12 -> f=15
-  span(s4Ledges, 15, 14, 4, 'ice');                  // [14,15,16,17] at f=15
-  tile(s4Ledges, 15, 15, 'solid');
-  stairFlight(s4Ledges, 15, 18, 4, 1, 5, 'solid');   // Crown Spillway [2,3,4,5,6] at f=19!
-  span(s4Ledges, 20, 7, 2, 'solid');
+  span(s4Ledges, 6, 7, 3, 'solid');                     // High Valve Loft [7,8,9] at f=6 (Crab Springboard bounce!)
+  tile(s4Ledges, 7, 6, 'box');
+  span(s4Ledges, 3, 11, 1, 'solid');                    // Grapple stepping stone [11] at f=3
+  span(s4Ledges, 4, 12, 4, 'solid');                    // [12,13,14,15] at f=4 (Pipe-Valve 1 at 14)
+  // Pipe-powered Lift s4_lift1 at col 16 (f=4..10) -> Mid-Spire Spillway Plaza [17..3] at f=10
+  span(s4Ledges, 10, 17, 7, 'solid');                   // [17,18,19,0,1,2,3] at f=10
+  tile(s4Ledges, 3, 10, 'laserGate', { switchGroup: 'seal_2', h: 3 });
+  span(s4Ledges, 11, 4, 2, 'phaseBlock', { switchGroup: 'seal_2', inverted: false });
+  span(s4Ledges, 11, 6, 4, 'solid');                    // [6,7,8,9] at f=11
+  // Counterweight Lift s4_lift2 at col 10 (f=11..15)
+  span(s4Ledges, 15, 11, 4, 'ice');                     // [11,12,13,14] at f=15
+  tile(s4Ledges, 12, 15, 'solid');
+  tile(s4Ledges, 14, 15, 'solid');
+  tile(s4Ledges, 15, 15, 'pillar', { h: 3 });           // Bulkhead forces +10 Cross-Tower Tunnel (14 -> 4 on f=15)!
+  span(s4Ledges, 15, 3, 3, 'solid');                    // Opposite side [3,4,5] at f=15
+  // Counterweight Lift s4_lift3 at col 6 (f=15..19) -> Crown Spillway Arena [7..13] at f=19!
+  span(s4Ledges, 19, 7, 7, 'solid');                    // [7,8,9,10,11,12,13] at f=19
+  span(s4Ledges, 20, 14, 2, 'solid');                   // Bonus perch [14,15] at f=20
 
   const t4 = finalizeTower({
     id: 4,
@@ -1393,46 +1627,61 @@ export function createCampaignTowers() {
     name: 'ALPENGLOW SPILLWAY SPIRE',
     subtitle: 'ACT II BOSS • GLACIAL GALE MONOLITH',
     theme: 'alpine_lake',
-    floors: 21,
-    timeLimit: 115,
-    parTime: 44,
+    floors: 22,
+    timeLimit: 290,
+    parTime: 130,
     spawn: { col: 0, floor: 0 },
-    mechanics: { windForce: 0.42, windPeriod: 6.2 },
+    mechanics: { windForce: 0.40, windPeriod: 6.2 },
     ledges: s4Ledges,
     elevators: [
-      { id: 's4_lift1', col: 16, minFloor: 4, maxFloor: 9, startFloor: 4, speed: 1.9, pipeGroup: 'pipeA', powered: false }
+      { id: 's4_lift1', col: 16, minFloor: 4, maxFloor: 10, startFloor: 4, speed: 1.95, pipeGroup: 'pipeA', powered: false },
+      { id: 's4_lift2', col: 10, minFloor: 11, maxFloor: 15, startFloor: 11, speed: 2.0 },
+      { id: 's4_lift3', col: 6, minFloor: 15, maxFloor: 19, startFloor: 15, speed: 2.0 }
     ],
     grappleRings: [
-      { id: 's4_ring1', col: 10.5, floor: 4.8 },
-      { id: 's4_ring2', col: 9.5, floor: 13.8 }
+      { id: 's4_ring1', col: 10.5, floor: 4.5 },
+      { id: 's4_ring2', col: 9.5, floor: 12.6 }
     ],
     doors: [
-      { id: 's4_d1a', col: 7, floor: 12, targetId: 's4_d1b', tunnelStyle: 'stone' },
-      { id: 's4_d1b', col: 15, floor: 15, targetId: 's4_d1a', tunnelStyle: 'stone' },
-      { id: 's4_vault', col: 5, floor: 12, isVault: true },
-      { id: 's4_crown', col: 4, floor: 19, isExit: true }
+      { id: 's4_t1a', col: 14, floor: 15, targetId: 's4_t1b', tunnelStyle: 'stone' },
+      { id: 's4_t1b', col: 4, floor: 15, targetId: 's4_t1a', tunnelStyle: 'stone' },
+      { id: 's4_sanctum', col: 18, floor: 10, isRune: true, puzzleType: 'beam', puzzleSeed: 44044, puzzleDifficulty: 0.42, sealId: 'seal_2' },
+      { id: 's4_vault', col: 0, floor: 10, isVault: true },
+      { id: 's4_crown', col: 12, floor: 19, isExit: true }
     ],
     switches: [
-      { id: 's4_pipe1', col: 14, floor: 4, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve' }
+      { id: 's4_pipe1', col: 14, floor: 4, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's4_pipe2', col: 8, floor: 6, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's4_seal3_sluice', col: 8, floor: 19, group: 'seal_3', mode: 'sluiceSeal', sealId: 'seal_3', requiresLockKeeper: true }
     ],
+    crownSeals: makeThreeSeals({
+      s1Label: 'Spillway Pressure',
+      s1Hint: 'Crab-bounce onto High Balcony Valve 2 & spin Spillway Valve 1',
+      s2Label: 'Sea-Glass Prism Sanctum',
+      s2Hint: 'Route the Prism Beam inside the Mid-Spire Sanctum to lower the Gate',
+      s2DoorId: 's4_sanctum',
+      s3Label: 'Glacier Warden Seal',
+      s3Hint: 'Defeat the Glacier Siphon Warden & pull the Upper Sluice Lever',
+      s3SwitchId: 's4_seal3_sluice'
+    }),
     collectibles: [
-      { id: 's4_g1', col: 6, floor: 3, type: 'gear' },
+      { id: 's4_g1', col: 5, floor: 2, type: 'gear' },
       { id: 's4_g2', col: 13, floor: 4, type: 'gear' },
-      { id: 's4_g3', col: 18, floor: 9, type: 'gear' },
-      { id: 's4_g4', col: 16, floor: 15, type: 'gear' },
-      { id: 's4_g5', col: 3, floor: 19, type: 'gear' },
-      { id: 's4_log', col: 6, floor: 12, type: 'relic', relicId: 'relic_t4' },
-      { id: 's4_seed', col: 7, floor: 20, type: 'starCore' },
+      { id: 's4_g3', col: 2, floor: 10, type: 'gear' },
+      { id: 's4_g4', col: 3, floor: 15, type: 'gear' },
+      { id: 's4_g5', col: 10, floor: 19, type: 'gear' },
+      { id: 's4_log', col: 19, floor: 10, type: 'relic', relicId: 'relic_t4' },
+      { id: 's4_seed', col: 14, floor: 20, type: 'starCore' },
       { id: 's4_cr1', col: 15, floor: 4, type: 'critter_pod', critterId: 'critter_s4_1', species: 'Alpine Newt', biome: 'alpine_lake' },
-      { id: 's4_cr2', col: 4, floor: 12, type: 'critter_pod', critterId: 'critter_s4_2', species: 'Alpine Newt', biome: 'alpine_lake' },
-      { id: 's4_cr3', col: 8, floor: 20, type: 'critter_pod', critterId: 'critter_s4_3', species: 'Alpine Newt', biome: 'alpine_lake' }
+      { id: 's4_cr2', col: 1, floor: 10, type: 'critter_pod', critterId: 'critter_s4_2', species: 'Alpine Newt', biome: 'alpine_lake' },
+      { id: 's4_cr3', col: 15, floor: 20, type: 'critter_pod', critterId: 'critter_s4_3', species: 'Alpine Newt', biome: 'alpine_lake' }
     ],
     enemies: [
-      { type: 'snap_crab', col: 13.5, floor: 4, dir: 1, speed: 1.75 },
-      { type: 'vent_stalker', col: 18.5, floor: 10.2, dir: -1, speed: 1.9, axis: 'v', minFloor: 9.0, maxFloor: 11.6 },
-      { type: 'barnacle_mortar', col: 2.5, floor: 12, dir: 1, firePeriod: 3.4 },
-      { type: 'gulp_hopper', col: 16.5, floor: 15, dir: -1, speed: 1.8 },
-      { type: 'siphon_warden', col: 13.5, floor: 18.8, dir: 1, speed: 2.1, hp: 3 }
+      { type: 'snap_crab', col: 6.5, floor: 3, dir: 1, speed: 1.55 },
+      { type: 'vent_stalker', col: 18.5, floor: 11.2, dir: -1, speed: 1.9, axis: 'v', minFloor: 10.0, maxFloor: 12.6 },
+      { type: 'barnacle_mortar', col: 7.5, floor: 11, dir: -1, firePeriod: 3.3 },
+      { type: 'gulp_hopper', col: 12.5, floor: 15, dir: -1, speed: 1.8 },
+      { type: 'siphon_warden', col: 10.5, floor: 19.3, dir: 1, speed: 2.1, hp: 3, maxHp: 3, isLockKeeper: true, bossTitle: 'GLACIER SIPHON WARDEN', sealId: 'seal_3' }
     ]
   });
 
@@ -1440,22 +1689,28 @@ export function createCampaignTowers() {
   // ACT III — EMERALD MIST BAYOUS ('mist_bayou', Spires 5 & 6)
   // --------------------------------------------------------------------------
 
-  // SPIRE 5: FIREFLY CYPRESS RELIQUARY (22 floors — Dual Valve Sluices, Volt-Eels & Sea-Glass Prism Sanctum)
+  // SPIRE 5: FIREFLY CYPRESS RELIQUARY (22 floors — Red Phase Bridge + 2 Pipe Valves,
+  // +10 Cross-Tower Tunnel + Mandatory Hydro-Mosaic Sanctum, Bayou Lock-Keeper)
   const s5Ledges = [];
   span(s5Ledges, 0, 18, 4, 'solid');
-  stairFlight(s5Ledges, 0, 2, 4, 1, 4, 'solid');     // [6,7,8,9] at f=4 (Red Valve at col 8, f=4)
-  span(s5Ledges, 5, 10, 2, 'phaseBlock', { switchGroup: 'red', inverted: false });
-  span(s5Ledges, 5, 12, 4, 'solid');                 // [12,13,14,15] at f=5
-  stairFlight(s5Ledges, 5, 16, 4, 1, 4, 'solid');    // [0,1,2,3] at f=9 (Cyan Valve at col 2, f=9)
-  span(s5Ledges, 9, 15, 3, 'solid');                 // [15,16,17] at f=9 (Prism Sanctum at col 16, f=9!)
-  span(s5Ledges, 10, 4, 3, 'phaseBlock', { switchGroup: 'cyan', inverted: false });
-  span(s5Ledges, 10, 7, 3, 'solid');                 // [7,8,9] at f=10
-  // Lift at col 10 (f=10..15)
-  span(s5Ledges, 15, 11, 4, 'solid');                // [11,12,13,14] at f=15
-  // Vine Gecko Wall-Strip at col 15 (f=15..18)
-  span(s5Ledges, 18, 16, 3, 'solid');                // [16,17,18] at f=18
-  stairFlight(s5Ledges, 18, 19, 2, 1, 5, 'solid');   // Crown Cypress Terrace [1,2,3,4,5] at f=20!
-  span(s5Ledges, 21, 6, 2, 'solid');
+  stairFlight(s5Ledges, 0, 2, 2, 1, 2, 'solid');        // 2F accent -> [4,5] at f=2
+  span(s5Ledges, 3, 6, 3, 'solid');                     // Step up to [6,7,8] at f=3 (Pipe-Valve 1 at 6, Red Switch at 7)
+  span(s5Ledges, 4, 9, 2, 'phaseBlock', { switchGroup: 'red', inverted: false });
+  span(s5Ledges, 4, 11, 4, 'solid');                    // [11,12,13,14] at f=4 (Pipe-Valve 2 at 13)
+  // Pipe-powered Lift s5_lift1 at col 15 (f=4..10) -> Mid-Spire Cypress Deck [16..19] at f=10
+  span(s5Ledges, 10, 16, 4, 'solid');
+  tile(s5Ledges, 19, 10, 'pillar', { h: 3 });           // Bulkhead forces +10 Cross-Tower Tunnel (18 -> 8 on f=10)!
+  span(s5Ledges, 10, 7, 5, 'solid');                    // Opposite Sanctum Courtyard [7,8,9,10,11] at f=10!
+  span(s5Ledges, 11, 4, 2, 'solid');                    // Left decoy spur [4,5] at f=11 (Gear)
+  // Mid-Spire Siphon Barrier (Seal 2) -> Sanctum-Powered Lift s5_lift2 at col 14 (f=11..15)!
+  tile(s5Ledges, 11, 10, 'laserGate', { switchGroup: 'seal_2', h: 3 });
+  span(s5Ledges, 11, 12, 2, 'phaseBlock', { switchGroup: 'seal_2', inverted: false });
+  // Sanctum-Powered Lift s5_lift2 at col 14 (f=11..15) -> Upper Deck [15..1] at f=15
+  span(s5Ledges, 15, 15, 7, 'solid');                   // [15,16,17,18,19,0,1] at f=15
+  // Vine Gecko Wall-Strip at col 2 (f=15..18)
+  span(s5Ledges, 18, 3, 3, 'solid');                    // [3,4,5] at f=18
+  stairFlight(s5Ledges, 18, 6, 2, 1, 7, 'solid');       // 2F accent -> Crown Cypress Arena [8,9,10,11,12,13,14] at f=20!
+  span(s5Ledges, 21, 15, 2, 'solid');                   // Bonus perch [15,16] at f=21
 
   const t5 = finalizeTower({
     id: 5,
@@ -1465,58 +1720,81 @@ export function createCampaignTowers() {
     subtitle: 'ACT III • EMERALD MIST BAYOUS',
     theme: 'mist_bayou',
     floors: 22,
-    timeLimit: 120,
-    parTime: 45,
+    timeLimit: 295,
+    parTime: 130,
     spawn: { col: 0, floor: 0 },
     ledges: s5Ledges,
     elevators: [
-      { id: 's5_lift1', col: 10, minFloor: 10, maxFloor: 15, startFloor: 10, speed: 1.9 }
+      { id: 's5_lift1', col: 15, minFloor: 4, maxFloor: 10, startFloor: 4, speed: 1.95, pipeGroup: 'pipeA', powered: false },
+      { id: 's5_lift2', col: 14, minFloor: 11, maxFloor: 15, startFloor: 11, speed: 1.95, pipeGroup: 'seal_2', powered: false }
     ],
     wallStrips: [
-      { id: 's5_gecko1', col: 15, minFloor: 15, maxFloor: 18 }
+      { id: 's5_gecko1', col: 2, minFloor: 15, maxFloor: 18 }
     ],
     doors: [
-      { id: 's5_d1a', col: 0, floor: 9, targetId: 's5_d1b', tunnelStyle: 'stone' },
-      { id: 's5_d1b', col: 15, floor: 9, targetId: 's5_d1a', tunnelStyle: 'stone' },
-      { id: 's5_sanctum', col: 16, floor: 9, isRune: true, puzzleType: 'beam', puzzleSeed: 55055 },
-      { id: 's5_crown', col: 3, floor: 20, isExit: true }
+      { id: 's5_d1a', col: 18, floor: 10, targetId: 's5_d1b', tunnelStyle: 'stone' },
+      { id: 's5_d1b', col: 8, floor: 10, targetId: 's5_d1a', tunnelStyle: 'stone' },
+      { id: 's5_sanctum', col: 9, floor: 10, isRune: true, puzzleType: 'lights', puzzleSeed: 55055, puzzleDifficulty: 0.45, sealId: 'seal_2' },
+      { id: 's5_crown', col: 13, floor: 20, isExit: true }
     ],
     switches: [
-      { id: 's5_sw_red', col: 8, floor: 4, group: 'red', mode: 'toggle' },
-      { id: 's5_sw_cyan', col: 2, floor: 9, group: 'cyan', mode: 'toggle' }
+      { id: 's5_pipe1', col: 6, floor: 3, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's5_sw_red', col: 7, floor: 3, group: 'red', mode: 'toggle' },
+      { id: 's5_pipe2', col: 13, floor: 4, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's5_seal3_sluice', col: 9, floor: 20, group: 'seal_3', mode: 'sluiceSeal', sealId: 'seal_3', requiresLockKeeper: true }
     ],
+    crownSeals: makeThreeSeals({
+      s1Label: 'Bayou Pipe Pressure',
+      s1Hint: 'Open Red Sluice Bridge & spin both Copper Pipe-Valves for the Lift',
+      s2Label: 'Hydro-Mosaic Sanctum',
+      s2Hint: 'Cross the +10 Rock Tunnel & solve the Mid-Spire Mosaic Sanctum',
+      s2DoorId: 's5_sanctum',
+      s3Label: 'Bayou Lock-Keeper',
+      s3Hint: 'Defeat the Bayou Lock-Keeper & pull the Upper Sluice Lever',
+      s3SwitchId: 's5_seal3_sluice'
+    }),
     collectibles: [
-      { id: 's5_g1', col: 7, floor: 4, type: 'gear' },
-      { id: 's5_g2', col: 14, floor: 5, type: 'gear' },
-      { id: 's5_g3', col: 17, floor: 9, type: 'gear' },
-      { id: 's5_g4', col: 13, floor: 15, type: 'gear' },
-      { id: 's5_g5', col: 4, floor: 20, type: 'gear' },
-      { id: 's5_log', col: 12, floor: 15, type: 'relic', relicId: 'relic_t5' },
-      { id: 's5_seed', col: 6, floor: 21, type: 'starCore' },
-      { id: 's5_cr1', col: 15, floor: 5, type: 'critter_pod', critterId: 'critter_s5_1', species: 'Bayou Axolotl', biome: 'mist_bayou' },
-      { id: 's5_cr2', col: 9, floor: 10, type: 'critter_pod', critterId: 'critter_s5_2', species: 'Bayou Axolotl', biome: 'mist_bayou' },
-      { id: 's5_cr3', col: 7, floor: 21, type: 'critter_pod', critterId: 'critter_s5_3', species: 'Bayou Axolotl', biome: 'mist_bayou' }
+      { id: 's5_g1', col: 5, floor: 2, type: 'gear' },
+      { id: 's5_g2', col: 12, floor: 4, type: 'gear' },
+      { id: 's5_g3', col: 4, floor: 11, type: 'gear' },
+      { id: 's5_g4', col: 19, floor: 15, type: 'gear' },
+      { id: 's5_g5', col: 11, floor: 20, type: 'gear' },
+      { id: 's5_log', col: 0, floor: 15, type: 'relic', relicId: 'relic_t5' },
+      { id: 's5_seed', col: 15, floor: 21, type: 'starCore' },
+      { id: 's5_cr1', col: 14, floor: 4, type: 'critter_pod', critterId: 'critter_s5_1', species: 'Bayou Axolotl', biome: 'mist_bayou' },
+      { id: 's5_cr2', col: 16, floor: 15, type: 'critter_pod', critterId: 'critter_s5_2', species: 'Bayou Axolotl', biome: 'mist_bayou' },
+      { id: 's5_cr3', col: 16, floor: 21, type: 'critter_pod', critterId: 'critter_s5_3', species: 'Bayou Axolotl', biome: 'mist_bayou' }
     ],
     enemies: [
-      { type: 'volt_eel', col: 13.5, floor: 5.4, dir: -1, speed: 1.85, amp: 0.35 },
-      { type: 'barnacle_mortar', col: 8.5, floor: 10, dir: -1, firePeriod: 3.3 },
-      { type: 'snap_crab', col: 12.5, floor: 15, dir: 1, speed: 1.8 },
-      { type: 'gulp_hopper', col: 17.5, floor: 18, dir: 1, speed: 1.85 },
-      { type: 'rail_skater', col: 2.5, floor: 20, dir: -1, speed: 1.9, axis: 'h' }
+      { type: 'volt_eel', col: 12.5, floor: 4.5, dir: -1, speed: 1.8, amp: 0.35 },
+      { type: 'barnacle_mortar', col: 17.5, floor: 15, dir: -1, firePeriod: 3.3 },
+      { type: 'snap_crab', col: 19.5, floor: 15, dir: 1, speed: 1.75 },
+      { type: 'gulp_hopper', col: 4.5, floor: 18, dir: 1, speed: 1.85 },
+      { type: 'siphon_warden', col: 11.5, floor: 20.4, dir: -1, speed: 2.0, hp: 2, maxHp: 2, isLockKeeper: true, bossTitle: 'BAYOU LOCK-KEEPER', sealId: 'seal_3' }
     ]
   });
 
-  // SPIRE 6: SUNKEN LOTUS FLOODGATE (22 floors — Rising Bayou Brine, Drain Valves, Mortar Reflect & Act III Warden)
+  // SPIRE 6: SUNKEN LOTUS FLOODGATE (23 floors — Act III Boss: Rising Bayou Surge + Crab Springboard,
+  // Mandatory Tide-Locks Sanctum + +10 Cross-Tower Tunnel, Act III Bayou Siphon Warden)
   const s6Ledges = [];
   span(s6Ledges, 0, 18, 4, 'solid');
-  stairFlight(s6Ledges, 0, 2, 4, 1, 4, 'solid');     // [6,7,8,9] at f=4 (Drain Valve 1 at col 8, f=4)
-  // Lift at col 10 (f=4..9)
-  span(s6Ledges, 9, 11, 4, 'solid');                 // [11,12,13,14] at f=9 (Core Vault at col 13, f=9)
-  stairFlight(s6Ledges, 9, 15, 3, 1, 4, 'solid');    // [18,19,0,1] at f=12 (Drain Valve 2 at col 0, f=12)
-  span(s6Ledges, 13, 2, 3, 'conveyorR');             // Lotus current channel [2,3,4] at f=13
-  stairFlight(s6Ledges, 13, 5, 3, 1, 4, 'solid');    // [8,9,10,11] at f=16 (Drain Valve 3 at col 10, f=16)
-  stairFlight(s6Ledges, 16, 12, 4, 1, 5, 'solid');   // Crown Lotus Terrace [16,17,18,19,0] at f=20!
-  span(s6Ledges, 21, 1, 2, 'solid');
+  stairFlight(s6Ledges, 0, 2, 2, 1, 2, 'solid');        // 2F accent -> [4,5] at f=2
+  span(s6Ledges, 3, 6, 4, 'solid');                     // [6,7,8,9] at f=3 (Pipe-Valve 1 at 6, Drain 1 at 8, Snap-Crab 7.5)
+  span(s6Ledges, 6, 7, 3, 'solid');                     // High Valve Loft [7,8,9] at f=6 (Crab Springboard!)
+  tile(s6Ledges, 8, 6, 'box');
+  // Pipe-powered Lift s6_lift1 at col 10 (f=3..10) -> Mid-Spire Delta Plaza [11..17] at f=10
+  span(s6Ledges, 10, 11, 7, 'solid');                   // [11,12,13,14,15,16,17] at f=10
+  tile(s6Ledges, 17, 10, 'laserGate', { switchGroup: 'seal_2', h: 3 });
+  span(s6Ledges, 11, 18, 2, 'phaseBlock', { switchGroup: 'seal_2', inverted: false });
+  span(s6Ledges, 11, 0, 3, 'solid');                    // [0,1,2] at f=11
+  span(s6Ledges, 12, 3, 3, 'conveyorR');                // Lotus Current [3,4,5] at f=12
+  span(s6Ledges, 13, 7, 3, 'solid');                    // 1-col jump gap col 6 -> [7,8,9] at f=13
+  tile(s6Ledges, 10, 13, 'pillar', { h: 3 });           // Bulkhead forces +10 Cross-Tower Tunnel (9 -> 19 on f=13)!
+  span(s6Ledges, 13, 18, 3, 'solid');                   // Opposite side [18,19,0] at f=13
+  stairFlight(s6Ledges, 13, 1, 2, 1, 4, 'solid');       // 2F accent -> [3,4,5,6] at f=15 (Drain Valve 3 at 5)
+  // Counterweight Lift s6_lift2 at col 7 (f=15..20)
+  span(s6Ledges, 20, 8, 8, 'solid');                    // Crown Lotus Arena [8,9,10,11,12,13,14,15] at f=20!
+  span(s6Ledges, 21, 16, 2, 'solid');                   // Bonus perch [16,17] at f=21
 
   const t6 = finalizeTower({
     id: 6,
@@ -1525,44 +1803,59 @@ export function createCampaignTowers() {
     name: 'SUNKEN LOTUS FLOODGATE',
     subtitle: 'ACT III BOSS • RISING DELTA SLUICE',
     theme: 'mist_bayou',
-    floors: 22,
-    timeLimit: 115,
-    parTime: 44,
+    floors: 23,
+    timeLimit: 305,
+    parTime: 135,
     spawn: { col: 0, floor: 0 },
-    mechanics: { waterRiseRate: 0.15 },
+    mechanics: { waterRiseRate: 0.085 },
     ledges: s6Ledges,
     elevators: [
-      { id: 's6_lift1', col: 10, minFloor: 4, maxFloor: 9, startFloor: 4, speed: 2.0 }
+      { id: 's6_lift1', col: 10, minFloor: 3, maxFloor: 10, startFloor: 3, speed: 2.0, pipeGroup: 'pipeA', powered: false },
+      { id: 's6_lift2', col: 7, minFloor: 15, maxFloor: 20, startFloor: 15, speed: 2.05 }
     ],
     doors: [
-      { id: 's6_vault', col: 13, floor: 9, isVault: true },
-      { id: 's6_c1a', col: 1, floor: 12, targetId: 's6_c1b', tunnelStyle: 'sparkArch' },
-      { id: 's6_c1b', col: 9, floor: 16, targetId: 's6_c1a', tunnelStyle: 'sparkArch' },
-      { id: 's6_crown', col: 18, floor: 20, isExit: true }
+      { id: 's6_t1a', col: 9, floor: 13, targetId: 's6_t1b', tunnelStyle: 'stone' },
+      { id: 's6_t1b', col: 19, floor: 13, targetId: 's6_t1a', tunnelStyle: 'stone' },
+      { id: 's6_sanctum', col: 13, floor: 10, isRune: true, puzzleType: 'tide_locks', puzzleSeed: 66066, puzzleDifficulty: 0.48, sealId: 'seal_2' },
+      { id: 's6_vault', col: 15, floor: 10, isVault: true },
+      { id: 's6_crown', col: 14, floor: 20, isExit: true }
     ],
     switches: [
-      { id: 's6_drain1', col: 8, floor: 4, group: 'drain', mode: 'drainValve' },
-      { id: 's6_drain2', col: 0, floor: 12, group: 'drain', mode: 'drainValve' },
-      { id: 's6_drain3', col: 10, floor: 16, group: 'drain', mode: 'drainValve' }
+      { id: 's6_pipe1', col: 6, floor: 3, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's6_drain1', col: 8, floor: 3, group: 'drain', mode: 'drainValve' },
+      { id: 's6_pipe2', col: 9, floor: 6, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's6_drain2', col: 16, floor: 10, group: 'drain', mode: 'drainValve' },
+      { id: 's6_drain3', col: 5, floor: 15, group: 'drain', mode: 'drainValve' },
+      { id: 's6_seal3_sluice', col: 9, floor: 20, group: 'seal_3', mode: 'sluiceSeal', sealId: 'seal_3', requiresLockKeeper: true }
     ],
+    crownSeals: makeThreeSeals({
+      s1Label: 'Delta Pipe Pressure',
+      s1Hint: 'Vent surge, Crab-bounce to Balcony Valve 2 & pressurize Delta Lift',
+      s2Label: 'Lotus Tide-Lock Sanctum',
+      s2Hint: 'Balance the Mid-Spire Sluice Chambers to open the Delta Gate',
+      s2DoorId: 's6_sanctum',
+      s3Label: 'Bayou Warden Seal',
+      s3Hint: 'Defeat the Bayou Siphon Warden & pull the Upper Sluice Lever',
+      s3SwitchId: 's6_seal3_sluice'
+    }),
     collectibles: [
-      { id: 's6_g1', col: 7, floor: 4, type: 'gear' },
-      { id: 's6_g2', col: 12, floor: 9, type: 'gear' },
-      { id: 's6_g3', col: 19, floor: 12, type: 'gear' },
-      { id: 's6_g4', col: 11, floor: 16, type: 'gear' },
-      { id: 's6_g5', col: 17, floor: 20, type: 'gear' },
-      { id: 's6_log', col: 14, floor: 9, type: 'relic', relicId: 'relic_t6' },
-      { id: 's6_seed', col: 1, floor: 21, type: 'starCore' },
-      { id: 's6_cr1', col: 9, floor: 4, type: 'critter_pod', critterId: 'critter_s6_1', species: 'Bayou Axolotl', biome: 'mist_bayou' },
-      { id: 's6_cr2', col: 18, floor: 12, type: 'critter_pod', critterId: 'critter_s6_2', species: 'Bayou Axolotl', biome: 'mist_bayou' },
-      { id: 's6_cr3', col: 2, floor: 21, type: 'critter_pod', critterId: 'critter_s6_3', species: 'Bayou Axolotl', biome: 'mist_bayou' }
+      { id: 's6_g1', col: 5, floor: 2, type: 'gear' },
+      { id: 's6_g2', col: 12, floor: 10, type: 'gear' },
+      { id: 's6_g3', col: 1, floor: 11, type: 'gear' },
+      { id: 's6_g4', col: 18, floor: 13, type: 'gear' },
+      { id: 's6_g5', col: 11, floor: 20, type: 'gear' },
+      { id: 's6_log', col: 14, floor: 10, type: 'relic', relicId: 'relic_t6' },
+      { id: 's6_seed', col: 16, floor: 21, type: 'starCore' },
+      { id: 's6_cr1', col: 9, floor: 3, type: 'critter_pod', critterId: 'critter_s6_1', species: 'Bayou Axolotl', biome: 'mist_bayou' },
+      { id: 's6_cr2', col: 4, floor: 15, type: 'critter_pod', critterId: 'critter_s6_2', species: 'Bayou Axolotl', biome: 'mist_bayou' },
+      { id: 's6_cr3', col: 17, floor: 21, type: 'critter_pod', critterId: 'critter_s6_3', species: 'Bayou Axolotl', biome: 'mist_bayou' }
     ],
     enemies: [
-      { type: 'snap_crab', col: 6.5, floor: 4, dir: 1, speed: 1.8 },
-      { type: 'barnacle_mortar', col: 14.5, floor: 9, dir: -1, firePeriod: 3.1 },
-      { type: 'volt_eel', col: 3.5, floor: 13.4, dir: 1, speed: 1.95, amp: 0.36 },
-      { type: 'gulp_hopper', col: 9.5, floor: 16, dir: -1, speed: 1.9 },
-      { type: 'siphon_warden', col: 8.5, floor: 19.8, dir: -1, speed: 2.15, hp: 3 }
+      { type: 'snap_crab', col: 7.5, floor: 3, dir: 1, speed: 1.6 },
+      { type: 'barnacle_mortar', col: 14.5, floor: 10, dir: -1, firePeriod: 3.1 },
+      { type: 'volt_eel', col: 4.5, floor: 12.4, dir: 1, speed: 1.9, amp: 0.35 },
+      { type: 'gulp_hopper', col: 4.5, floor: 15, dir: -1, speed: 1.85 },
+      { type: 'siphon_warden', col: 12.0, floor: 20.3, dir: -1, speed: 2.15, hp: 3, maxHp: 3, isLockKeeper: true, bossTitle: 'BAYOU SIPHON WARDEN', sealId: 'seal_3' }
     ]
   });
 
@@ -1570,22 +1863,28 @@ export function createCampaignTowers() {
   // ACT IV — SUNLIT CORAL SEAS ('coral_sea', Spires 7 & 8)
   // --------------------------------------------------------------------------
 
-  // SPIRE 7: MOTHER-OF-PEARL ATOLL SPIRE (23 floors — Lagoon Geysers, Grapple Arches & Sluice Basins Sanctum)
+  // SPIRE 7: MOTHER-OF-PEARL ATOLL SPIRE (23 floors — Lagoon Geyser + Grapple + +10 Cross-Tower Tunnel,
+  // Mandatory Sluice Basins Blocks Sanctum + Siphon Barrier, Atoll Lock-Keeper)
   const s7Ledges = [];
   span(s7Ledges, 0, 18, 4, 'solid');
-  stairFlight(s7Ledges, 0, 2, 3, 1, 4, 'solid');     // [5,6,7,8] at f=3
-  tile(s7Ledges, 8, 3, 'steamVent', { phasePeriod: 3.2, phaseOffset: 0.0 }); // Geyser launches to f=6!
-  stairFlight(s7Ledges, 3, 9, 3, 1, 4, 'solid');     // [12,13,14,15] at f=6
-  // Grapple Arch across cols 16..17 + stepping coral at col 16, f=6
-  span(s7Ledges, 6, 16, 2, 'crumble');
-  span(s7Ledges, 7, 18, 4, 'solid');                 // [18,19,0,1] at f=7
-  // Lift at col 2 (f=7..12)
-  span(s7Ledges, 12, 3, 5, 'solid');                 // [3,4,5,6,7] at f=12 (Sluice Basins Sanctum at col 5, f=12)
-  stairFlight(s7Ledges, 12, 8, 4, 1, 4, 'solid');    // [12,13,14,15] at f=16
-  // Sea-Glass Gecko Strip at col 16 (f=16..19)
-  span(s7Ledges, 19, 17, 3, 'solid');                // [17,18,19] at f=19
-  stairFlight(s7Ledges, 19, 0, 2, 1, 5, 'solid');    // Crown Atoll Terrace [2,3,4,5,6] at f=21!
-  span(s7Ledges, 22, 7, 2, 'solid');
+  stairFlight(s7Ledges, 0, 2, 2, 1, 2, 'solid');        // 2F accent -> [4,5] at f=2
+  span(s7Ledges, 3, 6, 3, 'solid');                     // [6,7,8] at f=3 (Pipe-Valve 1 at 6, Lagoon Geyser at 8 -> launches to f=6!)
+  tile(s7Ledges, 8, 3, 'steamVent', { phasePeriod: 3.1, phaseOffset: 0.0 });
+  span(s7Ledges, 6, 9, 4, 'solid');                     // [9,10,11,12] at f=6 (Pipe-Valve 2 at 11)
+  span(s7Ledges, 6, 14, 2, 'crumble');                  // Grapple Arch crossing [14,15] at f=6 (gap at 13 & 16!)
+  span(s7Ledges, 7, 17, 5, 'solid');                    // [17,18,19,0,1] at f=7
+  // Pipe-powered Lift s7_lift1 at col 2 (f=7..12) -> Mid-Spire Atoll Plaza [3..8] at f=12
+  span(s7Ledges, 12, 3, 6, 'solid');                    // [3,4,5,6,7,8] at f=12
+  tile(s7Ledges, 8, 12, 'laserGate', { switchGroup: 'seal_2', h: 3 });
+  span(s7Ledges, 13, 9, 2, 'phaseBlock', { switchGroup: 'seal_2', inverted: false });
+  span(s7Ledges, 13, 11, 3, 'solid');                   // [11,12,13] at f=13
+  tile(s7Ledges, 14, 13, 'pillar', { h: 3 });           // Bulkhead forces +10 Cross-Tower Tunnel (13 -> 3 on f=13)!
+  span(s7Ledges, 13, 2, 3, 'solid');                    // Opposite side [2,3,4] at f=13
+  stairFlight(s7Ledges, 13, 5, 2, 1, 4, 'solid');       // 2F accent -> [7,8,9,10] at f=15
+  // Sea-Glass Gecko Strip at col 11 (f=15..19)
+  span(s7Ledges, 19, 12, 3, 'solid');                   // [12,13,14] at f=19
+  stairFlight(s7Ledges, 19, 15, 2, 1, 7, 'solid');      // 2F accent -> Crown Atoll Arena [17,18,19,0,1,2,3] at f=21!
+  span(s7Ledges, 22, 4, 2, 'solid');                    // Bonus perch [4,5] at f=22
 
   const t7 = finalizeTower({
     id: 7,
@@ -1595,60 +1894,84 @@ export function createCampaignTowers() {
     subtitle: 'ACT IV • SUNLIT CORAL SEAS',
     theme: 'coral_sea',
     floors: 23,
-    timeLimit: 120,
-    parTime: 46,
+    timeLimit: 305,
+    parTime: 135,
     spawn: { col: 0, floor: 0 },
     ledges: s7Ledges,
     elevators: [
-      { id: 's7_lift1', col: 2, minFloor: 7, maxFloor: 12, startFloor: 7, speed: 2.0 }
+      { id: 's7_lift1', col: 2, minFloor: 7, maxFloor: 12, startFloor: 7, speed: 2.0, pipeGroup: 'pipeA', powered: false }
     ],
     wallStrips: [
-      { id: 's7_gecko1', col: 16, minFloor: 16, maxFloor: 19 }
+      { id: 's7_gecko1', col: 11, minFloor: 15, maxFloor: 19 }
     ],
     grappleRings: [
-      { id: 's7_ring1', col: 16.8, floor: 7.8 }
+      { id: 's7_ring1', col: 15.8, floor: 7.6 }
     ],
     doors: [
-      { id: 's7_sanctum', col: 5, floor: 12, isRune: true, puzzleType: 'blocks', puzzleSeed: 77077 },
-      { id: 's7_crown', col: 4, floor: 21, isExit: true }
+      { id: 's7_t1a', col: 13, floor: 13, targetId: 's7_t1b', tunnelStyle: 'stone' },
+      { id: 's7_t1b', col: 3, floor: 13, targetId: 's7_t1a', tunnelStyle: 'stone' },
+      { id: 's7_sanctum', col: 5, floor: 12, isRune: true, puzzleType: 'blocks', puzzleSeed: 77077, puzzleDifficulty: 0.48, sealId: 'seal_2' },
+      { id: 's7_crown', col: 2, floor: 21, isExit: true }
     ],
-    switches: [],
+    switches: [
+      { id: 's7_pipe1', col: 6, floor: 3, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's7_pipe2', col: 11, floor: 6, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's7_seal3_sluice', col: 18, floor: 21, group: 'seal_3', mode: 'sluiceSeal', sealId: 'seal_3', requiresLockKeeper: true }
+    ],
+    crownSeals: makeThreeSeals({
+      s1Label: 'Atoll Pipe Pressure',
+      s1Hint: 'Ride Lagoon Geyser & spin both Copper Pipe-Valves to power Atoll Lift',
+      s2Label: 'Sluice Basins Sanctum',
+      s2Hint: 'Slide the Sluice Stones inside the Mid-Spire Sanctum to lower the Gate',
+      s2DoorId: 's7_sanctum',
+      s3Label: 'Atoll Lock-Keeper',
+      s3Hint: 'Defeat the Atoll Lock-Keeper & pull the Upper Sluice Lever',
+      s3SwitchId: 's7_seal3_sluice'
+    }),
     collectibles: [
-      { id: 's7_g1', col: 6, floor: 3, type: 'gear' },
-      { id: 's7_g2', col: 13, floor: 6, type: 'gear' },
+      { id: 's7_g1', col: 5, floor: 2, type: 'gear' },
+      { id: 's7_g2', col: 10, floor: 6, type: 'gear' },
       { id: 's7_g3', col: 6, floor: 12, type: 'gear' },
-      { id: 's7_g4', col: 14, floor: 16, type: 'gear' },
-      { id: 's7_g5', col: 3, floor: 21, type: 'gear' },
+      { id: 's7_g4', col: 9, floor: 15, type: 'gear' },
+      { id: 's7_g5', col: 0, floor: 21, type: 'gear' },
       { id: 's7_log', col: 4, floor: 12, type: 'relic', relicId: 'relic_t7' },
-      { id: 's7_seed', col: 7, floor: 22, type: 'starCore' },
-      { id: 's7_cr1', col: 15, floor: 6, type: 'critter_pod', critterId: 'critter_s7_1', species: 'Sea Turtle', biome: 'coral_sea' },
+      { id: 's7_seed', col: 4, floor: 22, type: 'starCore' },
+      { id: 's7_cr1', col: 12, floor: 6, type: 'critter_pod', critterId: 'critter_s7_1', species: 'Sea Turtle', biome: 'coral_sea' },
       { id: 's7_cr2', col: 7, floor: 12, type: 'critter_pod', critterId: 'critter_s7_2', species: 'Sea Turtle', biome: 'coral_sea' },
-      { id: 's7_cr3', col: 8, floor: 22, type: 'critter_pod', critterId: 'critter_s7_3', species: 'Sea Turtle', biome: 'coral_sea' }
+      { id: 's7_cr3', col: 5, floor: 22, type: 'critter_pod', critterId: 'critter_s7_3', species: 'Sea Turtle', biome: 'coral_sea' }
     ],
     enemies: [
-      { type: 'snap_crab', col: 13.5, floor: 6, dir: -1, speed: 1.85 },
-      { type: 'rail_skater', col: 19.5, floor: 7, dir: 1, speed: 1.95, axis: 'h' },
-      { type: 'gulp_hopper', col: 13.5, floor: 16, dir: 1, speed: 1.9 },
-      { type: 'barnacle_mortar', col: 18.5, floor: 19, dir: -1, firePeriod: 3.1 },
-      { type: 'volt_eel', col: 10.5, floor: 20.5, dir: -1, speed: 2.0, amp: 0.38 }
+      { type: 'snap_crab', col: 10.0, floor: 6, dir: -1, speed: 1.8 },
+      { type: 'rail_skater', col: 19.0, floor: 7, dir: 1, speed: 1.9, axis: 'h' },
+      { type: 'gulp_hopper', col: 8.5, floor: 15, dir: 1, speed: 1.9 },
+      { type: 'barnacle_mortar', col: 13.5, floor: 19, dir: -1, firePeriod: 3.1 },
+      { type: 'siphon_warden', col: 0.5, floor: 21.4, dir: -1, speed: 2.05, hp: 2, maxHp: 2, isLockKeeper: true, bossTitle: 'ATOLL LOCK-KEEPER', sealId: 'seal_3' }
     ]
   });
 
-  // SPIRE 8: PELAGIC REEF CONDUIT (24 floors — Coral Pistons, Pipe-Valve Routing, Vault & Act IV Warden)
+  // SPIRE 8: PELAGIC REEF CONDUIT (24 floors — Act IV Boss: Coral Pistons + 2 Pipe Valves,
+  // +10 Cross-Tower Tunnel + Mandatory Rotary Pipes Sanctum, Act IV Coral Siphon Warden)
   const s8Ledges = [];
   span(s8Ledges, 0, 18, 4, 'solid');
-  stairFlight(s8Ledges, 0, 2, 3, 1, 4, 'solid');     // [5,6,7,8] at f=3 (Pipe-Valve A at col 7, f=3)
+  stairFlight(s8Ledges, 0, 2, 2, 1, 2, 'solid');        // 2F accent -> [4,5] at f=2
+  span(s8Ledges, 3, 6, 3, 'solid');                     // [6,7,8] at f=3 (Pipe-Valve 1 at 7)
   span(s8Ledges, 4, 9, 2, 'piston', { phasePeriod: 3.2, phaseOffset: 0.0 });
-  span(s8Ledges, 5, 11, 4, 'solid');                 // [11,12,13,14] at f=5
-  // Pipe-powered Lift at col 15 (f=5..10)
-  span(s8Ledges, 10, 16, 4, 'solid');                // [16,17,18,19] at f=10 (Flume Flip Switch at col 18)
-  span(s8Ledges, 11, 0, 4, 'conveyorL');             // Reversible Coral Flume [0,1,2,3] at f=11
-  stairFlight(s8Ledges, 11, 4, 3, 1, 5, 'solid');    // [7,8,9,10,11] at f=14 (Core Vault at col 9, f=14)
-  span(s8Ledges, 15, 12, 2, 'piston', { phasePeriod: 3.0, phaseOffset: 0.8 });
-  stairFlight(s8Ledges, 15, 14, 3, 1, 4, 'solid');   // [17,18,19,0] at f=18
-  // Lift 2 at col 1 (f=18..22)
-  span(s8Ledges, 22, 2, 6, 'solid');                 // Crown Reef Terrace [2,3,4,5,6,7] at f=22!
-  span(s8Ledges, 23, 8, 2, 'solid');
+  span(s8Ledges, 5, 11, 4, 'solid');                    // [11,12,13,14] at f=5 (Pipe-Valve 2 at 13)
+  // Pipe-powered Lift s8_lift1 at col 15 (f=5..11) -> Mid-Spire Reef Deck [16..19] at f=11
+  span(s8Ledges, 11, 16, 4, 'solid');                   // [16,17,18,19] (Flume Flip Switch at 18)
+  tile(s8Ledges, 0, 11, 'pillar', { h: 3 });            // Bulkhead forces +10 Cross-Tower Tunnel (19 -> 9 on f=11)!
+  span(s8Ledges, 11, 8, 5, 'solid');                    // Opposite Sanctum Courtyard [8,9,10,11,12] at f=11!
+  // Mid-Spire Siphon Barrier (Seal 2) -> Sanctum-Powered Lift s8_lift_mid at col 14 (f=12..15)!
+  tile(s8Ledges, 12, 11, 'laserGate', { switchGroup: 'seal_2', h: 3 });
+  span(s8Ledges, 12, 13, 1, 'phaseBlock', { switchGroup: 'seal_2', inverted: false });
+  // Upper Spire (f=15..22): Reversible Coral Flume at f=15 + Pistons + Counterweight Lift!
+  span(s8Ledges, 15, 15, 3, 'conveyorL');               // Reversible Coral Flume [15,16,17] at f=15
+  stairFlight(s8Ledges, 15, 18, 2, 1, 5, 'solid');      // 2F accent -> [0,1,2,3,4] at f=17 (Core Vault at 2)
+  span(s8Ledges, 18, 6, 2, 'piston', { phasePeriod: 3.0, phaseOffset: 0.8 }); // 1-col jump col 5 -> Pistons [6,7] at f=18
+  span(s8Ledges, 19, 8, 3, 'solid');                    // [8,9,10] at f=19
+  // Counterweight Lift s8_lift2 at col 11 (f=19..22)
+  span(s8Ledges, 22, 12, 8, 'solid');                   // Crown Reef Arena [12,13,14,15,16,17,18,19] at f=22!
+  span(s8Ledges, 23, 0, 2, 'solid');                    // Bonus perch [0,1] at f=23
 
   const t8 = finalizeTower({
     id: 8,
@@ -1658,40 +1981,56 @@ export function createCampaignTowers() {
     subtitle: 'ACT IV BOSS • OFFSHORE CORAL SIPHON',
     theme: 'coral_sea',
     floors: 24,
-    timeLimit: 125,
-    parTime: 48,
+    timeLimit: 315,
+    parTime: 140,
     spawn: { col: 0, floor: 0 },
     ledges: s8Ledges,
     elevators: [
-      { id: 's8_lift1', col: 15, minFloor: 5, maxFloor: 10, startFloor: 5, speed: 2.0, pipeGroup: 'pipeA', powered: false },
-      { id: 's8_lift2', col: 1, minFloor: 18, maxFloor: 22, startFloor: 18, speed: 2.05 }
+      { id: 's8_lift1', col: 15, minFloor: 5, maxFloor: 11, startFloor: 5, speed: 2.0, pipeGroup: 'pipeA', powered: false },
+      { id: 's8_lift_mid', col: 14, minFloor: 12, maxFloor: 15, startFloor: 12, speed: 2.0, pipeGroup: 'seal_2', powered: false },
+      { id: 's8_lift2', col: 11, minFloor: 19, maxFloor: 22, startFloor: 19, speed: 2.05 }
     ],
     doors: [
-      { id: 's8_vault', col: 9, floor: 14, isVault: true },
-      { id: 's8_crown', col: 5, floor: 22, isExit: true }
+      { id: 's8_t1a', col: 19, floor: 11, targetId: 's8_t1b', tunnelStyle: 'stone' },
+      { id: 's8_t1b', col: 9, floor: 11, targetId: 's8_t1a', tunnelStyle: 'stone' },
+      { id: 's8_sanctum', col: 10, floor: 11, isRune: true, puzzleType: 'pipes', puzzleSeed: 88088, puzzleDifficulty: 0.55, sealId: 'seal_2' },
+      { id: 's8_vault', col: 2, floor: 17, isVault: true },
+      { id: 's8_crown', col: 17, floor: 22, isExit: true }
     ],
     switches: [
-      { id: 's8_pipe1', col: 7, floor: 3, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve' },
-      { id: 's8_conv1', col: 18, floor: 10, group: 'conv', mode: 'conveyorFlip' }
+      { id: 's8_pipe1', col: 7, floor: 3, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's8_pipe2', col: 13, floor: 5, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's8_conv1', col: 18, floor: 11, group: 'conv', mode: 'conveyorFlip' },
+      { id: 's8_seal3_sluice', col: 13, floor: 22, group: 'seal_3', mode: 'sluiceSeal', sealId: 'seal_3', requiresLockKeeper: true }
     ],
+    crownSeals: makeThreeSeals({
+      s1Label: 'Reef Conduit Pressure',
+      s1Hint: 'Cross Coral Pistons & spin both Copper Pipe-Valves to power Reef Lift',
+      s2Label: 'Coral Conduit Sanctum',
+      s2Hint: 'Tunnel across spire & solve the Mid-Spire Rotary Pipe Sanctum',
+      s2DoorId: 's8_sanctum',
+      s3Label: 'Coral Warden Seal',
+      s3Hint: 'Defeat the Coral Siphon Warden & pull the Upper Sluice Lever',
+      s3SwitchId: 's8_seal3_sluice'
+    }),
     collectibles: [
       { id: 's8_g1', col: 6, floor: 3, type: 'gear' },
-      { id: 's8_g2', col: 13, floor: 5, type: 'gear' },
-      { id: 's8_g3', col: 17, floor: 10, type: 'gear' },
-      { id: 's8_g4', col: 10, floor: 14, type: 'gear' },
-      { id: 's8_g5', col: 4, floor: 22, type: 'gear' },
-      { id: 's8_log', col: 8, floor: 14, type: 'relic', relicId: 'relic_t8' },
-      { id: 's8_seed', col: 8, floor: 23, type: 'starCore' },
+      { id: 's8_g2', col: 12, floor: 5, type: 'gear' },
+      { id: 's8_g3', col: 17, floor: 11, type: 'gear' },
+      { id: 's8_g4', col: 4, floor: 17, type: 'gear' },
+      { id: 's8_g5', col: 15, floor: 22, type: 'gear' },
+      { id: 's8_log', col: 1, floor: 17, type: 'relic', relicId: 'relic_t8' },
+      { id: 's8_seed', col: 0, floor: 23, type: 'starCore' },
       { id: 's8_cr1', col: 14, floor: 5, type: 'critter_pod', critterId: 'critter_s8_1', species: 'Sea Turtle', biome: 'coral_sea' },
-      { id: 's8_cr2', col: 11, floor: 14, type: 'critter_pod', critterId: 'critter_s8_2', species: 'Sea Turtle', biome: 'coral_sea' },
-      { id: 's8_cr3', col: 9, floor: 23, type: 'critter_pod', critterId: 'critter_s8_3', species: 'Sea Turtle', biome: 'coral_sea' }
+      { id: 's8_cr2', col: 3, floor: 17, type: 'critter_pod', critterId: 'critter_s8_2', species: 'Sea Turtle', biome: 'coral_sea' },
+      { id: 's8_cr3', col: 1, floor: 23, type: 'critter_pod', critterId: 'critter_s8_3', species: 'Sea Turtle', biome: 'coral_sea' }
     ],
     enemies: [
-      { type: 'rail_skater', col: 12.5, floor: 5, dir: 1, speed: 1.95, axis: 'h' },
-      { type: 'snap_crab', col: 17.5, floor: 10, dir: -1, speed: 1.9 },
-      { type: 'vent_stalker', col: 5.5, floor: 15.5, dir: 1, speed: 2.05, axis: 'v', minFloor: 14.2, maxFloor: 16.8 },
-      { type: 'barnacle_mortar', col: 19.5, floor: 18, dir: -1, firePeriod: 3.0 },
-      { type: 'siphon_warden', col: 14.5, floor: 21.8, dir: 1, speed: 2.2, hp: 3 }
+      { type: 'rail_skater', col: 12.5, floor: 5, dir: 1, speed: 1.9, axis: 'h' },
+      { type: 'snap_crab', col: 17.0, floor: 11, dir: -1, speed: 1.85 },
+      { type: 'vent_stalker', col: 0.5, floor: 18.2, dir: 1, speed: 2.0, axis: 'v', minFloor: 17.0, maxFloor: 19.4 },
+      { type: 'barnacle_mortar', col: 9.5, floor: 19, dir: -1, firePeriod: 3.0 },
+      { type: 'siphon_warden', col: 15.5, floor: 22.3, dir: 1, speed: 2.2, hp: 3, maxHp: 3, isLockKeeper: true, bossTitle: 'CORAL SIPHON WARDEN', sealId: 'seal_3' }
     ]
   });
 
@@ -1699,22 +2038,29 @@ export function createCampaignTowers() {
   // ACT V — POLAR & TEMPEST OCEANS ('storm_ocean', Spires 9 & 10)
   // --------------------------------------------------------------------------
 
-  // SPIRE 9: AURORA ICEBERG BASTION (24 floors — Polar Aurora Tempest, Glacier Wall-Strips & Prism Sanctum)
+  // SPIRE 9: AURORA ICEBERG BASTION (24 floors — Polar Tempest + Gecko Crystal Strip + +10 Cross-Tower Tunnel,
+  // Mandatory Sea-Glass Prism Sanctum + Siphon Barrier, Polar Lock-Keeper)
   const s9Ledges = [];
   span(s9Ledges, 0, 18, 4, 'solid');
-  stairFlight(s9Ledges, 0, 2, 4, 1, 4, 'solid');     // Real 3D 5-riser stairs onto [6,7,8,9] at f=4
-  tile(s9Ledges, 7, 4, 'ice');                       // Glacier patch on flat terrace (not stair!)
+  stairFlight(s9Ledges, 0, 2, 2, 1, 2, 'solid');        // 2F accent -> [4,5] at f=2
+  span(s9Ledges, 3, 7, 2, 'crumble');                   // Running jump col 6 -> crumble [7,8] at f=3
+  span(s9Ledges, 4, 9, 3, 'solid');                     // [9,10,11] at f=4 (Pipe-Valve 1 at 10, ice at 9)
   tile(s9Ledges, 9, 4, 'ice');
-  // Glacier Gecko Strip at col 10 (f=4..8)
-  span(s9Ledges, 8, 11, 4, 'solid');                 // [11,12,13,14] at f=8
-  stairFlight(s9Ledges, 8, 15, 4, 1, 4, 'solid');    // [19,0,1,2] at f=12 (Cyan Switch at col 1, f=12)
-  span(s9Ledges, 13, 3, 3, 'phaseBlock', { switchGroup: 'cyan', inverted: false });
-  span(s9Ledges, 13, 6, 4, 'solid');                 // [6,7,8,9] at f=13 (Prism Sanctum at col 8, f=13)
-  // Lift at col 10 (f=13..18)
-  span(s9Ledges, 18, 11, 4, 'ice');                  // [11,12,13,14] at f=18
-  tile(s9Ledges, 12, 18, 'solid');
-  stairFlight(s9Ledges, 18, 15, 4, 1, 5, 'solid');   // Crown Aurora Terrace [19,0,1,2,3] at f=22!
-  span(s9Ledges, 23, 4, 2, 'solid');
+  // Glacier Gecko Strip at col 12 (f=4..8) -> [13,14,15,16] at f=8 (Pipe-Valve 2 at 15)
+  span(s9Ledges, 8, 13, 4, 'solid');
+  // Pipe-powered Lift s9_lift1 at col 17 (f=8..13) -> Mid-Spire Aurora Plaza [18..2] at f=13
+  span(s9Ledges, 13, 18, 5, 'solid');                   // [18,19,0,1,2] at f=13 (Prism Sanctum at 0)
+  tile(s9Ledges, 2, 13, 'pillar', { h: 3 });            // Bulkhead forces +10 Cross-Tower Tunnel (1 -> 11 on f=13)!
+  span(s9Ledges, 13, 10, 4, 'solid');                   // Opposite side [10,11,12,13] at f=13
+  // Mid-Spire Siphon Barrier (Seal 2) -> Sanctum-Powered Lift s9_lift2 at col 15 (f=14..18)!
+  tile(s9Ledges, 13, 13, 'laserGate', { switchGroup: 'seal_2', h: 3 });
+  span(s9Ledges, 14, 14, 1, 'phaseBlock', { switchGroup: 'seal_2', inverted: false });
+  // Upper Spire (f=18..22): arrives from Sanctum-Powered Lift s9_lift2 at col 15!
+  span(s9Ledges, 18, 16, 4, 'ice');                     // [16,17,18,19] at f=18
+  tile(s9Ledges, 17, 18, 'solid');
+  // Counterweight Lift s9_lift3 at col 0 (f=18..22) -> Crown Aurora Arena [1..7] at f=22!
+  span(s9Ledges, 22, 1, 7, 'solid');                    // [1,2,3,4,5,6,7] at f=22
+  span(s9Ledges, 23, 8, 2, 'solid');                    // Bonus perch [8,9] at f=23
 
   const t9 = finalizeTower({
     id: 9,
@@ -1724,66 +2070,90 @@ export function createCampaignTowers() {
     subtitle: 'ACT V • POLAR & TEMPEST OCEANS',
     theme: 'storm_ocean',
     floors: 24,
-    timeLimit: 125,
-    parTime: 48,
+    timeLimit: 320,
+    parTime: 142,
     spawn: { col: 0, floor: 0 },
-    mechanics: { windForce: 0.38, windPeriod: 6.4, lightningInterval: 7.5 },
+    mechanics: { windForce: 0.36, windPeriod: 6.4, lightningInterval: 7.5 },
     ledges: s9Ledges,
     elevators: [
-      { id: 's9_lift1', col: 10, minFloor: 13, maxFloor: 18, startFloor: 13, speed: 2.1 }
+      { id: 's9_lift1', col: 17, minFloor: 8, maxFloor: 13, startFloor: 8, speed: 2.05, pipeGroup: 'pipeA', powered: false },
+      { id: 's9_lift2', col: 15, minFloor: 14, maxFloor: 18, startFloor: 14, speed: 2.1, pipeGroup: 'seal_2', powered: false },
+      { id: 's9_lift3', col: 0, minFloor: 18, maxFloor: 22, startFloor: 18, speed: 2.1 }
     ],
     wallStrips: [
-      { id: 's9_gecko1', col: 10, minFloor: 4, maxFloor: 8 }
+      { id: 's9_gecko1', col: 12, minFloor: 4, maxFloor: 8 }
     ],
     grappleRings: [
-      { id: 's9_ring1', col: 4.5, floor: 14.2 }
+      { id: 's9_ring1', col: 14.5, floor: 15.2 }
     ],
     doors: [
-      { id: 's9_d1a', col: 13, floor: 8, targetId: 's9_d1b', tunnelStyle: 'sparkArch' },
-      { id: 's9_d1b', col: 0, floor: 12, targetId: 's9_d1a', tunnelStyle: 'sparkArch' },
-      { id: 's9_sanctum', col: 8, floor: 13, isRune: true, puzzleType: 'beam', puzzleSeed: 99099 },
-      { id: 's9_crown', col: 1, floor: 22, isExit: true }
+      { id: 's9_t1a', col: 1, floor: 13, targetId: 's9_t1b', tunnelStyle: 'stone' },
+      { id: 's9_t1b', col: 11, floor: 13, targetId: 's9_t1a', tunnelStyle: 'stone' },
+      { id: 's9_sanctum', col: 0, floor: 13, isRune: true, puzzleType: 'beam', puzzleSeed: 99099, puzzleDifficulty: 0.62, sealId: 'seal_2' },
+      { id: 's9_crown', col: 6, floor: 22, isExit: true }
     ],
     switches: [
-      { id: 's9_sw_cyan', col: 1, floor: 12, group: 'cyan', mode: 'toggle' }
+      { id: 's9_pipe1', col: 10, floor: 4, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's9_pipe2', col: 15, floor: 8, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's9_seal3_sluice', col: 2, floor: 22, group: 'seal_3', mode: 'sluiceSeal', sealId: 'seal_3', requiresLockKeeper: true }
     ],
+    crownSeals: makeThreeSeals({
+      s1Label: 'Aurora Pipe Pressure',
+      s1Hint: 'Leap crumble ice, climb Glacier Vein & spin both Copper Pipe-Valves',
+      s2Label: 'Aurora Prism Sanctum',
+      s2Hint: 'Solve Mid-Spire Prism Sanctum & tunnel across to ride Polar Lift',
+      s2DoorId: 's9_sanctum',
+      s3Label: 'Polar Lock-Keeper',
+      s3Hint: 'Defeat the Polar Lock-Keeper & pull the Upper Sluice Lever',
+      s3SwitchId: 's9_seal3_sluice'
+    }),
     collectibles: [
-      { id: 's9_g1', col: 7, floor: 4, type: 'gear' },
-      { id: 's9_g2', col: 12, floor: 8, type: 'gear' },
-      { id: 's9_g3', col: 7, floor: 13, type: 'gear' },
-      { id: 's9_g4', col: 13, floor: 18, type: 'gear' },
-      { id: 's9_g5', col: 2, floor: 22, type: 'gear' },
-      { id: 's9_log', col: 9, floor: 13, type: 'relic', relicId: 'relic_t9' },
-      { id: 's9_seed', col: 4, floor: 23, type: 'starCore' },
-      { id: 's9_cr1', col: 14, floor: 8, type: 'critter_pod', critterId: 'critter_s9_1', species: 'Polar Puffin', biome: 'storm_ocean' },
-      { id: 's9_cr2', col: 14, floor: 18, type: 'critter_pod', critterId: 'critter_s9_2', species: 'Polar Puffin', biome: 'storm_ocean' },
-      { id: 's9_cr3', col: 5, floor: 23, type: 'critter_pod', critterId: 'critter_s9_3', species: 'Polar Puffin', biome: 'storm_ocean' }
+      { id: 's9_g1', col: 5, floor: 2, type: 'gear' },
+      { id: 's9_g2', col: 14, floor: 8, type: 'gear' },
+      { id: 's9_g3', col: 18, floor: 13, type: 'gear' },
+      { id: 's9_g4', col: 18, floor: 18, type: 'gear' },
+      { id: 's9_g5', col: 4, floor: 22, type: 'gear' },
+      { id: 's9_log', col: 19, floor: 13, type: 'relic', relicId: 'relic_t9' },
+      { id: 's9_seed', col: 8, floor: 23, type: 'starCore' },
+      { id: 's9_cr1', col: 16, floor: 8, type: 'critter_pod', critterId: 'critter_s9_1', species: 'Polar Puffin', biome: 'storm_ocean' },
+      { id: 's9_cr2', col: 19, floor: 18, type: 'critter_pod', critterId: 'critter_s9_2', species: 'Polar Puffin', biome: 'storm_ocean' },
+      { id: 's9_cr3', col: 9, floor: 23, type: 'critter_pod', critterId: 'critter_s9_3', species: 'Polar Puffin', biome: 'storm_ocean' }
     ],
     enemies: [
-      { type: 'snap_crab', col: 12.5, floor: 8, dir: 1, speed: 1.95 },
-      { type: 'volt_eel', col: 17.5, floor: 10.5, dir: -1, speed: 2.05, amp: 0.4 },
-      { type: 'vent_stalker', col: 6.5, floor: 14.5, dir: 1, speed: 2.1, axis: 'v', minFloor: 13.2, maxFloor: 15.8 },
-      { type: 'barnacle_mortar', col: 13.5, floor: 18, dir: -1, firePeriod: 2.9 },
-      { type: 'rail_skater', col: 18.0, floor: 21, dir: 1, speed: 2.05, axis: 'h' },
-      { type: 'gulp_hopper', col: 0.5, floor: 22, dir: -1, speed: 1.95 }
+      { type: 'snap_crab', col: 14.5, floor: 8, dir: 1, speed: 1.9 },
+      { type: 'volt_eel', col: 18.5, floor: 13.5, dir: -1, speed: 2.0, amp: 0.36 },
+      { type: 'vent_stalker', col: 17.5, floor: 19.2, dir: 1, speed: 2.05, axis: 'v', minFloor: 18.0, maxFloor: 20.6 },
+      { type: 'barnacle_mortar', col: 18.5, floor: 18, dir: -1, firePeriod: 2.95 },
+      { type: 'siphon_warden', col: 4.5, floor: 22.4, dir: -1, speed: 2.15, hp: 3, maxHp: 3, isLockKeeper: true, bossTitle: 'POLAR LOCK-KEEPER', sealId: 'seal_3' }
     ]
   });
 
-  // SPIRE 10: THE MOTHER SIPHON CITADEL (26 floors — Grand Watershed Finale, All Mechanics & Supreme Warden)
+  // SPIRE 10: THE MOTHER SIPHON CITADEL (26 floors — Grand Finale: Rising Storm Tide + Crab Springboard,
+  // +10 Cross-Tower Tunnel + Mandatory Grand Tide-Locks Sanctum, Mother Siphon Prime & Final Sluice)
   const s10Ledges = [];
   span(s10Ledges, 0, 18, 4, 'solid');
-  stairFlight(s10Ledges, 0, 2, 4, 1, 4, 'solid');    // [6,7,8,9] at f=4 (Pipe-Valve A + Drain Valve 1)
-  // Pipe-powered Lift 1 at col 10 (f=4..9)
-  span(s10Ledges, 9, 11, 4, 'solid');                // [11,12,13,14] at f=9 (Red Switch at col 13)
-  span(s10Ledges, 10, 15, 2, 'phaseBlock', { switchGroup: 'red', inverted: false });
-  stairFlight(s10Ledges, 10, 17, 4, 1, 5, 'solid');  // [1,2,3,4,5] at f=14 (Core Vault at col 3, Drain Valve 2 at col 4)
-  // Gecko Crystal Strip at col 6 (f=14..18)
-  span(s10Ledges, 18, 7, 4, 'solid');                // [7,8,9,10] at f=18
-  tile(s10Ledges, 10, 18, 'steamVent', { phasePeriod: 3.1, phaseOffset: 0.4 });
-  stairFlight(s10Ledges, 18, 11, 2, 1, 4, 'solid');  // [13,14,15,16] at f=20 (Drain Valve 3 at col 15)
-  // Lift 2 at col 17 (f=20..24)
-  span(s10Ledges, 24, 18, 6, 'solid');               // Grand Nexus Crown [18,19,0,1,2,3] at f=24!
-  span(s10Ledges, 25, 4, 2, 'solid');
+  stairFlight(s10Ledges, 0, 2, 2, 1, 2, 'solid');        // 2F accent -> [4,5] at f=2
+  span(s10Ledges, 3, 7, 1, 'crumble');                  // Running jump over col 6 -> crumble [7] at f=3
+  span(s10Ledges, 4, 8, 6, 'solid');                    // [8,9,10,11,12,13] at f=4 (Pipe-Valve 1 at 8, Drain 1 at 10, Snap-Crab 11.5)
+  span(s10Ledges, 7, 11, 3, 'solid');                   // High Valve Loft [11,12,13] at f=7 (Crab Springboard!)
+  tile(s10Ledges, 12, 7, 'box');
+  // Pipe-powered Lift s10_lift1 at col 14 (f=4..10) -> Mid-Spire Citadel Plaza [15..0] at f=10
+  span(s10Ledges, 10, 15, 6, 'solid');                  // [15,16,17,18,19,0] at f=10
+  // Mid-Spire Siphon Barrier (Seal 2) -> Sanctum-Powered Lift s10_lift_mid at col 3 (f=11..14)!
+  tile(s10Ledges, 0, 10, 'laserGate', { switchGroup: 'seal_2', h: 3 });
+  span(s10Ledges, 11, 1, 2, 'phaseBlock', { switchGroup: 'seal_2', inverted: false });
+  // Upper Spire (f=14..24): arrives from Sanctum-Powered Lift s10_lift_mid at col 3!
+  span(s10Ledges, 14, 4, 4, 'solid');                   // [4,5,6,7] at f=14 (Core Vault at 5)
+  tile(s10Ledges, 8, 14, 'pillar', { h: 3 });           // Bulkhead forces +10 Cross-Tower Tunnel (7 -> 17 on f=14)!
+  span(s10Ledges, 14, 16, 3, 'solid');                  // Opposite side [16,17,18] at f=14 (+4F above f=10, zero bypass!)
+  stairFlight(s10Ledges, 14, 19, 2, 1, 3, 'solid');     // 2F accent -> [1,2,3] at f=16
+  // Gecko Crystal Strip at col 4 (f=16..18)
+  span(s10Ledges, 18, 5, 4, 'solid');                   // [5,6,7,8] at f=18 (Geyser at 8)
+  tile(s10Ledges, 8, 18, 'steamVent', { phasePeriod: 3.1, phaseOffset: 0.4 });
+  stairFlight(s10Ledges, 18, 9, 2, 1, 4, 'solid');      // 2F accent -> [11,12,13,14] at f=20 (Drain Valve 3 at 13)
+  // Counterweight Lift s10_lift2 at col 15 (f=20..24)
+  span(s10Ledges, 24, 16, 9, 'solid');                  // Grand Nexus Crown Arena [16,17,18,19,0,1,2,3,4] at f=24!
+  span(s10Ledges, 25, 5, 2, 'solid');                   // Bonus perch [5,6] at f=25
 
   const t10 = finalizeTower({
     id: 10,
@@ -1793,59 +2163,72 @@ export function createCampaignTowers() {
     subtitle: 'GRAND FINALE • PLANETARY HYDRO-NEXUS',
     theme: 'storm_ocean',
     floors: 26,
-    timeLimit: 135,
-    parTime: 52,
+    timeLimit: 340,
+    parTime: 150,
     spawn: { col: 0, floor: 0 },
     mechanics: {
-      waterRiseRate: 0.13,
-      windForce: 0.40,
+      waterRiseRate: 0.08,
+      windForce: 0.38,
       windPeriod: 6.2,
       lightningInterval: 7.2
     },
     ledges: s10Ledges,
     elevators: [
-      { id: 's10_lift1', col: 10, minFloor: 4, maxFloor: 9, startFloor: 4, speed: 2.15, pipeGroup: 'pipeA', powered: false },
-      { id: 's10_lift2', col: 17, minFloor: 20, maxFloor: 24, startFloor: 20, speed: 2.2 }
+      { id: 's10_lift1', col: 14, minFloor: 4, maxFloor: 10, startFloor: 4, speed: 2.1, pipeGroup: 'pipeA', powered: false },
+      { id: 's10_lift_mid', col: 3, minFloor: 11, maxFloor: 14, startFloor: 11, speed: 2.1, pipeGroup: 'seal_2', powered: false },
+      { id: 's10_lift2', col: 15, minFloor: 20, maxFloor: 24, startFloor: 20, speed: 2.2 }
     ],
     wallStrips: [
-      { id: 's10_gecko1', col: 6, minFloor: 14, maxFloor: 18 }
+      { id: 's10_gecko1', col: 4, minFloor: 16, maxFloor: 18 }
     ],
     grappleRings: [
-      { id: 's10_ring1', col: 15.8, floor: 11.4 }
+      { id: 's10_ring1', col: 2.0, floor: 12.2 }
     ],
     doors: [
-      { id: 's10_c1a', col: 14, floor: 9, targetId: 's10_c1b', tunnelStyle: 'sparkArch' },
-      { id: 's10_c1b', col: 1, floor: 14, targetId: 's10_c1a', tunnelStyle: 'sparkArch' },
-      { id: 's10_vault', col: 3, floor: 14, isVault: true },
-      { id: 's10_crown', col: 1, floor: 24, isExit: true }
+      { id: 's10_t1a', col: 7, floor: 14, targetId: 's10_t1b', tunnelStyle: 'stone' },
+      { id: 's10_t1b', col: 17, floor: 14, targetId: 's10_t1a', tunnelStyle: 'stone' },
+      { id: 's10_sanctum', col: 18, floor: 10, isRune: true, puzzleType: 'tide_locks', puzzleSeed: 101010, puzzleDifficulty: 0.72, sealId: 'seal_2' },
+      { id: 's10_vault', col: 5, floor: 14, isVault: true },
+      { id: 's10_crown', col: 2, floor: 24, isExit: true }
     ],
     switches: [
-      { id: 's10_pipe1', col: 7, floor: 4, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve' },
-      { id: 's10_drain1', col: 8, floor: 4, group: 'drain', mode: 'drainValve' },
-      { id: 's10_sw_red', col: 13, floor: 9, group: 'red', mode: 'toggle' },
-      { id: 's10_drain2', col: 4, floor: 14, group: 'drain', mode: 'drainValve' },
-      { id: 's10_drain3', col: 15, floor: 20, group: 'drain', mode: 'drainValve' }
+      { id: 's10_pipe1', col: 8, floor: 4, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's10_drain1', col: 10, floor: 4, group: 'drain', mode: 'drainValve' },
+      { id: 's10_pipe2', col: 13, floor: 7, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's10_drain2', col: 19, floor: 10, group: 'drain', mode: 'drainValve' },
+      { id: 's10_drain3', col: 13, floor: 20, group: 'drain', mode: 'drainValve' },
+      { id: 's10_seal3_sluice', col: 17, floor: 24, group: 'seal_3', mode: 'sluiceSeal', sealId: 'seal_3', requiresLockKeeper: true }
     ],
+    crownSeals: makeThreeSeals({
+      s1Label: 'Citadel Pipe Pressure',
+      s1Hint: 'Crab-bounce onto High Balcony Valve 2 & spin both Citadel Pipe-Valves',
+      s2Label: 'Grand Tide-Lock Sanctum',
+      s2Hint: 'Solve the Mid-Spire Grand Tide-Locks to retract the Citadel Barrier',
+      s2DoorId: 's10_sanctum',
+      s3Label: 'Mother Siphon Prime',
+      s3Hint: 'Defeat Mother Siphon Prime & pull the Grand Sluice Lever',
+      s3SwitchId: 's10_seal3_sluice'
+    }),
     collectibles: [
-      { id: 's10_g1', col: 6, floor: 4, type: 'gear' },
-      { id: 's10_g2', col: 12, floor: 9, type: 'gear' },
-      { id: 's10_g3', col: 2, floor: 14, type: 'gear' },
-      { id: 's10_g4', col: 8, floor: 18, type: 'gear' },
-      { id: 's10_g5', col: 14, floor: 20, type: 'gear' },
-      { id: 's10_g6', col: 2, floor: 24, type: 'gear' },
-      { id: 's10_log', col: 0, floor: 24, type: 'relic', relicId: 'relic_t10' },
-      { id: 's10_seed', col: 4, floor: 25, type: 'starCore' },
+      { id: 's10_g1', col: 12, floor: 4, type: 'gear' },
+      { id: 's10_g2', col: 16, floor: 10, type: 'gear' },
+      { id: 's10_g3', col: 6, floor: 14, type: 'gear' },
+      { id: 's10_g4', col: 6, floor: 18, type: 'gear' },
+      { id: 's10_g5', col: 12, floor: 20, type: 'gear' },
+      { id: 's10_g6', col: 19, floor: 24, type: 'gear' },
+      { id: 's10_log', col: 3, floor: 24, type: 'relic', relicId: 'relic_t10' },
+      { id: 's10_seed', col: 5, floor: 25, type: 'starCore' },
       { id: 's10_cr1', col: 9, floor: 4, type: 'critter_pod', critterId: 'critter_s10_1', species: 'Polar Puffin', biome: 'storm_ocean' },
-      { id: 's10_cr2', col: 9, floor: 18, type: 'critter_pod', critterId: 'critter_s10_2', species: 'Polar Puffin', biome: 'storm_ocean' },
-      { id: 's10_cr3', col: 5, floor: 25, type: 'critter_pod', critterId: 'critter_s10_3', species: 'Polar Puffin', biome: 'storm_ocean' }
+      { id: 's10_cr2', col: 7, floor: 18, type: 'critter_pod', critterId: 'critter_s10_2', species: 'Polar Puffin', biome: 'storm_ocean' },
+      { id: 's10_cr3', col: 6, floor: 25, type: 'critter_pod', critterId: 'critter_s10_3', species: 'Polar Puffin', biome: 'storm_ocean' }
     ],
     enemies: [
-      { type: 'snap_crab', col: 7.5, floor: 4, dir: 1, speed: 2.0 },
-      { type: 'gulp_hopper', col: 12.5, floor: 9, dir: -1, speed: 2.0 },
-      { type: 'volt_eel', col: 8.5, floor: 18.4, dir: 1, speed: 2.15, amp: 0.42 },
-      { type: 'barnacle_mortar', col: 15.5, floor: 20, dir: -1, firePeriod: 2.85 },
-      { type: 'vent_stalker', col: 12.5, floor: 21.2, dir: 1, speed: 2.2, axis: 'v', minFloor: 19.8, maxFloor: 22.6 },
-      { type: 'siphon_warden', col: 10.5, floor: 23.8, dir: -1, speed: 2.3, hp: 4, maxHp: 4 }
+      { type: 'snap_crab', col: 11.5, floor: 4, dir: 1, speed: 1.85 },
+      { type: 'gulp_hopper', col: 16.5, floor: 10, dir: -1, speed: 1.95 },
+      { type: 'volt_eel', col: 6.5, floor: 18.4, dir: 1, speed: 2.1, amp: 0.4 },
+      { type: 'barnacle_mortar', col: 14.5, floor: 20, dir: -1, firePeriod: 2.85 },
+      { type: 'vent_stalker', col: 1.5, floor: 16.2, dir: 1, speed: 2.15, axis: 'v', minFloor: 15.0, maxFloor: 17.6 },
+      { type: 'siphon_warden', col: 0.5, floor: 24.3, dir: -1, speed: 2.3, hp: 4, maxHp: 4, isLockKeeper: true, bossTitle: 'MOTHER SIPHON PRIME', sealId: 'seal_3' }
     ]
   });
 
@@ -1876,7 +2259,10 @@ const GROUP_BITS = {
   cyan: 2,
   conv: 4,
   pipeA: 8,
-  pipeB: 16
+  pipeB: 16,
+  seal_1: 32,
+  seal_2: 64,
+  seal_3: 128
 };
 
 function isSwitchGroupOn(mask, group) {
@@ -1902,7 +2288,8 @@ function isLaserBlockingAt(laserLedges, col, minF, maxF, mask) {
         ? isSwitchGroupOn(mask, lg.switchGroup)
         : !isSwitchGroupOn(mask, lg.switchGroup)
       : true;
-    if (active && lg.floor >= minF - 0.5 && lg.floor <= maxF + 0.8) {
+    const lgTop = lg.floor + Math.max(0.8, Number(lg.h || 1) - 0.1);
+    if (active && lgTop >= minF - 0.5 && lg.floor <= maxF + 0.8) {
       return true;
     }
   }
@@ -1910,22 +2297,46 @@ function isLaserBlockingAt(laserLedges, col, minF, maxF, mask) {
 }
 
 /**
- * Verifies 100% reachability across ledges, staircases, jumps, pipe-valve elevators,
- * Gecko wall-scamper strips, grapple rings, interior portals, and switches.
+ * Verifies 100% reachability across ledges, staircases, jumps, pipe-valve elevators (including
+ * multi-valve pressure groups), Snap-Crab springboard bounces, Gecko wall-scamper strips,
+ * grapple rings, interior portals, mandatory Inner Aqueduct Sanctum seals, and switches.
  * @param {object} tower
- * @returns {{ solvable: boolean, minSteps: number, reachableExit: boolean }}
+ * @param {{ enforceSeals?: boolean, allowSanctumSolve?: boolean }} [opts]
+ * @returns {{ solvable: boolean, minSteps: number, reachableExit: boolean, crownSealsTotal: number }}
  */
-export function verifyTowerSolvable(tower) {
+export function verifyTowerSolvable(tower, opts = {}) {
+  const enforceSeals = opts.enforceSeals !== false;
+  const allowSanctumSolve = opts.allowSanctumSolve !== false;
   if (!tower || !Array.isArray(tower.ledges) || !Array.isArray(tower.doors)) {
-    return { solvable: false, minSteps: -1, reachableExit: false };
+    return { solvable: false, minSteps: -1, reachableExit: false, crownSealsTotal: 0 };
   }
 
   const exitDoors = tower.doors.filter((d) => d.isExit);
   if (exitDoors.length === 0) {
-    return { solvable: false, minSteps: -1, reachableExit: false };
+    return { solvable: false, minSteps: -1, reachableExit: false, crownSealsTotal: 0 };
+  }
+
+  const crownSeals = Array.isArray(tower.crownSeals) ? tower.crownSeals : [];
+  let requiredSealMask = 0;
+  if (enforceSeals && crownSeals.length > 0) {
+    for (const cs of crownSeals) {
+      const bit = GROUP_BITS[cs.id] || 0;
+      if (bit) requiredSealMask |= bit;
+    }
   }
 
   const laserLedges = tower.ledges.filter((l) => l.type === 'laserGate');
+  const pillarLedges = tower.ledges.filter((l) => l.type === 'pillar');
+  const isPillarBlockingAt = (col, minF, maxF) => {
+    const c = wrapCol(col);
+    for (const pl of pillarLedges) {
+      if (pl.col !== c) continue;
+      const top = pl.floor + Math.max(1, Number(pl.h || 1)) - 0.1;
+      if (top >= minF + 0.1 && pl.floor <= maxF + 0.5) return true;
+    }
+    return false;
+  };
+
   const supportNodes = [];
   const nodeIndicesByCoord = new Map();
   const nodesByCol = Array.from({ length: COLS }, () => []);
@@ -2008,14 +2419,43 @@ export function verifyTowerSolvable(tower) {
     isNodeActive(supportNodes[idx], 0)
   );
   if (startCandidates.length === 0) {
-    return { solvable: false, minSteps: -1, reachableExit: false };
+    return { solvable: false, minSteps: -1, reachableExit: false, crownSealsTotal: crownSeals.length };
   }
 
   const doorById = new Map(tower.doors.map((d) => [d.id, d]));
   const switches = Array.isArray(tower.switches) ? tower.switches : [];
   const grappleRings = Array.isArray(tower.grappleRings) ? tower.grappleRings : [];
+  const enemies = Array.isArray(tower.enemies) ? tower.enemies : [];
 
-  const isGoalNode = (node) =>
+  // Map multi-valve pipeGroups to individual valve bit flags above bit 8 so ALL valves must be spun!
+  const pipeValvesByGroup = new Map();
+  const pipeValveBitById = new Map();
+  let nextValveBit = 256;
+  for (const sw of switches) {
+    if (sw.mode === 'pipeValve') {
+      const grp = sw.pipeGroup || sw.group || 'pipeA';
+      if (!pipeValvesByGroup.has(grp)) pipeValvesByGroup.set(grp, []);
+      pipeValvesByGroup.get(grp).push(sw);
+      pipeValveBitById.set(sw.id, nextValveBit);
+      nextValveBit <<= 1;
+    }
+  }
+
+  // Precompute Snap-Crab springboard terraces so BFS recognizes +3F carapace bounces!
+  const crabSpringCoords = new Set();
+  for (const en of enemies) {
+    if (en.type !== 'snap_crab') continue;
+    const f = Math.round(en.floor);
+    const sp = computeLedgeSpanAt(tower.ledges, en.col, f);
+    if (sp.onRealTile) {
+      for (let i = 0; i < sp.length; i++) {
+        crabSpringCoords.add(`${wrapCol(sp.startCol + i)}:${f}`);
+      }
+    }
+  }
+
+  const isGoalNode = (node, mask) =>
+    (mask & requiredSealMask) === requiredSealMask &&
     exitDoors.some((d) => wrapCol(d.col) === node.col && Math.abs(d.floor - node.floor) <= 0.5);
 
   const visited = new Map();
@@ -2032,8 +2472,8 @@ export function verifyTowerSolvable(tower) {
     const { idx, mask, steps } = queue[head++];
     const cur = supportNodes[idx];
 
-    if (isGoalNode(cur)) {
-      return { solvable: true, minSteps: steps, reachableExit: true };
+    if (isGoalNode(cur, mask)) {
+      return { solvable: true, minSteps: steps, reachableExit: true, crownSealsTotal: crownSeals.length };
     }
 
     const pushState = (nextIdx, nextMask, stepCost = 1) => {
@@ -2044,11 +2484,9 @@ export function verifyTowerSolvable(tower) {
       }
     };
 
-    // 1. Toggle switches or spin Pipe-Valves (on foot, Tail-Whip, or Hydro-Pulse within 6 cols)
+    // 1. Toggle switches, spin Pipe-Valves (multi-valve groups!), or pull Upper Sluice Levers
     for (const sw of switches) {
       const grpKey = sw.pipeGroup || sw.group;
-      const bit = GROUP_BITS[grpKey] || 0;
-      if (!bit) continue;
       const dc = colDist(cur.col, sw.col);
       const sameFloor = Math.abs(sw.floor - cur.floor) <= 0.6;
       if (!sameFloor || Math.abs(dc) > 6) continue;
@@ -2057,37 +2495,71 @@ export function verifyTowerSolvable(tower) {
       const stepDir = Math.sign(dc);
       for (let s = 1; s <= Math.abs(dc); s++) {
         const checkCol = wrapCol(cur.col + stepDir * s);
-        if (isLaserBlockingAt(laserLedges, checkCol, cur.floor, cur.floor, mask)) {
+        if (
+          isLaserBlockingAt(laserLedges, checkCol, cur.floor, cur.floor, mask) ||
+          isPillarBlockingAt(checkCol, cur.floor, cur.floor)
+        ) {
           blocked = true;
           break;
         }
       }
-      if (!blocked) {
-        pushState(idx, mask ^ bit, 1);
+      if (blocked) continue;
+
+      if (sw.mode === 'pipeValve') {
+        const vBit = pipeValveBitById.get(sw.id) || 0;
+        let nextMask = mask | vBit;
+        const grpValves = pipeValvesByGroup.get(grpKey) || [];
+        const allSpun = grpValves.every((v) => Boolean(nextMask & (pipeValveBitById.get(v.id) || 0)));
+        if (allSpun) {
+          nextMask |= GROUP_BITS[grpKey] || 0;
+          if (sw.sealId && GROUP_BITS[sw.sealId]) {
+            nextMask |= GROUP_BITS[sw.sealId];
+          }
+        }
+        if (nextMask !== mask) pushState(idx, nextMask, 1);
+      } else if (sw.mode === 'sluiceSeal') {
+        const sBit = GROUP_BITS[sw.sealId || sw.group] || 0;
+        if (sBit && !(mask & sBit)) {
+          pushState(idx, mask | sBit, 1);
+        }
+      } else {
+        const bit = GROUP_BITS[grpKey] || 0;
+        if (bit) {
+          pushState(idx, mask ^ bit, 1);
+        }
       }
     }
 
-    // 2. Interior through-spire portals
+    // 2. Interior through-spire portals AND Mandatory Mid-Spire Inner Aqueduct Sanctums (`isRune`)
     if (cur.kind === 'ledge') {
       for (const d of tower.doors) {
+        if (wrapCol(d.col) !== cur.col || Math.abs(d.floor - cur.floor) > 0.5) continue;
+        if (d.isRune && allowSanctumSolve && d.sealId && GROUP_BITS[d.sealId]) {
+          const sBit = GROUP_BITS[d.sealId];
+          if (!(mask & sBit)) {
+            pushState(idx, mask | sBit, 1);
+          }
+          continue;
+        }
         if (d.isExit || d.isVault || d.isRune || !d.targetId) continue;
-        if (wrapCol(d.col) === cur.col && Math.abs(d.floor - cur.floor) <= 0.5) {
-          const target = doorById.get(d.targetId);
-          if (target) {
-            const destIndices =
-              nodeIndicesByCoord.get(`${wrapCol(target.col)}:${Math.round(target.floor)}`) || [];
-            for (const destIdx of destIndices) {
-              if (isNodeActive(supportNodes[destIdx], mask)) {
-                pushState(destIdx, mask, 1);
-              }
+        const target = doorById.get(d.targetId);
+        if (target) {
+          const destIndices =
+            nodeIndicesByCoord.get(`${wrapCol(target.col)}:${Math.round(target.floor)}`) || [];
+          for (const destIdx of destIndices) {
+            if (isNodeActive(supportNodes[destIdx], mask)) {
+              pushState(destIdx, mask, 1);
             }
           }
         }
       }
     }
 
-    // 3. Steam/Hydro-Geyser vertical launch (+3 floors)
-    if (cur.kind === 'ledge' && cur.ledge?.type === 'steamVent') {
+    // 3. Steam/Hydro-Geyser OR Flipped Snap-Crab Springboard vertical launch (+3 floors)
+    const canSpringLaunch =
+      cur.kind === 'ledge' &&
+      (cur.ledge?.type === 'steamVent' || crabSpringCoords.has(`${cur.col}:${cur.floor}`));
+    if (canSpringLaunch) {
       for (let dc = -2; dc <= 2; dc++) {
         const tc = wrapCol(cur.col + dc);
         for (const nextIdx of nodesByCol[tc]) {
@@ -2095,7 +2567,12 @@ export function verifyTowerSolvable(tower) {
           if (!isNodeActive(nxt, mask)) continue;
           const df = nxt.floor - cur.floor;
           if (df >= 1 && df <= 3) {
-            pushState(nextIdx, mask, 1);
+            if (
+              !isLaserBlockingAt(laserLedges, tc, cur.floor, nxt.floor, mask) &&
+              !isLaserBlockingAt(laserLedges, cur.col, cur.floor, nxt.floor, mask)
+            ) {
+              pushState(nextIdx, mask, 1);
+            }
           }
         }
       }
@@ -2112,7 +2589,11 @@ export function verifyTowerSolvable(tower) {
           for (const nextIdx of nodesByCol[landCol]) {
             const nxt = supportNodes[nextIdx];
             if (!isNodeActive(nxt, mask)) continue;
-            if (nxt.floor >= cur.floor - 2 && nxt.floor <= cur.floor + 2) {
+            if (
+              nxt.floor >= cur.floor - 2 &&
+              nxt.floor <= cur.floor + 2 &&
+              !isLaserBlockingAt(laserLedges, landCol, Math.min(cur.floor, nxt.floor), Math.max(cur.floor, nxt.floor), mask)
+            ) {
               pushState(nextIdx, mask, 1);
             }
           }
@@ -2166,14 +2647,12 @@ export function verifyTowerSolvable(tower) {
         }
 
         if (absDc === 1) {
+          const minF = Math.min(cur.floor, nxt.floor);
+          const maxF = Math.max(cur.floor, nxt.floor);
           if (
-            isLaserBlockingAt(
-              laserLedges,
-              nxt.col,
-              Math.min(cur.floor, nxt.floor),
-              Math.max(cur.floor, nxt.floor),
-              mask
-            )
+            isLaserBlockingAt(laserLedges, cur.col, minF, maxF, mask) ||
+            isLaserBlockingAt(laserLedges, nxt.col, minF, maxF, mask) ||
+            isPillarBlockingAt(nxt.col, minF, maxF)
           ) {
             continue;
           }
@@ -2205,8 +2684,11 @@ export function verifyTowerSolvable(tower) {
           const maxF = Math.max(cur.floor, nxt.floor);
 
           if (
+            isLaserBlockingAt(laserLedges, cur.col, minF, maxF, mask) ||
             isLaserBlockingAt(laserLedges, midCol, minF, maxF, mask) ||
-            isLaserBlockingAt(laserLedges, nxt.col, minF, maxF, mask)
+            isLaserBlockingAt(laserLedges, nxt.col, minF, maxF, mask) ||
+            isPillarBlockingAt(midCol, minF, maxF) ||
+            isPillarBlockingAt(nxt.col, minF, maxF)
           ) {
             continue;
           }
@@ -2219,14 +2701,14 @@ export function verifyTowerSolvable(tower) {
     }
   }
 
-  return { solvable: false, minSteps: -1, reachableExit: false };
+  return { solvable: false, minSteps: -1, reachableExit: false, crownSealsTotal: crownSeals.length };
 }
 
 // ============================================================================
 // PROCEDURAL COMPOSER FOR FLOOD RUSH, EXPEDITION, SANCTUM TRIALS & DAILY TIDE
 // ============================================================================
 
-const PROC_PUZZLE_TYPES = ['lights', 'bells', 'beam', 'blocks'];
+const PROC_PUZZLE_TYPES = ['lights', 'bells', 'beam', 'blocks', 'pipes', 'tide_locks'];
 const SANCTUM_MISSIONS = ['puzzle_architect', 'tower_repair', 'treasure_hunt', 'curio_survey'];
 const CURIO_IDS = [
   'curio_astrolabe',
@@ -3270,7 +3752,7 @@ export function createSanctumTowers(count = 15) {
         { id: 'st8_r3', col: 7.0, floor: 12.1 }
       ],
       doors: [
-        { id: 'st8_rune', col: 4, floor: 10, isRune: true, puzzleType: 'lights', puzzleSeed: 70808, puzzleDifficulty: 0.45 },
+        { id: 'st8_rune', col: 4, floor: 10, isRune: true, puzzleType: 'pipes', puzzleSeed: 70808, puzzleDifficulty: 0.45 },
         { id: 'st8_exit', col: 11, floor: 12, isExit: true }
       ],
       collectibles: [
@@ -3404,7 +3886,7 @@ export function createSanctumTowers(count = 15) {
         { id: 'st12_pB', col: 11, floor: 7, group: 'pipeB', pipeGroup: 'pipeB', mode: 'pipeValve' }
       ],
       doors: [
-        { id: 'st12_rune', col: 16, floor: 12, isRune: true, puzzleType: 'bells', puzzleSeed: 71212, puzzleDifficulty: 0.55 },
+        { id: 'st12_rune', col: 16, floor: 12, isRune: true, puzzleType: 'tide_locks', puzzleSeed: 71212, puzzleDifficulty: 0.55 },
         { id: 'st12_exit', col: 1, floor: 16, isExit: true }
       ],
       collectibles: [
@@ -3476,7 +3958,7 @@ export function createSanctumTowers(count = 15) {
         { id: 'st14_cyan', col: 18, floor: 9, group: 'cyan', mode: 'toggle' }
       ],
       doors: [
-        { id: 'st14_rune', col: 5, floor: 10, isRune: true, puzzleType: 'lights', puzzleSeed: 71414, puzzleDifficulty: 0.65 },
+        { id: 'st14_rune', col: 5, floor: 10, isRune: true, puzzleType: 'pipes', puzzleSeed: 71414, puzzleDifficulty: 0.65 },
         { id: 'st14_exit', col: 17, floor: 17, isExit: true }
       ],
       collectibles: [
@@ -3519,7 +4001,7 @@ export function createSanctumTowers(count = 15) {
       ],
       doors: [
         { id: 'st15_rune1', col: 17, floor: 8, isRune: true, puzzleType: 'lights', puzzleSeed: 71501, puzzleDifficulty: 0.65 },
-        { id: 'st15_rune2', col: 9, floor: 14, isRune: true, puzzleType: 'beam', puzzleSeed: 71502, puzzleDifficulty: 0.7 },
+        { id: 'st15_rune2', col: 9, floor: 14, isRune: true, puzzleType: 'tide_locks', puzzleSeed: 71502, puzzleDifficulty: 0.7 },
         { id: 'st15_vault', col: 14, floor: 18, isVault: true },
         { id: 'st15_exit', col: 2, floor: 21, isExit: true }
       ],

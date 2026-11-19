@@ -199,14 +199,15 @@ export class SubStage {
     this._resetStats();
 
     this._layout();
+    const portrait = this.width / Math.max(1, this.height) < 0.85;
     const swimmer = this.sub;
     Object.assign(swimmer, this._makeSwimmer());
     swimmer.rx = 32 * this.s;
     swimmer.ry = 18 * this.s;
-    swimmer.x = -swimmer.rx * 2;
+    swimmer.x = -swimmer.rx * 1.4;
     swimmer.y = this.height * 0.48;
     swimmer.prop = 1;
-    this.sonarOriginX = this.width * 0.26;
+    this.sonarOriginX = this.width * (portrait ? 0.38 : 0.28);
     this.sonarOriginY = swimmer.y;
 
     const t = this.tower;
@@ -236,8 +237,8 @@ export class SubStage {
       }
     );
 
-    // Spawn initial trapped wildlife cage right into view so players immediately rescue Sea Turtles & River Otters!
-    this._spawnCage(this.width * 0.92, this.height * 0.42);
+    // Spawn initial trapped wildlife cage right into view inside safe portrait/desktop framing!
+    this._spawnCage(this.width * (portrait ? 0.72 : 0.78), this.height * 0.44);
 
     this.hiddenCaches.push(
       { x: this.width * 0.72, y: this.seabedY - 46 * this.s },
@@ -277,10 +278,11 @@ export class SubStage {
   }
 
   _layout() {
-    this.surfaceY = this.height * 0.115;
-    this.seabedY = this.height * 0.905;
-    this.top = this.surfaceY + 26 * this.s;
-    this.bottom = this.seabedY - 10 * this.s;
+    const portrait = this.width / Math.max(1, this.height) < 0.85;
+    this.surfaceY = portrait ? this.height * 0.145 : this.height * 0.11;
+    this.seabedY = portrait ? this.height * 0.845 : this.height * 0.895;
+    this.top = this.surfaceY + 24 * this.s;
+    this.bottom = this.seabedY - 18 * this.s;
   }
 
   resize(width, height) {
@@ -705,9 +707,11 @@ export class SubStage {
     if (swimmer.fireCd > 0) swimmer.fireCd -= dt;
     if (swimmer.autoCd > 0) swimmer.autoCd -= dt;
 
+    const portrait = W / Math.max(1, this.height) < 0.85;
+
     if (this.phase === 'intro') {
       const k = smooth(clamp(this.t / INTRO_TIME, 0, 1));
-      const tx = lerp(-swimmer.rx * 2, W * 0.26, k);
+      const tx = lerp(-swimmer.rx * 1.4, W * (portrait ? 0.38 : 0.28), k);
       swimmer.vx = (tx - swimmer.x) / Math.max(dt, 1e-4);
       swimmer.x = tx;
       swimmer.vy *= 0.9;
@@ -780,15 +784,26 @@ export class SubStage {
           ix /= len;
           iy /= len;
         }
-        const boostMult = this.ventBoostTimer > 0 ? 1.34 : 1.0;
-        const maxV = 232 * s * boostMult;
+        const boostMult = this.ventBoostTimer > 0 ? 1.36 : 1.0;
+        const maxV = 238 * s * boostMult;
         const steering = len > 0.05;
         const reversing = ix * swimmer.vx < 0 || iy * swimmer.vy < 0;
-        const k = steering ? (reversing ? 9.2 : 6.6) : 3.0;
+        // Real hydrodynamic water drag (quadratic drag at high speed + buoyant neutral-depth restoration)
+        const curSpeed = Math.hypot(swimmer.vx, swimmer.vy);
+        const dragFactor = 1.0 + clamp(curSpeed / Math.max(1, maxV), 0, 1.5) * 0.55;
+        const k = (steering ? (reversing ? 8.8 : 6.4) : 2.6) * dragFactor;
         const a = 1 - Math.exp(-k * dt);
-        swimmer.vx += (ix * maxV + (this.ventBoostTimer > 0 ? 55 * s : 0) - swimmer.vx) * a;
-        swimmer.vy += (iy * maxV - swimmer.vy) * a;
-        swimmer.prop = 0.8 + Math.max(0, ix) * 0.65 - Math.max(0, -ix) * 0.3 + (this.ventBoostTimer > 0 ? 0.4 : 0);
+        // Gentle marine buoyancy + undulating tail-kick surge when gliding underwater
+        const midWaterY = (this.top + this.bottom) * 0.48;
+        const buoyancyVy = Math.abs(iy) < 0.05
+          ? clamp((midWaterY - swimmer.y) * 0.42, -26 * s, 26 * s) + Math.sin(this.t * 2.2) * 10 * s
+          : 0;
+        const tailSurgeVx = steering && ix >= 0 ? Math.sin(swimmer.swimCycle) * 14 * s : 0;
+        const targetVx = ix * maxV + tailSurgeVx + (this.ventBoostTimer > 0 ? 58 * s : 0);
+        const targetVy = iy * maxV + buoyancyVy;
+        swimmer.vx += (targetVx - swimmer.vx) * a;
+        swimmer.vy += (targetVy - swimmer.vy) * a;
+        swimmer.prop = 0.82 + Math.max(0, ix) * 0.65 - Math.max(0, -ix) * 0.3 + (this.ventBoostTimer > 0 ? 0.42 : 0);
 
         if (wantSonar && this.sonarCooldown <= 0) {
           this.triggerSonarPing(fx, sound);
@@ -804,8 +819,8 @@ export class SubStage {
       swimmer.y += swimmer.vy * dt;
     }
 
-    const minX = swimmer.rx * 0.9;
-    const maxX = W - swimmer.rx * 1.1;
+    const minX = portrait ? Math.max(swimmer.rx * 1.65, W * 0.22) : Math.max(swimmer.rx * 1.35, W * 0.14);
+    const maxX = portrait ? Math.min(W - swimmer.rx * 1.65, W * 0.80) : Math.min(W - swimmer.rx * 1.35, W * 0.86);
     if (this.phase !== 'intro') {
       if (swimmer.x < minX) {
         swimmer.x = minX;

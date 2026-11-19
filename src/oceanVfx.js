@@ -174,8 +174,8 @@ function createPeriodicNoise2D(seed) {
   return { noise, fbm };
 }
 
-// 1. Seamless Tileable Cellular Voronoi Lacy Whitewater Foam + FBM Billow Texture (256x256)
-function createLacyFoamTexture(size = 256) {
+// 1. Seamless Tileable Cellular Voronoi Lacy Whitewater Foam + FBM Billow Texture (128x128 fast bake)
+function createLacyFoamTexture(size = 128) {
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
@@ -275,8 +275,8 @@ function createLacyFoamTexture(size = 256) {
   return tex;
 }
 
-// 2. 2x2 Quadrant Domain-Warped FBM Volumetric Mist Wisp Atlas (256x256)
-function createVolumetricWispAtlas(size = 256) {
+// 2. 2x2 Quadrant Domain-Warped FBM Volumetric Mist Wisp Atlas (128x128 fast bake)
+function createVolumetricWispAtlas(size = 128) {
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
@@ -853,8 +853,8 @@ export class TowerFluidAndSparkVFX {
 
           float foamDensity = f1.r * 0.58 + f2.r * 0.36 + f1.g * 0.44;
           float flankFade = sin(clamp(vUv.x, 0.0, 1.0) * 3.14159265);
-          float baseFade = smoothstep(0.0, 0.14, vUv.y);
-          float topFeather = 1.0 - smoothstep(0.40, 0.98, vUv.y) * 0.84;
+          float baseFade = smoothstep(0.0, 0.16, vUv.y);
+          float topFeather = 1.0 - smoothstep(0.22, 0.92, vUv.y);
 
           float envelope = flankFade * baseFade * topFeather * (0.28 + 0.72 * vGrazing);
           float threshold = vErode + (1.0 - envelope) * 0.58;
@@ -866,7 +866,7 @@ export class TowerFluidAndSparkVFX {
           float tipWhiteness = clamp(vUv.y * 0.78 + f1.r * 0.48 + f2.b * 0.36, 0.0, 1.0);
           vec3 col = mix(uCrestShadow, uCrestBright, tipWhiteness);
 
-          gl_FragColor = vec4(col, clamp(a, 0.0, 0.88));
+          gl_FragColor = vec4(col, clamp(a, 0.0, 0.44));
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
         }
@@ -1517,14 +1517,9 @@ export class TowerFluidAndSparkVFX {
     this.sparkGlowMesh.renderOrder = 11;
     this.towerVfxGroup.add(this.sparkGlowMesh);
 
+    // Keep sparkLights empty so toggling `oceanVfx.setVisible()` never mutates scene
+    // `NUM_POINT_LIGHTS` mid-climb (which would trigger full-scene ANGLE D3D11 shader recompiles!).
     this.sparkLights = [];
-    for (let i = 0; i < SPARK_LIGHT_POOL; i++) {
-      const light = new THREE.PointLight('#ff9f38', 0, 5.2, 1.85);
-      light.castShadow = false;
-      light.position.set(0, -100, 0);
-      this.towerVfxGroup.add(light);
-      this.sparkLights.push(light);
-    }
   }
 
   setEra(_era) {
@@ -1845,11 +1840,12 @@ export class TowerFluidAndSparkVFX {
       }
     }
 
-    this.surfPlumeMesh.visible = true;
+    this.surfPlumeMesh.visible = false;
     this.mistWispsMesh.visible = true;
     this.steamPlumeMesh.visible = this._steamVentCount > 0;
     this.sparkStreaksMesh.visible = this._sparkArchCount > 0;
     this.sparkGlowMesh.visible = this._sparkArchCount > 0;
+    if (this.seaDropletsMesh) this.seaDropletsMesh.visible = false;
     if (this._sparkArchCount === 0) {
       for (let i = 0; i < this.sparkLights.length; i++) {
         this.sparkLights[i].intensity = 0;
@@ -2018,13 +2014,14 @@ export class TowerFluidAndSparkVFX {
 
       const curPhi = basePhi + Math.sin(time * 0.65 + seed * TWO_PI) * 0.045;
       const arcWidth = (0.24 + seed * 0.12) * (0.95 + 0.35 * heightCurve);
-      const crestH = (0.72 + seed * 0.82) * amp * (0.24 + 0.92 * heightCurve);
-      const radialFlare = (0.52 + flankBoost * 0.78 + seed * 0.32) * (0.35 + 0.72 * heightCurve);
+      // Tuck surf collar strictly under Floor 0 stone walkway deck (`max Y <= waterY + 0.62 < 0.0`)
+      const crestH = Math.min(0.62, (0.26 + seed * 0.24) * amp * (0.24 + 0.76 * heightCurve));
+      const radialFlare = (0.34 + flankBoost * 0.42 + seed * 0.20) * (0.35 + 0.65 * heightCurve);
 
-      const erode = 0.14 + Math.pow(life, 1.25) * 0.54;
+      const erode = 0.20 + Math.pow(life, 1.25) * 0.56;
       const alpha =
         Math.sin(Math.min(1.0, life * 1.05) * Math.PI) *
-        Math.min(0.90, (0.48 + stairBoost * 0.16 + flankBoost * 0.14) * Math.min(1.2, surgeFactor));
+        Math.min(0.42, (0.26 + stairBoost * 0.08 + flankBoost * 0.08) * Math.min(1.15, surgeFactor));
 
       const x4 = i * 4;
       this._crestXformBuf[x4] = curPhi;

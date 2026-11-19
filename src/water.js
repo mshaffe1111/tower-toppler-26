@@ -221,7 +221,7 @@ export const OCEAN_PRESETS = Object.freeze({
 
 // Tileable organic water normal map: multi-octave periodic value-noise + domain-warped FBM
 // wrapped seamlessly on the [0, size)^2 torus with capillary ridge sharpening.
-export function createWaterNormalTexture(size = 256) {
+export function createWaterNormalTexture(size = 128) {
   const data = new Uint8Array(size * size * 4);
   const hashGrid = (ix, iy, per, salt) => {
     const wx = ((ix % per) + per) % per;
@@ -303,18 +303,18 @@ export class Ocean {
       towerRadius = 3.75,
       preset = 'canyon_river',
       size = 280,
-      segments = 80,
+      segments = 48,
       waterY = -0.82,
     } = {}
   ) {
     this.webgl = webgl;
-    this.reflectionEnabled = true;
+    this.reflectionEnabled = false;
     this.resScale = 0.5;
     this.era = 'reboot';
     this.currentPreset = resolveWaterBiome(preset);
     this._purification = 0;
     this._purificationTarget = 0;
-    this.normalTex = createWaterNormalTexture(256);
+    this.normalTex = createWaterNormalTexture(128);
 
     const outerRadius = Math.max(180, size * 0.62);
     const geo = new THREE.PlaneGeometry(2, 2, segments, segments);
@@ -347,14 +347,9 @@ export class Ocean {
       geo.computeBoundingSphere();
     }
 
-    this.rt = new THREE.WebGLRenderTarget(256, 256, {
-      type: THREE.HalfFloatType,
-      samples: 0,
-      depthBuffer: true,
-    });
-    this.rt.texture.generateMipmaps = false;
-    this.rt.texture.minFilter = THREE.LinearFilter;
-    this.rt.texture.magFilter = THREE.LinearFilter;
+    // Zero extra render passes & zero reflection WebGLRenderTarget VRAM on integrated GPUs:
+    // reflection is computed analytically in the single-pass water fragment shader!
+    this.rt = null;
     this.textureMatrix = new THREE.Matrix4();
 
     const uniforms = THREE.UniformsUtils.merge([
@@ -364,7 +359,7 @@ export class Ocean {
         normalMap: { value: null },
         reflectionMap: { value: null },
         textureMatrix: { value: new THREE.Matrix4() },
-        useReflection: { value: 1 },
+        useReflection: { value: 0 },
         uBiomeMode: { value: 0 },
         deepColor: { value: new THREE.Color('#074848') },
         shallowColor: { value: new THREE.Color('#1ad4b4') },
@@ -394,7 +389,7 @@ export class Ocean {
       },
     ]);
     uniforms.normalMap.value = this.normalTex;
-    uniforms.reflectionMap.value = this.rt.texture;
+    uniforms.reflectionMap.value = null;
     uniforms.textureMatrix.value = this.textureMatrix;
 
     this.material = new THREE.ShaderMaterial({
@@ -599,11 +594,9 @@ export class Ocean {
           ) * 1.35;
           vec2 pw = swirlP + warp;
 
-          vec3 n1 = sampleN(pw * 0.085 + advect + vec2(time * 0.020, time * 0.012));
-          vec3 n2 = sampleN((rotA * pw) * 0.19 + advect * 1.35 + vec2(-time * 0.017, time * 0.025));
-          vec3 n3 = sampleN((rotB * pw) * 0.40 + advect * 1.85 + vec2(time * 0.031, -time * 0.026));
-          vec3 n4 = sampleN((rotC * pw) * 0.82 + advect * 2.40 + vec2(-time * 0.045, -time * 0.035));
-          vec3 rip = (n1 + n2 * 0.82 + n3 * 0.56 + n4 * 0.32) * chopStrength + vec3(vortexNormalAdd, 0.0);
+          vec3 n1 = sampleN(pw * 0.095 + advect + vec2(time * 0.020, time * 0.012));
+          vec3 n2 = sampleN((rotA * pw) * 0.24 + advect * 1.45 + vec2(-time * 0.019, time * 0.026));
+          vec3 rip = (n1 + n2 * 0.78) * chopStrength + vec3(vortexNormalAdd, 0.0);
 
           vec3 viewVec = cameraPosition - vWorld;
           float dist = length(viewVec);
@@ -614,10 +607,10 @@ export class Ocean {
           float foamCellB = noise((rotA * pw) * 6.8 + advect * 4.2 - vec2(time * 0.30, time * 0.20));
           float laceMask = smoothstep(0.32, 0.78, foamCellA * 0.65 + foamCellB * 0.35);
 
-          // Expanding ring ripples + spire shoreline lap
+          // Expanding ring ripples + spire shoreline lap (4 active ripples for 60fps Radeon fill-rate!)
           vec2 rn = vec2(0.0);
           float ringFoam = 0.0;
-          for (int i = 0; i < 12; i++) {
+          for (int i = 0; i < 4; i++) {
             vec4 R = ripples[i];
             float age = time - R.z;
             if (age < 0.0 || age > 4.0) continue;
@@ -648,17 +641,30 @@ export class Ocean {
           float fres = 0.024 + 0.976 * pow(1.0 - cosT, 5.0);
           fres = clamp(fres, 0.0, 0.94) * mix(0.38, 1.0, farAtten);
 
-          // Planar reflection: crisp mirror in Alpine Lake & Mist Bayou, dynamic wave-broken in Rapids & Ocean
-          vec3 refl = skyColor * (0.82 + lightningBoost * 0.42);
-          if (useReflection > 0.5 && vReflCoord.w > 0.001) {
-            vec2 rc = vReflCoord.xy / vReflCoord.w;
-            float distortAmt = mix(0.013, 0.052, clamp(chopStrength * 0.72, 0.0, 1.0));
-            rc += n.xz * distortAmt * detail;
-            rc = clamp(rc, vec2(0.002), vec2(0.998));
-            vec3 rawRefl = texture2D(reflectionMap, rc).rgb;
-            // Gentle HDR highlight knee preserves sunlit snow-peaks, red-rock cliffs & clouds vividly without bloom washout
-            refl = (rawRefl / (vec3(1.0) + rawRefl * 0.36)) * (uReflStrength + lightningBoost * 0.22);
+          // Crisp Single-Pass Analytic Fresnel Sky / Vista / Sun / Spire Reflection (0 extra render passes!)
+          vec3 reflDir = reflect(-v, n);
+          float reflUp = clamp(reflDir.y, 0.0, 1.0);
+          vec3 L = normalize(sunDir);
+          float reflSun = max(0.0, dot(reflDir, L));
+          vec3 zenithRefl = skyColor * vec3(0.72, 0.84, 1.04);
+          vec3 skyGrad = mix(uHorizonMistColor * 0.94, skyColor * 1.04, smoothstep(0.0, 0.34, reflUp));
+          skyGrad = mix(skyGrad, zenithRefl, smoothstep(0.32, 0.82, reflUp));
+          // Mirrored distant vista band (canyon cliffs / alpine peaks / sunset treeline / aurora sheen)
+          float vistaAz = atan(reflDir.x, reflDir.z);
+          float vistaRidgeline = 0.09 + 0.055 * sin(vistaAz * 5.0 + 0.7) + 0.03 * cos(vistaAz * 11.0 - 0.4);
+          float vistaBand = smoothstep(vistaRidgeline + 0.06, vistaRidgeline - 0.02, reflUp) * smoothstep(0.0, 0.03, reflUp);
+          vec3 vistaReflCol = mix(deepColor * 0.65 + uHorizonMistColor * 0.45, uHorizonMistColor * 0.82, 0.55);
+          skyGrad = mix(skyGrad, vistaReflCol, vistaBand * 0.34);
+          // Warm solar / aurora sky dome reflection bounce
+          skyGrad += sunColor * (pow(reflSun, 5.0) * 0.34 + pow(reflSun, 24.0) * 0.52) * (0.75 + 0.25 * sunStrength);
+          if (uVortexAmt > 0.01) {
+            float aurWave = 0.5 + 0.5 * sin(vistaAz * 4.0 + time * 0.45 + n.x * 5.0);
+            skyGrad += glowColor * aurWave * smoothstep(0.04, 0.45, reflUp) * 0.36;
           }
+          // Subtle spire tower base reflection shadow & conduit bounce right around the tower perimeter
+          float spireReflMask = exp(-max(0.0, rr - towerRadius) * 0.24) * (1.0 - smoothstep(0.25, 0.65, reflUp));
+          skyGrad = mix(skyGrad, deepColor * 0.48 + glowColor * 0.22, spireReflMask * 0.45);
+          vec3 refl = skyGrad * (0.86 + uReflStrength * 0.26 + lightningBoost * 0.38);
 
           // Vibrant Biome Water Body + Ecosystem Purification Bloom (0..1)
           float purify = clamp(uPurification, 0.0, 1.0);
@@ -686,7 +692,6 @@ export class Ocean {
           }
 
           // Subsurface sun/aurora scattering through wave crests + spire bioluminescent bounce
-          vec3 L = normalize(sunDir);
           float sss = pow(clamp(dot(v, -L) * 0.5 + 0.5, 0.0, 1.0), 2.5) * smoothstep(0.35, 0.95, crest) * farAtten;
           body += effShallow * sss * 0.58;
           float nearGlow = exp(-max(0.0, rr - towerRadius) * 0.42) * (0.10 + purify * 0.14);
@@ -1000,111 +1005,16 @@ export class Ocean {
     arr[this._ri].set(x, z, time, strength);
   }
 
-  setSize(w, h, dpr = 1) {
-    const scale = this.resScale || 0.5;
-    const rw = Math.max(64, Math.floor((w || 360) * (dpr || 1) * scale));
-    const rh = Math.max(64, Math.floor((h || 640) * (dpr || 1) * scale));
-    if (this.rt.width !== rw || this.rt.height !== rh) {
-      this.rt.setSize(rw, rh);
-    }
+  setSize(_w, _h, _dpr = 1) {
+    // Analytic single-pass reflection requires no offscreen render target resize.
   }
 
   /**
-   * Renders the mirrored scene into `this.rt` using an oblique water-plane near clip.
-   * Strictly saves and restores all WebGLRenderer state with zero heap allocations.
+   * No-op: planar reflection pass removed (0 extra scene draw calls; analytic Fresnel reflection
+   * is evaluated directly inside the single-pass water fragment shader for locked 60fps!).
    */
-  updateReflection(scene, camera) {
-    this.material.uniforms.useReflection.value = this.reflectionEnabled ? 1 : 0;
-    if (!this.reflectionEnabled || !this.webgl || !scene || !camera) return;
-
-    const mesh = this.mesh;
-    mesh.updateMatrixWorld();
-    camera.updateMatrixWorld();
-
-    this._reflectorWorld.setFromMatrixPosition(mesh.matrixWorld);
-    this._camWorld.setFromMatrixPosition(camera.matrixWorld);
-    this._rot.extractRotation(mesh.matrixWorld);
-    this._normal.set(0, 1, 0);
-    this._view.subVectors(this._reflectorWorld, this._camWorld);
-    if (this._view.dot(this._normal) > 0) return;
-
-    this._view.reflect(this._normal).negate();
-    this._view.add(this._reflectorWorld);
-
-    this._rot.extractRotation(camera.matrixWorld);
-    this._lookAt.set(0, 0, -1).applyMatrix4(this._rot).add(this._camWorld);
-    this._target.subVectors(this._reflectorWorld, this._lookAt);
-    this._target.reflect(this._normal).negate();
-    this._target.add(this._reflectorWorld);
-
-    const vc = this._virtualCam;
-    vc.position.copy(this._view);
-    vc.up.set(0, 1, 0).applyMatrix4(this._rot).reflect(this._normal);
-    vc.lookAt(this._target);
-    vc.near = camera.near;
-    vc.far = camera.far;
-    vc.updateMatrixWorld();
-    vc.projectionMatrix.copy(camera.projectionMatrix);
-
-    this.textureMatrix.set(
-      0.5, 0.0, 0.0, 0.5,
-      0.0, 0.5, 0.0, 0.5,
-      0.0, 0.0, 0.5, 0.5,
-      0.0, 0.0, 0.0, 1.0
-    );
-    this.textureMatrix.multiply(vc.projectionMatrix);
-    this.textureMatrix.multiply(vc.matrixWorldInverse);
-    this.textureMatrix.multiply(mesh.matrixWorld);
-
-    // Oblique near plane aligned with the water surface so submerged geometry never leaks above
-    this._plane.setFromNormalAndCoplanarPoint(this._normal, this._reflectorWorld);
-    this._plane.applyMatrix4(vc.matrixWorldInverse);
-    this._clip.set(
-      this._plane.normal.x,
-      this._plane.normal.y,
-      this._plane.normal.z,
-      this._plane.constant
-    );
-    const pm = vc.projectionMatrix.elements;
-    this._q.x = (Math.sign(this._clip.x) + pm[8]) / pm[0];
-    this._q.y = (Math.sign(this._clip.y) + pm[9]) / pm[5];
-    this._q.z = -1.0;
-    this._q.w = (1.0 + pm[10]) / pm[14];
-    this._clip.multiplyScalar(2.0 / this._clip.dot(this._q));
-    pm[2] = this._clip.x;
-    pm[6] = this._clip.y;
-    pm[10] = this._clip.z + 1.0 - 0.003;
-    pm[14] = this._clip.w;
-
-    const r = this.webgl;
-    const prevTarget = r.getRenderTarget ? r.getRenderTarget() : null;
-    const prevAutoClear = r.autoClear;
-    const prevToneMapping = r.toneMapping;
-    const prevExposure = r.toneMappingExposure;
-    const prevXr = r.xr ? r.xr.enabled : false;
-    const prevShadowAuto = r.shadowMap ? r.shadowMap.autoUpdate : false;
-    const prevVisible = mesh.visible;
-
-    try {
-      if (r.xr) r.xr.enabled = false;
-      if (r.shadowMap) r.shadowMap.autoUpdate = false;
-      mesh.visible = false;
-      r.setRenderTarget(this.rt);
-      if (r.state?.buffers?.depth) {
-        r.state.buffers.depth.setMask(true);
-      }
-      r.autoClear = true;
-      r.clear(true, true, false);
-      r.render(scene, vc);
-    } finally {
-      mesh.visible = prevVisible;
-      if (r.xr) r.xr.enabled = prevXr;
-      if (r.shadowMap) r.shadowMap.autoUpdate = prevShadowAuto;
-      r.autoClear = prevAutoClear;
-      r.toneMapping = prevToneMapping;
-      r.toneMappingExposure = prevExposure;
-      r.setRenderTarget(prevTarget);
-    }
+  updateReflection(_scene, _camera) {
+    this.material.uniforms.useReflection.value = 0;
   }
 
   dispose() {

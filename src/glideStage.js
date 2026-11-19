@@ -583,8 +583,9 @@ export class GlideStage {
         }
         g.launch = Math.min(1, g.launch + dt * 2.2);
         const k = clamp((t - 0.75) / (INTRO_TIME - 0.75), 0, 1);
-        const wantX = W * 0.27;
-        const wantY = this.height * 0.48;
+        const portrait = W / Math.max(1, this.height) < 0.85;
+        const wantX = W * (portrait ? 0.36 : 0.28);
+        const wantY = this.height * 0.46;
         const ax = (wantX - g.x) * 5 - g.vx * 2.6;
         const sink = 340 * s * (1 - smooth(k)) ** 2;
         const ay = (wantY - g.y) * 4.2 * smooth(k) - g.vy * 2.2 * smooth(k) + sink;
@@ -641,22 +642,26 @@ export class GlideStage {
         iy /= len;
       }
 
-      // Horizontal airspeed tuck (+ix) vs air-brake (-ix)
-      const maxVx = 198 * s;
-      const kx = ix !== 0 ? (ix * g.vx < 0 ? 8.5 : 6.0) : 2.8;
-      g.vx += (ix * maxVx - g.vx) * (1 - Math.exp(-kx * dt));
+      // Horizontal airspeed tuck (+ix) vs air-brake (-ix) + dive-momentum forward carry
+      const maxVx = 205 * s;
+      const kx = ix !== 0 ? (ix * g.vx < 0 ? 8.5 : 6.0) : 2.6;
+      g.vx += (ix * maxVx + g.dive * 38 * s - g.vx) * (1 - Math.exp(-kx * dt));
 
-      // Buoyant vertical glide sink + responsive pitch steering + zoom-climb energy conversion
-      const sink = 28 * s;
-      const steer = 225 * s;
-      const holdLift = jumpNow || fireNow ? -95 * s : 0;
+      // Real Air-Pitch Glide Lift/Dive Physics:
+      //   - Diving (+iy) pitches nose down, accelerating forward airspeed & storing zoom-climb energy
+      //   - Pulling up (-iy / jump) converts stored kinetic energy & airspeed into soaring wing-lift!
+      const speedLift = clamp(g.speed - 0.85, 0, 0.95) * 44 * s;
+      const sink = Math.max(10 * s, 38 * s - speedLift);
+      const steer = 245 * s;
+      const holdLift = jumpNow || fireNow ? -110 * s : 0;
       let wantVy = sink + iy * steer + holdLift;
-      if ((iy < -0.18 || holdLift < 0) && g.energy > 0) {
-        const use = Math.min(g.energy, dt * 1.45);
+      const pullingUp = iy < -0.15 || holdLift < 0;
+      if (pullingUp && g.energy > 0.02) {
+        const use = Math.min(g.energy, dt * 1.55);
         g.energy -= use;
-        wantVy -= 195 * s * (use / Math.max(dt, 1e-4)) * 0.6;
+        wantVy -= 235 * s * (use / Math.max(dt, 1e-4)) * 0.68;
       }
-      const ky = iy !== 0 || holdLift < 0 ? 5.4 : 2.1;
+      const ky = iy !== 0 || holdLift < 0 ? 5.8 : 2.4;
       g.vy += (wantVy - g.vy) * (1 - Math.exp(-ky * dt));
 
       // Rising warm/bioluminescent sea thermals
@@ -669,20 +674,24 @@ export class GlideStage {
       }
       g.lift += (lift - g.lift) * Math.min(1, dt * 6.5);
       if (lift > 0.02) {
-        g.vy -= lift * 665 * s * dt;
+        g.vy -= lift * 685 * s * dt;
+        g.energy = Math.min(1.4, g.energy + lift * dt * 0.65);
         this.thermalTime += dt;
       }
-      if (g.vy < -340 * s) g.vy = -340 * s;
+      if (g.vy < -350 * s) g.vy = -350 * s;
 
-      // Dive builds speed & zoom-climb kinetic energy
-      const diving = clamp((g.vy - 82 * s) / (185 * s), 0, 1);
-      g.dive += (diving - g.dive) * Math.min(1, dt * 5.2);
-      if (diving > 0.05) g.energy = Math.min(1.25, g.energy + diving * dt * 0.95);
-      else g.energy = Math.max(0, g.energy - dt * 0.11);
+      // Dive builds speed & zoom-climb kinetic energy; pull-up flares wings gracefully
+      const diving = clamp((g.vy - 70 * s) / (175 * s), 0, 1);
+      g.dive += (diving - g.dive) * Math.min(1, dt * 5.8);
+      if (diving > 0.05) g.energy = Math.min(1.45, g.energy + diving * dt * 1.25);
+      else g.energy = Math.max(0, g.energy - dt * 0.09);
+
+      const targetFlare = pullingUp ? clamp(0.28 + g.energy * 0.45, 0, 0.85) : 0;
+      g.flare += (targetFlare - g.flare) * Math.min(1, dt * 7.5);
 
       const wantSpeed =
-        1 + 0.22 * ix + 0.42 * g.dive + (g.flapT < 0.6 ? 0.26 * (1 - g.flapT / 0.6) : 0);
-      g.speed += (wantSpeed - g.speed) * (1 - Math.exp(-2.6 * dt));
+        1 + 0.24 * ix + 0.52 * g.dive + g.energy * 0.14 + (g.flapT < 0.6 ? 0.28 * (1 - g.flapT / 0.6) : 0);
+      g.speed += (wantSpeed - g.speed) * (1 - Math.exp(-3.0 * dt));
 
       // Wing-flap trigger with 140ms tap buffer: `firePressed` OR `jump`/`fire` edge never drops a tap!
       if (Boolean(firePressed) || jumpEdge || fireEdge) {
@@ -700,8 +709,9 @@ export class GlideStage {
     g.y += g.vy * dt;
 
     const wide = W / this.height > 1.15;
-    const minX = g.rx * 1.2;
-    const maxX = wide ? Math.min(W * 0.68, W - g.rx * 2.6) : W - g.rx * 2.2;
+    const portrait = W / this.height < 0.85;
+    const minX = portrait ? Math.max(g.rx * 1.8, W * 0.22) : Math.max(g.rx * 1.35, W * 0.14);
+    const maxX = wide ? Math.min(W * 0.68, W - g.rx * 2.6) : portrait ? Math.min(W * 0.78, W - g.rx * 1.8) : W - g.rx * 2.2;
     if (g.x < minX) {
       g.x = minX;
       if (g.vx < 0) g.vx = 0;

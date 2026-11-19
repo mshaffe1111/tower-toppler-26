@@ -148,20 +148,38 @@ body {
   touch-action: none;
 }
 
+.stage-transition-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: radial-gradient(circle at 50% 42%, #083350 0%, #041828 100%);
+  opacity: 1;
+  transition: opacity 0.24s ease-out, visibility 0.24s ease-out;
+  pointer-events: none;
+}
+
+.stage-transition-veil.is-ready {
+  opacity: 0;
+  visibility: hidden;
+}
+
 /* Hide In-Game Chrome Whenever Title, Modals, Mutation Draft, or Cutscene Are Active */
 #app[data-title-open="true"] #hud,
+#app[data-title-open="true"] #crown-seals-pill,
 #app[data-title-open="true"] #touch-controls,
 #app[data-title-open="true"] #altitude-meter,
 #app[data-title-open="true"] #core-descent-hud,
 #app[data-title-open="true"] #action-prompt,
 #app[data-title-open="true"] #puzzle-hud,
 #app:has(#overlay-title:not(.hidden)) #hud,
+#app:has(#overlay-title:not(.hidden)) #crown-seals-pill,
 #app:has(#overlay-title:not(.hidden)) #touch-controls,
 #app:has(#overlay-title:not(.hidden)) #altitude-meter,
 #app:has(#overlay-title:not(.hidden)) #core-descent-hud,
 #app:has(#overlay-title:not(.hidden)) #action-prompt,
 #app:has(#overlay-title:not(.hidden)) #puzzle-hud,
 #app:has(#overlay-wardrobe:not(.hidden)) #hud,
+#app:has(#overlay-wardrobe:not(.hidden)) #crown-seals-pill,
 #app:has(#overlay-wardrobe:not(.hidden)) #touch-controls,
 #app:has(#overlay-wardrobe:not(.hidden)) #altitude-meter,
 #app:has(#overlay-wardrobe:not(.hidden)) #core-descent-hud,
@@ -172,6 +190,7 @@ body {
 #app:has(#overlay-trophies:not(.hidden)) #touch-controls,
 #app:has(#overlay-mutation:not(.hidden)) #touch-controls,
 #app:has(#overlay-cutscene:not(.hidden)) #hud,
+#app:has(#overlay-cutscene:not(.hidden)) #crown-seals-pill,
 #app:has(#overlay-cutscene:not(.hidden)) #touch-controls {
   opacity: 0 !important;
   visibility: hidden !important;
@@ -187,9 +206,9 @@ body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: start;
-  gap: 8px;
-  padding: calc(10px + var(--safe-top)) calc(14px + var(--safe-right)) 14px calc(14px + var(--safe-left));
-  background: linear-gradient(180deg, rgba(4, 24, 42, 0.56) 0%, rgba(4, 24, 42, 0.16) 62%, rgba(4, 24, 42, 0) 100%);
+  gap: 6px;
+  padding: calc(7px + var(--safe-top)) calc(12px + var(--safe-right)) 6px calc(12px + var(--safe-left));
+  background: linear-gradient(180deg, rgba(4, 24, 42, 0.36) 0%, rgba(4, 24, 42, 0.08) 58%, rgba(4, 24, 42, 0) 100%);
   pointer-events: none;
   z-index: 15;
   transition: opacity 0.22s ease;
@@ -200,16 +219,16 @@ body {
   flex-direction: column;
   align-items: flex-start;
   min-width: 0;
-  gap: 2px;
+  gap: 1px;
 }
 
 .hud-label {
   font-family: var(--font-display);
-  font-size: clamp(10px, 2.4vw, 12.5px);
+  font-size: clamp(9px, 2vw, 11px);
   font-weight: 800;
   letter-spacing: 0.12em;
   color: var(--aqua-glow);
-  text-shadow: 0 0 12px rgba(94, 252, 232, 0.48), 0 1px 3px rgba(0, 0, 0, 0.9);
+  text-shadow: 0 0 10px rgba(94, 252, 232, 0.45), 0 1px 3px rgba(0, 0, 0, 0.9);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -219,28 +238,28 @@ body {
 .hud-score {
   font-family: 'Orbitron', var(--font-ui);
   font-variant-numeric: tabular-nums;
-  font-size: clamp(15px, 3.8vw, 22px);
+  font-size: clamp(13.5px, 3.2vw, 18px);
   font-weight: 800;
   letter-spacing: 0.05em;
-  line-height: 1.08;
+  line-height: 1.06;
   color: #ffffff;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.88);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.88);
 }
 
 .hud-lives {
   display: flex;
   align-items: center;
-  gap: 5px;
-  margin-top: 4px;
-  min-height: 20px;
+  gap: 4px;
+  margin-top: 2px;
+  min-height: 17px;
 }
 
 .life-pip {
   display: inline-flex;
-  width: 18px;
-  height: 20px;
+  width: 15px;
+  height: 17px;
   color: var(--aqua-glow);
-  filter: drop-shadow(0 0 7px rgba(94, 252, 232, 0.78)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.85));
+  filter: drop-shadow(0 0 6px rgba(94, 252, 232, 0.72)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.85));
   transition: opacity 0.25s ease, transform 0.25s ease;
 }
 
@@ -271,6 +290,119 @@ body {
   align-items: center;
   min-width: 0;
   gap: 5px;
+}
+
+/* 3-Seal Hydro-Lock Progression Pill (Right Below Top Siphon Bar) */
+.crown-seals-pill {
+  position: fixed;
+  top: calc(70px + var(--safe-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 15;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 12px 5px;
+  width: max-content;
+  max-width: calc(100vw - 22px);
+  clip-path: var(--poly-oct-sm);
+  background: linear-gradient(180deg, rgba(8, 42, 68, 0.9), rgba(4, 20, 36, 0.94));
+  box-shadow: inset 0 0 0 1.2px rgba(246, 196, 83, 0.56);
+  filter: drop-shadow(0 5px 12px rgba(0, 0, 0, 0.65));
+  pointer-events: none;
+}
+
+.crown-seals-pill.is-unsealed {
+  background: linear-gradient(180deg, rgba(10, 62, 82, 0.92), rgba(5, 28, 46, 0.95));
+  box-shadow: inset 0 0 0 1.4px rgba(94, 252, 232, 0.85), 0 0 14px rgba(94, 252, 232, 0.34);
+}
+
+.crown-seals-count {
+  font-family: var(--font-display);
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  line-height: 1.1;
+  color: var(--bronze-gleam);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+}
+
+.crown-seals-pill.is-unsealed .crown-seals-count {
+  color: var(--aqua-glow);
+  text-shadow: 0 0 10px rgba(94, 252, 232, 0.82), 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+
+.crown-seals-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 5px;
+}
+
+.crown-seal-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(5, 22, 38, 0.78);
+  border: 1px solid rgba(180, 205, 230, 0.24);
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: rgba(180, 205, 230, 0.72);
+  white-space: nowrap;
+}
+
+.crown-seal-chip .ico-svg {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+
+.crown-seal-chip .ico-seal-lock {
+  color: rgba(251, 191, 36, 0.62);
+}
+
+.crown-seal-chip .ico-seal-open {
+  display: none;
+  color: var(--aqua-glow);
+  filter: drop-shadow(0 0 6px rgba(94, 252, 232, 0.85));
+}
+
+.crown-seal-chip.is-next {
+  background: rgba(14, 58, 86, 0.9);
+  border-color: rgba(255, 224, 130, 0.72);
+  color: #fffbeb;
+  box-shadow: 0 0 8px rgba(251, 191, 36, 0.28);
+}
+
+.crown-seal-chip.is-next .ico-seal-lock {
+  color: var(--bronze-gleam);
+  filter: drop-shadow(0 0 5px rgba(255, 228, 143, 0.75));
+}
+
+.crown-seal-chip.is-broken {
+  background: linear-gradient(135deg, rgba(16, 118, 110, 0.85), rgba(14, 74, 104, 0.92));
+  border-color: rgba(94, 252, 232, 0.85);
+  color: #fef08a;
+  box-shadow: 0 0 10px rgba(94, 252, 232, 0.34);
+}
+
+.crown-seal-chip.is-broken .ico-seal-lock {
+  display: none;
+}
+
+.crown-seal-chip.is-broken .ico-seal-open {
+  display: inline-block;
+}
+
+#hud:has(#crown-seals-pill:not(.hidden)) .mission-status-pill {
+  top: calc(116px + var(--safe-top));
 }
 
 .mission-status-pill {
@@ -440,11 +572,15 @@ body {
   flex-direction: column;
   align-items: flex-end;
   min-width: 0;
-  gap: 2px;
+  gap: 1px;
 }
 
-.hud-label-ghost,
+.hud-label-ghost {
+  display: none;
+}
+
 .hud-score-ghost {
+  font-size: clamp(11px, 2vw, 13px);
   color: var(--ghost-slate);
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.75);
 }
@@ -593,7 +729,6 @@ body {
   height: 0%;
   border-radius: 999px;
   background: linear-gradient(180deg, var(--amber-time) 0%, var(--aqua-glow) 55%, var(--emerald-heal) 100%);
-  transition: height 0.12s ease-out;
 }
 
 .alt-water {
@@ -606,7 +741,6 @@ body {
   background: linear-gradient(180deg, #fb7185 0%, #be123c 100%);
   box-shadow: 0 0 10px rgba(251, 113, 133, 0.85);
   z-index: 2;
-  transition: height 0.12s linear;
 }
 
 .alt-pip {
@@ -621,7 +755,6 @@ body {
   border: 1.5px solid #ffffff;
   box-shadow: 0 0 9px rgba(94, 252, 232, 0.95);
   z-index: 3;
-  transition: bottom 0.12s ease-out;
 }
 
 /* Reactor Core Descent Plunge HUD */
@@ -752,6 +885,26 @@ body {
   width: 13px;
   height: 13px;
   color: var(--aqua-glow);
+}
+
+.action-prompt.is-locked {
+  color: #fef3c7;
+  text-shadow: 0 0 10px rgba(251, 191, 36, 0.7);
+  cursor: default;
+  pointer-events: none;
+  animation: none;
+}
+
+.action-prompt.is-locked::before {
+  background: linear-gradient(135deg, #fbbf24 0%, #fb7185 55%, #f59e0b 100%);
+}
+
+.action-prompt.is-locked::after {
+  background: linear-gradient(180deg, rgba(64, 22, 34, 0.95), rgba(26, 12, 24, 0.97));
+}
+
+.action-prompt.is-locked .ico-svg {
+  color: #fde047;
 }
 
 @keyframes promptFloat {
@@ -1347,24 +1500,7 @@ body {
 }
 
 .title-watershed-chip {
-  position: relative;
-  isolation: isolate;
-  display: inline-flex;
-  align-items: center;
-  padding: 5px 11px;
-  min-height: 31px;
-  border: none;
-  clip-path: var(--poly-hex-pill);
-  background: linear-gradient(180deg, rgba(12, 66, 84, 0.90), rgba(5, 28, 42, 0.95));
-  box-shadow: inset 0 0 0 1.2px rgba(52, 211, 153, 0.62);
-  color: #a7f3d0;
-  font-family: var(--font-ui);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.09em;
-  white-space: nowrap;
-  cursor: pointer;
-  filter: drop-shadow(0 5px 12px rgba(0, 0, 0, 0.65));
+  display: none;
 }
 
 .title-gear-wrap {
@@ -1578,6 +1714,10 @@ body {
   width: 100%;
 }
 
+.ctrl-pills-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .ctrl-pill-btn,
 .ctrl-scheme-pill {
   position: relative;
@@ -1643,7 +1783,7 @@ body {
 
 /* Chiseled 3D Hydro-Sanctum Crest Stage */
 .title-crest-stage {
-  width: min(94vw, 456px);
+  width: min(88vw, 412px);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -1658,10 +1798,10 @@ body {
 .title-crest-stage svg {
   width: 100%;
   height: auto;
-  max-height: min(17.5dvh, 148px);
+  max-height: min(15.5dvh, 128px);
   display: block;
   overflow: visible;
-  filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.78)) drop-shadow(0 0 24px rgba(94, 252, 232, 0.26));
+  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.72)) drop-shadow(0 0 20px rgba(94, 252, 232, 0.22));
 }
 
 .crest-astrolabe-spin {
@@ -1716,23 +1856,23 @@ body {
   position: relative;
   isolation: isolate;
   z-index: 4;
-  margin-bottom: -7px;
+  margin-bottom: 3px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  max-width: min(90vw, 324px);
-  padding: 4px 16px;
+  gap: 6px;
+  max-width: min(86vw, 296px);
+  padding: 3px 13px;
   background: transparent;
   border: none;
   color: var(--bronze-gleam);
   font-family: var(--font-ui);
-  font-size: 9px;
+  font-size: 8.5px;
   font-weight: 800;
-  letter-spacing: 0.11em;
+  letter-spacing: 0.1em;
   white-space: nowrap;
   cursor: pointer;
-  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.78));
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.72));
 }
 
 .hero-sector-ribbon::before {
@@ -1756,7 +1896,7 @@ body {
 .hero-sector-name {
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 210px;
+  max-width: 196px;
 }
 
 .tower-stars-inline {
@@ -1770,10 +1910,10 @@ body {
 .hero-play-medallion {
   position: relative;
   isolation: isolate;
-  width: min(92vw, 352px);
-  aspect-ratio: 380 / 104;
-  min-height: 74px;
-  padding: 10px 56px;
+  width: min(84vw, 304px);
+  aspect-ratio: 380 / 98;
+  min-height: 60px;
+  padding: 8px 46px;
   border: none;
   background: transparent;
   color: #ffffff;
@@ -1783,13 +1923,13 @@ body {
   justify-content: center;
   gap: 2px;
   font-family: var(--font-display);
-  font-size: clamp(12.5px, 3.6vw, 15px);
+  font-size: clamp(12px, 3.2vw, 14.5px);
   font-weight: 900;
   letter-spacing: 0.12em;
   text-shadow: 0 2px 6px rgba(0, 0, 0, 0.92), 0 0 16px rgba(94, 252, 232, 0.52);
   cursor: pointer;
   touch-action: manipulation;
-  filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.85)) drop-shadow(0 0 18px rgba(94, 252, 232, 0.25));
+  filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.8)) drop-shadow(0 0 14px rgba(94, 252, 232, 0.24));
   transition: transform 0.1s ease, filter 0.15s ease;
 }
 
@@ -1835,22 +1975,17 @@ body {
   width: 100%;
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  align-items: end;
-  gap: clamp(5px, 1.6vw, 10px);
-  padding: 4px 2px 0;
-}
-
-.diegetic-dock-row > .dock-crest-btn:first-child,
-.diegetic-dock-row > .dock-crest-btn:last-child {
-  transform: translateY(-4px);
+  align-items: stretch;
+  gap: clamp(5px, 1.4vw, 8px);
+  padding: 2px 2px 0;
 }
 
 .dock-crest-btn {
   position: relative;
   isolation: isolate;
   min-width: 0;
-  min-height: 62px;
-  padding: 8px 4px 11px;
+  min-height: 52px;
+  padding: 6px 4px 8px;
   border: none;
   background: transparent;
   color: #f0fdfa;
@@ -1858,16 +1993,36 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 3px;
   font-family: var(--font-ui);
-  font-size: clamp(8.5px, 2.2vw, 10px);
+  font-size: clamp(8px, 2vw, 9.5px);
   font-weight: 800;
   letter-spacing: 0.05em;
   text-align: center;
   cursor: pointer;
   touch-action: manipulation;
-  filter: drop-shadow(0 7px 15px rgba(0, 0, 0, 0.78));
+  filter: drop-shadow(0 5px 12px rgba(0, 0, 0, 0.72));
   transition: transform 0.14s ease, filter 0.15s ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .corner-bracket,
+  .gesture-hint {
+    display: none !important;
+  }
+
+  #touch-controls .action-btn {
+    opacity: 0.18;
+  }
+
+  #touch-controls .action-btn:hover {
+    opacity: 0.78;
+  }
+
+  .dock-crest-btn:hover {
+    transform: translateY(-2px);
+    filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.82)) drop-shadow(0 0 10px rgba(94, 252, 232, 0.35));
+  }
 }
 
 .dock-crest-btn::before {
@@ -2576,30 +2731,165 @@ body {
 }
 
 /* ============================================================================
-   5. GATEWAY SANCTUARY SPOTLIGHT (#overlay-wardrobe) & ARCHIVES (#overlay-trophies)
+   5. INTERACTIVE 3D PELAGIAN SANCTUARY (#overlay-wardrobe):
+      360° Turntable, Animation Studio, 12-Node Bio-Skill Tree, 3D Bestiary & Critters
    ============================================================================ */
+.critter-sonar-pill {
+  position: fixed;
+  top: calc(78px + var(--safe-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 16;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 13px;
+  clip-path: var(--poly-hex-pill);
+  background: linear-gradient(180deg, rgba(10, 62, 74, 0.90), rgba(4, 28, 38, 0.94));
+  box-shadow: inset 0 0 0 1.3px var(--emerald-heal), 0 0 14px rgba(52, 211, 153, 0.45);
+  color: #a7f3d0;
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  pointer-events: none;
+  animation: sonarPulseGlow 1.15s ease-in-out infinite alternate;
+}
+
+@keyframes sonarPulseGlow {
+  from { box-shadow: inset 0 0 0 1.2px var(--emerald-heal), 0 0 8px rgba(52, 211, 153, 0.35); }
+  to { box-shadow: inset 0 0 0 1.8px #5efce8, 0 0 20px rgba(94, 252, 232, 0.72); }
+}
+
 #overlay-wardrobe,
 .overlay-drawer {
-  align-items: flex-end;
-  padding: 0 calc(8px + var(--safe-right)) calc(8px + var(--safe-bottom)) calc(8px + var(--safe-left));
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  padding: calc(10px + var(--safe-top)) calc(8px + var(--safe-right)) calc(8px + var(--safe-bottom)) calc(8px + var(--safe-left));
   background: linear-gradient(
     180deg,
-    rgba(4, 20, 36, 0.00) 0%,
-    rgba(4, 20, 36, 0.00) 64%,
-    rgba(4, 20, 36, 0.68) 76%,
+    rgba(4, 20, 36, 0.18) 0%,
+    rgba(4, 20, 36, 0.00) 14%,
+    rgba(4, 20, 36, 0.00) 56%,
+    rgba(4, 20, 36, 0.68) 70%,
     rgba(3, 14, 26, 0.94) 100%
   ) !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
 
+.sanctuary-turntable-stage {
+  flex: 1 1 0;
+  min-height: 110px;
+  width: 100%;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+
+.sanctuary-turntable-stage.dragging {
+  cursor: grabbing;
+}
+
+.sanctuary-cam-hud {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px;
+}
+
+.turntable-hint-pill {
+  padding: 4px 12px;
+  clip-path: var(--poly-hex-pill);
+  background: rgba(5, 24, 40, 0.74);
+  box-shadow: inset 0 0 0 1px rgba(94, 252, 232, 0.42);
+  color: var(--aqua-glow);
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  pointer-events: none;
+}
+
+.turntable-zoom-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.turntable-cam-btn {
+  min-width: 34px;
+  height: 30px;
+  padding: 0 8px;
+  border: none;
+  clip-path: var(--poly-oct-sm);
+  background: rgba(7, 34, 56, 0.84);
+  box-shadow: inset 0 0 0 1.2px rgba(94, 252, 232, 0.48);
+  color: #f0fdfa;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.turntable-cam-btn:active {
+  transform: scale(0.93);
+  color: var(--bronze-gleam);
+}
+
+.sanctuary-anim-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 4px;
+}
+
+.anim-studio-pill {
+  padding: 4px 10px;
+  border: none;
+  clip-path: var(--poly-hex-pill);
+  background: rgba(6, 28, 46, 0.84);
+  box-shadow: inset 0 0 0 1px rgba(94, 252, 232, 0.36);
+  color: #cbe3ff;
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.anim-studio-pill.active {
+  background: linear-gradient(180deg, rgba(16, 86, 118, 0.96), rgba(8, 42, 68, 0.98));
+  box-shadow: inset 0 0 0 1.4px var(--bronze-gleam);
+  color: var(--bronze-gleam);
+}
+
 #overlay-wardrobe .modal-card {
-  max-width: 560px;
-  max-height: 36dvh;
+  max-width: 680px;
+  max-height: 44dvh;
   padding: 10px 12px 11px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
+}
+
+#overlay-wardrobe[data-sanctuary-tab="skills"] .modal-card,
+#overlay-wardrobe[data-sanctuary-tab="critters"] .modal-card {
+  max-height: 60dvh;
 }
 
 #overlay-wardrobe .retro-pill {
@@ -2616,6 +2906,214 @@ body {
   box-shadow: inset 0 0 0 1px rgba(94, 252, 232, 0.34);
   margin-bottom: 7px;
   flex-shrink: 0;
+}
+
+.sub-tabs-5 {
+  display: flex;
+  overflow-x: auto;
+  gap: 4px;
+  clip-path: var(--poly-oct-sm);
+  padding: 3px 4px;
+}
+
+.sub-tabs-5 .sub-tab-btn {
+  flex: 1 0 auto;
+  padding: 6px 8px;
+  font-size: 8.5px;
+  white-space: nowrap;
+}
+
+/* 12-Node Pelagian Bio-Skill Tree */
+.skill-tree-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  overflow-y: auto;
+  padding-right: 3px;
+  touch-action: pan-y;
+}
+
+.skill-tree-notice {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--aqua-bright);
+  background: rgba(8, 42, 64, 0.72);
+  padding: 5px 10px;
+  clip-path: var(--poly-oct-sm);
+  border-left: 2.5px solid var(--bronze-gleam);
+}
+
+.skill-branch-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.skill-branch-head {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: var(--bronze-gleam);
+  padding-left: 2px;
+}
+
+.skill-branch-nodes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+@media (max-width: 460px) and (orientation: portrait) {
+  .skill-branch-nodes {
+    grid-template-columns: 1fr;
+  }
+}
+
+.skill-node-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 8px 10px;
+  border: none;
+  clip-path: var(--poly-oct-sm);
+  background: linear-gradient(160deg, rgba(12, 54, 84, 0.92), rgba(5, 22, 38, 0.96));
+  box-shadow: inset 0 0 0 1.2px rgba(94, 252, 232, 0.36);
+  color: #f8fafc;
+  text-align: left;
+  cursor: pointer;
+}
+
+.skill-node-card.maxed {
+  box-shadow: inset 0 0 0 1.6px var(--emerald-heal);
+}
+
+.skill-node-card.affordable:not(.maxed) {
+  box-shadow: inset 0 0 0 1.5px var(--bronze-gleam);
+}
+
+.skill-node-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.skill-node-name {
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 900;
+  color: #ffffff;
+}
+
+.skill-rank-pips {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.skill-pip {
+  width: 7px;
+  height: 7px;
+  transform: rotate(45deg);
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(94, 252, 232, 0.45);
+}
+
+.skill-pip.on {
+  background: var(--aqua-glow);
+  box-shadow: 0 0 6px var(--aqua-glow);
+}
+
+.skill-node-desc {
+  font-size: 10px;
+  line-height: 1.25;
+  color: #cbe3ff;
+}
+
+.skill-node-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--bronze-gleam);
+}
+
+/* 3D Bestiary Codex & Critter Sanctuary */
+.bestiary-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.bestiary-detail-strip {
+  padding: 6px 10px;
+  clip-path: var(--poly-oct-sm);
+  background: rgba(6, 30, 50, 0.86);
+  box-shadow: inset 0 0 0 1px rgba(251, 113, 133, 0.42);
+  font-size: 10.5px;
+  line-height: 1.26;
+  color: #e2f2ff;
+}
+
+.bestiary-detail-strip strong {
+  color: var(--bronze-gleam);
+  font-family: var(--font-display);
+  letter-spacing: 0.06em;
+}
+
+.critters-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  padding-right: 3px;
+  touch-action: pan-y;
+}
+
+.critter-biome-group {
+  padding: 8px 10px;
+  clip-path: var(--poly-oct-sm);
+  background: rgba(6, 32, 52, 0.86);
+  box-shadow: inset 0 0 0 1px rgba(94, 252, 232, 0.34);
+}
+
+.critter-biome-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 900;
+  color: var(--aqua-glow);
+  margin-bottom: 5px;
+}
+
+.critter-pips-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.critter-chip {
+  padding: 5px 6px;
+  clip-path: var(--poly-oct-sm);
+  background: rgba(4, 18, 32, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  font-size: 9px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.critter-chip.rescued {
+  background: rgba(16, 185, 129, 0.22);
+  border-color: var(--emerald-heal);
+  color: #ecfdf5;
 }
 
 .sub-tabs-row.sub-tabs-3 {
@@ -3361,6 +3859,36 @@ body {
     padding: 6px 14px;
   }
 
+  .crown-seals-pill {
+    top: calc(64px + var(--safe-top));
+    padding: 3px 8px 4px;
+    gap: 2px;
+  }
+
+  .crown-seals-count {
+    font-size: 7.5px;
+    letter-spacing: 0.12em;
+  }
+
+  .crown-seals-row {
+    gap: 3px;
+  }
+
+  .crown-seal-chip {
+    padding: 1.5px 5px;
+    gap: 3px;
+    font-size: 7.5px;
+  }
+
+  .crown-seal-chip .ico-svg {
+    width: 9.5px;
+    height: 9.5px;
+  }
+
+  #hud:has(#crown-seals-pill:not(.hidden)) .mission-status-pill {
+    top: calc(106px + var(--safe-top));
+  }
+
   .title-watershed-chip {
     display: none;
   }
@@ -3398,13 +3926,29 @@ body {
   }
 
   /* Side-Gutter Docking in Landscape: Keep Center Spire & Gateway 100% Unobstructed! */
+  .crown-seals-pill {
+    top: calc(52px + var(--safe-top));
+    flex-direction: row;
+    gap: 8px;
+    padding: 4px 12px;
+  }
+
+  #hud:has(#crown-seals-pill:not(.hidden)) .mission-status-pill {
+    top: calc(60px + var(--safe-top));
+  }
+
   .mission-status-pill,
+  .critter-sonar-pill,
   .core-descent-hud {
     top: calc(60px + var(--safe-top));
     left: calc(14px + var(--safe-left));
     right: auto;
     transform: none;
     max-width: min(258px, 27vw);
+  }
+
+  .critter-sonar-pill {
+    top: calc(92px + var(--safe-top));
   }
 
   .stage-banner {
