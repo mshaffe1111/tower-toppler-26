@@ -3160,7 +3160,28 @@ function hideAllOverlays() {
   syncTitleShowcaseState();
 }
 
+const prestagedModeRuns = {
+  flood_rush: { seed: (Date.now() >>> 0) || 1337, tower: null },
+  expedition: { seed: ((Date.now() + 7919) >>> 0) || 4242, tower: null },
+  dailyDate: new Date(),
+  dailyDateKey: '',
+  dailyTower: null,
+  sanctum0: null,
+  gauntlet0: null,
+  warmedPropVer: -1,
+  initialShadersCompiled: false,
+  timerId: null,
+};
+
+function cancelPendingModePrewarm() {
+  if (prestagedModeRuns.timerId != null) {
+    clearTimeout(prestagedModeRuns.timerId);
+    prestagedModeRuns.timerId = null;
+  }
+}
+
 function beginRunCommon() {
+  cancelPendingModePrewarm();
   sound.unlock?.();
   if (cutsceneState.active) {
     cutsceneState.active = false;
@@ -3179,18 +3200,6 @@ function beginRunCommon() {
   pushNavGuard();
 }
 
-const prestagedModeRuns = {
-  flood_rush: { seed: (Date.now() >>> 0) || 1337, tower: null },
-  expedition: { seed: ((Date.now() + 7919) >>> 0) || 4242, tower: null },
-  dailyDate: new Date(),
-  dailyDateKey: '',
-  dailyTower: null,
-  sanctum0: null,
-  gauntlet0: null,
-  warmedPropVer: -1,
-  timerId: null,
-};
-
 function rotatePrestagedEndlessSeeds(whichMode = null) {
   if (!whichMode || whichMode === 'flood_rush') {
     prestagedModeRuns.flood_rush.seed = ((prestagedModeRuns.flood_rush.seed + 104729) >>> 0) || 1337;
@@ -3203,81 +3212,92 @@ function rotatePrestagedEndlessSeeds(whichMode = null) {
   prestagedModeRuns.warmedPropVer = -1;
 }
 
+function getPrestagedStepTower(sIdx) {
+  if (sIdx === 0) {
+    const now = new Date();
+    const dk = typeof getDailySeed === 'function' ? getDailySeed(now).dateKey : '';
+    if (!prestagedModeRuns.dailyTower || prestagedModeRuns.dailyDateKey !== dk) {
+      prestagedModeRuns.dailyDate = now;
+      prestagedModeRuns.dailyDateKey = dk;
+      prestagedModeRuns.dailyTower = typeof createDailyTower === 'function' ? createDailyTower(now) : null;
+    }
+    return prestagedModeRuns.dailyTower;
+  }
+  if (sIdx === 1) {
+    if (!prestagedModeRuns.flood_rush.tower && typeof generateProceduralTower === 'function') {
+      prestagedModeRuns.flood_rush.tower = generateProceduralTower({
+        seed: (prestagedModeRuns.flood_rush.seed + 101) >>> 0,
+        index: 1,
+        difficulty: 1.2,
+        modeHint: 'flood_rush',
+      });
+    }
+    return prestagedModeRuns.flood_rush.tower;
+  }
+  if (sIdx === 2) {
+    if (!prestagedModeRuns.expedition.tower && typeof generateProceduralTower === 'function') {
+      prestagedModeRuns.expedition.tower = generateProceduralTower({
+        seed: (prestagedModeRuns.expedition.seed + 509) >>> 0,
+        index: 1,
+        difficulty: 1.1,
+        modeHint: 'expedition',
+      });
+    }
+    return prestagedModeRuns.expedition.tower;
+  }
+  if (sIdx === 3) {
+    return getTowersSafe()[0] || null;
+  }
+  if (sIdx === 4) {
+    if (!prestagedModeRuns.sanctum0 && typeof createSanctumTowers === 'function') {
+      prestagedModeRuns.sanctum0 = createSanctumTowers(15)?.[0] || null;
+    }
+    return prestagedModeRuns.sanctum0;
+  }
+  if (sIdx === 5) {
+    if (!prestagedModeRuns.gauntlet0 && typeof createWardenGauntletTowers === 'function') {
+      prestagedModeRuns.gauntlet0 = createWardenGauntletTowers()?.[0] || null;
+    }
+    return prestagedModeRuns.gauntlet0;
+  }
+  return null;
+}
+
+function prewarmAllModeSpiresSync() {
+  cancelPendingModePrewarm();
+  const warmedGroups = [];
+  for (let sIdx = 0; sIdx <= 5; sIdx++) {
+    try {
+      const tw = getPrestagedStepTower(sIdx);
+      const c = tw ? renderer.prewarmTowerGroup?.(tw, false) : null;
+      if (c?.group) warmedGroups.push(c.group);
+    } catch (_) {}
+  }
+  if (!prestagedModeRuns.initialShadersCompiled && warmedGroups.length > 0) {
+    try {
+      renderer.compileTowerGroups?.(warmedGroups);
+      prestagedModeRuns.initialShadersCompiled = true;
+    } catch (_) {}
+  }
+  prestagedModeRuns.warmedPropVer = renderer?._archPropsVersion ?? 0;
+  resetFrameClock();
+}
+
 function scheduleModeSpiresPrewarm() {
   const targetVer = renderer?._archPropsVersion ?? 0;
   if (prestagedModeRuns.warmedPropVer === targetVer) return;
-  if (prestagedModeRuns.timerId != null) {
-    clearTimeout(prestagedModeRuns.timerId);
-    prestagedModeRuns.timerId = null;
-  }
+  cancelPendingModePrewarm();
 
   let step = 0;
   const warmedGroups = [];
 
-  const getStepTower = (sIdx) => {
-    if (sIdx === 0) {
-      // Step 0: Daily Tide FIRST so cold storm_ocean / daily launch is instant!
-      const now = new Date();
-      const dk = typeof getDailySeed === 'function' ? getDailySeed(now).dateKey : '';
-      if (!prestagedModeRuns.dailyTower || prestagedModeRuns.dailyDateKey !== dk) {
-        prestagedModeRuns.dailyDate = now;
-        prestagedModeRuns.dailyDateKey = dk;
-        prestagedModeRuns.dailyTower = typeof createDailyTower === 'function' ? createDailyTower(now) : null;
-      }
-      return prestagedModeRuns.dailyTower;
-    }
-    if (sIdx === 1) {
-      // Step 1: Flood Rush
-      if (!prestagedModeRuns.flood_rush.tower && typeof generateProceduralTower === 'function') {
-        prestagedModeRuns.flood_rush.tower = generateProceduralTower({
-          seed: (prestagedModeRuns.flood_rush.seed + 101) >>> 0,
-          index: 1,
-          difficulty: 1.2,
-          modeHint: 'flood_rush',
-        });
-      }
-      return prestagedModeRuns.flood_rush.tower;
-    }
-    if (sIdx === 2) {
-      // Step 2: Expedition
-      if (!prestagedModeRuns.expedition.tower && typeof generateProceduralTower === 'function') {
-        prestagedModeRuns.expedition.tower = generateProceduralTower({
-          seed: (prestagedModeRuns.expedition.seed + 509) >>> 0,
-          index: 1,
-          difficulty: 1.1,
-          modeHint: 'expedition',
-        });
-      }
-      return prestagedModeRuns.expedition.tower;
-    }
-    if (sIdx === 3) {
-      // Step 3: Spire 1 (covers campaign, purist & master_watershed)
-      return getTowersSafe()[0] || null;
-    }
-    if (sIdx === 4) {
-      // Step 4: Sanctum 1
-      if (!prestagedModeRuns.sanctum0 && typeof createSanctumTowers === 'function') {
-        prestagedModeRuns.sanctum0 = createSanctumTowers(15)?.[0] || null;
-      }
-      return prestagedModeRuns.sanctum0;
-    }
-    if (sIdx === 5) {
-      // Step 5: Warden Gauntlet Act 1
-      if (!prestagedModeRuns.gauntlet0 && typeof createWardenGauntletTowers === 'function') {
-        prestagedModeRuns.gauntlet0 = createWardenGauntletTowers()?.[0] || null;
-      }
-      return prestagedModeRuns.gauntlet0;
-    }
-    return null;
-  };
-
   const runNextSlice = () => {
     prestagedModeRuns.timerId = null;
-    // Never abort mid-prewarm if game.mode changes; advance immediately past already-cached towers!
+    if (game.mode !== 'title') return;
     while (step <= 5) {
       let builtNew = false;
       try {
-        const tw = getStepTower(step);
+        const tw = getPrestagedStepTower(step);
         if (tw) {
           const alreadyCached = Boolean(renderer.hasCachedTowerGroup?.(tw));
           const c = renderer.prewarmTowerGroup?.(tw, false);
@@ -3288,7 +3308,10 @@ function scheduleModeSpiresPrewarm() {
       step++;
       if (step > 5) {
         try {
-          renderer.compileTowerGroups?.(warmedGroups);
+          if (!prestagedModeRuns.initialShadersCompiled && warmedGroups.length > 0) {
+            renderer.compileTowerGroups?.(warmedGroups);
+            prestagedModeRuns.initialShadersCompiled = true;
+          }
           prestagedModeRuns.warmedPropVer = renderer?._archPropsVersion ?? 0;
           resetFrameClock();
         } catch (_) {}
@@ -4081,12 +4104,12 @@ function prewarmStartupAssets() {
     return Promise.resolve();
   });
 
-  // 2. Pre-warm renderer shaders, Sanctum puzzle renderer (avoids 900ms PMREM/compile spike on _enterPuzzleRoom!), & initial tower render during startup fade
+  // 2. Pre-warm renderer shaders, all 6 mode starting spires, Sanctum puzzle renderer, & initial tower render during startup fade
   try {
     renderer.prewarm?.();
+    prewarmAllModeSpiresSync();
     renderer._ensurePuzzleRenderer?.();
     game.render();
-    scheduleModeSpiresPrewarm();
   } catch (_) {}
 
   // 3. Dismiss transition veil once images decode + GLBs & all 6 mode spires warm + >= 2 WebGL frames (capped at 850ms)
