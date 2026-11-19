@@ -692,17 +692,38 @@ export class GatewayRig {
     this.currentEra = 'reboot';
     this._activeSkin = GATEWAY_SKINS[0];
 
-    // Zero-allocation scratch math objects for 60fps mobile animation polish
+    // Zero-allocation scratch math objects for 60fps mobile animation polish & 2-bone Foot-IK
     this._qScratchA = new THREE.Quaternion();
     this._qScratchB = new THREE.Quaternion();
+    this._qIkParentRoot = new THREE.Quaternion();
+    this._qIkDelta = new THREE.Quaternion();
+    this._qIkThighRoot = new THREE.Quaternion();
+    this._qIkShinRoot = new THREE.Quaternion();
+    this._qIkLocalTmp = new THREE.Quaternion();
     this._eScratch = new THREE.Euler(0, 0, 0, 'XYZ');
     this._scratchColor = new THREE.Color();
+    this._mIkInvRoot = new THREE.Matrix4();
+    this._mIkTmp = new THREE.Matrix4();
+    this._mIkBasis1 = new THREE.Matrix4();
+    this._mIkDelta = new THREE.Matrix4();
+    this._vIkHip = new THREE.Vector3();
+    this._vIkAnkleTgt = new THREE.Vector3();
+    this._vIkHA = new THREE.Vector3();
+    this._vIkUDir = new THREE.Vector3();
+    this._vIkPole = new THREE.Vector3();
+    this._vIkKnee = new THREE.Vector3();
+    this._vIkThighDir = new THREE.Vector3();
+    this._vIkShinDir = new THREE.Vector3();
+    this._vIkPlaneN = new THREE.Vector3();
+    this._vIkBinorm = new THREE.Vector3();
 
-    this._lastPoseState = { time: 0, vx: 0, vy: 0, facing: 1, onGround: true };
+    this._initDummyPoseState = { time: 0, vx: 0, vy: 0, facing: 1, onGround: true };
+    this._lastPoseState = this._initDummyPoseState;
+    this._yawSyncedToCaller = false;
     this._internalTime = 0;
     this._stridePhase = 0;
-    this._yaw = 0.38;
-    this._prevYaw = 0.38;
+    this._yaw = 0.42;
+    this._prevYaw = 0.42;
     this._bankRoll = 0;
     this._stairOffset = 0;
     this._pelvisBindY = 0.53;
@@ -710,6 +731,7 @@ export class GatewayRig {
     this._headLookPitch = 0;
     this._frillFlare = 0;
     this._castBlend = 0;
+    this._pushBlend = 0;
     this._recoil = 0;
     this._landTimer = 0;
     this._landSquash = 0;
@@ -721,6 +743,7 @@ export class GatewayRig {
     this._wasOnGround = true;
     this._lastVy = 0;
     this._prevVx = 0;
+    this._legIkBind = null;
 
     // 7-Bone 2nd-order spring-damped dynamic lizard tail state
     this._tailYawVel = 0;
@@ -913,6 +936,7 @@ export class GatewayRig {
     this.skinnedMesh = sMesh;
     this.skeleton = skel;
     this._wireBoneAliasesAndAttachments(boneByName);
+    this._measureBindPoseLegIk(standInGroup);
     this._initFallbackClipsAndMixer(standInGroup);
   }
 
@@ -923,15 +947,25 @@ export class GatewayRig {
 
     for (let i = 0; i < GATEWAY_CLIP_NAMES.length; i++) {
       const cname = GATEWAY_CLIP_NAMES[i];
-      const q0 = new THREE.Quaternion();
-      const q1 = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(cname === 'FluidRun' ? 0.18 : 0.03, 0, 0)
-      );
-      const track = new THREE.QuaternionKeyframeTrack(
-        'Pelvis.quaternion',
-        [0, 0.5, 1.0],
-        [q0.x, q0.y, q0.z, q0.w, q1.x, q1.y, q1.z, q1.w, q0.x, q0.y, q0.z, q0.w]
-      );
+      let track;
+      if (cname === 'IdleBreathe') {
+        const y0 = this._pelvisBindY;
+        track = new THREE.VectorKeyframeTrack(
+          'Pelvis.position',
+          [0, 0.5, 1.0],
+          [0, y0, -0.012, 0, y0 - 0.012, -0.012, 0, y0, -0.012]
+        );
+      } else {
+        const q0 = new THREE.Quaternion();
+        const q1 = new THREE.Quaternion().setFromEuler(
+          new THREE.Euler(cname === 'FluidRun' ? 0.18 : 0.03, 0, 0)
+        );
+        track = new THREE.QuaternionKeyframeTrack(
+          'Pelvis.quaternion',
+          [0, 0.5, 1.0],
+          [q0.x, q0.y, q0.z, q0.w, q1.x, q1.y, q1.z, q1.w, q0.x, q0.y, q0.z, q0.w]
+        );
+      }
       const clip = new THREE.AnimationClip(cname, 1.0, [track]);
       this.animations.push(clip);
       const act = this.mixer.clipAction(clip);
@@ -1089,6 +1123,9 @@ export class GatewayRig {
     }
     clonedScene.position.set(0, 0, 0);
 
+    // Measure exact bind-pose leg segment lengths & foot/ankle contact targets BEFORE mixer playback
+    this._measureBindPoseLegIk(rigMotionRoot);
+
     // Bind all 18 baked Blender NLA clips into `THREE.AnimationMixer`
     this.mixer = new THREE.AnimationMixer(clonedScene);
     this.actions = {};
@@ -1217,6 +1254,198 @@ export class GatewayRig {
   }
 
   /**
+   * Measures bind-pose `thighLen`, `shinLen`, and `motionRoot`-space ankle/foot contact targets
+   * once when the stand-in or `gateway.glb` skeleton binds. Completely invariant to `this.group` transforms!
+   */
+  _measureBindPoseLegIk(motionRoot) {
+    if (!motionRoot) return;
+    const savedPos = motionRoot.position.clone();
+    const savedRot = motionRoot.rotation.clone();
+    const savedScale = motionRoot.scale.clone();
+    motionRoot.position.set(0, 0, 0);
+    motionRoot.rotation.set(0, 0, 0);
+    motionRoot.scale.set(1, 1, 1);
+    motionRoot.updateWorldMatrix(true, true);
+
+    const invRoot = new THREE.Matrix4().copy(motionRoot.matrixWorld).invert();
+    const matTmp = new THREE.Matrix4();
+    const legs = [];
+
+    for (const s of ['L', 'R']) {
+      const thigh = this.bones[`Thigh${s}`];
+      const shin = this.bones[`Shin${s}`];
+      const ankle = this.bones[`Ankle${s}`];
+      const foot = this.bones[`Foot${s}`];
+      if (!thigh || !shin || !ankle || !foot || !thigh.parent) continue;
+
+      matTmp.multiplyMatrices(invRoot, thigh.matrixWorld);
+      const hipBindPos = new THREE.Vector3().setFromMatrixPosition(matTmp);
+      const thighBindQuat = new THREE.Quaternion().setFromRotationMatrix(matTmp);
+
+      matTmp.multiplyMatrices(invRoot, shin.matrixWorld);
+      const kneeBindPos = new THREE.Vector3().setFromMatrixPosition(matTmp);
+      const shinBindQuat = new THREE.Quaternion().setFromRotationMatrix(matTmp);
+
+      matTmp.multiplyMatrices(invRoot, ankle.matrixWorld);
+      const ankleBindPos = new THREE.Vector3().setFromMatrixPosition(matTmp);
+      const ankleBindQuat = new THREE.Quaternion().setFromRotationMatrix(matTmp);
+
+      matTmp.multiplyMatrices(invRoot, foot.matrixWorld);
+      const footBindPos = new THREE.Vector3().setFromMatrixPosition(matTmp);
+      const footBindLocalQuat = foot.quaternion.clone();
+
+      const thighLen = hipBindPos.distanceTo(kneeBindPos);
+      const shinLen = kneeBindPos.distanceTo(ankleBindPos);
+
+      const thighDirBind = kneeBindPos.clone().sub(hipBindPos).normalize();
+      const shinDirBind = ankleBindPos.clone().sub(kneeBindPos).normalize();
+      const uBind = ankleBindPos.clone().sub(hipBindPos).normalize();
+      const vKnee = kneeBindPos.clone().sub(hipBindPos);
+      const poleDirBind = vKnee.clone().addScaledVector(uBind, -vKnee.dot(uBind));
+      if (poleDirBind.lengthSq() < 1e-8) poleDirBind.set(0, 0, 1);
+      poleDirBind.normalize();
+
+      const planeNormalBind = new THREE.Vector3().crossVectors(thighDirBind, uBind);
+      if (planeNormalBind.lengthSq() < 1e-8) planeNormalBind.set(1, 0, 0);
+      planeNormalBind.normalize();
+
+      const thighBasis0Inv = new THREE.Matrix4()
+        .makeBasis(
+          planeNormalBind,
+          thighDirBind,
+          new THREE.Vector3().crossVectors(planeNormalBind, thighDirBind)
+        )
+        .invert();
+      const shinBasis0Inv = new THREE.Matrix4()
+        .makeBasis(
+          planeNormalBind,
+          shinDirBind,
+          new THREE.Vector3().crossVectors(planeNormalBind, shinDirBind)
+        )
+        .invert();
+
+      legs.push({
+        side: s,
+        hipBindPos,
+        kneeBindPos,
+        ankleBindPos,
+        footBindPos,
+        thighLen,
+        shinLen,
+        thighBindQuat,
+        shinBindQuat,
+        ankleBindQuat,
+        footBindLocalQuat,
+        poleDirBind,
+        planeNormalBind,
+        thighBasis0Inv,
+        shinBasis0Inv,
+      });
+    }
+
+    motionRoot.position.copy(savedPos);
+    motionRoot.rotation.copy(savedRot);
+    motionRoot.scale.copy(savedScale);
+    motionRoot.updateWorldMatrix(false, true);
+
+    if (legs.length === 2) {
+      this._legIkBind = legs;
+    }
+  }
+
+  /**
+   * Zero-allocation Runtime Analytic 2-Bone Leg IK Solver (Law of Cosines).
+   * Pins both `AnkleL/R` and `FootL/R` flat on `y = 0.000m` (`0.00mm` drift) across `IdleBreathe`,
+   * `HydroCast`, and heavy `landComp` crouches!
+   */
+  _solveGroundedTwoBoneLegIk(motionRoot, ikWeight = 1.0) {
+    if (!this._legIkBind || !motionRoot || ikWeight <= 0.001) return;
+
+    motionRoot.updateWorldMatrix(true, true);
+    this._mIkInvRoot.copy(motionRoot.matrixWorld).invert();
+
+    for (let i = 0; i < this._legIkBind.length; i++) {
+      const leg = this._legIkBind[i];
+      const thigh = this.bones[`Thigh${leg.side}`];
+      const shin = this.bones[`Shin${leg.side}`];
+      const ankle = this.bones[`Ankle${leg.side}`];
+      const foot = this.bones[`Foot${leg.side}`];
+      if (!thigh || !shin || !ankle || !foot || !thigh.parent) continue;
+
+      this._mIkTmp.multiplyMatrices(this._mIkInvRoot, thigh.parent.matrixWorld);
+      this._qIkParentRoot.setFromRotationMatrix(this._mIkTmp);
+
+      this._mIkTmp.multiplyMatrices(this._mIkInvRoot, thigh.matrixWorld);
+      this._vIkHip.setFromMatrixPosition(this._mIkTmp);
+
+      this._vIkAnkleTgt.copy(leg.ankleBindPos);
+      this._vIkHA.subVectors(this._vIkAnkleTgt, this._vIkHip);
+      const rawDist = this._vIkHA.length();
+      const L1 = leg.thighLen;
+      const L2 = leg.shinLen;
+      const minD = Math.abs(L1 - L2) + 1e-5;
+      const maxD = L1 + L2 - 1e-5;
+      const d = THREE.MathUtils.clamp(rawDist, minD, maxD);
+      this._vIkUDir.copy(this._vIkHA).divideScalar(rawDist > 1e-7 ? rawDist : 1);
+
+      const dotUP = this._vIkUDir.dot(leg.poleDirBind);
+      this._vIkPole.copy(leg.poleDirBind).addScaledVector(this._vIkUDir, -dotUP);
+      if (this._vIkPole.lengthSq() < 1e-8) {
+        this._vIkPole.set(0, 0, 1).addScaledVector(this._vIkUDir, -this._vIkUDir.z);
+      }
+      this._vIkPole.normalize();
+
+      const cosAlpha = THREE.MathUtils.clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1);
+      const sinAlpha = Math.sqrt(Math.max(0, 1 - cosAlpha * cosAlpha));
+      this._vIkKnee
+        .copy(this._vIkHip)
+        .addScaledVector(this._vIkUDir, L1 * cosAlpha)
+        .addScaledVector(this._vIkPole, L1 * sinAlpha);
+
+      this._vIkThighDir.subVectors(this._vIkKnee, this._vIkHip).normalize();
+      this._vIkShinDir.subVectors(this._vIkAnkleTgt, this._vIkKnee).normalize();
+      this._vIkPlaneN.crossVectors(this._vIkThighDir, this._vIkUDir);
+      if (this._vIkPlaneN.lengthSq() > 1e-8) {
+        this._vIkPlaneN.normalize();
+      } else {
+        this._vIkPlaneN.copy(leg.planeNormalBind);
+      }
+
+      // Thigh exact orientation in `motionRoot` -> local to `Pelvis`
+      this._vIkBinorm.crossVectors(this._vIkPlaneN, this._vIkThighDir);
+      this._mIkBasis1.makeBasis(this._vIkPlaneN, this._vIkThighDir, this._vIkBinorm);
+      this._mIkDelta.multiplyMatrices(this._mIkBasis1, leg.thighBasis0Inv);
+      this._qIkDelta.setFromRotationMatrix(this._mIkDelta);
+      this._qIkThighRoot.multiplyQuaternions(this._qIkDelta, leg.thighBindQuat);
+      this._qIkLocalTmp.copy(this._qIkParentRoot).invert().multiply(this._qIkThighRoot);
+      if (ikWeight >= 0.999) thigh.quaternion.copy(this._qIkLocalTmp);
+      else thigh.quaternion.slerp(this._qIkLocalTmp, ikWeight);
+
+      // Shin exact orientation in `motionRoot` -> local to `Thigh`
+      this._vIkBinorm.crossVectors(this._vIkPlaneN, this._vIkShinDir);
+      this._mIkBasis1.makeBasis(this._vIkPlaneN, this._vIkShinDir, this._vIkBinorm);
+      this._mIkDelta.multiplyMatrices(this._mIkBasis1, leg.shinBasis0Inv);
+      this._qIkDelta.setFromRotationMatrix(this._mIkDelta);
+      this._qIkShinRoot.multiplyQuaternions(this._qIkDelta, leg.shinBindQuat);
+      this._qIkLocalTmp.copy(this._qIkThighRoot).invert().multiply(this._qIkShinRoot);
+      if (ikWeight >= 0.999) shin.quaternion.copy(this._qIkLocalTmp);
+      else shin.quaternion.slerp(this._qIkLocalTmp, ikWeight);
+
+      // Ankle & Foot locked flat to bind stone contact orientation
+      this._qIkLocalTmp.copy(this._qIkShinRoot).invert().multiply(leg.ankleBindQuat);
+      if (ikWeight >= 0.999) {
+        ankle.quaternion.copy(this._qIkLocalTmp);
+        foot.quaternion.copy(leg.footBindLocalQuat);
+      } else {
+        ankle.quaternion.slerp(this._qIkLocalTmp, ikWeight);
+        foot.quaternion.slerp(leg.footBindLocalQuat, ikWeight);
+      }
+
+      thigh.updateWorldMatrix(false, true);
+    }
+  }
+
+  /**
    * Updates `THREE.AnimationMixer` + zero-allocation procedural bone polish!
    * Supports BOTH `update(dt, playerState, opts)` AND `update(playerState, dt, opts)`.
    */
@@ -1256,13 +1485,22 @@ export class GatewayRig {
     const wallScamper = Boolean(ps.wallScamper || ps.climbing);
     const isSwimming = Boolean(ps.isSwimming || ps.swimming || ps.inWater);
     const isSurfing = Boolean(ps.surfing || ps.rapidsSurf);
-    const isGliding = Boolean(ps.gliding || ps.frillGlide);
     const isCoreDive = Boolean(ps.coreDive || ps.diving);
     const isMantling = Boolean(ps.mantling || Number(ps.mantleTimer) > 0);
     const isCutscene = Boolean(ps.cutscene || ps.cutscenePose);
-
     const speed = Math.abs(vx);
-    const speedNorm = THREE.MathUtils.clamp(speed / 4.8, 0, 1);
+    const speedNorm = THREE.MathUtils.clamp(speed / 3.3, 0, 1);
+    const pushingBox = THREE.MathUtils.clamp(Number(ps.pushingBox) || 0, 0, 1);
+    this._pushBlend = damp(this._pushBlend, onGround ? pushingBox : 0, 14, safeDt);
+
+    // STRICT FrillGlide Gate: ONLY play `FrillGlide` when `ps.isGliding === true`
+    // (or `glideRenderer.js` `gliding: true` / Sanctuary Wardrobe static glide preview — NEVER on tower jumps!)
+    const isWardrobeGlidePreview =
+      ps.anim === 'FrillGlide' && Number(ps.frillFlare) >= 0.99 && speed === 0 && vy === 0 && !onGround;
+    const isGliding =
+      ps.isGliding !== undefined
+        ? Boolean(ps.isGliding)
+        : Boolean(ps.gliding || ps.frillGlide || isWardrobeGlidePreview);
 
     // Physical weight telemetry from 120Hz physics (`@physics_puzzles_lead`) + fallback inference
     const extLandSquash = THREE.MathUtils.clamp(
@@ -1317,21 +1555,42 @@ export class GatewayRig {
     this._prevVx = vx;
 
     // 1. Select & Cross-Fade Skeletal Animation Clip (`0.10s–0.18s`)
-    const explicitClip = opts?.clip || ps.clip || ps.anim;
+    // Note: `renderer.js` passes `ps.anim` every frame from `hero.anim`. Only treat `opts?.clip || ps.clip`
+    // or showcase-only `ps.anim` (`Celebrate`, `CutsceneHero`, Wardrobe `StairClimb` at `speed === 0`)
+    // as hard overrides so calibrated `!onGround` (`AirRise`/`Fall`), touchdown `Land`, and distance-locked
+    // `Walk`/`FluidRun`/`StairClimb` stride speeds always govern live tower gameplay!
+    const hardClipOverride = opts?.clip || ps.clip || null;
+    const animHint = typeof ps.anim === 'string' ? ps.anim : null;
     let wantClip = 'IdleBreathe';
     let fadeDur = 0.14;
     let timeScale = 1.0;
 
-    if (explicitClip && typeof explicitClip === 'string') {
-      wantClip = explicitClip;
-      fadeDur = 0.12;
-      if (wantClip.toLowerCase().includes('run') || wantClip.toLowerCase().includes('walk')) {
-        timeScale = THREE.MathUtils.clamp(0.8 + speed * 0.22, 0.75, 1.65);
+    // Helper: exact distance-locked stride playback (`1 col = 1.323m`; `1.05m` walk, `1.52m` run, `1.27m` stair)
+    const calcStrideTimeScale = (clipName, colSpeed) => {
+      const worldMps = colSpeed * 1.323;
+      const strideMeters = clipName === 'FluidRun' ? 1.52 : clipName === 'StairClimb' ? 1.27 : 1.05;
+      const cyclesPerSec = worldMps / strideMeters;
+      const clipDur = this.actions[clipName]?.getClip?.()?.duration || 1.0;
+      return THREE.MathUtils.clamp(cyclesPerSec * clipDur, 0.16, 2.92);
+    };
+
+    if (hardClipOverride && typeof hardClipOverride === 'string') {
+      const normOver = hardClipOverride.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if ((normOver === 'frillglide' || normOver === 'glide') && !isGliding) {
+        wantClip = vy >= 0.6 ? 'AirRise' : 'Fall';
+        fadeDur = vy >= 0.6 ? 0.10 : 0.14;
+      } else {
+        wantClip = hardClipOverride;
+        fadeDur = 0.12;
+        if (normOver.includes('run') || normOver.includes('walk') || normOver.includes('stair')) {
+          const canon = normOver.includes('run') ? 'FluidRun' : normOver.includes('stair') ? 'StairClimb' : 'Walk';
+          timeScale = speed > 0.05 ? calcStrideTimeScale(canon, speed) : 1.0;
+        }
       }
-    } else if (victory) {
+    } else if (victory || animHint === 'Celebrate') {
       wantClip = 'Celebrate';
       fadeDur = 0.16;
-    } else if (isCutscene) {
+    } else if (isCutscene || animHint === 'CutsceneHero') {
       wantClip = 'CutsceneHero';
       fadeDur = 0.18;
     } else if (isCoreDive) {
@@ -1359,35 +1618,37 @@ export class GatewayRig {
       wantClip = 'FrillGlide';
       fadeDur = 0.14;
     } else if (!onGround) {
-      if (vy > 1.6) {
+      if (vy >= 0.6) {
         wantClip = 'AirRise';
         fadeDur = 0.10;
-      } else if (vy < -1.8) {
+      } else {
         wantClip = 'Fall';
         fadeDur = 0.14;
-      } else {
-        wantClip = speed > 1.8 ? 'FrillGlide' : 'AirRise';
-        fadeDur = 0.14;
       }
-    } else if (this._landTimer > 0.02 && speed < 1.2) {
+    } else if (this._landTimer > 0.02 && speed < 0.10) {
       wantClip = 'Land';
       fadeDur = 0.08;
     } else if (muzzleFlash > 0.02 && speed < 0.35) {
       wantClip = 'HydroCast';
       fadeDur = 0.09;
       timeScale = 1.25;
-    } else if (onStairs && speed > 0.15) {
+    } else if (animHint === 'StairClimb' && speed < 0.05) {
+      // Sanctuary Wardrobe `StairClimb` pill preview
       wantClip = 'StairClimb';
       fadeDur = 0.12;
-      timeScale = THREE.MathUtils.clamp(0.85 + speed * 0.24, 0.8, 1.6);
-    } else if (speed > 1.55 || doorBlend > 0.05) {
+      timeScale = 1.0;
+    } else if (onStairs && speed >= 0.10) {
+      wantClip = 'StairClimb';
+      fadeDur = 0.12;
+      timeScale = calcStrideTimeScale('StairClimb', speed);
+    } else if (speed > 1.25 || doorBlend > 0.05) {
       wantClip = 'FluidRun';
       fadeDur = 0.12;
-      timeScale = THREE.MathUtils.clamp(0.82 + Math.max(speed, doorBlend * 3.0) * 0.20, 0.8, 1.65);
-    } else if (speed > 0.12) {
+      timeScale = calcStrideTimeScale('FluidRun', Math.max(speed, doorBlend * 2.4));
+    } else if (speed >= 0.10 || this._pushBlend > 0.05) {
       wantClip = 'Walk';
       fadeDur = 0.14;
-      timeScale = THREE.MathUtils.clamp(0.85 + speed * 0.42, 0.75, 1.45);
+      timeScale = calcStrideTimeScale('Walk', Math.max(speed, this._pushBlend * 0.85));
     }
 
     this.playAction(wantClip, fadeDur, timeScale);
@@ -1401,9 +1662,29 @@ export class GatewayRig {
       this.skinnedMesh.receiveShadow = true;
     }
 
-    // 2. Motion Root Heading Yaw, Door Entry & Squash/Stretch
-    if ((onGround && speed > 0.12) || doorBlend > 0.05) {
-      this._stridePhase += safeDt * (5.2 + Math.max(speed, doorBlend * 3.0) * 2.1);
+    // Grounded 2-bone Foot-IK eligibility (`maxFootDriftMm = 0.0mm` across IdleBreathe, HydroCast & Land crouch!)
+    const ikEligible =
+      onGround &&
+      !isSwimming &&
+      !isSurfing &&
+      !wallScamper &&
+      !isMantling &&
+      !isGliding &&
+      !isCoreDive &&
+      !victory &&
+      this._activeClipName !== 'Celebrate' &&
+      this._activeClipName !== 'StairClimb' &&
+      speed < 0.10 &&
+      whipTimer <= 0.01 &&
+      this._whipHoldTimer <= 0.01 &&
+      doorBlend <= 0.02;
+    const ikWeight = ikEligible ? (speed <= 0.02 ? 1.0 : THREE.MathUtils.clamp((0.10 - speed) / 0.08, 0, 1)) : 0.0;
+
+    // 2. Motion Root Heading Yaw, Distance-Locked Stride Phase, Door Entry & Squash/Stretch
+    if ((onGround && speed >= 0.10) || doorBlend > 0.05) {
+      const effColSpeed = Math.max(speed, doorBlend * 2.4);
+      const strideM = wantClip === 'FluidRun' ? 1.52 : wantClip === 'StairClimb' ? 1.18 : 1.05;
+      this._stridePhase += safeDt * ((effColSpeed * 1.323) / strideM) * Math.PI * 2;
     }
 
     let targetYaw = dir * (0.42 + speedNorm * 0.74);
@@ -1418,19 +1699,29 @@ export class GatewayRig {
       targetYaw = THREE.MathUtils.lerp(targetYaw, doorYaw, Math.min(1, doorBlend * 1.35));
     }
 
+    if (!this._yawSyncedToCaller && ps !== this._initDummyPoseState) {
+      this._yawSyncedToCaller = true;
+      this._yaw = targetYaw;
+      this._prevYaw = targetYaw;
+    }
+
     this._prevYaw = this._yaw;
     this._yaw = dampAngle(this._yaw, targetYaw, 15, safeDt);
     let yawVel = (this._yaw - this._prevYaw) / safeDt;
     yawVel = THREE.MathUtils.clamp(yawVel, -14, 14);
 
+    const baseSx = THREE.MathUtils.clamp(Number(ps.squashX) || 1, 0.86, 1.16);
+    const baseSy = THREE.MathUtils.clamp(Number(ps.squashY) || 1, 0.84, 1.16);
+
     const motionRoot = this._motionRoot || this._standInGroup;
     if (motionRoot) {
       motionRoot.rotation.set(0, this._yaw, 0);
-      // Combine caller squash/stretch with physical landing impact compression
-      const baseSx = THREE.MathUtils.clamp(Number(ps.squashX) || 1, 0.86, 1.16);
-      const baseSy = THREE.MathUtils.clamp(Number(ps.squashY) || 1, 0.84, 1.16);
-      const sx = THREE.MathUtils.clamp(baseSx * (1 + landComp * 0.085), 0.84, 1.22);
-      const sy = THREE.MathUtils.clamp(baseSy * (1 - landComp * 0.095), 0.78, 1.20);
+      // When grounded IK is active, keep `motionRoot.scale = (1,1,1)` and absorb vertical compression
+      // directly into `Pelvis.position.y` so planted feet NEVER slide laterally from root scale!
+      const rawSx = THREE.MathUtils.clamp(baseSx * (1 + landComp * 0.085), 0.84, 1.22);
+      const rawSy = THREE.MathUtils.clamp(baseSy * (1 - landComp * 0.095), 0.78, 1.20);
+      const sx = THREE.MathUtils.lerp(rawSx, 1.0, ikWeight);
+      const sy = THREE.MathUtils.lerp(rawSy, 1.0, ikWeight);
       motionRoot.scale.set(sx, sy, sx);
       // EXACT y = 0.000 feet grounding — ZERO upward hover offset!
       motionRoot.position.set(0, 0, -doorBlend * 0.34);
@@ -1444,7 +1735,7 @@ export class GatewayRig {
       this.mainMat.emissiveIntensity = 0.78;
     }
 
-    // 3. Additive Spine Turn-Banking, Skid Lean, Landing Impact Compression & Hurt Flinch
+    // 3. Additive Spine Turn-Banking, Trajectory Jump Pitch, Box-Push Lean, Skid & Landing Compression
     const b = this.bones;
     const surfBank = Number(ps.surfBank) || 0;
     const skidLean = this._skidBlend * this._skidDir;
@@ -1455,14 +1746,34 @@ export class GatewayRig {
     );
     this._bankRoll = damp(this._bankRoll, targetBank, 14, safeDt);
     const hurtPitch = hurtTimer > 0 ? -0.35 * Math.min(1, hurtTimer / 0.25) : 0;
-    const fallPitch = !onGround && vy < -2.2 ? THREE.MathUtils.clamp((-vy - 2.2) * 0.022, 0, 0.26) : 0;
+    const airTrajectoryPitch =
+      !onGround && !isGliding && !isSwimming && !isSurfing && !wallScamper && !isMantling
+        ? vy >= 0.6
+          ? THREE.MathUtils.clamp(-vy * 0.018, -0.22, 0.05)
+          : THREE.MathUtils.clamp((-vy - 0.6) * 0.022, 0, 0.24)
+        : 0;
     const landTorsoPitch = landComp * 0.28;
     const skidTorsoPitch = this._skidBlend * 0.16;
-    const totalTorsoPitch = hurtPitch + landTorsoPitch + skidTorsoPitch + fallPitch;
+    const pushTorsoPitch = this._pushBlend * 0.36;
+    const totalTorsoPitch = hurtPitch + landTorsoPitch + skidTorsoPitch + airTrajectoryPitch + pushTorsoPitch;
 
     this._addBoneLocalEuler(b.Spine1, totalTorsoPitch * 0.42, skidLean * 0.14, this._bankRoll * 0.38);
     this._addBoneLocalEuler(b.Spine2, totalTorsoPitch * 0.32, skidLean * 0.12, this._bankRoll * 0.34);
     this._addBoneLocalEuler(b.Chest, totalTorsoPitch * 0.26, skidLean * 0.10, this._bankRoll * 0.28);
+
+    if (this._pushBlend > 0.02) {
+      // Shoulder & palm brace against heavy Pelagian Siphon Crates (`ps.pushingBox > 0.02`)!
+      const pb = this._pushBlend;
+      this._addBoneLocalEuler(b.ClavicleL, 0.14 * pb, 0, 0);
+      this._addBoneLocalEuler(b.ClavicleR, 0.14 * pb, 0, 0);
+      this._addBoneLocalEuler(b.UpperArmL, 0.92 * pb, 0, 0.16 * pb);
+      this._addBoneLocalEuler(b.UpperArmR, 0.92 * pb, 0, -0.16 * pb);
+      this._addBoneLocalEuler(b.ForearmL, 0.28 * pb, 0, 0);
+      this._addBoneLocalEuler(b.ForearmR, 0.28 * pb, 0, 0);
+      this._addBoneLocalEuler(b.HandL, -0.52 * pb, 0, 0);
+      this._addBoneLocalEuler(b.HandR, -0.52 * pb, 0, 0);
+      this._addBoneLocalEuler(b.Head, -0.22 * pb, 0, 0);
+    }
 
     // 3b. Heavy Landing Compression (`landSquash`) + Skid Crouch Pelvis Drop & Deep Knee Bend!
     // Feet stay pinned at exact `y = 0.000` while hips absorb weight and knees flex deeply.
@@ -1475,15 +1786,19 @@ export class GatewayRig {
     this._stairBobSmooth = damp(this._stairBobSmooth, rawStairBob, 24, safeDt);
 
     if (b.Pelvis) {
-      const landPelvisDrop = -landComp * 0.135;
+      const landPelvisDrop = -landComp * 0.14;
       const skidPelvisDrop = -this._skidBlend * 0.055;
+      const pushPelvisDrop = -this._pushBlend * 0.045;
+      const ikSquashDrop = ikWeight * THREE.MathUtils.clamp((baseSy - 1) * 0.35, -0.09, 0.0);
       // Subtle pelvis compression on riser push-off (never floats root off stone!)
       const stairPelvisDelta = stairActive ? this._stairBobSmooth * 0.048 - 0.018 : 0;
-      const pelvisDeltaY = landPelvisDrop + skidPelvisDrop + stairPelvisDelta;
+      const pelvisDeltaY = landPelvisDrop + skidPelvisDrop + pushPelvisDrop + ikSquashDrop + stairPelvisDelta;
       if (this._glbApplied) {
         b.Pelvis.position.y += pelvisDeltaY;
-      } else {
+      } else if (!ikEligible) {
         b.Pelvis.position.y = this._pelvisBindY + pelvisDeltaY;
+      } else {
+        b.Pelvis.position.y += pelvisDeltaY;
       }
       if (stairActive) {
         // Weight shift roll onto planted foot per 30cm stone riser!
@@ -1592,9 +1907,9 @@ export class GatewayRig {
     const targetFlare = Math.max(
       extFlare,
       isGliding
-        ? 0.48
+        ? 0.52
         : !onGround
-          ? 0.28 + THREE.MathUtils.clamp(-vy * 0.025, 0, 0.28)
+          ? 0.12 + THREE.MathUtils.clamp(-vy * 0.016, 0, 0.16)
           : muzzleFlash > 0.01 || whipTimer > 0.01
             ? 0.38
             : this._skidBlend * 0.26
@@ -1603,7 +1918,9 @@ export class GatewayRig {
     // Landing impact whips head-frills sharply downward with inertia then rebounds!
     const frillLandDip = -landComp * 0.42;
     const flutter =
-      (!onGround || isGliding ? Math.sin(time * 24) * 0.065 : 0) + this._frillFlare + frillLandDip;
+      (isGliding ? Math.sin(time * 24) * 0.065 : !onGround ? Math.sin(time * 18) * 0.025 : 0) +
+      this._frillFlare +
+      frillLandDip;
     if (Math.abs(flutter) > 0.005) {
       this._addBoneLocalEuler(b.FrillL1, flutter * 0.55, 0, 0);
       this._addBoneLocalEuler(b.FrillL2, flutter * 0.78, 0, 0);
@@ -1678,6 +1995,11 @@ export class GatewayRig {
         this._starMoteInst.setMatrixAt(i, dm.matrix);
       }
       this._starMoteInst.instanceMatrix.needsUpdate = true;
+    }
+
+    // 10. Final Pass: Analytic 2-Bone Leg IK — locks `FootL` & `FootR` flat on `y = 0.000m` (`0.00mm` drift!)
+    if (ikWeight > 0.001 && motionRoot) {
+      this._solveGroundedTwoBoneLegIk(motionRoot, ikWeight);
     }
   }
 

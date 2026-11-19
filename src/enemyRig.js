@@ -1348,6 +1348,10 @@ function buildGulpHopperRig(chromeEnv) {
     ud.foreR = clone.getObjectByName('fore_leg_R');
     ud.eyeL = clone.getObjectByName('eye_L');
     ud.eyeR = clone.getObjectByName('eye_R');
+    if (ud.waterCore && ud.waterCore.isMesh && ud.waterCore.material) {
+      ud.waterCore.material = ud.waterCore.material.clone();
+      ud.waterCoreMat = ud.waterCore.material;
+    }
   } else {
     const shellMat = getSharedPbrMat(
       'hopperShell',
@@ -1361,9 +1365,9 @@ function buildGulpHopperRig(chromeEnv) {
     );
     const waterMat = getSharedPbrMat(
       'hopperWater',
-      { color: '#22f0e8', emissive: new THREE.Color('#00f2fe'), emissiveIntensity: 2.0, roughness: 0.08 },
+      { color: '#22f0e8', emissive: new THREE.Color('#00f2fe'), emissiveIntensity: 1.2, roughness: 0.08 },
       chromeEnv
-    );
+    ).clone();
 
     const cowl = new THREE.Mesh(
       cached('geo:fbHopperCowl', () => new THREE.SphereGeometry(0.24, 16, 12)),
@@ -1383,6 +1387,7 @@ function buildGulpHopperRig(chromeEnv) {
     squashPivot.add(cowl, tank, water);
     ud.glassTank = tank;
     ud.waterCore = water;
+    ud.waterCoreMat = waterMat;
 
     const legGeo = cached('geo:fbHopperLeg', () => {
       const g = new THREE.CapsuleGeometry(0.048, 0.18, 6, 10);
@@ -1437,12 +1442,28 @@ function buildVoltEelRig(chromeEnv) {
     segs: [],
     jaw: null,
     arcBridge: null,
+    antennaL: null,
+    antennaR: null,
+    eelEmissiveMats: [],
     glbMaskBit: _glbReadyMask & (1 << FAM_VOLT_EEL),
   };
 
   const tpl = _glbTemplates[FAM_VOLT_EEL];
   if (tpl) {
     const clone = tpl.clone(true);
+    const clonedMatMap = new Map();
+    clone.traverse((o) => {
+      if (o.isMesh && o.material && !Array.isArray(o.material) && o.material.emissive) {
+        let cm = clonedMatMap.get(o.material);
+        if (!cm) {
+          cm = o.material.clone();
+          cm.userData = { baseEmissiveHex: cm.emissive.getHex(), baseIntensity: cm.emissiveIntensity ?? 0.62 };
+          clonedMatMap.set(o.material, cm);
+          ud.eelEmissiveMats.push(cm);
+        }
+        o.material = cm;
+      }
+    });
     body.add(clone);
     for (let k = 0; k < 8; k++) {
       const s = clone.getObjectByName(`seg_${k}`);
@@ -1450,6 +1471,8 @@ function buildVoltEelRig(chromeEnv) {
     }
     ud.jaw = clone.getObjectByName('eel_jaw');
     ud.arcBridge = clone.getObjectByName('arc_bridge');
+    ud.antennaL = clone.getObjectByName('arc_antenna_L');
+    ud.antennaR = clone.getObjectByName('arc_antenna_R');
     if (ud.segs[0]) {
       arcFlash.position.set(0, 0.28, 0.04);
       ud.segs[0].add(arcFlash);
@@ -1459,12 +1482,15 @@ function buildVoltEelRig(chromeEnv) {
       'eelBody',
       { color: '#1b2854', emissive: new THREE.Color('#00f5ff'), emissiveIntensity: 0.55, roughness: 0.24, metalness: 0.6 },
       chromeEnv
-    );
+    ).clone();
+    eelMat.userData = { baseEmissiveHex: 0x00f5ff, baseIntensity: 0.55 };
     const finMat = getSharedPbrMat(
       'eelFin',
-      { color: '#22f0e8', emissive: new THREE.Color('#00f5ff'), emissiveIntensity: 2.0, transparent: true, opacity: 0.8 },
+      { color: '#22f0e8', emissive: new THREE.Color('#00f5ff'), emissiveIntensity: 1.35, transparent: true, opacity: 0.8 },
       chromeEnv
-    );
+    ).clone();
+    finMat.userData = { baseEmissiveHex: 0x00f5ff, baseIntensity: 1.35 };
+    ud.eelEmissiveMats.push(eelMat, finMat);
     for (let k = 0; k < 8; k++) {
       const g = new THREE.Group();
       const r = mix(0.125, 0.042, k / 7);
@@ -1580,6 +1606,38 @@ function buildRailSkaterRig(chromeEnv) {
     ud.impellerR = iR;
   }
 
+  // Forged antique-brass dorsal clockwork wind-up key (1 merged mesh = 1 draw call, spins on `windup`!)
+  const keyGeo = cached('geo:skaterClockworkKey', () => {
+    const parts = [];
+    const shaft = new THREE.CylinderGeometry(0.018, 0.022, 0.14, 8);
+    shaft.translate(0, 0.07, 0);
+    parts.push(stripPosNormal(shaft));
+    const bowL = new THREE.TorusGeometry(0.052, 0.014, 6, 14);
+    bowL.translate(-0.048, 0.16, 0);
+    parts.push(stripPosNormal(bowL));
+    const bowR = new THREE.TorusGeometry(0.052, 0.014, 6, 14);
+    bowR.translate(0.048, 0.16, 0);
+    parts.push(stripPosNormal(bowR));
+    return mergePartsClean(parts, false);
+  });
+  const keyMat = getSharedPbrMat(
+    'skaterBrassKey',
+    { color: '#e0a63a', roughness: 0.22, metalness: 0.90 },
+    chromeEnv
+  );
+  const keyMesh = new THREE.Mesh(keyGeo, keyMat);
+  keyMesh.name = 'clockwork_key';
+  keyMesh.castShadow = false;
+  keyMesh.receiveShadow = false;
+  if (ud.chassis) {
+    keyMesh.position.set(0, 0.11, -0.04);
+    ud.chassis.add(keyMesh);
+  } else {
+    keyMesh.position.set(0, 0.44, -0.04);
+    body.add(keyMesh);
+  }
+  ud.clockworkKey = keyMesh;
+
   root.userData = ud;
   return root;
 }
@@ -1677,6 +1735,31 @@ function buildBarnacleMortarRig(chromeEnv) {
     ud.mortarBubble = bub;
   }
 
+  // Swiveling brass submarine periscope (tracks Gateway during `watch`, retracts on `shell_hide`!)
+  const periGeo = cached('geo:mortarPeriscope', () => {
+    const parts = [];
+    const stalk = new THREE.CylinderGeometry(0.022, 0.026, 0.22, 8);
+    stalk.translate(0, 0.11, 0);
+    parts.push(stripPosNormal(stalk));
+    const hood = new THREE.CylinderGeometry(0.036, 0.032, 0.09, 10);
+    hood.rotateX(Math.PI * 0.5);
+    hood.translate(0, 0.22, 0.035);
+    parts.push(stripPosNormal(hood));
+    return mergePartsClean(parts, false);
+  });
+  const periMat = getSharedPbrMat(
+    'mortarBrassPeri',
+    { color: '#c88d32', roughness: 0.26, metalness: 0.88 },
+    chromeEnv
+  );
+  const periscope = new THREE.Mesh(periGeo, periMat);
+  periscope.name = 'mortar_periscope';
+  periscope.castShadow = false;
+  periscope.receiveShadow = false;
+  periscope.position.set(0, 0.42, 0.0);
+  (ud.turret || body).add(periscope);
+  ud.periscope = periscope;
+
   root.userData = ud;
   return root;
 }
@@ -1743,6 +1826,11 @@ function buildVentStalkerRig(chromeEnv) {
     ud.legFR = clone.getObjectByName('leg_FR');
     ud.legBL = clone.getObjectByName('leg_BL');
     ud.legBR = clone.getObjectByName('leg_BR');
+    ud.dorsalVents = clone.getObjectByName('dorsal_vents');
+    if (ud.dorsalVents && ud.dorsalVents.isMesh && ud.dorsalVents.material) {
+      ud.dorsalVents.material = ud.dorsalVents.material.clone();
+      ud.ventMat = ud.dorsalVents.material;
+    }
   } else {
     const skinMat = getSharedPbrMat(
       'stalkerSkin',
@@ -1751,9 +1839,9 @@ function buildVentStalkerRig(chromeEnv) {
     );
     const cryMat = getSharedPbrMat(
       'stalkerCry',
-      { color: '#67e8f9', emissive: new THREE.Color('#22d3ee'), emissiveIntensity: 2.0 },
+      { color: '#67e8f9', emissive: new THREE.Color('#22d3ee'), emissiveIntensity: 1.2 },
       chromeEnv
-    );
+    ).clone();
     const torso = new THREE.Mesh(
       cached('geo:fbStalkerTorso', () => {
         const g = new THREE.CapsuleGeometry(0.13, 0.34, 6, 12);
@@ -1769,6 +1857,30 @@ function buildVentStalkerRig(chromeEnv) {
     );
     vents.position.set(0, 0.36, 0);
     body.add(torso, vents);
+    ud.stalkerBody = torso;
+    ud.dorsalVents = vents;
+    ud.ventMat = cryMat;
+  }
+
+  // 3 Hinged Brass Chimney Damper Caps (`chimneyCaps` — rattle violently in `hiss_tell`, flip open in `erupt`!)
+  const capGeo = cached('geo:stalkerChimneyCap', () => {
+    const c = new THREE.CylinderGeometry(0.042, 0.048, 0.016, 8);
+    c.translate(0.036, 0, 0);
+    return c;
+  });
+  const capMat = getSharedPbrMat(
+    'stalkerBrassCap',
+    { color: '#c88d32', roughness: 0.28, metalness: 0.86 },
+    chromeEnv
+  );
+  ud.chimneyCaps = [];
+  for (let i = 0; i < 3; i++) {
+    const cap = new THREE.Mesh(capGeo, capMat);
+    cap.castShadow = false;
+    cap.receiveShadow = false;
+    cap.position.set(-0.036, 0.42 - Math.abs(i - 1) * 0.025, (i - 1) * 0.11);
+    (ud.stalkerBody || body).add(cap);
+    ud.chimneyCaps.push(cap);
   }
 
   root.userData = ud;
@@ -2261,6 +2373,12 @@ export class EnemyVisualPool {
       slamTriggered: false,
       wasAlive: true,
       deathMax: 0,
+      coilSmooth: 0,
+      brakeSmooth: 0,
+      hideSmooth: 0,
+      chargeSmooth: 0,
+      recoilT: 9,
+      windupSpin: 0,
     };
   }
 
@@ -2467,8 +2585,46 @@ export class EnemyVisualPool {
     en.dir = 1;
     en.stunTimer = 0;
     en.flipped = famId === FAM_SNAP_CRAB && b.flourishKind === 'flip' && b.flourishTimer > 0.2;
-    en.telegraph = famId === FAM_SNAP_CRAB ? flK * 0.65 : famId === FAM_SIPHON_WARDEN ? flK * 0.55 : 0;
-    en.inflatePhase = famId === FAM_GULP_HOPPER ? clamp(0.32 + flK * 0.68, 0, 1) : 0.35;
+    en.aiState =
+      flK > 0.35
+        ? famId === FAM_SNAP_CRAB
+          ? en.flipped
+            ? 'flipped'
+            : flK > 0.72
+              ? 'charge'
+              : 'aggro_tell'
+          : famId === FAM_GULP_HOPPER
+            ? b.flourishTimer < 0.72
+              ? 'leap'
+              : 'inflate'
+            : famId === FAM_VOLT_EEL
+              ? flK > 0.7
+                ? 'discharge'
+                : 'coil_tell'
+              : famId === FAM_RAIL_SKATER
+                ? flK > 0.7
+                  ? 'windup'
+                  : 'spark_brake'
+                : famId === FAM_BARNACLE_MORTAR
+                  ? b.flourishKind === 'hide'
+                    ? 'shell_hide'
+                    : 'swell_tell'
+                  : famId === FAM_VENT_STALKER
+                    ? flK > 0.68
+                      ? 'erupt'
+                      : 'hiss_tell'
+                    : en.coreExposed
+                      ? 'vulnerable'
+                      : 'telegraph'
+        : 'patrol';
+    en.chargeBlend = famId === FAM_SNAP_CRAB && en.aiState === 'charge' ? 1 : 0;
+    en.coilBlend = famId === FAM_VOLT_EEL && flK > 0.35 ? flK : 0;
+    en.shockActive = famId === FAM_VOLT_EEL && en.aiState === 'discharge';
+    en.brakeBlend = famId === FAM_RAIL_SKATER && en.aiState === 'spark_brake' ? flK : 0;
+    en.shellHide = famId === FAM_BARNACLE_MORTAR && en.aiState === 'shell_hide' ? 1 : 0;
+    en.venting = famId === FAM_VENT_STALKER && en.aiState === 'erupt';
+    en.telegraph = famId === FAM_SNAP_CRAB ? flK * 0.65 : famId === FAM_SIPHON_WARDEN ? flK * 0.55 : flK * 0.5;
+    en.inflatePhase = famId === FAM_GULP_HOPPER ? clamp(0.15 + flK * 0.85, 0, 1) : 0.35;
     en.floor = famId === FAM_GULP_HOPPER && b.flourishTimer > 0 && b.flourishTimer < 0.72 ? Math.sin((b.flourishTimer / 0.72) * Math.PI) * 0.48 : 0;
     en.baseFloor = 0;
     en.slitherPhase = t * 5.8;
@@ -2477,8 +2633,10 @@ export class EnemyVisualPool {
     en.coreExposed = famId === FAM_SIPHON_WARDEN && ((b.flourishKind === 'exposed' && b.flourishTimer > 0) || (t % 7.5 > 4.8));
     en.tentacleSlam = famId === FAM_SIPHON_WARDEN && b.flourishKind === 'slam' ? flK : (famId === FAM_SIPHON_WARDEN && flK > 0.35 && !en.coreExposed ? flK : 0);
     en.beamCharge = famId === FAM_SIPHON_WARDEN && !en.coreExposed ? flK * 0.85 : 0;
-    st.vx = 1.6 + flK * 1.4;
-    st.vy = famId === FAM_GULP_HOPPER && en.floor > 0.05 ? 2.4 : 0;
+    en.velCol = famId === FAM_GULP_HOPPER && en.floor <= 0.05 ? 0 : 1.4 + flK * 1.2;
+    en.velFloor = famId === FAM_GULP_HOPPER && en.floor > 0.05 ? 2.4 : famId === FAM_VENT_STALKER && flK <= 0.35 ? 0.78 : 0;
+    st.vx = en.velCol;
+    st.vy = en.velFloor;
 
     if (famId === FAM_SNAP_CRAB) {
       this._animateSnapCrab(ud, st, en, 0, en.flipped, b.x, b.y, b.z, t, stepDt);
@@ -2550,6 +2708,12 @@ export class EnemyVisualPool {
         mortarOpenPrev: 0,
         wasAlive: !en.dead,
         deathMax: 0,
+        coilSmooth: 0,
+        brakeSmooth: 0,
+        hideSmooth: 0,
+        chargeSmooth: 0,
+        recoilT: 9,
+        windupSpin: 0,
       };
       this._animStates.set(en, st);
     }
@@ -2757,8 +2921,10 @@ export class EnemyVisualPool {
       const isCagedStun = famId !== FAM_SNAP_CRAB && stunRem > 0;
 
       if (!isCagedStun) {
-        st.vx = damp(st.vx, dCol / dt, 14, dt);
-        st.vy = damp(st.vy, dFloor / dt, 14, dt);
+        const targetVx = Number.isFinite(Number(en.velCol)) ? Number(en.velCol) : dCol / dt;
+        const targetVy = Number.isFinite(Number(en.velFloor)) ? Number(en.velFloor) : dFloor / dt;
+        st.vx = damp(st.vx, targetVx, 16, dt);
+        st.vy = damp(st.vy, targetVy, 16, dt);
       }
 
       // Strict vertical + front-arc culling (close-up 9.85m camera frames ~3.8 floors; cull unseen enemies!)
@@ -3034,32 +3200,62 @@ export class EnemyVisualPool {
   }
 
   // --------------------------------------------------------------------------
-  // 1. `snap_crab` — 6-Legged Crustacean Gait, Pincer Snap & Upside-Down Springboard!
+  // 1. `snap_crab` — Grumpy Territorial Brawler (`patrol`, `edge_look`, `aggro_tell`, `charge`, `huff`, `flipped`)!
   // --------------------------------------------------------------------------
   _animateSnapCrab(ud, st, en, eTheta, isFlipped, wx, wy, wz, t, dt) {
+    const aiState = typeof en.aiState === 'string' ? en.aiState : '';
+    const velCol = Number.isFinite(Number(en.velCol)) ? Number(en.velCol) : st.vx;
+    const absVel = Math.abs(velCol);
+    const chargeTarget = clamp(Number(en.chargeBlend) || (aiState === 'charge' ? 1 : 0), 0, 1);
+    st.chargeSmooth = damp(st.chargeSmooth || 0, isFlipped ? 0 : chargeTarget, 14, dt);
+
     const prevFlip = st.flipProgress;
-    st.flipProgress = damp(st.flipProgress, isFlipped ? 1.0 : 0.0, 12, dt);
+    const flippedNow = Boolean(isFlipped || aiState === 'flipped');
+    st.flipProgress = damp(st.flipProgress, flippedNow ? 1.0 : 0.0, 12, dt);
     if (prevFlip < 0.25 && st.flipProgress >= 0.25) {
       this._spawnSplashRing(wx, wy, wz, '#22f0e8');
     }
 
+    const dir = en.dir < 0 ? -1 : 1;
+    const isEdgeLook = !flippedNow && aiState === 'edge_look';
+    const isAggroTell = !flippedNow && aiState === 'aggro_tell';
+    const isHuff = !flippedNow && aiState === 'huff';
+
     // 180-deg barrel flip onto curved copper carapace + rocking turtle wobble!
     const flipAng = st.flipProgress * Math.PI;
-    const rockZ = isFlipped ? Math.sin(t * 8.5 + st.seed * 6) * 0.12 : 0;
+    const rockZ = flippedNow ? Math.sin(t * 9.5 + st.seed * 6) * 0.14 : 0;
     const bounceSquash = Number(en.bounceCompress) || 0;
+    const huffHeave = isHuff ? Math.sin(t * 12.5) * 0.065 : 0;
     ud.flipPivot.rotation.set(0, 0, flipAng + rockZ);
     ud.flipPivot.scale.set(
-      1 + bounceSquash * 0.28,
-      Math.max(0.65, 1 - bounceSquash * 0.32),
-      1 + bounceSquash * 0.28
+      1 + bounceSquash * 0.28 + huffHeave * 0.5,
+      Math.max(0.65, 1 - bounceSquash * 0.32 - huffHeave * 0.65),
+      1 + bounceSquash * 0.28 + huffHeave * 0.5
     );
 
-    const dir = en.dir < 0 ? -1 : 1;
-    const targetYaw = isFlipped ? 0 : clamp(dir * 0.28 - eTheta * 0.35, -0.58, 0.58);
-    st.yawSmooth = damp(st.yawSmooth, targetYaw, 8, dt);
+    // Body posture: edge-look turn, aggro squat, furious low-slung charge lean, or winded huff!
+    const edgePeekYaw = isEdgeLook ? dir * 0.36 + Math.sin(t * 8.5) * 0.18 : 0;
+    const targetYaw = flippedNow ? 0 : clamp(dir * 0.28 - eTheta * 0.35 + edgePeekYaw, -0.82, 0.82);
+    st.yawSmooth = damp(st.yawSmooth, targetYaw, 9, dt);
     ud.body.rotation.y = st.yawSmooth;
-    // 100% FLUSH stone contact (feet stay at exact 0.00m; legs articulate cleanly!)
     ud.body.position.y = 0;
+
+    const rawTele =
+      typeof en.telegraph === 'number'
+        ? clamp(en.telegraph, 0, 1)
+        : isAggroTell
+          ? 0.85
+          : smooth(0.55, 0.12, Math.abs(eTheta)) * (0.5 + 0.5 * Math.sin(t * 5.2 + st.seed * 6));
+    const aggroK = flippedNow ? 0 : isAggroTell ? Math.max(0.45, rawTele) : 0;
+    const squatDrop = -aggroK * 0.065 - st.chargeSmooth * 0.048 + huffHeave * 0.35;
+    const chargePitch = st.chargeSmooth * 0.20 - aggroK * 0.22 + (isHuff ? 0.12 : 0);
+    const chargeBank = -dir * st.chargeSmooth * 0.24;
+    ud.localFrame.position.y = damp(ud.localFrame.position.y, -0.28 + squatDrop, 14, dt);
+    ud.localFrame.rotation.set(
+      damp(ud.localFrame.rotation.x, chargePitch, 14, dt),
+      0,
+      damp(ud.localFrame.rotation.z, chargeBank, 14, dt)
+    );
 
     // Glowing Hydro-Bounce Springboard Ring above upturned belly!
     ud.bounceRing.visible = st.flipProgress > 0.55;
@@ -3071,46 +3267,68 @@ export class EnemyVisualPool {
       ud.bounceRing.material.opacity = (1 - pulse) * 0.58;
     }
 
-    // True 6-Leg Alternating Tripod Crustacean Gait (or frantic upside-down leg kicking!)
-    const speed = Math.max(1.8, Math.abs(st.vx) * 2.4);
-    st.gaitPhase += (isFlipped ? 16.5 : speed * 3.1) * dt;
+    // Heavy alternating 6-leg sideways gait strictly scaled by `|velCol|` (0 leg skate when paused!)
+    const gaitRate = flippedNow ? 18.0 : absVel > 0.04 ? absVel * (5.6 + st.chargeSmooth * 1.8) : 0;
+    st.gaitPhase += gaitRate * dt;
+    const moveAmp = flippedNow ? 1.0 : clamp(absVel / 0.85, 0, 1.35);
     for (let i = 0; i < ud.legs.length; i++) {
       const leg = ud.legs[i];
       const base = ud.baseLegsRot[i];
       const isLeft = i < 3;
       const tripodPhase = st.gaitPhase + ((i % 2 === 0) !== isLeft ? 0 : Math.PI) + i * 0.35;
-      if (isFlipped) {
+      if (flippedNow) {
         // Frantic upside-down kicking legs!
-        leg.rotation.z = base.z + Math.sin(tripodPhase * 1.4 + i) * 0.55;
-        leg.rotation.y = base.y + Math.cos(tripodPhase * 1.1) * 0.32;
+        leg.rotation.z = base.z + Math.sin(tripodPhase * 1.4 + i) * 0.58;
+        leg.rotation.y = base.y + Math.cos(tripodPhase * 1.15) * 0.34;
       } else {
-        const lift = Math.max(0, Math.sin(tripodPhase)) * 0.36;
-        const sweep = Math.cos(tripodPhase) * 0.28 * dir;
-        leg.rotation.z = base.z + (isLeft ? -lift : lift);
+        const splay = aggroK * 0.22 + st.chargeSmooth * 0.14;
+        const lift = Math.max(0, Math.sin(tripodPhase)) * 0.36 * moveAmp;
+        const sweep = Math.cos(tripodPhase) * 0.28 * dir * moveAmp;
+        leg.rotation.z = base.z + (isLeft ? -(lift + splay) : lift + splay);
         leg.rotation.y = base.y + sweep;
       }
     }
 
-    // Eye-stalk tracking
+    // Eye-stalk tracking (peering down at edge during `edge_look`)
     if (ud.eyeL && ud.eyeR) {
-      const look = clamp(-eTheta * 0.45, -0.4, 0.4);
-      ud.eyeL.rotation.y = look;
-      ud.eyeR.rotation.y = look;
+      const lookY = clamp(-eTheta * 0.45 + (isEdgeLook ? dir * 0.25 : 0), -0.5, 0.5);
+      const lookX = isEdgeLook ? 0.24 : isHuff ? 0.18 : -aggroK * 0.16;
+      ud.eyeL.rotation.set(lookX, lookY, 0);
+      ud.eyeR.rotation.set(lookX, lookY, 0);
     }
 
-    // Oversized Hydraulic Pincer Telegraph + Electric-Blue Spark!
-    const rawTele =
-      typeof en.telegraph === 'number'
-        ? en.telegraph
-        : smooth(0.55, 0.12, Math.abs(eTheta)) * (0.5 + 0.5 * Math.sin(t * 5.2 + st.seed * 6));
-    const snapCycle = isFlipped ? 0 : clamp(rawTele, 0, 1);
-    const openClaw = snapCycle < 0.78 ? (snapCycle / 0.78) * 0.52 : -0.14;
+    // Pincer choreography: double pincer-click on `edge_look`, raised snapping claws on `aggro_tell`,
+    // forward battering ram on `charge`, drooping panting claws on `huff`!
+    const snapCycle = flippedNow ? 0 : clamp(rawTele, 0, 1);
+    let openClaw = snapCycle < 0.78 ? (snapCycle / 0.78) * 0.52 : -0.14;
+    let armRaiseX = -snapCycle * 0.22;
+    let armSpreadY = openClaw * 0.65;
+    if (isEdgeLook) {
+      // Crisp double pincer-click at terrace edge!
+      const click = Math.pow(Math.max(0, Math.sin(t * 20.0)), 2);
+      openClaw = click * 0.48;
+      armRaiseX = -0.18 - click * 0.12;
+      armSpreadY = 0.26;
+    } else if (isAggroTell) {
+      const snapOsc = 0.5 + 0.5 * Math.sin(t * 28.0);
+      openClaw = 0.20 + snapOsc * 0.48;
+      armRaiseX = -0.68 * aggroK;
+      armSpreadY = 0.52 * aggroK;
+    } else if (st.chargeSmooth > 0.1) {
+      openClaw = 0.34 + 0.24 * Math.sin(t * 32.0);
+      armRaiseX = -0.32 * st.chargeSmooth;
+      armSpreadY = 0.22;
+    } else if (isHuff) {
+      openClaw = 0.08 + Math.max(0, huffHeave) * 0.8;
+      armRaiseX = 0.26;
+      armSpreadY = 0.12;
+    }
 
     if (ud.armL && ud.armR) {
-      ud.armL.rotation.y = -openClaw * 0.65;
-      ud.armR.rotation.y = openClaw * 0.65;
-      ud.armL.rotation.x = -snapCycle * 0.22;
-      ud.armR.rotation.x = -snapCycle * 0.22;
+      ud.armL.rotation.y = -armSpreadY;
+      ud.armR.rotation.y = armSpreadY;
+      ud.armL.rotation.x = armRaiseX;
+      ud.armR.rotation.x = armRaiseX;
     }
     if (ud.pincerUpL && ud.pincerLoL) {
       ud.pincerUpL.rotation.x = -openClaw;
@@ -3121,30 +3339,29 @@ export class EnemyVisualPool {
       ud.pincerLoR.rotation.x = openClaw * 0.8;
     }
 
-    const sparkActive = !isFlipped && snapCycle > 0.48;
+    const sparkActive = !flippedNow && (snapCycle > 0.48 || isAggroTell || st.chargeSmooth > 0.4);
     ud.sparkSprite.visible = sparkActive;
     if (ud.clawSparkMesh) ud.clawSparkMesh.visible = sparkActive;
     if (sparkActive) {
-      ud.sparkSprite.material.opacity = 0.36 + 0.26 * Math.sin(t * 36);
+      ud.sparkSprite.material.opacity = 0.38 + 0.28 * Math.sin(t * 38);
       ud.sparkSprite.material.rotation = t * 14;
-      const sc = 0.24 + snapCycle * 0.22;
+      const sc = 0.24 + Math.max(snapCycle, st.chargeSmooth) * 0.24;
       ud.sparkSprite.scale.set(sc, sc, 1);
     }
 
-    // Refined etched crimson-amber & aqua Pelagian warning rune ring (opacity <= 0.56, stone deck clearly visible!)
     if (ud.telegraphRing) {
-      const showTele = !isFlipped && snapCycle > 0.32;
+      const teleAmt = Math.max(snapCycle, st.chargeSmooth * 0.85);
+      const showTele = !flippedNow && teleAmt > 0.32;
       ud.telegraphRing.visible = showTele;
       if (showTele) {
-        const k = clamp((snapCycle - 0.32) / 0.68, 0, 1);
+        const k = clamp((teleAmt - 0.32) / 0.68, 0, 1);
         const pulse = 0.96 + k * 0.22 + Math.sin(t * 16) * 0.03;
         ud.telegraphRing.scale.setScalar(pulse);
         ud.telegraphRing.rotation.y = t * (0.95 + k * 0.85);
-        // Smooth crimson-amber windup -> crisp pelagic aqua snap flash (zero white blowout!)
         ud.telegraphRing.material.color.setRGB(
-          mix(0.92, 0.10, smooth(0.68, 0.96, snapCycle)),
-          mix(0.32, 0.80, smooth(0.68, 0.96, snapCycle)),
-          mix(0.14, 0.78, smooth(0.68, 0.96, snapCycle))
+          mix(0.92, 0.10, smooth(0.68, 0.96, teleAmt)),
+          mix(0.32, 0.80, smooth(0.68, 0.96, teleAmt)),
+          mix(0.14, 0.78, smooth(0.68, 0.96, teleAmt))
         );
         ud.telegraphRing.material.opacity = clamp(0.24 + k * 0.32, 0, 0.56);
       }
@@ -3152,94 +3369,117 @@ export class EnemyVisualPool {
   }
 
   // --------------------------------------------------------------------------
-  // 2. `gulp_hopper` — Water-Inhaling Belly Inflation, Frog-Hops & Splash Rings!
+  // 2. `gulp_hopper` — Gluttonous Ambush Bullfrog (`sit_watch`, `inflate` 1.45x, `leap`, `land_recover`)!
   // --------------------------------------------------------------------------
   _animateGulpHopper(ud, st, en, eTheta, isStunned, wx, wy, wz, t, dt) {
+    const aiState = typeof en.aiState === 'string' ? en.aiState : '';
+    const velCol = Number.isFinite(Number(en.velCol)) ? Number(en.velCol) : st.vx;
+    const velFloor = Number.isFinite(Number(en.velFloor)) ? Number(en.velFloor) : st.vy;
     const dir = en.dir < 0 ? -1 : 1;
     const floorBase = Math.round(en.baseFloor ?? en.floor);
     const heightAboveLedge = Math.max(0, en.floor - floorBase);
-    const airborne = heightAboveLedge > 0.08 || Math.abs(st.vy) > 0.55;
+    const airborne = aiState === 'leap' || heightAboveLedge > 0.08 || Math.abs(velFloor) > 0.55;
+    const isLandRecover = !airborne && aiState === 'land_recover';
 
     if (!airborne && !st.landed) {
       st.landed = true;
       st.wobbleT = 0;
       this._spawnSplashRing(wx, wy, wz, '#38bdf8');
-    } else if (airborne && heightAboveLedge > 0.14) {
+    } else if (airborne && (heightAboveLedge > 0.10 || aiState === 'leap')) {
       st.landed = false;
     }
     st.wobbleT = Math.min(10, st.wobbleT + dt);
 
-    // Stolen-Water Inhale Inflation (`en.inflatePhase` 0..1 or automatic pre-hop suction!)
-    const autoInhale = airborne ? 0.22 : 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(t * 4.2 + st.seed * TWO_PI));
+    // Dramatic 1.45x glowing turquoise belly/throat sac expansion during `inflate`!
+    const autoInhale = airborne ? 0.12 : aiState === 'sit_watch' || isLandRecover ? 0.08 : 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(t * 4.2 + st.seed * TWO_PI));
     const targetInflate =
       typeof en.inflatePhase === 'number' ? clamp(en.inflatePhase, 0, 1) : autoInhale;
     if (!isStunned) {
-      st.inflateSmooth = damp(st.inflateSmooth, targetInflate, 10, dt);
+      st.inflateSmooth = damp(st.inflateSmooth, targetInflate, 12, dt);
     }
+
+    const croakVib = !isStunned && !airborne && st.inflateSmooth > 0.18 ? Math.sin(t * 48.0) * 0.022 * st.inflateSmooth : 0;
 
     if (ud.waterCore) {
-      const wScale = 0.42 + st.inflateSmooth * 0.92;
+      const wScale = 0.38 + st.inflateSmooth * 1.07; // swells up to 1.45x!
       ud.waterCore.scale.set(
-        wScale * (1 + Math.sin(t * 11) * 0.05),
-        wScale * (1 - Math.sin(t * 11) * 0.05),
-        wScale
+        wScale * (1 + Math.sin(t * 14) * 0.05 + croakVib),
+        wScale * (1 - Math.sin(t * 14) * 0.05 - croakVib),
+        wScale * (1 + st.inflateSmooth * 0.08)
       );
-      ud.waterCore.rotation.y = t * 2.2;
+      ud.waterCore.rotation.y = t * (2.0 + st.inflateSmooth * 3.2);
+    }
+    if (ud.waterCoreMat) {
+      ud.waterCoreMat.emissiveIntensity = 0.42 + st.inflateSmooth * 0.85;
     }
     if (ud.glassTank) {
-      const tScale = 0.94 + st.inflateSmooth * 0.24;
-      ud.glassTank.scale.setScalar(tScale);
+      // Dramatic 1.45x glowing glass belly/throat sac expansion!
+      const tScale = 0.92 + st.inflateSmooth * 0.53; // 0.92 -> 1.45x!
+      ud.glassTank.scale.set(tScale * (1 + croakVib), tScale * (1 - croakVib * 0.5), tScale * (1 + st.inflateSmooth * 0.06));
+    }
+    if (ud.hopperBody) {
+      ud.hopperBody.position.x = croakVib * 0.45;
     }
 
-    // Gulper jaw opens wide & suction vortex ring pulls inward while inhaling!
-    const inhaling = !isStunned && !airborne && st.inflateSmooth > 0.52;
+    // Gulper jaw croak flutter & suction vortex ring while inhaling!
+    const inhaling = !isStunned && !airborne && (aiState === 'inflate' || st.inflateSmooth > 0.42);
     if (ud.jaw) {
-      ud.jaw.rotation.x = damp(ud.jaw.rotation.x, inhaling ? 0.48 : 0.06, 12, dt);
+      const targetJaw = inhaling ? 0.36 + st.inflateSmooth * 0.24 + Math.sin(t * 36) * 0.07 : 0.04;
+      ud.jaw.rotation.x = damp(ud.jaw.rotation.x, targetJaw, 14, dt);
     }
     ud.inhaleRing.visible = inhaling;
     if (inhaling) {
-      const suck = 1 - ((t * 3.2 + st.seed) % 1);
-      ud.inhaleRing.position.z = 0.28 + suck * 0.20;
-      ud.inhaleRing.rotation.z = t * 2.8;
-      ud.inhaleRing.scale.setScalar(0.55 + suck * 0.65);
-      ud.inhaleRing.material.opacity = (1 - suck) * 0.46;
+      const suck = 1 - ((t * 3.4 + st.seed) % 1);
+      ud.inhaleRing.position.z = 0.28 + suck * 0.22;
+      ud.inhaleRing.rotation.z = t * 3.2;
+      ud.inhaleRing.scale.setScalar(0.55 + suck * 0.72);
+      ud.inhaleRing.material.opacity = (1 - suck) * 0.48;
     }
 
     if (!isStunned) {
-      const jiggle = Math.exp(-st.wobbleT * 5.5) * Math.sin(st.wobbleT * 26.0) * 0.16;
-      const crouch = !airborne ? st.inflateSmooth * 0.16 : 0;
-      const airStretch = airborne ? clamp(Math.abs(st.vy) * 0.06 + 0.16, 0, 0.28) : 0;
+      const jiggle = Math.exp(-st.wobbleT * 5.2) * Math.sin(st.wobbleT * 25.0) * 0.18;
+      const recoverSquash = isLandRecover ? 0.22 * Math.exp(-st.wobbleT * 2.4) : 0;
+      const crouch = !airborne ? st.inflateSmooth * 0.15 + recoverSquash : 0;
+      const airStretch = airborne ? clamp(Math.abs(velFloor) * 0.05 + 0.22, 0, 0.32) : 0;
 
-      const sy = clamp(1.0 - crouch + airStretch + jiggle, 0.68, 1.34);
-      const sxz = clamp(1.0 + crouch * 0.65 - airStretch * 0.35 - jiggle * 0.45, 0.76, 1.32);
+      const sy = clamp(1.0 - crouch + airStretch + jiggle, 0.66, 1.36);
+      const sxz = clamp(1.0 + crouch * 0.78 - airStretch * 0.32 - jiggle * 0.48, 0.74, 1.36);
       ud.squashPivot.scale.set(sxz, sy, sxz);
 
-      // Kick frog hind legs straight back during airborne hop!
-      const legKick = airborne ? 0.92 : -crouch * 0.45;
-      if (ud.hindL) ud.hindL.rotation.x = damp(ud.hindL.rotation.x, legKick, 14, dt);
-      if (ud.hindR) ud.hindR.rotation.x = damp(ud.hindR.rotation.x, legKick, 14, dt);
-      if (ud.foreL) ud.foreL.rotation.x = damp(ud.foreL.rotation.x, airborne ? 0.55 : 0, 12, dt);
-      if (ud.foreR) ud.foreR.rotation.x = damp(ud.foreR.rotation.x, airborne ? 0.55 : 0, 12, dt);
+      // Planted stationary crouch (`0` leg slide when `|velCol| < 0.05`) vs full stretched frog hind-leg leap!
+      const legKick = airborne ? 1.18 : -0.12 - crouch * 0.48;
+      const foreReach = airborne ? -0.58 : 0.0;
+      if (ud.hindL) ud.hindL.rotation.x = damp(ud.hindL.rotation.x, legKick, 16, dt);
+      if (ud.hindR) ud.hindR.rotation.x = damp(ud.hindR.rotation.x, legKick, 16, dt);
+      if (ud.foreL) ud.foreL.rotation.x = damp(ud.foreL.rotation.x, foreReach, 14, dt);
+      if (ud.foreR) ud.foreR.rotation.x = damp(ud.foreR.rotation.x, foreReach, 14, dt);
 
-      const targetYaw = clamp(dir * 0.58 - eTheta * 0.25, -0.85, 0.85);
-      ud.body.rotation.y = damp(ud.body.rotation.y, targetYaw, 9, dt);
-      ud.body.rotation.z = airborne ? clamp(-dir * 0.14, -0.2, 0.2) : 0;
+      // Head/body tracks Gateway cleanly while sitting!
+      const targetYaw = clamp(dir * 0.48 - eTheta * 0.55, -0.95, 0.95);
+      const leapPitch = airborne ? clamp(-velFloor * 0.042, -0.36, 0.36) : 0;
+      const leapBank = airborne ? clamp(-velCol * 0.10, -0.26, 0.26) : 0;
+      ud.body.rotation.x = damp(ud.body.rotation.x, leapPitch, 12, dt);
+      ud.body.rotation.y = damp(ud.body.rotation.y, targetYaw, 10, dt);
+      ud.body.rotation.z = damp(ud.body.rotation.z, leapBank, 12, dt);
+      if (ud.eyeL && ud.eyeR) {
+        const eyeTrack = clamp(-eTheta * 0.4, -0.35, 0.35);
+        ud.eyeL.rotation.y = eyeTrack;
+        ud.eyeR.rotation.y = eyeTrack;
+      }
     }
 
-    // Grounded contact shadow tightens when airborne, stays flush on stone when landed!
     if (ud.contactShadow) {
-      const hopShrink = airborne ? clamp(1 - heightAboveLedge * 0.45, 0.42, 0.92) : 1.0 + st.inflateSmooth * 0.12;
+      const hopShrink = airborne ? clamp(1 - heightAboveLedge * 0.45, 0.40, 0.90) : 1.0 + st.inflateSmooth * 0.22;
       ud.contactShadow.scale.set(0.88 * hopShrink, 1, 0.76 * hopShrink);
     }
 
-    // Refined etched pre-leap Pelagian warning rune ring (flush on stone, opacity <= 0.54!)
     if (ud.telegraphRing) {
-      const showTele = !isStunned && !airborne && st.inflateSmooth > 0.54;
+      const showTele = !isStunned && !airborne && st.inflateSmooth > 0.46;
       ud.telegraphRing.visible = showTele;
       if (showTele) {
-        const k = clamp((st.inflateSmooth - 0.54) / 0.46, 0, 1);
-        ud.telegraphRing.scale.setScalar(0.86 + k * 0.26 + Math.sin(t * 16) * 0.03);
-        ud.telegraphRing.rotation.y = -t * (0.9 + k * 0.7);
+        const k = clamp((st.inflateSmooth - 0.46) / 0.54, 0, 1);
+        ud.telegraphRing.scale.setScalar(0.86 + k * 0.30 + Math.sin(t * 16) * 0.03);
+        ud.telegraphRing.rotation.y = -t * (0.9 + k * 0.8);
         ud.telegraphRing.material.color.setHex(k > 0.65 ? 0xea7a1a : 0x0ea5e9);
         ud.telegraphRing.material.opacity = clamp(0.22 + k * 0.32, 0, 0.54);
       }
@@ -3247,58 +3487,79 @@ export class EnemyVisualPool {
   }
 
   // --------------------------------------------------------------------------
-  // 3. `volt_eel` — True 8-Segment Cylindrical S-Wave Slither & Arc Antennae!
+  // 3. `volt_eel` — Speed-Matched S-Wave, Helical Ring Coil (`coil_tell`/`discharge`) & Dimmed `exhausted`!
   // --------------------------------------------------------------------------
   _animateVoltEel(ud, st, en, eTheta, cylRadius, isStunned, t, dt) {
     const segs = ud.segs;
     const n = segs.length;
     if (n === 0) return;
 
+    const aiState = typeof en.aiState === 'string' ? en.aiState : '';
+    const velCol = Number.isFinite(Number(en.velCol)) ? Number(en.velCol) : st.vx;
+    const velFloor = Number.isFinite(Number(en.velFloor)) ? Number(en.velFloor) : st.vy;
+    const travelSpeed = Math.hypot(velCol, velFloor);
+    const shockActive = !isStunned && Boolean(en.shockActive || aiState === 'discharge');
+    const isExhausted = !isStunned && aiState === 'exhausted';
+    const rawCoil =
+      typeof en.coilBlend === 'number'
+        ? clamp(en.coilBlend, 0, 1)
+        : shockActive
+          ? 1.0
+          : aiState === 'coil_tell'
+            ? clamp(Number(en.telegraph) || 0.75, 0.25, 1.0)
+            : 0.0;
+    st.coilSmooth = damp(st.coilSmooth || 0, isStunned || isExhausted ? 0 : rawCoil, 12, dt);
+
     const dir = en.dir < 0 ? -1 : 1;
-    const isVert = Math.abs(st.vy) > Math.abs(st.vx) * 1.4 && Math.abs(st.vy) > 0.4;
+    const isVert = Math.abs(velFloor) > Math.abs(velCol) * 1.4 && Math.abs(velFloor) > 0.35;
 
     if (!isStunned) {
       if (typeof en.slitherPhase === 'number') {
         st.slitherPhase = en.slitherPhase;
       } else {
-        const moveBoost = clamp(Math.hypot(st.vx, st.vy) * 1.2, 0, 4.5);
-        st.slitherPhase += (6.2 + moveBoost) * dt;
+        // Speed-matched travelling S-wave along spine segments!
+        const rate = isExhausted ? 2.1 + travelSpeed * 2.2 : 2.2 + travelSpeed * 5.2 + (shockActive ? 12.0 : 0);
+        st.slitherPhase += rate * dt;
       }
     }
 
     const segSpacing = 0.148;
-    const waveAmp = isStunned ? 0.025 : 0.135;
+    const waveAmp = isStunned ? 0.025 : isExhausted ? 0.055 : 0.14;
     const waveFreq = 0.84;
+    const coilK = st.coilSmooth;
+    const coilSpin = t * (shockActive ? 10.5 : 3.6);
+    const coilRad = 0.23 - (shockActive ? 0.015 * Math.sin(t * 42) : 0);
 
-    // Sample 9 spine stations (8 segments + look-ahead nose point) wrapped onto the curved spire cylinder!
     for (let k = 0; k < n; k++) {
       const sAlong = (2.15 - k) * segSpacing;
       const w0 = Math.sin(st.slitherPhase - k * waveFreq) * waveAmp;
       const w1 = Math.sin(st.slitherPhase - (k - 0.65) * waveFreq) * waveAmp;
       const sNext = sAlong + segSpacing * 0.65;
 
+      // Exhausted drooped posture sags middle/tail segments downward!
+      const droopY = isExhausted ? -(0.06 + Math.sin((k / 7) * Math.PI) * 0.085) : 0;
+
       let arc0;
       let y0;
       let arc1;
       let y1;
       if (isVert) {
-        const vSign = st.vy >= 0 ? 1 : -1;
+        const vSign = velFloor >= 0 ? 1 : -1;
         arc0 = w0;
         y0 = sAlong * vSign;
         arc1 = w1;
         y1 = sNext * vSign;
       } else {
         arc0 = sAlong * dir;
-        y0 = w0;
+        y0 = w0 + droopY;
         arc1 = sNext * dir;
-        y1 = w1;
+        y1 = w1 + droopY;
       }
 
       const dTheta0 = arc0 / cylRadius;
       const dTheta1 = arc1 / cylRadius;
       const rOut = 0.03 * Math.cos(st.slitherPhase - k * waveFreq);
 
-      // Local rig coords where rig origin is `(0, 0, cylRadius)` shifted to `(0, 0, 0)`
       _vA.set(
         (cylRadius + rOut) * Math.sin(dTheta0),
         y0,
@@ -3310,12 +3571,28 @@ export class EnemyVisualPool {
         (cylRadius + rOut) * Math.cos(dTheta1) - cylRadius
       );
 
+      if (coilK > 0.005) {
+        // Morph smoothly into a tight crackling helical ring (`coil_tell` / `discharge`)!
+        const ang0 = coilSpin - k * 0.76 * dir;
+        const ang1 = coilSpin - (k - 0.65) * 0.76 * dir;
+        const jitter = shockActive ? Math.sin(t * 64 + k * 3.1) * 0.016 : 0;
+        const hx0 = Math.cos(ang0) * (coilRad + jitter);
+        const hy0 = Math.sin(ang0) * (coilRad + jitter);
+        const hz0 = (3.5 - k) * 0.024;
+        const hx1 = Math.cos(ang1) * coilRad;
+        const hy1 = Math.sin(ang1) * coilRad;
+        const hz1 = (3.5 - (k - 0.65)) * 0.024;
+        _vA.set(mix(_vA.x, hx0, coilK), mix(_vA.y, hy0, coilK), mix(_vA.z, hz0, coilK));
+        _vB.set(mix(_vB.x, hx1, coilK), mix(_vB.y, hy1, coilK), mix(_vB.z, hz1, coilK));
+      }
+
       const seg = segs[k];
       seg.position.copy(_vA);
 
-      // Orient segment `+Z` along spine tangent `_vB - _vA`, keeping dorsal `+Y` upright/outward
-      _vC.subVectors(_vB, _vA).normalize();
-      _vUp.set(0, isVert ? 0 : 1, isVert ? 1 : 0.35).normalize();
+      _vC.subVectors(_vB, _vA);
+      if (_vC.lengthSq() < 1e-8) _vC.set(dir, 0, 0);
+      _vC.normalize();
+      _vUp.set(0, isVert && coilK < 0.5 ? 0 : 1, isVert && coilK < 0.5 ? 1 : 0.35 + coilK * 0.65).normalize();
       _vA.crossVectors(_vUp, _vC).normalize();
       _vUp.crossVectors(_vC, _vA).normalize();
       _mBasis.makeBasis(_vA, _vUp, _vC);
@@ -3323,70 +3600,122 @@ export class EnemyVisualPool {
       seg.quaternion.copy(_qSeg);
     }
 
-    if (ud.jaw && !isStunned) {
-      const alert = smooth(0.85, 0.18, Math.abs(eTheta));
-      ud.jaw.rotation.x = 0.15 + alert * 0.32 + 0.14 * Math.sin(t * 9.5 + st.seed * 5);
-    }
-    if (ud.arcFlash) {
-      const crackle = !isStunned && Math.sin(t * 37 + st.seed * 11) > -0.25;
-      ud.arcFlash.visible = crackle;
-      if (crackle) {
-        ud.arcFlash.material.rotation = t * 19;
-        ud.arcFlash.material.opacity = 0.62 + 0.38 * Math.sin(t * 45);
+    // Per-state emissive copper/cyan spine nodes (`discharge` blazing vs `exhausted` dimmed copper!)
+    for (let mIdx = 0; mIdx < ud.eelEmissiveMats.length; mIdx++) {
+      const em = ud.eelEmissiveMats[mIdx];
+      const baseInt = em.userData?.baseIntensity ?? 0.62;
+      if (isExhausted) {
+        em.emissive.setHex(0x7c4a24); // dimmed warm copper recovery!
+        em.emissiveIntensity = 0.14;
+      } else if (shockActive) {
+        em.emissive.setHex(0x38f9ff);
+        em.emissiveIntensity = baseInt * 2.15 + 0.35 * Math.sin(t * 48);
+      } else if (coilK > 0.15) {
+        em.emissive.setHex(0x00f5ff);
+        em.emissiveIntensity = baseInt * (1.0 + coilK * 0.95);
+      } else {
+        em.emissive.setHex(em.userData?.baseEmissiveHex ?? 0x06b6d4);
+        em.emissiveIntensity = baseInt;
       }
     }
 
-    // Compact etched electric-aqua Pelagian warning halo behind Volt-Eel head (zero blinding white hoop!)
+    if (ud.antennaL && ud.antennaR) {
+      const antVib = shockActive ? Math.sin(t * 55) * 0.28 : isExhausted ? 0.35 : Math.sin(t * 14) * 0.08;
+      ud.antennaL.rotation.x = antVib;
+      ud.antennaR.rotation.x = -antVib;
+    }
+
+    if (ud.jaw && !isStunned) {
+      const alert = shockActive ? 0.55 : isExhausted ? 0.32 : smooth(0.85, 0.18, Math.abs(eTheta)) * 0.30;
+      ud.jaw.rotation.x = 0.12 + alert + (isExhausted ? 0.06 * Math.sin(t * 4.0) : 0.12 * Math.sin(t * 9.5 + st.seed * 5));
+    }
+    if (ud.arcFlash) {
+      const crackle = !isStunned && !isExhausted && (shockActive || coilK > 0.25 || Math.sin(t * 37 + st.seed * 11) > -0.15);
+      ud.arcFlash.visible = crackle;
+      if (crackle) {
+        const fSc = shockActive ? 0.72 + 0.18 * Math.sin(t * 50) : 0.36 + coilK * 0.26;
+        ud.arcFlash.scale.set(fSc, fSc, 1);
+        ud.arcFlash.material.rotation = t * (shockActive ? 32 : 19);
+        ud.arcFlash.material.opacity = shockActive ? 0.95 : 0.58 + 0.34 * Math.sin(t * 45);
+      }
+    }
+
     if (ud.telegraphRing) {
       const prox = smooth(0.85, 0.16, Math.abs(eTheta));
-      const rawTele = typeof en.telegraph === 'number' ? en.telegraph : prox;
-      const showTele = !isStunned && rawTele > 0.38;
+      const rawTele = Math.max(coilK, shockActive ? 1.0 : 0, typeof en.telegraph === 'number' ? en.telegraph : isExhausted ? 0 : prox * 0.6);
+      const showTele = !isStunned && !isExhausted && rawTele > 0.32;
       ud.telegraphRing.visible = showTele;
       if (showTele && segs[0]) {
-        ud.telegraphRing.position.set(segs[0].position.x, segs[0].position.y, segs[0].position.z - 0.06);
-        const k = clamp((rawTele - 0.38) / 0.62, 0, 1);
-        const pulse = 0.46 + k * 0.18 + Math.sin(t * 20) * 0.03;
+        ud.telegraphRing.position.set(coilK > 0.4 ? 0 : segs[0].position.x, coilK > 0.4 ? 0 : segs[0].position.y, -0.06);
+        const k = clamp((rawTele - 0.32) / 0.68, 0, 1);
+        const pulse = (shockActive ? 0.72 : 0.46 + k * 0.22) + Math.sin(t * 24) * 0.04;
         ud.telegraphRing.scale.setScalar(pulse);
-        ud.telegraphRing.rotation.set(Math.PI * 0.5, 0, t * 1.4);
-        ud.telegraphRing.material.color.setHex(rawTele > 0.72 ? 0x14b8a6 : 0x0284c7);
-        ud.telegraphRing.material.opacity = clamp(0.20 + k * 0.26, 0, 0.46);
+        ud.telegraphRing.rotation.set(Math.PI * 0.5, 0, t * (shockActive ? 3.8 : 1.4));
+        ud.telegraphRing.material.color.setHex(shockActive || rawTele > 0.72 ? 0x22f0e8 : 0x0284c7);
+        ud.telegraphRing.material.opacity = clamp(0.24 + k * 0.32, 0, 0.58);
       }
     }
   }
 
   // --------------------------------------------------------------------------
-  // 4. `rail_skater` — Counter-Rotating Brass Impellers, Skids & Aqua Jet Trails!
+  // 4. `rail_skater` — Hyperactive Clockwork Strider (`sprint`, `spark_brake`, `windup` key spin)!
   // --------------------------------------------------------------------------
   _animateRailSkater(ud, st, en, eTheta, isStunned, t, dt) {
+    const aiState = typeof en.aiState === 'string' ? en.aiState : '';
+    const velCol = Number.isFinite(Number(en.velCol)) ? Number(en.velCol) : st.vx;
+    const velFloor = Number.isFinite(Number(en.velFloor)) ? Number(en.velFloor) : st.vy;
     const dir = en.dir < 0 ? -1 : 1;
     const isVert = en.type === 'robotV' || en.kind === 'vpat' || Boolean(en.vertical);
+    const isWindup = !isStunned && aiState === 'windup';
+    const rawBrake = clamp(Number(en.brakeBlend) || (aiState === 'spark_brake' ? 1 : 0), 0, 1);
+    st.brakeSmooth = damp(st.brakeSmooth || 0, isStunned ? 0 : rawBrake, 16, dt);
 
     if (!isStunned) {
-      const rpm = isVert ? 22.0 : 16.5;
-      if (ud.impellerL) ud.impellerL.rotation.z = t * rpm + st.seed * TWO_PI;
-      if (ud.impellerR) ud.impellerR.rotation.z = -t * rpm - st.seed * TWO_PI;
+      const brk = st.brakeSmooth;
+      const rpm = isWindup ? -14.0 : brk > 0.2 ? 4.0 : isVert ? 22.0 : 20.0 + Math.abs(velCol) * 3.5;
+      if (ud.impellerL) ud.impellerL.rotation.z += rpm * dt;
+      if (ud.impellerR) ud.impellerR.rotation.z -= rpm * dt;
 
-      const hoverBob = Math.sin(t * 6.4 + st.seed * TWO_PI) * 0.036;
-      ud.body.position.y = hoverBob;
+      // Dorsal clockwork key spins rapidly on `windup`, ticks steadily during `sprint`!
+      if (ud.clockworkKey) {
+        const keyRate = isWindup ? 26.0 : brk > 0.2 ? 0.5 : 3.6;
+        ud.clockworkKey.rotation.y += keyRate * dt;
+      }
 
-      const targetYaw = isVert ? 0 : clamp(dir * 0.46 - eTheta * 0.22, -0.72, 0.72);
-      const targetBank = isVert ? Math.sin(t * 4.2) * 0.08 : -dir * 0.22;
-      const targetPitch = isVert ? clamp(-st.vy * 0.08, -0.28, 0.28) : 0.08;
+      // High-frequency chassis friction tremble & drop during `spark_brake`!
+      const brakeJitterX = brk > 0.08 ? Math.sin(t * 64) * 0.022 * brk : 0;
+      const brakeJitterY = brk > 0.08 ? Math.cos(t * 58) * 0.014 * brk : 0;
+      const hoverBob = Math.sin(t * 6.8 + st.seed * TWO_PI) * 0.032 * (1 - brk * 0.8);
+      ud.body.position.set(brakeJitterX, hoverBob - brk * 0.036 + brakeJitterY, 0);
+
+      // Sharp forward sprint bank vs pitched-back two-skate heel lock (`spark_brake`) & crisp 180° `windup` snap!
+      const targetYaw = isVert ? 0 : clamp(dir * (isWindup ? 0.72 : 0.52) - eTheta * 0.20, -0.85, 0.85);
+      const sprintBank = -dir * clamp(0.18 + Math.abs(velCol) * 0.08, 0.18, 0.38);
+      const brakeHeelBank = dir * 0.40 * brk;
+      const targetBank = isVert ? Math.sin(t * 4.2) * 0.08 : mix(sprintBank, brakeHeelBank, brk);
+      const targetPitch = isVert
+        ? clamp(-velFloor * 0.08, -0.28, 0.28)
+        : isWindup
+          ? -0.14 + Math.sin(t * 36) * 0.06
+          : mix(0.20, -0.36, brk);
+
+      const yawLambda = isWindup ? 26 : 11; // crisp 180° mechanical escapement snap!
       ud.body.rotation.set(
-        damp(ud.body.rotation.x, targetPitch, 9, dt),
-        damp(ud.body.rotation.y, targetYaw, 9, dt),
-        damp(ud.body.rotation.z, targetBank, 9, dt)
+        damp(ud.body.rotation.x, targetPitch, 14, dt),
+        damp(ud.body.rotation.y, targetYaw, yawLambda, dt),
+        damp(ud.body.rotation.z, targetBank, 14, dt)
       );
 
-      // Articulated water-strider stabilizer skids flex with hover waves
+      // Articulated skates: front skids lift & rear heels lock into stone during `spark_brake`!
       for (let i = 0; i < ud.skids.length; i++) {
         const sk = ud.skids[i];
         const side = i % 2 === 0 ? -1 : 1;
-        sk.rotation.z = side * (0.08 + Math.sin(t * 7.5 + i * 1.4) * 0.11);
-        sk.rotation.x = Math.cos(t * 6.4 + i) * 0.08;
+        const isFront = i < 2;
+        const heelLockPitch = brk * (isFront ? -0.34 : 0.32);
+        sk.rotation.z = side * (0.08 + brk * 0.16 + Math.sin(t * 7.5 + i * 1.4) * 0.09 * (1 - brk));
+        sk.rotation.x = heelLockPitch + Math.cos(t * 6.4 + i) * 0.06 * (1 - brk);
       }
 
-      // Sweeping optical visor eye locking onto Gateway
       if (ud.scannerEye) {
         const lock = smooth(0.9, 0.2, Math.abs(eTheta));
         const sweep = Math.sin(t * 4.8 + st.seed * 7) * 0.1;
@@ -3394,29 +3723,29 @@ export class EnemyVisualPool {
         ud.scannerEye.position.x = mix(sweep, track, lock);
       }
 
-      // Bright aqua hydro-jet trails
-      const jetPulse = 0.85 + 0.32 * Math.sin(t * 32 + st.seed * 9);
+      const jetActive = brk < 0.65 && !isWindup;
+      const jetPulse = (0.92 + Math.abs(velCol) * 0.14) + 0.30 * Math.sin(t * 34 + st.seed * 9);
       if (ud.jetL) {
-        ud.jetL.visible = true;
-        ud.jetL.scale.set(1, 1, jetPulse);
+        ud.jetL.visible = jetActive;
+        if (jetActive) ud.jetL.scale.set(1, 1, jetPulse);
       }
       if (ud.jetR) {
-        ud.jetR.visible = true;
-        ud.jetR.scale.set(1, 1, jetPulse);
+        ud.jetR.visible = jetActive;
+        if (jetActive) ud.jetR.scale.set(1, 1, jetPulse);
       }
       ud.wakeTrail.visible = true;
-      ud.wakeTrail.scale.set(0.8 + Math.sin(t * 14) * 0.15, 0.38, 1);
+      ud.wakeTrail.material.color.setHex(brk > 0.25 ? 0xf97316 : 0x5efce8);
+      ud.wakeTrail.scale.set(0.82 + brk * 0.35 + Math.sin(t * 16) * 0.14, 0.38 + brk * 0.18, 1);
 
       if (ud.telegraphRing) {
-        const prox = smooth(0.75, 0.15, Math.abs(eTheta));
-        const tele = typeof en.telegraph === 'number' ? en.telegraph : prox;
-        const showTele = tele > 0.38;
+        const tele = Math.max(brk, isWindup ? 0.75 : 0, typeof en.telegraph === 'number' ? en.telegraph : 0);
+        const showTele = tele > 0.32;
         ud.telegraphRing.visible = showTele;
         if (showTele) {
-          const k = clamp((tele - 0.38) / 0.62, 0, 1);
+          const k = clamp((tele - 0.32) / 0.68, 0, 1);
           ud.telegraphRing.scale.setScalar(0.92 + k * 0.24 + Math.sin(t * 16) * 0.03);
           ud.telegraphRing.rotation.y = t * (1.1 + k * 0.9);
-          ud.telegraphRing.material.color.setHex(tele > 0.7 ? 0xdc2646 : 0x0ea5e9);
+          ud.telegraphRing.material.color.setHex(brk > 0.3 ? 0xf97316 : tele > 0.7 ? 0xdc2646 : 0x0ea5e9);
           ud.telegraphRing.material.opacity = clamp(0.22 + k * 0.30, 0, 0.52);
         }
       }
@@ -3429,13 +3758,26 @@ export class EnemyVisualPool {
   }
 
   // --------------------------------------------------------------------------
-  // 5. `barnacle_mortar` — 5 Peeling Armored Shell Petals & Bubble Pop Telegraph!
+  // 5. `barnacle_mortar` — Paranoid Siege Hermit (`watch` periscope, `swell_tell`, `lob_recoil`, `shell_hide` dome)!
   // --------------------------------------------------------------------------
-  _animateBarnacleMortar(ud, st, en, isStunned, wx, wy, wz, t, _dt) {
-    // Support explicit `en.openAmount` (`0..1`) from `world_gameplay` OR autonomous telegraph cycle!
+  _animateBarnacleMortar(ud, st, en, isStunned, wx, wy, wz, t, dt) {
+    const stepDt = dt > 0 && dt <= 0.1 ? dt : 1 / 60;
+    const aiState = typeof en.aiState === 'string' ? en.aiState : '';
+    const rawHide = clamp(Number(en.shellHide) || (aiState === 'shell_hide' ? 1 : 0), 0, 1);
+    st.hideSmooth = damp(st.hideSmooth || 0, isStunned ? 0 : rawHide, 16, stepDt);
+    const hideK = st.hideSmooth;
+
     let openAmt;
-    if (typeof en.openAmount === 'number') {
+    if (hideK > 0.05) {
+      openAmt = 0;
+    } else if (typeof en.openAmount === 'number') {
       openAmt = clamp(en.openAmount, 0, 1);
+    } else if (aiState === 'swell_tell') {
+      openAmt = clamp(typeof en.telegraph === 'number' ? Math.max(0.35, en.telegraph) : 0.85, 0, 1);
+    } else if (aiState === 'lob_recoil') {
+      openAmt = 0.22;
+    } else if (aiState === 'watch') {
+      openAmt = 0.08;
     } else if (typeof en.telegraph === 'number') {
       openAmt = clamp(en.telegraph, 0, 1);
     } else {
@@ -3449,65 +3791,84 @@ export class EnemyVisualPool {
     }
     if (isStunned) openAmt *= 0.25;
 
-    // Detect exact bubble-pop moment (`openAmt` dropping sharply from peak) -> spawn splash ring!
-    if (st.mortarOpenPrev > 0.78 && openAmt < 0.45) {
+    // Detect `lob_recoil` or sharp bubble-pop release -> upward mortar kickback squash + splash ring!
+    if ((aiState === 'lob_recoil' && st.recoilT > 0.35) || (st.mortarOpenPrev > 0.72 && openAmt < 0.42 && hideK < 0.1)) {
+      st.recoilT = 0;
       this._spawnSplashRing(wx, wy + 0.55, wz, '#38bdf8');
     }
     st.mortarOpenPrev = openAmt;
+    st.recoilT = Math.min(10, (st.recoilT ?? 9) + stepDt);
 
-    // Pressure shudder during buildup telegraph
-    const shudder = openAmt > 0.45 && !isStunned ? (openAmt - 0.45) * 0.032 : 0;
+    const recoilKick = Math.exp(-st.recoilT * 6.5) * Math.sin(st.recoilT * 24.0) * 0.24;
+
+    // Swiveling brass periscope tracking yaw (`watch`), retracting inside dome during `shell_hide`!
+    const dir = en.dir < 0 ? -1 : 1;
+    const trackYaw = dir * 0.45 + Math.sin(t * 1.9 + st.seed * 5) * 0.28;
+    if (ud.turret) {
+      ud.turret.rotation.y = damp(ud.turret.rotation.y, trackYaw * (1 - hideK), 8, stepDt);
+    }
+    if (ud.periscope) {
+      ud.periscope.visible = hideK < 0.88;
+      ud.periscope.position.y = 0.42 - hideK * 0.24 + Math.sin(t * 3.2) * 0.015 * (1 - hideK);
+      ud.periscope.rotation.y = trackYaw * 1.35 + Math.sin(t * 2.8) * 0.22;
+    }
+
+    // Pressure shudder during `swell_tell` OR clamped-shell panic tremor on `shell_hide`
+    const shudder = !isStunned ? (openAmt > 0.42 ? (openAmt - 0.42) * 0.034 : hideK > 0.5 ? 0.008 : 0) : 0;
     ud.body.position.set(
       Math.sin(t * 54 + st.seed * 8) * shudder,
       0,
       Math.cos(t * 47 + st.seed * 5) * shudder
     );
+    const bodySy = clamp(1.0 - recoilKick - hideK * 0.12, 0.72, 1.26);
+    const bodySxz = clamp(1.0 + recoilKick * 0.65 + hideK * 0.07, 0.84, 1.24);
+    ud.body.scale.set(bodySxz, bodySy, bodySxz);
 
-    // Peel all 5 armored barnacle shell petals outward (`0 -> -64 deg` around radial rim hinge)!
-    const peelRad = 0.04 + openAmt * 1.08;
+    // 5 armored petals: peel wide open (`-1.18 rad`) on `swell_tell`, OR clamp tightly shut (`+0.42 rad`) into an impenetrable dome on `shell_hide`!
+    const targetPetalX = hideK > 0.02 ? mix(-0.06, 0.42, hideK) : -(0.06 + openAmt * 1.12 + Math.max(0, recoilKick) * 0.45);
     for (let i = 0; i < ud.petals.length; i++) {
-      const flutter = !isStunned ? Math.sin(t * 12 + i * 1.25) * 0.035 * openAmt : 0;
-      ud.petals[i].rotation.x = -(peelRad + flutter);
+      const flutter = !isStunned && hideK < 0.1 ? Math.sin(t * 13 + i * 1.25) * 0.038 * openAmt : 0;
+      ud.petals[i].rotation.x = damp(ud.petals[i].rotation.x, targetPetalX - flutter, 16, stepDt);
     }
 
-    // Inflate swirling pressurized water bubble out of the glowing molten-amber maw!
+    // Glowing amber sac / bubble swell!
     if (ud.mortarBubble) {
-      const bubVis = openAmt > 0.16 && !isStunned;
+      const bubVis = openAmt > 0.14 && hideK < 0.2 && !isStunned;
       ud.mortarBubble.visible = bubVis;
       if (bubVis) {
-        const bSc = 0.28 + openAmt * 0.92;
-        const wob = 1 + Math.sin(t * 16) * 0.07 * openAmt;
+        const bSc = 0.28 + openAmt * 1.02;
+        const wob = 1 + Math.sin(t * 18) * 0.08 * openAmt;
         ud.mortarBubble.scale.set(bSc * wob, bSc * (2 - wob), bSc * wob);
-        ud.mortarBubble.position.y = 0.44 + openAmt * 0.20;
-        ud.mortarBubble.rotation.set(t * 1.4, t * 2.2, 0);
+        ud.mortarBubble.position.y = 0.44 + openAmt * 0.22;
+        ud.mortarBubble.rotation.set(t * 1.6, t * 2.4, 0);
       }
     }
     if (ud.pressureCore) {
-      ud.pressureCore.scale.setScalar(0.85 + openAmt * 0.32);
-      ud.pressureCore.rotation.y = t * 1.6;
+      ud.pressureCore.visible = hideK < 0.75;
+      ud.pressureCore.scale.setScalar(0.84 + openAmt * 0.44);
+      ud.pressureCore.rotation.y = t * (1.6 + openAmt * 3.0);
     }
 
-    // Subtle atmospheric pressure glow (never washes out the sculpted barnacle valves or bubble!)
+    ud.pressureHalo.visible = hideK < 0.5;
     ud.pressureHalo.material.color.setRGB(
-      mix(0.92, 0.08, openAmt),
-      mix(0.42, 0.78, openAmt),
+      mix(0.95, 0.12, openAmt * 0.7),
+      mix(0.45, 0.78, openAmt),
       mix(0.10, 0.82, openAmt)
     );
-    ud.pressureHalo.material.opacity = isStunned ? 0.08 : 0.12 + openAmt * 0.22;
-    const hSc = 0.52 + openAmt * 0.28;
+    ud.pressureHalo.material.opacity = isStunned ? 0.06 : (0.12 + openAmt * 0.28) * (1 - hideK);
+    const hSc = 0.52 + openAmt * 0.34;
     ud.pressureHalo.scale.set(hSc, hSc, 1);
 
-    // Refined etched crimson-amber -> pelagic aqua warning rune ring on stone deck (opacity <= 0.55!)
     if (ud.telegraphRing) {
-      const showTele = !isStunned && openAmt > 0.28;
+      const showTele = !isStunned && hideK < 0.2 && openAmt > 0.26;
       ud.telegraphRing.visible = showTele;
       if (showTele) {
-        const k = clamp((openAmt - 0.28) / 0.72, 0, 1);
+        const k = clamp((openAmt - 0.26) / 0.74, 0, 1);
         ud.telegraphRing.scale.setScalar(0.95 + k * 0.28 + Math.sin(t * 16) * 0.03);
         ud.telegraphRing.rotation.y = t * (0.8 + k * 0.9);
         ud.telegraphRing.material.color.setRGB(
-          mix(0.88, 0.08, k),
-          mix(0.32, 0.76, k),
+          mix(0.92, 0.08, k),
+          mix(0.36, 0.76, k),
           mix(0.12, 0.74, k)
         );
         ud.telegraphRing.material.opacity = clamp(0.22 + k * 0.33, 0, 0.55);
@@ -3516,37 +3877,105 @@ export class EnemyVisualPool {
   }
 
   // --------------------------------------------------------------------------
-  // 6. `vent_stalker` — 4-Legged Salamander Trot, Whip Tail & Rising Frost/Steam Plumes!
+  // 6. `vent_stalker` — Brooding Thermal Salamander (`stalk`, `sniff`, `hiss_tell` cap rattle, `erupt`, `cooldown`)!
   // --------------------------------------------------------------------------
   _animateVentStalker(ud, st, en, eTheta, isStunned, t, dt) {
+    const aiState = typeof en.aiState === 'string' ? en.aiState : '';
+    const velCol = Number.isFinite(Number(en.velCol)) ? Number(en.velCol) : st.vx;
+    const velFloor = Number.isFinite(Number(en.velFloor)) ? Number(en.velFloor) : st.vy;
+    const moveMag = Math.hypot(velCol, velFloor);
     const dir = en.dir < 0 ? -1 : 1;
+    const isHissTell = !isStunned && aiState === 'hiss_tell';
+    const isErupt = !isStunned && Boolean(en.venting || aiState === 'erupt');
+    const isCooldown = !isStunned && aiState === 'cooldown';
+    const isSniff = !isStunned && (aiState === 'sniff' || (!isHissTell && !isErupt && !isCooldown && moveMag < 0.05));
 
     if (!isStunned) {
-      const crawlSpeed = Math.max(2.0, Math.abs(st.vx) * 2.6);
-      st.gaitPhase += crawlSpeed * 3.0 * dt;
+      // Heavy 4-limb salamander crawl strictly synced to vertical & horizontal movement!
+      const gaitSpeed = isHissTell || isErupt ? 0 : moveMag > 0.04 ? moveMag * 5.8 : 0;
+      st.gaitPhase += gaitSpeed * dt;
 
-      const targetYaw = clamp(dir * 1.08 - eTheta * 0.22, -1.32, 1.32);
+      const isClimbingVert = Math.abs(velFloor) > Math.abs(velCol) * 1.15 && Math.abs(velFloor) > 0.12;
+      const targetYaw = isClimbingVert ? clamp(-eTheta * 0.35, -0.55, 0.55) : clamp(dir * 1.08 - eTheta * 0.22, -1.32, 1.32);
+      const climbPitch = isClimbingVert ? clamp(-velFloor * 0.22, -0.34, 0.34) : 0;
       ud.body.rotation.y = damp(ud.body.rotation.y, targetYaw, 9, dt);
+      ud.body.rotation.x = damp(ud.body.rotation.x, climbPitch, 9, dt);
 
-      // Sinuous salamander spine sway & diagonal reptile trot (`FL+BR` vs `FR+BL`)
-      const sway = Math.sin(st.gaitPhase) * 0.12;
-      if (ud.stalkerBody) ud.stalkerBody.rotation.y = sway * 0.45;
-      if (ud.head) {
-        ud.head.rotation.y = clamp(-eTheta * 0.35 - sway * 0.6, -0.5, 0.5);
-        ud.head.rotation.x = Math.sin(t * 4.2 + st.seed * 5) * 0.08;
+      const moveBlend = clamp(moveMag / 0.65, 0, 1.2);
+      const sway = Math.sin(st.gaitPhase) * 0.14 * moveBlend;
+      const archY = isHissTell ? 0.048 + Math.sin(t * 48) * 0.008 : isErupt ? 0.032 : isCooldown ? -0.022 + Math.sin(t * 3.4) * 0.010 : 0;
+      const archPitch = isHissTell ? 0.22 : isErupt ? -0.14 : isCooldown ? 0.08 : 0;
+
+      if (ud.stalkerBody) {
+        ud.stalkerBody.position.y = damp(ud.stalkerBody.position.y || 0, archY, 14, dt);
+        ud.stalkerBody.rotation.x = damp(ud.stalkerBody.rotation.x || 0, archPitch, 14, dt);
+        ud.stalkerBody.rotation.y = sway * 0.48;
       }
-      if (ud.tail1) ud.tail1.rotation.y = -sway * 1.65;
-      if (ud.tail2) ud.tail2.rotation.y = Math.sin(st.gaitPhase - 1.1) * 0.34;
+      if (ud.head) {
+        const sniffYaw = isSniff ? Math.sin(t * 7.2) * 0.32 : 0;
+        const sniffPitch = isSniff ? -0.18 + Math.sin(t * 11.0) * 0.09 : isHissTell ? -0.26 : isErupt ? -0.34 : isCooldown ? 0.18 : 0;
+        ud.head.rotation.y = clamp(-eTheta * 0.35 - sway * 0.6 + sniffYaw, -0.62, 0.62);
+        ud.head.rotation.x = damp(ud.head.rotation.x, sniffPitch, 12, dt);
+      }
+      if (ud.tail1) ud.tail1.rotation.y = -sway * 1.65 + (isHissTell ? Math.sin(t * 36) * 0.12 : 0);
+      if (ud.tail2) ud.tail2.rotation.y = Math.sin(st.gaitPhase - 1.1) * 0.36 * moveBlend;
 
-      const strideA = Math.sin(st.gaitPhase) * 0.38;
-      const strideB = Math.sin(st.gaitPhase + Math.PI) * 0.38;
-      if (ud.legFL) ud.legFL.rotation.x = strideA;
-      if (ud.legBR) ud.legBR.rotation.x = strideA;
-      if (ud.legFR) ud.legFR.rotation.x = strideB;
-      if (ud.legBL) ud.legBL.rotation.x = strideB;
+      // Planted braced claws during `hiss_tell`/`erupt` vs heavy diagonal reptile crawl!
+      const brace = isHissTell || isErupt ? 0.28 : 0;
+      const strideA = Math.sin(st.gaitPhase) * 0.42 * moveBlend;
+      const strideB = Math.sin(st.gaitPhase + Math.PI) * 0.42 * moveBlend;
+      if (ud.legFL) {
+        ud.legFL.rotation.x = strideA - brace;
+        ud.legFL.rotation.z = -brace * 0.6;
+      }
+      if (ud.legBR) {
+        ud.legBR.rotation.x = strideA + brace;
+        ud.legBR.rotation.z = brace * 0.6;
+      }
+      if (ud.legFR) {
+        ud.legFR.rotation.x = strideB - brace;
+        ud.legFR.rotation.z = brace * 0.6;
+      }
+      if (ud.legBL) {
+        ud.legBL.rotation.x = strideB + brace;
+        ud.legBL.rotation.z = -brace * 0.6;
+      }
     }
 
-    // Rising frost crystals / hydrothermal steam plumes billowing from dorsal vents!
+    // 3 Hinged Brass Chimney Caps: rapid rattle on `hiss_tell`, wide-open `1.28 rad` on `erupt`, relaxed on `cooldown`!
+    if (ud.chimneyCaps) {
+      for (let i = 0; i < ud.chimneyCaps.length; i++) {
+        const cap = ud.chimneyCaps[i];
+        let capAng = 0.12 + Math.sin(t * 3.5 + i) * 0.05;
+        if (isHissTell) {
+          capAng = 0.28 + Math.abs(Math.sin(t * 58.0 + i * 2.1)) * 0.48;
+        } else if (isErupt) {
+          capAng = 1.28 + Math.sin(t * 24.0 + i) * 0.08;
+        } else if (isCooldown) {
+          capAng = 0.04;
+        }
+        cap.rotation.z = capAng;
+      }
+    }
+
+    // Dorsal chimney glow: blazing orange-cyan on `erupt`, pulsing amber on `hiss_tell`, dimmed on `cooldown`!
+    if (ud.ventMat) {
+      if (isErupt) {
+        ud.ventMat.emissive.setHex(0xff7b24);
+        ud.ventMat.emissiveIntensity = 2.45 + 0.35 * Math.sin(t * 34);
+      } else if (isHissTell) {
+        ud.ventMat.emissive.setHex(0xf97316);
+        ud.ventMat.emissiveIntensity = 1.55 + 0.45 * Math.sin(t * 42);
+      } else if (isCooldown) {
+        ud.ventMat.emissive.setHex(0x1e3a4c);
+        ud.ventMat.emissiveIntensity = 0.16;
+      } else {
+        ud.ventMat.emissive.setHex(0x22d3ee);
+        ud.ventMat.emissiveIntensity = 0.95;
+      }
+    }
+
+    // Steam/plume sprites scaled cleanly by state (`erupt` vertical scalding plume vs `cooldown` faint wisp!)
     for (let i = 0; i < ud.plumes.length; i++) {
       const sp = ud.plumes[i];
       if (isStunned) {
@@ -3554,39 +3983,44 @@ export class EnemyVisualPool {
         continue;
       }
       sp.visible = true;
-      const life = (t * 0.95 + st.seed + i / 3) % 1;
+      const rate = isErupt ? 2.6 : isHissTell ? 1.8 : isCooldown ? 0.45 : 0.95;
+      const life = (t * rate + st.seed + i / 3) % 1;
+      const maxRise = isErupt ? 1.28 : isHissTell ? 0.58 : isCooldown ? 0.24 : 0.46;
       sp.position.set(
-        Math.sin(t * 3.5 + i * 2.1) * 0.08,
-        0.44 + life * 0.48,
+        Math.sin(t * (isErupt ? 9.5 : 3.5) + i * 2.1) * (isErupt ? 0.05 : 0.08),
+        0.44 + life * maxRise,
         (i - 1) * 0.11
       );
-      const pSc = 0.22 + life * 0.36;
-      sp.scale.set(pSc, pSc, 1);
+      const pSc = (isErupt ? 0.34 + life * 0.58 : isCooldown ? 0.14 + life * 0.16 : 0.20 + life * 0.32);
+      sp.scale.set(pSc, isErupt ? pSc * 1.35 : pSc, 1);
+      sp.material.color.setHex(isErupt ? (i % 2 === 0 ? 0xfed7aa : 0xe0f2fe) : isHissTell ? 0xfdba74 : 0xa5f3fc);
       sp.material.rotation = life * 1.4 + i;
-      sp.material.opacity = Math.sin(life * Math.PI) * 0.62;
+      sp.material.opacity = Math.sin(life * Math.PI) * (isErupt ? 0.88 : isHissTell ? 0.72 : isCooldown ? 0.22 : 0.52);
     }
 
-    // Refined etched thermal-amber -> cryo-aqua Pelagian warning rune ring (opacity <= 0.54!)
     if (ud.telegraphRing) {
-      const prox = smooth(0.82, 0.15, Math.abs(eTheta));
-      const surge = typeof en.telegraph === 'number' ? en.telegraph : prox * (0.5 + 0.5 * Math.sin(t * 4.5 + st.seed * 6));
-      const showTele = !isStunned && surge > 0.34;
+      const surge = isErupt ? 1.0 : isHissTell ? Math.max(0.55, Number(en.telegraph) || 0.75) : isCooldown ? 0 : Number(en.telegraph) || 0;
+      const showTele = !isStunned && surge > 0.32;
       ud.telegraphRing.visible = showTele;
       if (showTele) {
-        const k = clamp((surge - 0.34) / 0.66, 0, 1);
-        ud.telegraphRing.scale.setScalar(0.92 + k * 0.24 + Math.sin(t * 16) * 0.03);
-        ud.telegraphRing.rotation.y = -t * (0.85 + k * 0.75);
-        ud.telegraphRing.material.color.setHex(surge > 0.68 ? 0x06b6d4 : 0xea580c);
-        ud.telegraphRing.material.opacity = clamp(0.22 + k * 0.32, 0, 0.54);
+        const k = clamp((surge - 0.32) / 0.68, 0, 1);
+        ud.telegraphRing.scale.setScalar(0.92 + k * 0.26 + Math.sin(t * 18) * 0.03);
+        ud.telegraphRing.rotation.y = -t * (0.9 + k * 0.9);
+        ud.telegraphRing.material.color.setHex(isErupt ? 0xf97316 : 0xea580c);
+        ud.telegraphRing.material.opacity = clamp(0.24 + k * 0.32, 0, 0.56);
       }
     }
   }
 
   // --------------------------------------------------------------------------
-  // 7. `siphon_warden` — 3-Phase Boss Escalation, Core Exposure, Beam Charge & Tentacle Slam!
+  // 7. `siphon_warden` — 5-Act Sovereign Bosses (`patrol`, Act-Signature `telegraph`, `vulnerable` open core)!
   // --------------------------------------------------------------------------
   _animateSiphonWarden(ud, st, en, eTheta, isStunned, wx, wy, wz, t, dt) {
-    // Resolve 3-Phase Boss Escalation from explicit `en.bossPhase` OR HP percentage!
+    const aiState = typeof en.aiState === 'string' ? en.aiState : '';
+    const velCol = Number.isFinite(Number(en.velCol)) ? Number(en.velCol) : st.vx;
+    const dir = en.dir < 0 ? -1 : 1;
+
+    // Resolve 3-Phase Boss Escalation + 5-Act Signature (`actSignature`: 1..5 or string)
     let phase = Number(en.bossPhase) || 0;
     if (!(phase >= 1)) {
       const hpRatio = en.maxHp > 0 ? (Number(en.hp) || 0) / Number(en.maxHp) : 1;
@@ -3595,30 +4029,57 @@ export class EnemyVisualPool {
     phase = clamp(Math.round(phase), 1, 3);
     const phaseBoost = phase === 3 ? 2.05 : phase === 2 ? 1.45 : 1.0;
 
-    const rawTele = typeof en.telegraph === 'number' ? clamp(en.telegraph, 0, 1) : 0;
-    const beamAmt = clamp(
-      Math.max(
-        Number(en.beamCharge) || 0,
-        en.beamActive ? 1.0 : 0,
-        en.attackType === 'hydro_beam' ? rawTele : 0
-      ),
-      0,
-      1
-    );
-    const slamAmt = clamp(
-      Math.max(
-        Number(en.tentacleSlam) || 0,
-        Number(en.slamPhase) || 0,
-        en.attackType === 'tentacle_slam' ? rawTele : 0
-      ),
-      0,
-      1
-    );
-    const coreExposed = Boolean(en.coreExposed || en.exposedTimer > 0 || en.vulnerable);
-    const isShielded = !coreExposed && Boolean(en.shielded);
+    const rawSig = en.actSignature ?? en.act ?? 1;
+    const sigStr = String(rawSig).toLowerCase();
+    const actNum =
+      typeof rawSig === 'number'
+        ? clamp(Math.round(rawSig), 1, 5)
+        : sigStr.includes('2') || sigStr.includes('beam') || sigStr.includes('cryo')
+          ? 2
+          : sigStr.includes('3') || sigStr.includes('slam') || sigStr.includes('tentacle')
+            ? 3
+            : sigStr.includes('4') || sigStr.includes('shield') || sigStr.includes('aegis')
+              ? 4
+              : sigStr.includes('5') || sigStr.includes('leviathan')
+                ? 5
+                : 1;
+
+    const coreExposed = Boolean(en.coreExposed || en.exposedTimer > 0 || en.vulnerable || aiState === 'vulnerable');
+    const rawTele = coreExposed
+      ? 0
+      : typeof en.telegraph === 'number'
+        ? clamp(en.telegraph, 0, 1)
+        : aiState === 'telegraph'
+          ? 0.78
+          : 0;
+    const chargeAmt = coreExposed
+      ? 0
+      : clamp(Math.max(Number(en.chargeBlend) || 0, actNum === 1 && rawTele > 0.1 ? rawTele : 0), 0, 1);
+    const beamAmt = coreExposed
+      ? 0
+      : clamp(
+          Math.max(
+            Number(en.beamCharge) || 0,
+            en.beamActive ? 1.0 : 0,
+            en.attackType === 'hydro_beam' || actNum === 2 || actNum === 5 ? rawTele : 0
+          ),
+          0,
+          1
+        );
+    const slamAmt = coreExposed
+      ? 0
+      : clamp(
+          Math.max(
+            Number(en.tentacleSlam) || 0,
+            Number(en.slamPhase) || 0,
+            en.attackType === 'tentacle_slam' || actNum === 3 || actNum === 5 ? rawTele : 0
+          ),
+          0,
+          1
+        );
+    const isShielded = !coreExposed && Boolean(en.shielded || (actNum === 4 && rawTele > 0.2));
     const hitJolt = st.hitFlashT > 0 ? Math.sin((st.hitFlashT / 0.26) * Math.PI) : 0;
 
-    // Trigger ground shockwave splash ring at exact Tentacle Slam impact crest!
     if (slamAmt > 0.82 && !st.slamTriggered) {
       st.slamTriggered = true;
       this._spawnSplashRing(wx, wy - 0.55, wz, phase >= 3 ? '#ff4d8d' : '#22f0e8');
@@ -3627,83 +4088,112 @@ export class EnemyVisualPool {
     }
 
     if (!isStunned) {
-      const phaseJitter = phase >= 3 ? Math.sin(t * 46) * 0.024 : phase === 2 ? Math.sin(t * 28) * 0.01 : 0;
+      const phaseJitter = phase >= 3 && !coreExposed ? Math.sin(t * 46) * 0.024 : phase === 2 && !coreExposed ? Math.sin(t * 28) * 0.01 : 0;
       const slamDip = slamAmt > 0.65 ? -((slamAmt - 0.65) / 0.35) * 0.22 : slamAmt * 0.14;
+      const vulnSlumpY = coreExposed ? -0.14 + Math.sin(t * 3.2) * 0.025 : 0;
       ud.body.position.set(
         phaseJitter,
-        Math.sin(t * 2.4 * phaseBoost + st.seed * TWO_PI) * 0.08 + slamDip,
-        -hitJolt * 0.16 + beamAmt * 0.10
-      );
-      const targetYaw = clamp(-eTheta * 0.55, -0.68, 0.68);
-      const slamPitch = slamAmt < 0.62 ? -slamAmt * 0.42 : ((slamAmt - 0.62) / 0.38) * 0.48;
-      ud.body.rotation.set(
-        rawTele * 0.16 + slamPitch - hitJolt * 0.24,
-        damp(ud.body.rotation.y, targetYaw, 6, dt),
-        Math.sin(t * 1.6 * phaseBoost + st.seed * 4) * (0.05 + (phase - 1) * 0.03)
+        (coreExposed ? vulnSlumpY : Math.sin(t * 2.4 * phaseBoost + st.seed * TWO_PI) * 0.08 + slamDip - chargeAmt * 0.08),
+        -hitJolt * 0.16 + beamAmt * 0.12 + chargeAmt * 0.14
       );
 
-      // Twin counter-rotating 12-tooth geared astrolabe gimbal rings
-      const coreSpin = (2.4 + rawTele * 5.2 + beamAmt * 6.5) * phaseBoost;
+      // Distinct body language: bulldozer charge lean (Act 1), beam lock (Act 2), slam rear-back (Act 3), sagging slump (`vulnerable`)!
+      const targetYaw = clamp(-eTheta * 0.55 + chargeAmt * dir * 0.32, -0.78, 0.78);
+      const slamPitch = slamAmt < 0.62 ? -slamAmt * 0.44 : ((slamAmt - 0.62) / 0.38) * 0.50;
+      const bulldozerPitch = chargeAmt * 0.36;
+      const vulnPitch = coreExposed ? 0.18 : 0;
+      const prowlBank = coreExposed ? 0 : -velCol * 0.06 - dir * chargeAmt * 0.26 + Math.sin(t * 1.6 * phaseBoost + st.seed * 4) * 0.05;
+      ud.body.rotation.set(
+        damp(ud.body.rotation.x, vulnPitch + bulldozerPitch + rawTele * 0.12 + slamPitch - hitJolt * 0.24, 10, dt),
+        damp(ud.body.rotation.y, targetYaw, 6, dt),
+        damp(ud.body.rotation.z, clamp(prowlBank, -0.38, 0.38), 10, dt)
+      );
+
+      const coreSpin = coreExposed ? 0.8 : (2.4 + rawTele * 5.2 + beamAmt * 7.0 + chargeAmt * 4.0) * phaseBoost;
       if (ud.coreOuter) {
-        ud.coreOuter.rotation.z = t * coreSpin;
-        ud.coreOuter.rotation.y = coreExposed ? 0.08 * Math.sin(t * 8) : Math.sin(t * 1.8 * phaseBoost) * 0.36;
+        ud.coreOuter.rotation.z += coreSpin * dt;
+        ud.coreOuter.rotation.y = coreExposed ? 0.08 * Math.sin(t * 6) : Math.sin(t * 1.8 * phaseBoost) * 0.36;
       }
       if (ud.coreInner) {
-        ud.coreInner.rotation.x = coreExposed ? 0.12 * Math.cos(t * 8) : -t * coreSpin * 1.35;
-        ud.coreInner.rotation.z = t * 1.9 * phaseBoost;
+        ud.coreInner.rotation.x = coreExposed ? 0.12 * Math.cos(t * 6) : ud.coreInner.rotation.x - coreSpin * 1.35 * dt;
+        ud.coreInner.rotation.z = t * (coreExposed ? 0.6 : 1.9 * phaseBoost);
       }
       if (ud.singularity) {
         const beat =
-          (coreExposed ? 1.38 : 1.0) +
+          (coreExposed ? 1.46 : 1.0) +
           0.18 * Math.sin(t * (9.5 + phase * 3.0)) +
-          Math.max(rawTele, beamAmt) * 0.32;
+          Math.max(rawTele, beamAmt) * 0.34;
         ud.singularity.scale.setScalar(beat);
       }
 
-      // 4 Orbiting Bladed Aegis Halberd-Shields: lock tight when shielded, flare WIDE when `coreExposed`!
+      // 4 Orbiting Aegis Shields: wide-open peeled core plates on `vulnerable`, tight phalanx on Act 4 / `isShielded`, battering prow on `chargeAmt`!
       if (ud.shieldOrbit) {
-        ud.shieldOrbit.rotation.z = t * (coreExposed ? 0.55 : 1.35 * phaseBoost);
+        const orbitRate = coreExposed ? 0.35 : isShielded ? 3.4 * phaseBoost : 1.35 * phaseBoost;
+        ud.shieldOrbit.rotation.z += orbitRate * dt;
       }
       for (let i = 0; i < ud.shields.length; i++) {
         const sh = ud.shields[i];
         const sa = (i * TWO_PI) / 4 + Math.PI * 0.25;
         const rad = coreExposed
-          ? 0.86 + Math.sin(t * 6 + i) * 0.04
+          ? 0.92 + Math.sin(t * 5 + i) * 0.03
           : isShielded
             ? 0.30
-            : 0.58 + rawTele * 0.16 + (phase - 1) * 0.04 + Math.sin(t * 3.2 + i) * 0.04;
+            : chargeAmt > 0.2
+              ? 0.44
+              : 0.58 + rawTele * 0.18 + (phase - 1) * 0.04 + Math.sin(t * 3.2 + i) * 0.04;
         sh.position.set(
           Math.cos(sa) * rad,
           Math.sin(sa) * rad,
-          coreExposed ? -0.16 : isShielded ? 0.16 : 0.02
+          coreExposed ? -0.20 : isShielded || chargeAmt > 0.2 ? 0.18 : 0.02
         );
-        sh.rotation.y = coreExposed ? 1.15 : rawTele * 0.55 + (phase >= 2 ? 0.22 : 0);
+        sh.rotation.y = coreExposed ? 1.24 : chargeAmt > 0.2 ? -0.35 : rawTele * 0.55 + (phase >= 2 ? 0.22 : 0);
       }
 
-      // 4 Segmented Kraken-Mech Tentacles: dramatic overhead wind-up -> violent forward slam!
+      // 4 Segmented Kraken-Mech Tentacles: patrol sweep, overhead slam raise, beam tuning-fork array, bulldozer sweep-back, OR heavy sagging `vulnerable`!
       for (let i = 0; i < ud.tentacles.length; i++) {
         const tn = ud.tentacles[i];
         const sx = i % 2 === 0 ? -1 : 1;
         const wave = Math.sin(t * 3.4 * phaseBoost + i * 1.35);
-        let pitchX = rawTele * 0.52 + wave * (0.16 + (phase - 1) * 0.06);
-        let spreadY = sx * (-rawTele * 0.40 + Math.cos(t * 2.6 * phaseBoost + i) * 0.18);
-        if (slamAmt > 0.04) {
-          // 0..0.60: rear high overhead (-0.95 rad); 0.60..1.0: whip violently forward-down (+1.12 rad)!
-          pitchX = slamAmt < 0.6 ? mix(wave * 0.15, -0.98, slamAmt / 0.6) : mix(-0.98, 1.12, (slamAmt - 0.6) / 0.4);
-          spreadY = sx * (slamAmt < 0.6 ? 0.35 : -0.55);
-        } else if (coreExposed) {
-          pitchX = -0.35 + wave * 0.22;
-          spreadY = sx * 0.55;
+        let pitchX = rawTele * 0.45 + wave * (0.16 + (phase - 1) * 0.06);
+        let spreadY = sx * (-rawTele * 0.35 + Math.cos(t * 2.6 * phaseBoost + i) * 0.18);
+        let tipCurl = rawTele * 0.48 + Math.cos(t * 4.8 * phaseBoost + i) * 0.28;
+
+        if (coreExposed) {
+          // Limp, heavy sagging tentacles exposing the glowing core!
+          pitchX = 0.62 + Math.sin(t * 2.2 + i) * 0.07;
+          spreadY = sx * 0.64;
+          tipCurl = 0.48;
+        } else if (slamAmt > 0.04) {
+          pitchX = slamAmt < 0.6 ? mix(wave * 0.15, -1.04, slamAmt / 0.6) : mix(-1.04, 1.15, (slamAmt - 0.6) / 0.4);
+          spreadY = sx * (slamAmt < 0.6 ? 0.38 : -0.56);
+          tipCurl = slamAmt > 0.6 ? 0.98 : -0.45 * slamAmt;
+        } else if (beamAmt > 0.12) {
+          // Cryo/Hydro-Beam 4-point tuning-fork channeling array!
+          pitchX = 0.28 * beamAmt + wave * 0.06;
+          spreadY = sx * (0.66 * beamAmt);
+          tipCurl = -0.38 * beamAmt;
+        } else if (chargeAmt > 0.12) {
+          // Bulldozer ram jet-swept tentacles!
+          pitchX = -0.48 * chargeAmt + wave * 0.08;
+          spreadY = sx * 0.24;
+          tipCurl = 0.32;
+        } else if (actNum === 4 && rawTele > 0.15) {
+          // Aegis summon upward gesture!
+          pitchX = i < 2 ? -0.85 * rawTele : 0.22;
+          spreadY = sx * 0.48;
         }
-        tn.rotation.set(pitchX, spreadY, sx * wave * (0.22 + (phase - 1) * 0.07));
+
+        tn.rotation.set(
+          damp(tn.rotation.x, pitchX, 12, dt),
+          damp(tn.rotation.y, spreadY, 12, dt),
+          sx * wave * (coreExposed ? 0.06 : 0.22 + (phase - 1) * 0.07)
+        );
         if (ud.tentacleTips[i]) {
-          ud.tentacleTips[i].rotation.x =
-            slamAmt > 0.6 ? 0.95 : rawTele * 0.48 + Math.cos(t * 4.8 * phaseBoost + i) * 0.28;
+          ud.tentacleTips[i].rotation.x = damp(ud.tentacleTips[i].rotation.x, tipCurl, 14, dt);
         }
       }
     }
 
-    // Weak-Point Core Exposure Double Target Reticle (`exposedRingOuter` & `exposedRingInner`)
     if (ud.exposedRingOuter && ud.exposedRingInner) {
       const showExp = coreExposed && !isStunned;
       ud.exposedRingOuter.visible = showExp;
@@ -3719,25 +4209,23 @@ export class EnemyVisualPool {
       }
     }
 
-    // Hydro-Beam Swirling Vortex Charge Emitter (`beamChargeOrb` — zero solid-white blowout!)
     if (ud.beamChargeOrb) {
       const showBeam = (beamAmt > 0.08 || (rawTele > 0.35 && !coreExposed)) && !isStunned;
       ud.beamChargeOrb.visible = showBeam;
       if (showBeam) {
         const bMag = Math.max(beamAmt, rawTele);
-        const bSc = 0.42 + bMag * 0.66 + Math.sin(t * 24) * 0.06;
+        const bSc = 0.42 + bMag * 0.68 + Math.sin(t * 24) * 0.06;
         ud.beamChargeOrb.scale.setScalar(bSc);
         ud.beamChargeOrb.rotation.set(t * 5, t * 7, 0);
-        const orbHex = phase >= 3 ? 0xe11d48 : phase === 2 ? 0xd946ef : 0x0ea5e9;
+        const orbHex = actNum === 2 ? 0x38bdf8 : phase >= 3 ? 0xe11d48 : phase === 2 ? 0xd946ef : 0x0ea5e9;
         ud.beamChargeOrb.material.color.setHex(orbHex);
         ud.beamChargeOrb.material.emissive.setHex(orbHex);
         ud.beamChargeOrb.material.opacity = clamp(0.28 + bMag * 0.36, 0, 0.64);
       }
     }
 
-    // Phase 2 / Phase 3 Overdrive Arc Sparks (`bossArcSprite`)
     if (ud.bossArcSprite) {
-      const showArc = !isStunned && (phase >= 2 || rawTele > 0.4 || slamAmt > 0.4);
+      const showArc = !isStunned && !coreExposed && (phase >= 2 || rawTele > 0.4 || slamAmt > 0.4 || chargeAmt > 0.4);
       const flicker = showArc && Math.sin(t * (28 + phase * 11) + st.seed * 7) > (phase >= 3 ? -0.45 : 0.15);
       ud.bossArcSprite.visible = flicker;
       if (flicker) {
@@ -3749,7 +4237,6 @@ export class EnemyVisualPool {
       }
     }
 
-    // Core halo shifts distinctly across Phase 1 (violet), Phase 2 (amber-magenta), Phase 3 (crimson), Exposed (cyan-gold), & Hit (white)!
     if (hitJolt > 0.05) {
       ud.coreHalo.material.color.setHex(0xffe4e6);
     } else if (coreExposed) {
@@ -3763,7 +4250,7 @@ export class EnemyVisualPool {
     }
     ud.coreHalo.material.opacity = isStunned
       ? 0.12
-      : clamp((coreExposed ? 0.42 : 0.26) + 0.10 * Math.sin(t * (8.5 + phase * 2)) + rawTele * 0.10, 0, 0.46);
+      : clamp((coreExposed ? 0.44 : 0.26) + 0.10 * Math.sin(t * (8.5 + phase * 2)) + rawTele * 0.10, 0, 0.48);
   }
 
   /**

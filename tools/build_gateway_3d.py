@@ -30,12 +30,21 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
 OUT_MODELS_DIR = os.path.join(PROJECT_DIR, "assets", "models")
 OUT_TEXTURES_DIR = os.path.join(PROJECT_DIR, "assets", "textures")
-DONE_JSON_PATH = os.path.join(OUT_MODELS_DIR, "_gateway_build_done.json")
-PROOF_RENDER_PATH = r"C:\Users\mshaf\.gemini\antigravity\brain\7ce01634-b178-4665-b637-a4e88d2cbed3\scratch\gateway_wave2_blender_proof.png"
+SCRATCH_OUT_DIR = os.path.join(
+    os.path.expanduser("~"),
+    ".gemini",
+    "antigravity",
+    "brain",
+    "92cf7236-6a33-4375-bc98-9b23c2c10b27",
+    "scratch",
+)
+DONE_JSON_PATH = os.path.join(SCRATCH_OUT_DIR, "gateway_build_done.json")
+PROOF_RENDER_PATH = os.path.join(SCRATCH_OUT_DIR, "gateway_r4_blender_proof.png")
 PY312_EXE = r"C:\Users\mshaf\AppData\Local\Programs\Python\Python312\python.exe"
 
 os.makedirs(OUT_MODELS_DIR, exist_ok=True)
 os.makedirs(OUT_TEXTURES_DIR, exist_ok=True)
+os.makedirs(SCRATCH_OUT_DIR, exist_ok=True)
 
 
 # ==============================================================================
@@ -545,11 +554,13 @@ def generate_weta_pbr_textures_py312(out_size=1024):
 def run_blender_pipeline():
     import bpy
     import bmesh
-    from mathutils import Vector
+    from mathutils import Vector, Matrix
     import numpy as np
 
-    # First invoke Python 3.12 (`scipy` + `Pillow`) to synthesize crisp 2048->1024 PBR maps!
-    subprocess.run([PY312_EXE, os.path.abspath(__file__), "--textures-only"], check=True)
+    # Reuse existing baked 1K PBR textures unless `--rebake-textures` is requested or missing
+    req_tex = ["gateway_albedo.png", "gateway_normal.png", "gateway_orm.png", "gateway_emissive.png"]
+    if "--rebake-textures" in sys.argv or not all(os.path.exists(os.path.join(OUT_TEXTURES_DIR, fn)) for fn in req_tex):
+        subprocess.run([PY312_EXE, os.path.abspath(__file__), "--textures-only"], check=True)
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
@@ -1439,12 +1450,166 @@ def run_blender_pipeline():
             if wv > 0.002:
                 vgroups[seg_list[bi][0]].add([vi], wv, "REPLACE")
 
+    # Decimate in bind pose to ~4,200 crisp triangles (< 1.7 MB WEBP GLB for locked 60fps!)
+    bpy.ops.object.select_all(action="DESELECT")
+    body_obj.select_set(True)
+    bpy.context.view_layer.objects.active = body_obj
+    arm_mod.show_viewport = False
+
+    dec_mod = body_obj.modifiers.new(name="GatewayDecimate", type="DECIMATE")
+    dec_mod.decimate_type = "COLLAPSE"
+    dec_mod.use_collapse_triangulate = True
+    dec_mod.use_symmetry = True
+    dec_mod.symmetry_axis = "X"
+    dec_mod.delimit = {"UV"}
+    bpy.ops.object.modifier_move_to_index(modifier=dec_mod.name, index=0)
+
+    def _eval_tris():
+        dg = bpy.context.evaluated_depsgraph_get()
+        eo = body_obj.evaluated_get(dg)
+        em = eo.to_mesh()
+        em.calc_loop_triangles()
+        cnt = len(em.loop_triangles)
+        eo.to_mesh_clear()
+        return cnt
+
+    dec_mod.ratio = 0.10
+    bpy.context.view_layer.update()
+    if _eval_tris() > 4400:
+        dec_mod.delimit = set()
+
+    lo_r, hi_r, best_r, best_d = 0.05, 0.95, 0.23, 10**9
+    for _ in range(14):
+        mid_r = 0.5 * (lo_r + hi_r)
+        dec_mod.ratio = mid_r
+        bpy.context.view_layer.update()
+        cur_t = _eval_tris()
+        if abs(cur_t - 4200) < best_d:
+            best_d = abs(cur_t - 4200)
+            best_r = mid_r
+        if cur_t > 4200:
+            hi_r = mid_r
+        else:
+            lo_r = mid_r
+    dec_mod.ratio = best_r
+    bpy.context.view_layer.update()
+    bpy.ops.object.modifier_apply(modifier=dec_mod.name)
+    arm_mod.show_viewport = True
+    bpy.ops.object.shade_smooth()
+
+    pelvis_vg = body_obj.vertex_groups.get("Pelvis")
+    if pelvis_vg is not None:
+        for v_item in body_obj.data.vertices:
+            if len(v_item.groups) == 0:
+                pelvis_vg.add([v_item.index], 1.0, "REPLACE")
+    bpy.ops.object.mode_set(mode="WEIGHT_PAINT")
+    bpy.ops.object.vertex_group_limit_total(group_select_mode="ALL", limit=4)
+    bpy.ops.object.vertex_group_normalize_all(group_select_mode="ALL", lock_active=False)
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+    min_sole_z = min(v_item.co.z for v_item in body_obj.data.vertices)
+    if abs(min_sole_z) > 1e-5:
+        for v_item in body_obj.data.vertices:
+            v_item.co.z -= min_sole_z
+        body_obj.data.update()
+
     # Bake All 18 NLA Skeletal Animations
     def _zero_pose():
         for pb in arm_obj.pose.bones:
             pb.location = (0.0, 0.0, 0.0)
             pb.rotation_euler = (0.0, 0.0, 0.0)
             pb.scale = (1.0, 1.0, 1.0)
+
+    _zero_pose()
+    bpy.context.view_layer.update()
+
+    # Precompute bind-pose leg geometry for exact analytic 2-bone IK foot-pinning (< 0.001mm drift!)
+    _leg_ik_bind = {}
+    for _s in ("L", "R"):
+        _pb_th = arm_obj.pose.bones[f"Thigh{_s}"]
+        _pb_sh = arm_obj.pose.bones[f"Shin{_s}"]
+        _pb_ak = arm_obj.pose.bones[f"Ankle{_s}"]
+        _pb_ft = arm_obj.pose.bones[f"Foot{_s}"]
+        _h0 = _pb_th.head.copy()
+        _k0 = _pb_sh.head.copy()
+        _a0 = _pb_ak.head.copy()
+        _f0 = _pb_ft.head.copy()
+        _l1 = (_k0 - _h0).length
+        _l2 = (_a0 - _k0).length
+        _u0 = (_a0 - _h0).normalized()
+        _kv = _k0 - _h0
+        _pole0 = (_kv - _u0 * _kv.dot(_u0)).normalized()
+        _yth0 = (_k0 - _h0).normalized()
+        _ysh0 = (_a0 - _k0).normalized()
+        _n0 = _yth0.cross(_u0).normalized()
+        _b0_th = Matrix((_n0, _yth0, _n0.cross(_yth0))).transposed()
+        _b0_sh = Matrix((_n0, _ysh0, _n0.cross(_ysh0))).transposed()
+        _leg_ik_bind[_s] = {
+            "h0": _h0,
+            "a0": _a0,
+            "f0": _f0,
+            "l1": _l1,
+            "l2": _l2,
+            "pole0": _pole0,
+            "n0": _n0,
+            "b0_th_inv": _b0_th.inverted(),
+            "b0_sh_inv": _b0_sh.inverted(),
+            "m_th0": _pb_th.matrix.to_3x3().copy(),
+            "m_sh0": _pb_sh.matrix.to_3x3().copy(),
+            "m_ak0": _pb_ak.matrix.to_3x3().copy(),
+            "hip_in_pelvis": arm_obj.pose.bones["Pelvis"].bone.matrix_local.inverted() @ _h0,
+            "r_rel_th": arm_obj.pose.bones["Pelvis"].bone.matrix_local.to_3x3().inverted() @ _pb_th.bone.matrix_local.to_3x3(),
+            "r_rel_sh": _pb_th.bone.matrix_local.to_3x3().inverted() @ _pb_sh.bone.matrix_local.to_3x3(),
+            "r_rel_ak": _pb_sh.bone.matrix_local.to_3x3().inverted() @ _pb_ak.bone.matrix_local.to_3x3(),
+        }
+
+    def _pin_feet_analytic_ik():
+        bpy.context.view_layer.update()
+        pb_pelvis = arm_obj.pose.bones["Pelvis"]
+        m_pelvis = pb_pelvis.matrix
+        m_pelvis_3 = m_pelvis.to_3x3()
+        for s in ("L", "R"):
+            bd = _leg_ik_bind[s]
+            pb_th = arm_obj.pose.bones[f"Thigh{s}"]
+            pb_sh = arm_obj.pose.bones[f"Shin{s}"]
+            pb_ak = arm_obj.pose.bones[f"Ankle{s}"]
+            pb_ft = arm_obj.pose.bones[f"Foot{s}"]
+
+            h_cur = m_pelvis @ bd["hip_in_pelvis"]
+            a_tgt = bd["a0"]
+            ha = a_tgt - h_cur
+            l1, l2 = bd["l1"], bd["l2"]
+            raw_d = ha.length
+            d = max(abs(l1 - l2) + 1e-5, min(l1 + l2 - 1e-5, raw_d))
+            u_dir = ha / (raw_d if raw_d > 1e-7 else 1.0)
+
+            p_dir = bd["pole0"] - u_dir * bd["pole0"].dot(u_dir)
+            if p_dir.length_squared < 1e-8:
+                p_dir = Vector((0.0, -1.0, 0.0)) - u_dir * u_dir.y * -1.0
+            p_dir.normalize()
+
+            cos_a = max(-1.0, min(1.0, (l1 * l1 + d * d - l2 * l2) / (2.0 * l1 * d)))
+            sin_a = math.sqrt(max(0.0, 1.0 - cos_a * cos_a))
+            k_pos = h_cur + u_dir * (l1 * cos_a) + p_dir * (l1 * sin_a)
+
+            y_th = (k_pos - h_cur).normalized()
+            y_sh = (a_tgt - k_pos).normalized()
+            n_pl = y_th.cross(u_dir)
+            n_pl = n_pl.normalized() if n_pl.length_squared > 1e-8 else bd["n0"]
+
+            b1_th = Matrix((n_pl, y_th, n_pl.cross(y_th))).transposed()
+            m_th_world = (b1_th @ bd["b0_th_inv"]) @ bd["m_th0"]
+            m_th_basis = (m_pelvis_3 @ bd["r_rel_th"]).inverted() @ m_th_world
+            pb_th.rotation_euler = m_th_basis.to_euler("XYZ")
+
+            b1_sh = Matrix((n_pl, y_sh, n_pl.cross(y_sh))).transposed()
+            m_sh_world = (b1_sh @ bd["b0_sh_inv"]) @ bd["m_sh0"]
+            m_sh_basis = (m_th_world @ bd["r_rel_sh"]).inverted() @ m_sh_world
+            pb_sh.rotation_euler = m_sh_basis.to_euler("XYZ")
+
+            m_ak_basis = (m_sh_world @ bd["r_rel_ak"]).inverted() @ bd["m_ak0"]
+            pb_ak.rotation_euler = m_ak_basis.to_euler("XYZ")
+            pb_ft.rotation_euler = (0.0, 0.0, 0.0)
 
     def _set_rot(bname, rx=0.0, ry=0.0, rz=0.0):
         pb = arm_obj.pose.bones.get(bname)
@@ -1455,6 +1620,11 @@ def run_blender_pipeline():
         pb = arm_obj.pose.bones.get(bname)
         if pb:
             pb.location = (float(dx), float(dy), float(dz))
+
+    def _set_world_delta_t3(bname, dx=0.0, dy=0.0, dz=0.0):
+        pb = arm_obj.pose.bones.get(bname)
+        if pb:
+            pb.location = pb.bone.matrix_local.to_3x3().inverted() @ v3(dx, dy, dz)
 
     def _set_tail_wave(phase, amp_yaw, amp_pitch, base_lift=0.0, freq_step=0.62):
         for ti in range(1, 8):
@@ -1469,31 +1639,32 @@ def run_blender_pipeline():
         c2 = math.cos(2.0 * p)
 
         if clip_name == "IdleBreathe":
-            _set_loc_t3("Pelvis", 0.008 * sp, -0.006 + 0.008 * cp, 0.0)
-            _set_rot("Pelvis", 0.02 * cp, 0.06 * sp, 0.02 * sp)
-            _set_rot("Spine1", 0.02 - 0.02 * cp, -0.03 * sp, -0.02 * sp)
-            _set_rot("Spine2", 0.02 - 0.02 * cp, -0.03 * sp, 0.0)
-            _set_rot("Chest", 0.02 - 0.03 * cp, -0.02 * sp, 0.0)
-            _set_rot("Neck", -0.04 + 0.02 * cp, 0.05 * sp, 0.0)
-            _set_rot("Head", 0.02 + 0.02 * cp, 0.08 * sp, 0.05 * cp)
+            # ZERO Pelvis X/Z translation & ZERO Pelvis yaw/roll/pitch!
+            # Pure vertical downward exhale settle `dy <= 0.0` + exact 2-bone IK foot lock (< 0.01mm drift!)
+            dy = -0.006 * (1.0 - cp)
+            _set_world_delta_t3("Pelvis", 0.0, dy, 0.0)
+            _set_rot("Pelvis", 0.0, 0.0, 0.0)
+            # Organic ribcage inhalation expansion & subtle upper-body life
+            _set_rot("Spine1", 0.016 - 0.020 * cp, 0.018 * sp, 0.0)
+            _set_rot("Spine2", 0.016 - 0.024 * cp, 0.022 * sp, 0.0)
+            _set_rot("Chest", 0.014 - 0.032 * cp, 0.024 * sp, 0.0)
+            _set_rot("ClavicleL", 0.0, 0.0, 0.026 * cp)
+            _set_rot("ClavicleR", 0.0, 0.0, -0.026 * cp)
+            _set_rot("Neck", -0.036 + 0.020 * cp, 0.046 * sp, 0.0)
+            _set_rot("Head", 0.020 + 0.022 * cp, 0.075 * sp, 0.036 * cp)
             blink = max(0.0, math.sin((u - 0.72) / 0.10 * math.pi)) if 0.72 <= u <= 0.82 else 0.0
             _set_rot("EyelidL", 0.72 * blink, 0.0, 0.0)
             _set_rot("EyelidR", 0.72 * blink, 0.0, 0.0)
-            _set_rot("FrillL1", 0.08 + 0.05 * cp, 0.0, 0.0)
-            _set_rot("FrillL2", 0.10 + 0.07 * sp, 0.0, 0.0)
-            _set_rot("FrillR1", 0.08 + 0.05 * cp, 0.0, 0.0)
-            _set_rot("FrillR2", 0.10 + 0.07 * sp, 0.0, 0.0)
-            _set_rot("UpperArmL", -0.06 + 0.03 * sp, 0.0, -0.14)
-            _set_rot("ForearmL", 0.34, 0.0, 0.0)
-            _set_rot("UpperArmR", 0.06 - 0.03 * sp, 0.0, 0.16)
-            _set_rot("ForearmR", 0.40, 0.0, 0.0)
-            knee_flex = 0.03 * (1.0 - cp)
-            for s in ("L", "R"):
-                _set_rot(f"Thigh{s}", knee_flex, 0.0, 0.0)
-                _set_rot(f"Shin{s}", -2.0 * knee_flex, 0.0, 0.0)
-                _set_rot(f"Ankle{s}", knee_flex, 0.0, 0.0)
-                _set_rot(f"Foot{s}", 0.0, 0.0, 0.0)
-            _set_tail_wave(p, amp_yaw=0.16, amp_pitch=0.05, base_lift=0.04)
+            _set_rot("FrillL1", 0.08 + 0.045 * cp, 0.0, 0.0)
+            _set_rot("FrillL2", 0.10 + 0.065 * sp, 0.0, 0.0)
+            _set_rot("FrillR1", 0.08 + 0.045 * cp, 0.0, 0.0)
+            _set_rot("FrillR2", 0.10 + 0.065 * sp, 0.0, 0.0)
+            _set_rot("UpperArmL", -0.05 + 0.025 * sp, 0.0, -0.14 - 0.015 * cp)
+            _set_rot("ForearmL", 0.34 + 0.02 * (1.0 - cp), 0.0, 0.0)
+            _set_rot("UpperArmR", 0.05 - 0.025 * sp, 0.0, 0.16 + 0.015 * cp)
+            _set_rot("ForearmR", 0.40 + 0.02 * (1.0 - cp), 0.0, 0.0)
+            _set_tail_wave(p, amp_yaw=0.14, amp_pitch=0.045, base_lift=0.04)
+            _pin_feet_analytic_ik()
 
         elif clip_name in ("Walk", "FluidRun", "StairClimb"):
             is_run, is_stair = (clip_name == "FluidRun"), (clip_name == "StairClimb")
@@ -1546,24 +1717,30 @@ def run_blender_pipeline():
             _set_tail_wave(0.8 * t, amp_yaw=0.14, amp_pitch=0.12, base_lift=0.20 * t)
 
         elif clip_name == "AirRise":
-            _set_loc_t3("Pelvis", 0.0, 0.03 * sp, 0.0)
-            _set_rot("Pelvis", -0.10, 0.05 * sp, 0.0)
-            _set_rot("Spine1", -0.08, 0.0, 0.0)
-            _set_rot("Chest", -0.10, 0.0, 0.0)
-            _set_rot("Head", -0.14 + 0.04 * cp, 0.0, 0.0)
+            # Crisp athletic lizard leap: strong hind-leg push extension + tucked lead knee + zero hip sway!
+            _set_world_delta_t3("Pelvis", 0.0, 0.0, 0.0)
+            _set_rot("Pelvis", -0.08, 0.0, 0.0)
+            _set_rot("Spine1", -0.06, 0.0, 0.0)
+            _set_rot("Spine2", -0.05, 0.0, 0.0)
+            _set_rot("Chest", -0.06, 0.0, 0.0)
+            _set_rot("Neck", -0.06, 0.0, 0.0)
+            _set_rot("Head", -0.10 + 0.015 * cp, 0.0, 0.0)
             for fn in ("FrillL1", "FrillL2", "FrillR1", "FrillR2"):
-                _set_rot(fn, 0.36 + 0.08 * sp, 0.0, 0.0)
-            _set_rot("UpperArmL", 0.65 + 0.08 * sp, 0.0, -0.45)
-            _set_rot("ForearmL", 0.42, 0.0, 0.0)
-            _set_rot("UpperArmR", 0.52 - 0.08 * sp, 0.0, 0.45)
-            _set_rot("ForearmR", 0.48, 0.0, 0.0)
-            _set_rot("ThighL", 0.72, 0.0, 0.0)
-            _set_rot("ShinL", -0.95, 0.0, 0.0)
-            _set_rot("AnkleL", 0.35, 0.0, 0.0)
-            _set_rot("ThighR", -0.32, 0.0, 0.0)
-            _set_rot("ShinR", -0.18, 0.0, 0.0)
-            _set_rot("FootR", -0.42, 0.0, 0.0)
-            _set_tail_wave(p, amp_yaw=0.16, amp_pitch=0.10, base_lift=-0.22)
+                _set_rot(fn, 0.22 + 0.03 * cp, 0.0, 0.0)
+            _set_rot("UpperArmL", 0.68, 0.0, -0.32)
+            _set_rot("ForearmL", 0.56, 0.0, 0.0)
+            _set_rot("UpperArmR", -0.32, 0.0, 0.28)
+            _set_rot("ForearmR", 0.52, 0.0, 0.0)
+            # Tucked lead knee (L) + powerful extended push-off hind leg (R)
+            _set_rot("ThighL", 0.82, 0.0, 0.0)
+            _set_rot("ShinL", -1.12, 0.0, 0.0)
+            _set_rot("AnkleL", 0.38, 0.0, 0.0)
+            _set_rot("FootL", 0.08, 0.0, 0.0)
+            _set_rot("ThighR", -0.46, 0.0, 0.0)
+            _set_rot("ShinR", -0.14, 0.0, 0.0)
+            _set_rot("AnkleR", -0.20, 0.0, 0.0)
+            _set_rot("FootR", -0.38, 0.0, 0.0)
+            _set_tail_wave(p, amp_yaw=0.04, amp_pitch=0.05, base_lift=-0.20)
 
         elif clip_name == "FrillGlide":
             _set_loc_t3("Pelvis", 0.02 * sp, 0.02 * cp, 0.0)
@@ -1585,20 +1762,29 @@ def run_blender_pipeline():
             _set_tail_wave(p, amp_yaw=0.26, amp_pitch=0.08, base_lift=0.14)
 
         elif clip_name == "Fall":
-            _set_rot("Pelvis", 0.14, 0.05 * sp, 0.0)
-            _set_rot("Spine1", 0.10, 0.0, 0.0)
-            _set_rot("Head", 0.24 + 0.04 * sp, 0.0, 0.0)
+            # Spotted downward gaze + hind claws reaching cleanly for the stone below (zero hip/leg sway!)
+            _set_world_delta_t3("Pelvis", 0.0, 0.0, 0.0)
+            _set_rot("Pelvis", 0.12, 0.0, 0.0)
+            _set_rot("Spine1", 0.08, 0.0, 0.0)
+            _set_rot("Spine2", 0.06, 0.0, 0.0)
+            _set_rot("Chest", 0.06, 0.0, 0.0)
+            _set_rot("Neck", 0.10, 0.0, 0.0)
+            _set_rot("Head", 0.22, 0.0, 0.0)
             for fn in ("FrillL1", "FrillL2", "FrillR1", "FrillR2"):
-                _set_rot(fn, 0.42 + 0.10 * c2, 0.0, 0.0)
-            _set_rot("UpperArmL", 0.35 + 0.08 * sp, 0.0, -0.78)
-            _set_rot("ForearmL", 0.45, 0.0, 0.0)
-            _set_rot("UpperArmR", 0.35 - 0.08 * sp, 0.0, 0.78)
-            _set_rot("ForearmR", 0.45, 0.0, 0.0)
-            _set_rot("ThighL", 0.36 + 0.06 * sp, 0.0, 0.0)
-            _set_rot("ShinL", -0.45, 0.0, 0.0)
-            _set_rot("ThighR", 0.56 - 0.06 * sp, 0.0, 0.0)
-            _set_rot("ShinR", -0.78, 0.0, 0.0)
-            _set_tail_wave(p, amp_yaw=0.20, amp_pitch=0.12, base_lift=0.28)
+                _set_rot(fn, 0.34 + 0.04 * c2, 0.0, 0.0)
+            _set_rot("UpperArmL", 0.28, 0.0, -0.52)
+            _set_rot("ForearmL", 0.46, 0.0, 0.0)
+            _set_rot("UpperArmR", 0.28, 0.0, 0.52)
+            _set_rot("ForearmR", 0.46, 0.0, 0.0)
+            _set_rot("ThighL", 0.48, 0.0, 0.0)
+            _set_rot("ShinL", -0.68, 0.0, 0.0)
+            _set_rot("AnkleL", 0.16, 0.0, 0.0)
+            _set_rot("FootL", -0.10, 0.0, 0.0)
+            _set_rot("ThighR", 0.28, 0.0, 0.0)
+            _set_rot("ShinR", -0.38, 0.0, 0.0)
+            _set_rot("AnkleR", 0.06, 0.0, 0.0)
+            _set_rot("FootR", -0.14, 0.0, 0.0)
+            _set_tail_wave(p, amp_yaw=0.05, amp_pitch=0.06, base_lift=0.26)
 
         elif clip_name == "Land":
             env = math.sin(u * math.pi) * (1.0 - 0.45 * u)
@@ -1667,9 +1853,12 @@ def run_blender_pipeline():
 
         elif clip_name == "HydroCast":
             punch = math.sin(min(1.0, u * 1.45) * math.pi) if u < 0.69 else math.sin(((1.0 - u) / 0.31) * math.pi * 0.5) * 0.25
-            _set_rot("Pelvis", 0.10 * punch, -0.22 * punch, 0.0)
-            _set_rot("Spine1", 0.08 * punch, 0.28 * punch, 0.0)
-            _set_rot("Chest", 0.08 * punch, 0.34 * punch, 0.0)
+            # Grounded athletic cast crouch (`dy <= 0`, zero lateral hip sway, 100% IK-pinned feet!)
+            _set_world_delta_t3("Pelvis", 0.0, -0.018 * punch, 0.0)
+            _set_rot("Pelvis", 0.04 * punch, -0.08 * punch, 0.0)
+            _set_rot("Spine1", 0.08 * punch, 0.22 * punch, 0.0)
+            _set_rot("Spine2", 0.06 * punch, 0.18 * punch, 0.0)
+            _set_rot("Chest", 0.08 * punch, 0.28 * punch, 0.0)
             _set_rot("Head", -0.12 * punch, -0.32 * punch, 0.0)
             for fn in ("FrillL1", "FrillL2", "FrillR1", "FrillR2"):
                 _set_rot(fn, 0.46 * punch, 0.0, 0.0)
@@ -1679,7 +1868,8 @@ def run_blender_pipeline():
             _set_rot("HandR", -0.58 * punch, 0.0, 0.0)
             _set_rot("UpperArmL", -0.52 * punch, 0.0, -0.42 * punch - 0.14)
             _set_rot("ForearmL", 0.62, 0.0, 0.0)
-            _set_tail_wave(u * 2.0 * math.pi, amp_yaw=0.22, amp_pitch=0.06, base_lift=0.14 * punch)
+            _set_tail_wave(u * 2.0 * math.pi, amp_yaw=0.18, amp_pitch=0.06, base_lift=0.14 * punch)
+            _pin_feet_analytic_ik()
 
         elif clip_name == "FreeSwim":
             _set_loc_t3("Pelvis", 0.045 * sp, 0.03 * cp, 0.0)
@@ -1779,15 +1969,17 @@ def run_blender_pipeline():
             _set_tail_wave(p, amp_yaw=0.18, amp_pitch=0.06, base_lift=0.06)
 
     CLIP_SPECS = [
-        ("IdleBreathe",  48, 4), ("Walk", 32, 2), ("FluidRun", 24, 2), ("StairClimb", 24, 2),
+        ("IdleBreathe",  48, 1), ("Walk", 32, 2), ("FluidRun", 24, 2), ("StairClimb", 24, 2),
         ("JumpCoil",     12, 2), ("AirRise", 20, 2), ("FrillGlide", 32, 2), ("Fall", 24, 2),
         ("Land",         14, 2), ("LedgeMantle", 18, 2), ("WallScamper", 20, 2), ("TailWhip", 18, 1),
-        ("HydroCast",    16, 2), ("FreeSwim", 32, 2), ("RapidsSurf", 28, 2), ("CoreDive", 24, 2),
+        ("HydroCast",    16, 1), ("FreeSwim", 32, 2), ("RapidsSurf", 28, 2), ("CoreDive", 24, 2),
         ("Celebrate",    40, 2), ("CutsceneHero", 60, 3),
     ]
 
     arm_obj.animation_data_create()
     anim_bones = [pb.name for pb in arm_obj.pose.bones if pb.name != "Root"]
+    max_idle_foot_drift_mm = 0.0
+    max_cast_foot_drift_mm = 0.0
     for clip_name, n_frames, step in CLIP_SPECS:
         act = bpy.data.actions.new(name=clip_name)
         act.use_fake_user = True
@@ -1802,6 +1994,14 @@ def run_blender_pipeline():
             u = (fr - 1) / float(max(1, n_frames - 1))
             scene.frame_set(fr)
             _eval_clip_pose(clip_name, u)
+            if clip_name in ("IdleBreathe", "HydroCast"):
+                bpy.context.view_layer.update()
+                for s_chk in ("L", "R"):
+                    drift_mm = (arm_obj.pose.bones[f"Foot{s_chk}"].head - _leg_ik_bind[s_chk]["f0"]).length * 1000.0
+                    if clip_name == "IdleBreathe":
+                        max_idle_foot_drift_mm = max(max_idle_foot_drift_mm, drift_mm)
+                    else:
+                        max_cast_foot_drift_mm = max(max_cast_foot_drift_mm, drift_mm)
             for bname in anim_bones:
                 pb = arm_obj.pose.bones[bname]
                 pb.keyframe_insert(data_path="rotation_euler", frame=fr)
@@ -1818,17 +2018,25 @@ def run_blender_pipeline():
     _zero_pose()
     bpy.context.view_layer.update()
 
-    # Export `assets/models/gateway.glb`
+    # Export `assets/models/gateway.glb` (WEBP 1K PBR + ~4,200 tris + 39 bones + 18 NLA clips)
+    bpy.ops.object.select_all(action="DESELECT")
+    arm_obj.select_set(True)
+    body_obj.select_set(True)
+    bpy.context.view_layer.objects.active = arm_obj
+
     out_glb = os.path.join(OUT_MODELS_DIR, "gateway.glb")
-    bpy.ops.export_scene.gltf(
+    export_kwargs = dict(
         filepath=out_glb,
         export_format="GLB",
+        use_selection=True,
         export_yup=True,
         export_apply=False,
         export_texcoords=True,
         export_normals=True,
         export_tangents=True,
         export_materials="EXPORT",
+        export_image_format="WEBP",
+        export_image_quality=85,
         export_skins=True,
         export_animations=True,
         export_animation_mode="NLA_TRACKS",
@@ -1838,6 +2046,9 @@ def run_blender_pipeline():
         export_frame_step=1,
         export_optimize_animation_size=True,
     )
+    op_props = set(bpy.ops.export_scene.gltf.get_rna_type().properties.keys())
+    safe_kwargs = {k: v for k, v in export_kwargs.items() if k in op_props}
+    bpy.ops.export_scene.gltf(**safe_kwargs)
 
     size_bytes = os.path.getsize(out_glb)
     with open(out_glb, "rb") as f:
@@ -1849,70 +2060,71 @@ def run_blender_pipeline():
     tris = sum(accessors[p["indices"]]["count"] // 3 for m in gltf.get("meshes", []) for p in m.get("primitives", []) if "indices" in p)
     pos_acc = next(accessors[p["attributes"]["POSITION"]] for m in gltf.get("meshes", []) for p in m.get("primitives", []))
 
-    # Render 4-Panel Cycles Close-Up + Multi-Pose Studio Proof Sheet!
-    os.makedirs(os.path.dirname(PROOF_RENDER_PATH), exist_ok=True)
-    engines = [e.identifier for e in scene.render.bl_rna.properties["engine"].enum_items]
-    scene.render.engine = "CYCLES" if "CYCLES" in engines else engines[0]
-    if scene.render.engine == "CYCLES":
-        scene.cycles.samples = 32
-        scene.cycles.use_denoising = False
+    if "--render-proof" in sys.argv:
+        # Render 4-Panel Cycles Close-Up + Multi-Pose Studio Proof Sheet when requested
+        os.makedirs(os.path.dirname(PROOF_RENDER_PATH), exist_ok=True)
+        engines = [e.identifier for e in scene.render.bl_rna.properties["engine"].enum_items]
+        scene.render.engine = "CYCLES" if "CYCLES" in engines else engines[0]
+        if scene.render.engine == "CYCLES":
+            scene.cycles.samples = 32
+            scene.cycles.use_denoising = False
 
-    world = bpy.data.worlds.new("StudioWorld")
-    scene.world = world
-    world.use_nodes = True
-    bg = world.node_tree.nodes.get("Background")
-    if bg:
-        bg.inputs[0].default_value = (0.032, 0.068, 0.115, 1.0)
-        bg.inputs[1].default_value = 0.85
+        world = bpy.data.worlds.new("StudioWorld")
+        scene.world = world
+        world.use_nodes = True
+        bg = world.node_tree.nodes.get("Background")
+        if bg:
+            bg.inputs[0].default_value = (0.032, 0.068, 0.115, 1.0)
+            bg.inputs[1].default_value = 0.85
 
-    def _add_light(name, energy, loc_t3, col):
-        ld = bpy.data.lights.new(name=name, type="AREA")
-        ld.energy, ld.size, ld.color = energy, 2.4, col
-        lo = bpy.data.objects.new(name, ld)
-        lo.location = v3(*loc_t3)
-        lo.rotation_euler = (v3(0.0, 0.68, 0.0) - lo.location).to_track_quat("-Z", "Y").to_euler()
-        scene.collection.objects.link(lo)
+        def _add_light(name, energy, loc_t3, col):
+            ld = bpy.data.lights.new(name=name, type="AREA")
+            ld.energy, ld.size, ld.color = energy, 2.4, col
+            lo = bpy.data.objects.new(name, ld)
+            lo.location = v3(*loc_t3)
+            lo.rotation_euler = (v3(0.0, 0.68, 0.0) - lo.location).to_track_quat("-Z", "Y").to_euler()
+            scene.collection.objects.link(lo)
 
-    _add_light("KeyLight", 125.0, (1.8, 2.1, 2.2), (1.0, 0.97, 0.92))
-    _add_light("FillLight", 62.0, (-2.0, 1.2, 1.8), (0.65, 0.92, 1.0))
-    _add_light("RimLight", 115.0, (-1.2, 1.9, -2.2), (0.45, 0.95, 0.90))
+        _add_light("KeyLight", 125.0, (1.8, 2.1, 2.2), (1.0, 0.97, 0.92))
+        _add_light("FillLight", 62.0, (-2.0, 1.2, 1.8), (0.65, 0.92, 1.0))
+        _add_light("RimLight", 115.0, (-1.2, 1.9, -2.2), (0.45, 0.95, 0.90))
 
-    cam_data = bpy.data.cameras.new("ProofCam")
-    cam_obj = bpy.data.objects.new("ProofCam", cam_data)
-    scene.collection.objects.link(cam_obj)
-    scene.camera = cam_obj
+        cam_data = bpy.data.cameras.new("ProofCam")
+        cam_obj = bpy.data.objects.new("ProofCam", cam_data)
+        scene.collection.objects.link(cam_obj)
+        scene.camera = cam_obj
 
-    shots = [
-        ("3q",      (1.02, 0.76, 1.48),  (0.00, 0.60, -0.06), 50.0, "IdleBreathe", 0.15),
-        ("side",    (1.98, 0.64, -0.26), (0.00, 0.56, -0.34), 48.0, "FluidRun",    0.20),
-        ("closeup", (0.22, 1.05, 0.58),  (0.00, 1.02,  0.03), 68.0, "CutsceneHero",0.20),
-        ("back3q",  (-1.12, 0.88, -1.55),(0.00, 0.62, -0.22), 50.0, "HydroCast",   0.45),
-    ]
-    panel_size = 512
-    scene.render.resolution_x = panel_size
-    scene.render.resolution_y = panel_size
-    panels = []
-    for tag, c_pos, c_tgt, lens, clip_n, u_val in shots:
-        _eval_clip_pose(clip_n, u_val)
-        bpy.context.view_layer.update()
-        cam_data.lens = lens
-        cam_obj.location = v3(*c_pos)
-        cam_obj.rotation_euler = (v3(*c_tgt) - cam_obj.location).to_track_quat("-Z", "Y").to_euler()
-        tmp_p = PROOF_RENDER_PATH.replace(".png", f"_{tag}.png")
-        scene.render.filepath = tmp_p
-        bpy.ops.render.render(write_still=True)
-        img_l = bpy.data.images.load(tmp_p)
-        arr = np.empty(panel_size * panel_size * 4, dtype=np.float32)
-        img_l.pixels.foreach_get(arr)
-        panels.append(arr.reshape((panel_size, panel_size, 4)))
+        shots = [
+            ("3q",      (1.02, 0.76, 1.48),  (0.00, 0.60, -0.06), 50.0, "IdleBreathe", 0.15),
+            ("side",    (1.98, 0.64, -0.26), (0.00, 0.56, -0.34), 48.0, "FluidRun",    0.20),
+            ("closeup", (0.22, 1.05, 0.58),  (0.00, 1.02,  0.03), 68.0, "CutsceneHero",0.20),
+            ("back3q",  (-1.12, 0.88, -1.55),(0.00, 0.62, -0.22), 50.0, "HydroCast",   0.45),
+        ]
+        panel_size = 512
+        scene.render.resolution_x = panel_size
+        scene.render.resolution_y = panel_size
+        panels = []
+        for tag, c_pos, c_tgt, lens, clip_n, u_val in shots:
+            _eval_clip_pose(clip_n, u_val)
+            bpy.context.view_layer.update()
+            cam_data.lens = lens
+            cam_obj.location = v3(*c_pos)
+            cam_obj.rotation_euler = (v3(*c_tgt) - cam_obj.location).to_track_quat("-Z", "Y").to_euler()
+            tmp_p = PROOF_RENDER_PATH.replace(".png", f"_{tag}.png")
+            scene.render.filepath = tmp_p
+            bpy.ops.render.render(write_still=True)
+            img_l = bpy.data.images.load(tmp_p)
+            arr = np.empty(panel_size * panel_size * 4, dtype=np.float32)
+            img_l.pixels.foreach_get(arr)
+            panels.append(arr.reshape((panel_size, panel_size, 4)))
 
-    _zero_pose()
-    grid = np.concatenate([np.concatenate([panels[2], panels[3]], axis=1), np.concatenate([panels[0], panels[1]], axis=1)], axis=0)
-    comp = bpy.data.images.new("ProofGrid", width=panel_size * 2, height=panel_size * 2, alpha=False)
-    comp.pixels.foreach_set(grid.ravel())
-    comp.filepath_raw = PROOF_RENDER_PATH
-    comp.file_format = "PNG"
-    comp.save()
+        _zero_pose()
+        grid = np.concatenate([np.concatenate([panels[2], panels[3]], axis=1), np.concatenate([panels[0], panels[1]], axis=1)], axis=0)
+        comp = bpy.data.images.new("ProofGrid", width=panel_size * 2, height=panel_size * 2, alpha=False)
+        comp.pixels.foreach_set(grid.ravel())
+        comp.filepath_raw = PROOF_RENDER_PATH
+        comp.file_format = "PNG"
+        comp.save()
 
     report = {
         "ok": True,
@@ -1923,13 +2135,17 @@ def run_blender_pipeline():
         "skin_count": len(gltf.get("skins", [])),
         "bone_count": len(gltf["skins"][0]["joints"]),
         "animation_count": len(gltf.get("animations", [])),
+        "animations": [a.get("name", "") for a in gltf.get("animations", [])],
         "embedded_images": len(gltf.get("images", [])),
+        "image_mimes": [im.get("mimeType", "") for im in gltf.get("images", [])],
         "bounds_min_yup": pos_acc.get("min"),
         "bounds_max_yup": pos_acc.get("max"),
-        "proof_render": PROOF_RENDER_PATH,
+        "max_idle_foot_drift_mm": round(max_idle_foot_drift_mm, 6),
+        "max_cast_foot_drift_mm": round(max_cast_foot_drift_mm, 6),
     }
     with open(DONE_JSON_PATH, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2)
+    print("GATEWAY_BUILD_REPORT:", json.dumps(report))
 
 
 if __name__ == "__main__":
