@@ -1643,6 +1643,357 @@ export class GameRenderer {
     this.wildlifeLagoonSlots = [];
     this._initWildlifeLagoon();
     this.towerScene.add(this.wildlifeLagoonGroup);
+
+    // Round 4: Pooled 7-Enemy Personality Visual Tells & Mortar Trailing Droplets (ZERO PointLights, <= 2 draw calls!)
+    this._initEnemyTellVfxPools();
+  }
+
+  _initEnemyTellVfxPools() {
+    this._wwPos = new THREE.Vector3();
+    this._wwQuat = new THREE.Quaternion();
+    this._wwScl = new THREE.Vector3();
+    this._wwEuler = new THREE.Euler();
+    this._wwMat = new THREE.Matrix4();
+    this._wwDummy = new THREE.Object3D();
+    this._wwCol = new THREE.Color();
+    this._wwLook = new THREE.Vector3();
+
+    this.enemyTellSparkGeo = new THREE.PlaneGeometry(0.16, 0.16);
+    this.enemyTellSparkMat = new THREE.MeshBasicMaterial({
+      map: this.glowDotTex,
+      color: '#ffffff',
+      transparent: true,
+      opacity: 0.92,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.enemyTellSparkInst = new THREE.InstancedMesh(this.enemyTellSparkGeo, this.enemyTellSparkMat, 96);
+    this.enemyTellSparkInst.frustumCulled = false;
+    this.enemyTellSparkInst.visible = false;
+    this.enemyTellSparkInst.count = 0;
+    this.towerScene.add(this.enemyTellSparkInst);
+
+    this.enemyTellSteamGeo = new THREE.PlaneGeometry(0.30, 0.30);
+    this.enemyTellSteamMat = new THREE.MeshBasicMaterial({
+      map: this.glowDotTex,
+      color: '#f1f5f9',
+      transparent: true,
+      opacity: 0.56,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.enemyTellSteamInst = new THREE.InstancedMesh(this.enemyTellSteamGeo, this.enemyTellSteamMat, 64);
+    this.enemyTellSteamInst.frustumCulled = false;
+    this.enemyTellSteamInst.visible = false;
+    this.enemyTellSteamInst.count = 0;
+    this.towerScene.add(this.enemyTellSteamInst);
+  }
+
+  _applyTowerWorldWeight(cached, state, fh, time) {
+    if (!cached) return;
+    const tower = state?.tower || cached.tower || {};
+    const ledges = state?.ledges || tower?.ledges || [];
+    const ledgeR = TOWER_RADIUS + LEDGE_STAND_OFFSET;
+
+    // 1. Weighted Crates (`box`: col + visualSlideCol) & Crumble Slabs (`crumble`: -crumbleDepress * 0.12)
+    if (cached.ledgeMeshes && ledges.length > 0) {
+      for (let i = 0; i < ledges.length; i++) {
+        const l = ledges[i];
+        const node = cached.ledgeMeshes[i];
+        if (!l || !node || l.gone) continue;
+        const ud = node.userData;
+        if (!ud) continue;
+
+        if (l.type === 'box' && Array.isArray(ud.batchRefs)) {
+          const effCol = (Number(l.col) || 0) + (Number(l.visualSlideCol) || 0);
+          const effPhi = (effCol + 0.5) * COL_ANGLE;
+          const prevPhi = ud._lastBoxPhi !== undefined ? ud._lastBoxPhi : ud.phi;
+          if (Math.abs(effPhi - prevPhi) > 1e-4) {
+            ud._lastBoxPhi = effPhi;
+            const bx = ledgeR * Math.sin(effPhi);
+            const bz = ledgeR * Math.cos(effPhi);
+            this._wwEuler.set(0, effPhi, 0);
+            this._wwQuat.setFromEuler(this._wwEuler);
+            for (let b = 0; b < ud.batchRefs.length; b++) {
+              const item = ud.batchRefs[b];
+              const out = item?._bandOutRef;
+              if (!out?.inst || !item?.m) continue;
+              item.m.decompose(this._wwPos, this._wwDummy.quaternion, this._wwScl);
+              this._wwPos.set(bx, this._wwPos.y, bz);
+              this._wwMat.compose(this._wwPos, this._wwQuat, this._wwScl);
+              out.inst.setMatrixAt(out.localIdx, this._wwMat);
+              out.inst.instanceMatrix.needsUpdate = true;
+            }
+          }
+        } else if (l.type === 'crumble' && node.visible) {
+          const depress = Number(l.crumbleDepress) || 0;
+          if (depress > 0.001) {
+            node.position.y -= depress * 0.12;
+            node.position.y += Math.sin(time * 52 + i * 1.7) * depress * 0.008;
+          }
+        }
+      }
+    }
+
+    // 2. Weighted Counterweight Elevators (`el.cabBounceOffset * FLOOR_HEIGHT`)
+    const elevators = state?.elevators || tower?.elevators || [];
+    if (cached.elevatorPods && elevators.length > 0) {
+      for (let i = 0; i < elevators.length; i++) {
+        const el = elevators[i];
+        const pod = cached.elevatorPods[i];
+        if (!el || !pod) continue;
+        const bounce = Number(el.cabBounceOffset) || 0;
+        if (Math.abs(bounce) > 1e-4) {
+          const bounceY = bounce * fh;
+          pod.position.y += bounceY;
+          const pUd = pod.userData;
+          if (pUd?.update) pUd.update();
+          if (pUd?.cwtNode) {
+            pUd.cwtNode.position.y -= bounceY * 0.65;
+          }
+        }
+      }
+    }
+  }
+
+  _syncEnemyPersonalityVfx(state, effCamCol, fh, time, dropY, focusFloor, hidden = false) {
+    if (!this.enemyTellSparkInst || !this.enemyTellSteamInst) return;
+    if (hidden) {
+      this.enemyTellSparkInst.visible = false;
+      this.enemyTellSparkInst.count = 0;
+      this.enemyTellSteamInst.visible = false;
+      this.enemyTellSteamInst.count = 0;
+      return;
+    }
+
+    const dm = this._wwDummy;
+    const col = this._wwCol;
+    const enemies = state?.enemies || [];
+    const rBase = TOWER_RADIUS + LEDGE_STAND_OFFSET;
+    let spCnt = 0;
+    let stCnt = 0;
+
+    // Track volt_eel exhausted dimming on active volt_eel rigs in enemyVisuals._buckets[2]
+    const eelBucket = this.enemyVisuals?._buckets?.[2] || null;
+    let eelSlotIdx = 0;
+
+    for (let i = 0; i < enemies.length; i++) {
+      const en = enemies[i];
+      if (!en || en.alive === false || en.dead) continue;
+      const th = wrapAngle(((Number(en.col) || 0) - effCamCol) * COL_ANGLE);
+      const enFloor = Number(en.floor) || 0;
+      const inView = Math.cos(th) >= -0.05 && Math.abs(enFloor - focusFloor) <= 3.6;
+
+      const t = String(en.type || '').toLowerCase();
+      const isEel = t.includes('volt_eel') || t === 'eel';
+      if (isEel && inView && eelBucket && eelSlotIdx < eelBucket.length) {
+        const rig = eelBucket[eelSlotIdx++];
+        const isExhausted = en.aiState === 'exhausted';
+        if (rig && rig.userData && rig.userData._lastExhausted !== isExhausted) {
+          rig.userData._lastExhausted = isExhausted;
+          rig.traverse((o) => {
+            if (!o.isMesh || !o.material || Array.isArray(o.material)) return;
+            const m = o.material;
+            if (typeof m.emissiveIntensity === 'number' && m.emissiveIntensity > 0.05) {
+              if (m.userData._baseEmissive === undefined) {
+                m.userData._baseEmissive = m.emissiveIntensity;
+              }
+              m.emissiveIntensity = isExhausted ? m.userData._baseEmissive * 0.16 : m.userData._baseEmissive;
+            }
+          });
+        }
+      }
+
+      if (!inView) continue;
+
+      const ex = rBase * Math.sin(th);
+      const ez = rBase * Math.cos(th);
+      const ey = enFloor * fh + dropY;
+      // Tangent unit vector along tower circumference (+col direction)
+      const tanX = Math.cos(th);
+      const tanZ = -Math.sin(th);
+      const outX = Math.sin(th);
+      const outZ = Math.cos(th);
+
+      // 1. `rail_skater`: bright orange bronze-on-stone skate-brake sparks (`en.brakeBlend > 0.1`)
+      const brake = Number(en.brakeBlend) || 0;
+      if ((t.includes('rail_skater') || t === 'skater') && brake > 0.1 && spCnt < 96) {
+        const dir = en.dir >= 0 ? 1 : -1;
+        const sparkN = Math.min(8, 96 - spCnt);
+        for (let k = 0; k < sparkN; k++) {
+          const u = (time * (3.6 + (k % 3) * 0.9) + k * 0.27 + i * 0.41) % 1;
+          const back = -dir * (0.14 + u * 0.62);
+          const lift = 0.05 + Math.sin(u * Math.PI) * (0.28 + (k % 3) * 0.10) + u * 0.14;
+          const radOff = 0.06 + ((k % 3) - 1) * 0.09;
+          dm.position.set(
+            ex + tanX * back + outX * radOff,
+            ey + lift,
+            ez + tanZ * back + outZ * radOff
+          );
+          dm.quaternion.copy(this.towerCam.quaternion);
+          const sc = (0.55 + (1 - u) * 0.85) * clamp(brake, 0.35, 1.15);
+          dm.scale.set(sc * 1.45, sc * 0.72, 1);
+          dm.updateMatrix();
+          col.set(k % 2 === 0 ? '#fb923c' : '#fde047');
+          this.enemyTellSparkInst.setColorAt(spCnt, col);
+          this.enemyTellSparkInst.setMatrixAt(spCnt++, dm.matrix);
+        }
+      }
+
+      // 2. `volt_eel`: crackling cyan bio-electric aura ring / arc shimmer (`en.coilBlend > 0.2 || en.shockActive`)
+      const coil = Number(en.coilBlend) || 0;
+      const shock = Boolean(en.shockActive);
+      if (isEel && (coil > 0.2 || shock) && spCnt < 96) {
+        const arcN = Math.min(shock ? 14 : 9, 96 - spCnt);
+        const rad = shock ? 0.62 : 0.44 + coil * 0.14;
+        for (let k = 0; k < arcN; k++) {
+          const ang = (k / arcN) * TWO_PI + time * (shock ? 16 : 9) + i;
+          const jitter = Math.sin(time * 43 + k * 7.1) * (shock ? 0.14 : 0.07);
+          const ca = Math.cos(ang) * (rad + jitter);
+          const sa = Math.sin(ang) * (rad * 0.72 + jitter * 0.6);
+          dm.position.set(
+            ex + tanX * ca + outX * 0.14,
+            ey + 0.56 + sa,
+            ez + tanZ * ca + outZ * 0.14
+          );
+          dm.quaternion.copy(this.towerCam.quaternion);
+          const pulse = shock ? 0.95 + Math.sin(time * 38 + k) * 0.45 : 0.65 + coil * 0.4;
+          dm.scale.set(pulse * 1.35, pulse * 0.85, 1);
+          dm.updateMatrix();
+          col.set(k % 3 === 0 ? '#e0f2fe' : '#22d3ee');
+          this.enemyTellSparkInst.setColorAt(spCnt, col);
+          this.enemyTellSparkInst.setMatrixAt(spCnt++, dm.matrix);
+        }
+      }
+
+      // 3. `snap_crab`: angry white steam puffs during `aggro_tell` or `huff`
+      if (
+        (t.includes('snap_crab') || t === 'crab') &&
+        (en.aiState === 'aggro_tell' || en.aiState === 'huff') &&
+        stCnt < 64
+      ) {
+        const isHuff = en.aiState === 'huff';
+        const puffN = Math.min(6, 64 - stCnt);
+        for (let k = 0; k < puffN; k++) {
+          const side = k % 2 === 0 ? 1 : -1;
+          const u = (time * (isHuff ? 2.4 : 3.2) + k * 0.31 + i * 0.19) % 1;
+          const lat = side * (0.22 + u * 0.34);
+          const rise = 0.44 + u * 0.64;
+          dm.position.set(
+            ex + tanX * lat + outX * (0.14 + u * 0.12),
+            ey + rise,
+            ez + tanZ * lat + outZ * (0.14 + u * 0.12)
+          );
+          dm.quaternion.copy(this.towerCam.quaternion);
+          const sc = Math.sin(u * Math.PI) * (0.68 + u * 0.75);
+          dm.scale.setScalar(Math.max(0.01, sc));
+          dm.updateMatrix();
+          col.set(isHuff ? '#e2e8f0' : '#ffffff');
+          this.enemyTellSteamInst.setColorAt(stCnt, col);
+          this.enemyTellSteamInst.setMatrixAt(stCnt++, dm.matrix);
+        }
+      }
+
+      // 4. `vent_stalker`: warning steam wisps during `hiss_tell` before full `en.venting` plume!
+      if ((t.includes('vent_stalker') || t === 'stalker') && en.aiState === 'hiss_tell' && stCnt < 64) {
+        const wispN = Math.min(6, 64 - stCnt);
+        for (let k = 0; k < wispN; k++) {
+          const chimney = (k % 3) - 1;
+          const u = (time * 3.1 + k * 0.29 + i * 0.37) % 1;
+          const lat = chimney * 0.22 + Math.sin(time * 12 + k) * 0.04;
+          const rise = 0.62 + u * 0.88;
+          dm.position.set(
+            ex + tanX * lat + outX * 0.12,
+            ey + rise,
+            ez + tanZ * lat + outZ * 0.12
+          );
+          dm.quaternion.copy(this.towerCam.quaternion);
+          const sc = Math.sin(u * Math.PI) * (0.62 + u * 0.68);
+          dm.scale.setScalar(Math.max(0.01, sc));
+          dm.updateMatrix();
+          col.set(k % 2 === 0 ? '#e0f2fe' : '#bae6fd');
+          this.enemyTellSteamInst.setColorAt(stCnt, col);
+          this.enemyTellSteamInst.setMatrixAt(stCnt++, dm.matrix);
+        }
+      }
+    }
+
+    // 5. `barnacle_mortar` parabolic velocity-aligned water-bombs + trailing hydro-droplet beads!
+    const projs = state?.enemyProjectiles || null;
+    const projMeshes = this.enemyVisuals?._projectileMeshes || null;
+    if (Array.isArray(projs) && projs.length > 0) {
+      const rProj = TOWER_RADIUS + 0.56;
+      let usedMesh = 0;
+      for (let i = 0; i < projs.length; i++) {
+        const pr = projs[i];
+        if (!pr) continue;
+        const pFloor = Number(pr.floor) || 0;
+        if (Math.abs(pFloor - focusFloor) > 3.2) continue;
+        const th = wrapAngle(((Number(pr.col) || 0) - effCamCol) * COL_ANGLE);
+        if (Math.cos(th) < -0.15) continue;
+
+        const vxCols = Number(pr.vx ?? pr.speed) || 0;
+        const vyFloors = Number(pr.vy) || 0;
+        const vxW = vxCols * COL_ANGLE * rProj;
+        const vyW = vyFloors * fh;
+        const tanX = Math.cos(th);
+        const tanZ = -Math.sin(th);
+        const velX = vxW * tanX;
+        const velY = vyW;
+        const velZ = vxW * tanZ;
+        const speedMag = Math.hypot(velX, velY, velZ);
+
+        const px = rProj * Math.sin(th);
+        const py = pFloor * fh + 0.68 + dropY;
+        const pz = rProj * Math.cos(th);
+
+        // Orient & aerodynamically stretch the pooled mortar orb along its parabolic velocity tangent!
+        if (projMeshes && usedMesh < projMeshes.length) {
+          const pm = projMeshes[usedMesh++];
+          if (pm && pm.visible && speedMag > 0.15) {
+            this._wwLook.set(pm.position.x + velX, pm.position.y + velY, pm.position.z + velZ);
+            pm.lookAt(this._wwLook);
+            const stretch = clamp(1.16 + speedMag * 0.055, 1.16, 1.72);
+            const baseS = 1.22;
+            pm.scale.set(baseS * 0.84, baseS * 0.84, baseS * stretch);
+          }
+        }
+
+        // Trailing droplet beads behind the arcing mortar bomb
+        if (speedMag > 0.15 && spCnt < 96) {
+          const invS = 1 / speedMag;
+          const dx = -velX * invS;
+          const dy = -velY * invS;
+          const dz = -velZ * invS;
+          for (let d = 1; d <= 3 && spCnt < 96; d++) {
+            const dist = d * 0.22 + ((time * 2.4 + d * 0.3) % 0.14);
+            dm.position.set(px + dx * dist, py + dy * dist, pz + dz * dist);
+            dm.quaternion.copy(this.towerCam.quaternion);
+            const sc = (0.92 - d * 0.22) * (0.9 + Math.sin(time * 18 + d) * 0.12);
+            dm.scale.setScalar(Math.max(0.18, sc));
+            dm.updateMatrix();
+            col.set(pr.deflected ? '#5efce8' : '#7dd3fc');
+            this.enemyTellSparkInst.setColorAt(spCnt, col);
+            this.enemyTellSparkInst.setMatrixAt(spCnt++, dm.matrix);
+          }
+        }
+      }
+    }
+
+    this.enemyTellSparkInst.count = spCnt;
+    this.enemyTellSparkInst.visible = spCnt > 0;
+    if (spCnt > 0) {
+      this.enemyTellSparkInst.instanceMatrix.needsUpdate = true;
+      if (this.enemyTellSparkInst.instanceColor) this.enemyTellSparkInst.instanceColor.needsUpdate = true;
+    }
+
+    this.enemyTellSteamInst.count = stCnt;
+    this.enemyTellSteamInst.visible = stCnt > 0;
+    if (stCnt > 0) {
+      this.enemyTellSteamInst.instanceMatrix.needsUpdate = true;
+      if (this.enemyTellSteamInst.instanceColor) this.enemyTellSteamInst.instanceColor.needsUpdate = true;
+    }
   }
 
   _buildTurntableHalo() {
@@ -2967,6 +3318,7 @@ export class GameRenderer {
     }
 
     updateTowerArchitecture(cached, state, time, dt);
+    this._applyTowerWorldWeight(cached, state, fh, time);
 
     // Update Collectibles (`waterDrop`, `waterSeed`, `relic`, `curio`, plus Wave 3 `critterPods`!)
     const rawCols = state.collectibles || [];
@@ -3311,6 +3663,17 @@ export class GameRenderer {
         this._trimEnemyShadows();
       }
     }
+
+    // Round 4: 7-Enemy Personality Visual Tells (skater sparks, eel arcs, crab/stalker steam, parabolic mortar bombs!)
+    this._syncEnemyPersonalityVfx(
+      state,
+      effCamCol,
+      fh,
+      time,
+      topple.active ? tg.position.y : 0,
+      hero?.floor != null ? hero.floor : camFloor,
+      isWardrobe || isBestiary
+    );
 
     // Wave 4: 3D Telegraphed Boss Hazards (`state.bossHazards` sweeping hydro-beams & tentacle slams)
     this._updateBossHazards(
@@ -3661,6 +4024,10 @@ export class GameRenderer {
 
     this.debrisPool?.geo?.dispose();
     this.debrisPool?.mat?.dispose();
+    this.enemyTellSparkGeo?.dispose();
+    this.enemyTellSparkMat?.dispose();
+    this.enemyTellSteamGeo?.dispose();
+    this.enemyTellSteamMat?.dispose();
     this.shieldBubble?.geometry?.dispose();
     this.shieldBubble?.material?.dispose();
     this._disposeCollectibleMesh(this.grappleBeam, true);

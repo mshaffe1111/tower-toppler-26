@@ -73,6 +73,9 @@ export class SubStage {
     this.sonarOriginX = 0;
     this.sonarOriginY = 0;
     this.ventBoostTimer = 0;
+    this.currents = [];
+    this.slipRings = [];
+    this._slipCd = 0;
     this.rings = [];
     this.vfx = [];
     this._vfxId = 0;
@@ -112,6 +115,8 @@ export class SubStage {
       autoCd: 0,
       surfaced: 0,
       prop: 0,
+      pitch: 0,
+      bank: 0,
       ax: 0,
       ay: 0,
       shots: 0,
@@ -185,6 +190,7 @@ export class SubStage {
     this.sonarPulse = 0;
     this.sonarCooldown = 0;
     this.ventBoostTimer = 0;
+    this._slipCd = 0;
 
     this.fish.length = 0;
     this.cages.length = 0;
@@ -193,6 +199,8 @@ export class SubStage {
     this.clams.length = 0;
     this.bubbles.length = 0;
     this.vents.length = 0;
+    this.currents.length = 0;
+    this.slipRings.length = 0;
     this.hiddenCaches.length = 0;
     this.rings.length = 0;
     this.vfx.length = 0;
@@ -234,6 +242,38 @@ export class SubStage {
         phase: 2.1,
         active: true,
         boosted: false,
+      }
+    );
+
+    // Subtle underwater cross-current drift zones (gentle push, never trap player)
+    const spanY = Math.max(80 * this.s, this.bottom - this.top);
+    this.currents.push(
+      {
+        x: this.width * 0.56,
+        y: this.top + spanY * 0.34,
+        w: 158 * this.s,
+        h: 108 * this.s,
+        vx: 38 * this.s,
+        vy: -22 * this.s,
+        phase: 0.3,
+      },
+      {
+        x: this.width * 1.18,
+        y: this.top + spanY * 0.64,
+        w: 168 * this.s,
+        h: 112 * this.s,
+        vx: -28 * this.s,
+        vy: 24 * this.s,
+        phase: 2.2,
+      },
+      {
+        x: this.width * 1.82,
+        y: this.top + spanY * 0.46,
+        w: 160 * this.s,
+        h: 106 * this.s,
+        vx: 44 * this.s,
+        vy: 18 * this.s,
+        phase: 4.1,
       }
     );
 
@@ -327,6 +367,15 @@ export class SubStage {
       v.y = this.seabedY;
       v.width *= ks;
     }
+    for (const cur of this.currents) {
+      cur.x *= kx;
+      cur.y *= ky;
+      cur.w *= ks;
+      cur.h *= ks;
+      cur.vx *= ks;
+      cur.vy *= ks;
+    }
+    this.slipRings.length = 0;
     for (const hc of this.hiddenCaches) {
       hc.x *= kx;
       hc.y = this.seabedY - 46 * this.s;
@@ -449,12 +498,19 @@ export class SubStage {
     const whipEdge = whipNow && !this._prevWhip;
     this._prevWhip = whipNow;
 
-    const wantSonar = Boolean(sonarPressed || jumpEdge || whipEdge);
-
     const fireNow = Boolean(input.fire);
     const fireEdge = fireNow && !this._prevFire;
     this._prevFire = fireNow;
-    const wantFire = Boolean(firePressed || fireEdge);
+
+    // Buttonless compatibility: BOTH `fire` (tap) and `whip` (wrist-flick / slash) trigger
+    // torpedo shots AND harmonic sonar ping when sonar is off cooldown!
+    const wantFire = Boolean(firePressed || fireEdge || whipEdge);
+    const wantSonar = Boolean(
+      sonarPressed ||
+        jumpEdge ||
+        whipEdge ||
+        ((firePressed || fireEdge) && this.sonarCooldown <= 0)
+    );
 
     if (whipEdge) {
       this.sub.whipTimer = 0.42;
@@ -470,6 +526,26 @@ export class SubStage {
     this._updateJellies(dt, fx, sound);
     this._updateMines(dt, fx, sound);
     this._updateClams(dt, fx, sound);
+
+    for (let i = 0; i < this.currents.length; i++) {
+      const cur = this.currents[i];
+      cur.x -= this.scrollSpeed * 0.78 * dt;
+      cur.phase += dt * 1.4;
+      if (cur.x < -cur.w * 0.75) {
+        cur.x = this.width + cur.w * 0.75 + rand(40, 120) * this.s;
+        const spanY = Math.max(80 * this.s, this.bottom - this.top);
+        cur.y = this.top + spanY * rand(0.24, 0.76);
+        const dirSign = i % 2 === 0 ? 1 : -1;
+        cur.vx = dirSign * rand(28, 46) * this.s;
+        cur.vy = (Math.random() < 0.5 ? 1 : -1) * rand(16, 28) * this.s;
+      }
+    }
+    for (let i = this.slipRings.length - 1; i >= 0; i--) {
+      const sr = this.slipRings[i];
+      sr.life -= dt;
+      sr.x -= this.scrollSpeed * 0.92 * dt;
+      if (sr.life <= 0) removeAt(this.slipRings, i);
+    }
 
     for (let i = this.rings.length - 1; i >= 0; i--) {
       const r = this.rings[i];
@@ -717,6 +793,8 @@ export class SubStage {
       swimmer.vy *= 0.9;
       swimmer.y += swimmer.vy * dt;
       swimmer.prop = 1.35;
+      swimmer.pitch *= Math.exp(-6 * dt);
+      swimmer.bank *= Math.exp(-6 * dt);
     } else if (this.phase === 'arrive') {
       const tx = this.tower.x - this.tower.r * 1.4 - swimmer.rx * 0.2;
       const ty = this.surfaceY - swimmer.ry * 0.15;
@@ -732,6 +810,9 @@ export class SubStage {
       swimmer.y += swimmer.vy * dt;
       swimmer.stun = Math.max(0, swimmer.stun - dt);
       swimmer.spin *= Math.exp(-6 * dt);
+      const arrPitch = clamp(Math.atan2(swimmer.vy, Math.max(160 * s, Math.abs(swimmer.vx) + 120 * s)), -0.35, 0.35);
+      swimmer.pitch += (arrPitch - swimmer.pitch) * Math.min(1, dt * 6);
+      swimmer.bank *= Math.exp(-6 * dt);
       swimmer.prop = Math.max(0.25, Math.min(1.25, Math.hypot(dx, dy) / (60 * s)));
       const near = swimmer.y - this.surfaceY < swimmer.ry * 0.9 && Math.abs(dx) < 42 * s;
       if (near && swimmer.surfaced === 0) {
@@ -773,6 +854,8 @@ export class SubStage {
         swimmer.vx *= damp;
         swimmer.vy *= damp;
         swimmer.prop = 0.25;
+        swimmer.pitch *= Math.exp(-5 * dt);
+        swimmer.bank *= Math.exp(-5 * dt);
       } else {
         swimmer.spin += (Math.round(swimmer.spin / TAU) * TAU - swimmer.spin) * Math.min(1, dt * 10);
         const rawAx = input.analogX ?? input.axisX ?? 0;
@@ -787,30 +870,100 @@ export class SubStage {
         const boostMult = this.ventBoostTimer > 0 ? 1.36 : 1.0;
         const maxV = 238 * s * boostMult;
         const steering = len > 0.05;
-        const reversing = ix * swimmer.vx < 0 || iy * swimmer.vy < 0;
-        // Real hydrodynamic water drag (quadratic drag at high speed + buoyant neutral-depth restoration)
-        const curSpeed = Math.hypot(swimmer.vx, swimmer.vy);
-        const dragFactor = 1.0 + clamp(curSpeed / Math.max(1, maxV), 0, 1.5) * 0.55;
-        const k = (steering ? (reversing ? 8.8 : 6.4) : 2.6) * dragFactor;
-        const a = 1 - Math.exp(-k * dt);
-        // Gentle marine buoyancy + undulating tail-kick surge when gliding underwater
+
+        // Real submarine hydrodynamics: thrust force + quadratic water drag + gentle linear settle + buoyancy trim
+        const kLin = 1.15;
+        const kQuad = 3.2 / Math.max(1, maxV);
+        const thrustBase = (kLin + 3.2) * maxV; // exact equilibrium at |v| === maxV!
+        const revX = ix * swimmer.vx < -8 * s ? 1.65 : 1.0;
+        const revY = iy * swimmer.vy < -8 * s ? 1.65 : 1.0;
+        const tailSurgeAx = steering && ix > 0.05 ? Math.sin(swimmer.swimCycle) * 44 * s : 0;
+        const ventThrustAx = this.ventBoostTimer > 0 ? 225 * s : 0;
+
+        let thrustAx = ix * thrustBase * revX + tailSurgeAx + ventThrustAx;
+        let thrustAy = iy * thrustBase * revY;
+
+        // Gentle damped buoyancy trim toward mid-water depth ONLY when no vertical input
         const midWaterY = (this.top + this.bottom) * 0.48;
-        const buoyancyVy = Math.abs(iy) < 0.05
-          ? clamp((midWaterY - swimmer.y) * 0.42, -26 * s, 26 * s) + Math.sin(this.t * 2.2) * 10 * s
-          : 0;
-        const tailSurgeVx = steering && ix >= 0 ? Math.sin(swimmer.swimCycle) * 14 * s : 0;
-        const targetVx = ix * maxV + tailSurgeVx + (this.ventBoostTimer > 0 ? 58 * s : 0);
-        const targetVy = iy * maxV + buoyancyVy;
-        swimmer.vx += (targetVx - swimmer.vx) * a;
-        swimmer.vy += (targetVy - swimmer.vy) * a;
-        swimmer.prop = 0.82 + Math.max(0, ix) * 0.65 - Math.max(0, -ix) * 0.3 + (this.ventBoostTimer > 0 ? 0.42 : 0);
+        if (Math.abs(iy) < 0.05) {
+          const depthErr = midWaterY - swimmer.y;
+          thrustAy += clamp(depthErr * 1.45, -90 * s, 90 * s) - swimmer.vy * 1.25 + Math.sin(this.t * 2.1) * 22 * s;
+        }
+
+        // Subtle underwater cross-current drift zones (gentle hydro push, never overpowering player thrust)
+        for (let ci = 0; ci < this.currents.length; ci++) {
+          const cur = this.currents[ci];
+          const halfW = cur.w * 0.5;
+          const halfH = cur.h * 0.5;
+          const dx = (swimmer.x - cur.x) / Math.max(1, halfW);
+          const dy = (swimmer.y - cur.y) / Math.max(1, halfH);
+          if (Math.abs(dx) < 1 && Math.abs(dy) < 1) {
+            const falloff = (1 - dx * dx) * (1 - dy * dy);
+            thrustAx += cur.vx * falloff * 2.4;
+            thrustAy += cur.vy * falloff * 2.4;
+          }
+        }
+
+        // Quadratic drag: a_drag = -(kLin + kQuad * |v|) * v
+        const curSpeed = Math.hypot(swimmer.vx, swimmer.vy);
+        const dragRate = kLin + kQuad * curSpeed;
+        const dragDecay = Math.exp(-dragRate * dt);
+        const effAccScale = dragRate > 1e-4 ? (1 - dragDecay) / dragRate : dt;
+        swimmer.vx = swimmer.vx * dragDecay + thrustAx * effAccScale;
+        swimmer.vy = swimmer.vy * dragDecay + thrustAy * effAccScale;
+
+        // Safety speed envelope cap (prevents numerical overshoot on vent/current overlap)
+        const postSpeed = Math.hypot(swimmer.vx, swimmer.vy);
+        const speedCap = maxV * 1.45;
+        if (postSpeed > speedCap) {
+          const inv = speedCap / postSpeed;
+          swimmer.vx *= inv;
+          swimmer.vy *= inv;
+        }
+
+        // Visual dive/climb pitch (+ = nose down in screen Y-down) & maneuver roll-bank for subRenderer
+        const fwdFlow = Math.max(175 * s, this.scrollSpeed + Math.max(0, swimmer.vx) + 110 * s);
+        const targetPitch = clamp(Math.atan2(swimmer.vy, fwdFlow), -0.42, 0.42);
+        const targetBank = clamp(
+          (thrustAy / Math.max(1, thrustBase)) * 0.36 +
+            (swimmer.vy / Math.max(1, maxV)) * 0.16 +
+            (thrustAx / Math.max(1, thrustBase)) * 0.14,
+          -0.5,
+          0.5
+        );
+        const attLerp = 1 - Math.exp(-8.5 * dt);
+        swimmer.pitch += (targetPitch - swimmer.pitch) * attLerp;
+        swimmer.bank += (targetBank - swimmer.bank) * attLerp;
+
+        // Slipstream speed rings trailing behind the sub when moving fast (> 70% maxV) or vent-boosting
+        if (this._slipCd > 0) this._slipCd -= dt;
+        if ((postSpeed > maxV * 0.68 || this.ventBoostTimer > 0) && this._slipCd <= 0) {
+          this._slipCd = this.ventBoostTimer > 0 ? 0.095 : 0.145;
+          if (this.slipRings.length >= 12) removeAt(this.slipRings, 0);
+          this.slipRings.push({
+            x: swimmer.x - swimmer.rx * 0.92,
+            y: swimmer.y,
+            r: swimmer.ry * 0.92,
+            pitch: swimmer.pitch,
+            life: 0.46,
+            maxLife: 0.46,
+            boost: this.ventBoostTimer > 0,
+          });
+        }
+
+        swimmer.prop =
+          0.82 +
+          Math.max(0, ix) * 0.65 -
+          Math.max(0, -ix) * 0.3 +
+          clamp(postSpeed / Math.max(1, maxV), 0, 1.2) * 0.25 +
+          (this.ventBoostTimer > 0 ? 0.42 : 0);
 
         if (wantSonar && this.sonarCooldown <= 0) {
           this.triggerSonarPing(fx, sound);
         }
 
         const heldFire = Boolean(input.fire);
-        const tapFire = Boolean(firePressed && (!wantSonar || input.fire));
+        const tapFire = Boolean(firePressed);
         if ((tapFire && swimmer.fireCd <= 0) || (heldFire && swimmer.autoCd <= 0 && swimmer.fireCd <= 0)) {
           this._fire(sound);
         }

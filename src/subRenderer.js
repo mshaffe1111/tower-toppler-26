@@ -1279,6 +1279,8 @@ export class SubRenderer {
     this._wp = { x: 0, y: 0, halfW: 5, halfH: 4 };
     this._reefFov = FOV;
     this._reefCamZ = CAM_Z;
+    this._subPitchSmooth = 0;
+    this._subBankSmooth = 0;
 
     this._initReefScene();
     this._initCoreDescentScene();
@@ -1655,7 +1657,7 @@ export class SubRenderer {
     this.subVesselGroup.add(this.reefHeroInner);
     this.heroSwimAnchor.add(this.subVesselGroup);
 
-    // Streaming bioluminescent hydro-slipstream & Harmonic Echo Sphere on Gateway
+    // Streaming bioluminescent hydro-slipstream & Harmonic Echo Sphere + 3D Sonar Shockwave Ring on Gateway
     this.echoSphere = new THREE.Mesh(
       new THREE.SphereGeometry(1.0, 24, 18),
       new THREE.MeshBasicMaterial({
@@ -1669,6 +1671,53 @@ export class SubRenderer {
     );
     this.echoSphere.visible = false;
     this.reefScene.add(this.echoSphere);
+
+    this.sonarRingMesh = new THREE.Mesh(
+      new THREE.TorusGeometry(1.0, 0.055, 10, 44),
+      new THREE.MeshBasicMaterial({
+        color: '#5efce8',
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    this.sonarRingMesh.visible = false;
+    this.reefScene.add(this.sonarRingMesh);
+
+    // Pooled Underwater Cross-Current Drift Streaks (1 instanced draw call)
+    this.currentStreakInst = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(0.95, 0.095),
+      new THREE.MeshBasicMaterial({
+        map: this.beamGradTex,
+        color: '#99f6e4',
+        transparent: true,
+        opacity: 0.28,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+      42
+    );
+    this.currentStreakInst.frustumCulled = false;
+    this.currentStreakInst.count = 0;
+    this.reefScene.add(this.currentStreakInst);
+
+    // Pooled Slipstream Speed Rings trailing behind the Pelagian Sub (1 instanced draw call)
+    this.slipRingInst = new THREE.InstancedMesh(
+      new THREE.TorusGeometry(0.46, 0.026, 6, 22),
+      new THREE.MeshBasicMaterial({
+        color: '#a5f3fc',
+        transparent: true,
+        opacity: 0.54,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+      14
+    );
+    this.slipRingInst.frustumCulled = false;
+    this.slipRingInst.count = 0;
+    this.reefScene.add(this.slipRingInst);
 
     this.heroGlowLight = new THREE.PointLight('#fbbf24', 0.85, 6.5);
     this.heroGlowLight.position.set(0.2, 0.2, 1.4);
@@ -2162,18 +2211,28 @@ export class SubRenderer {
     this.coreHeroAnchor.add(this.coreWhipRing);
     this.coreScene.add(this.coreHeroAnchor);
 
-    // Spinning Hydro-Turbine Rotors (`reactor_turbine`) — sculpted curved bronze/copper hydrofoil fallback too!
+    // Spinning Hydro-Turbine Rotors (`reactor_turbine`) — weathered antique-bronze + glowing sea-glass core!
+    this.coreSeaGlassMat = new THREE.MeshStandardMaterial({
+      color: '#1b8a99',
+      emissive: '#0e7490',
+      emissiveIntensity: 0.48,
+      roughness: 0.16,
+      metalness: 0.18,
+    });
     this.turbineSlots = [];
     const curvedBladeGeo = buildCurvedHydrofoilBladeGeo();
     const fbHubGeo = new THREE.CylinderGeometry(0.46, 0.62, 0.44, 16);
     fbHubGeo.rotateX(Math.PI * 0.5);
     const fbStatorGeo = new THREE.TorusGeometry(0.64, 0.07, 8, 20);
+    const fbCoreGeo = new THREE.CylinderGeometry(0.28, 0.28, 0.48, 14);
+    fbCoreGeo.rotateX(Math.PI * 0.5);
     const fbShroudGeo = new THREE.TorusGeometry(2.44, 0.14, 8, 28);
     for (let i = 0; i < MAX_CORE_TURBINES; i++) {
       const g = new THREE.Group();
       const fb = new THREE.Group();
       fb.add(new THREE.Mesh(fbHubGeo, this.coreBronzeMat));
-      fb.add(new THREE.Mesh(fbStatorGeo, conduitGlowMat));
+      fb.add(new THREE.Mesh(fbStatorGeo, this.coreBronzeMat));
+      fb.add(new THREE.Mesh(fbCoreGeo, this.coreSeaGlassMat));
       fb.add(new THREE.Mesh(fbShroudGeo, this.coreBronzeMat));
       for (let b = 0; b < 5; b++) {
         const ba = (b / 5) * TAU;
@@ -2508,6 +2567,38 @@ export class SubRenderer {
         for (const slot of this.turbineSlots) {
           slot.fallback.visible = false;
           const cl = turbSrc.clone(true);
+          cl.traverse((o) => {
+            if (!o.isMesh || !o.material) return;
+            const mats = Array.isArray(o.material) ? o.material : [o.material];
+            const replaced = mats.map((m) => {
+              const nm = String(m.name || '').toLowerCase();
+              const isStarkHub =
+                nm.includes('aqua') ||
+                nm.includes('glow') ||
+                nm.includes('pearl') ||
+                nm.includes('white') ||
+                (m.emissive && m.emissive.g > 0.5 && m.emissive.b > 0.5) ||
+                (m.color && m.color.r > 0.72 && m.color.g > 0.72 && m.color.b > 0.72);
+              if (isStarkHub) {
+                return this.coreSeaGlassMat;
+              }
+              if (nm.includes('bronze') && !nm.includes('verdigris')) {
+                return this.coreBronzeMat;
+              }
+              if (nm.includes('verdigris')) {
+                const vm = m.clone();
+                vm.color.set('#4c6b5c');
+                vm.roughness = 0.42;
+                vm.metalness = 0.78;
+                return vm;
+              }
+              if (nm.includes('copper')) {
+                return this.coreCopperMat;
+              }
+              return m;
+            });
+            o.material = Array.isArray(o.material) ? replaced : replaced[0];
+          });
           cl.position.set(0, 0, 0);
           cl.rotation.x = Math.PI * 0.5;
           slot.group.add(cl);
@@ -2767,15 +2858,21 @@ export class SubRenderer {
 
     const vx = sw.vx || 0;
     const vy = sw.vy || 0;
-    const pitch = clamp(Math.atan2(-vy, 300), -0.45, 0.45);
-    const roll = clamp(-vy * 0.0012, -0.26, 0.26) + (sw.spin || 0);
+    // Apply hydrodynamic pitch-into-dive/climb & roll-bank into maneuvers (subStage pitch is + nose-down; Three.js +Z is nose-up)
+    const rawPitch = sw.pitch != null ? -clamp(sw.pitch, -0.45, 0.45) : clamp(Math.atan2(-vy, 300), -0.45, 0.45);
+    const rawBank = sw.bank != null ? clamp(sw.bank, -0.52, 0.52) : clamp(-vy * 0.0014, -0.32, 0.32);
+    const smoothK = 1 - Math.exp(-12 * dt);
+    this._subPitchSmooth += (rawPitch - this._subPitchSmooth) * smoothK;
+    this._subBankSmooth += (rawBank - this._subBankSmooth) * smoothK;
+    const pitch = this._subPitchSmooth;
+    const roll = this._subBankSmooth + (sw.spin || 0);
     const swimPhase = sw.swimCycle ?? time * 8.2;
     const sonarP = stage.sonarPulse || 0;
 
     this.heroSwimAnchor.position.set(heroX, heroY, 0.4);
-    this.heroSwimAnchor.rotation.set(roll * 0.35, Math.sin(time * 2.4) * 0.06, pitch);
-    if (this.subFinL) this.subFinL.rotation.x = Math.sin(swimPhase * 0.75) * 0.26 + pitch * 0.45;
-    if (this.subFinR) this.subFinR.rotation.x = -Math.sin(swimPhase * 0.75) * 0.26 - pitch * 0.45;
+    this.heroSwimAnchor.rotation.set(roll * 0.72, Math.sin(time * 2.4) * 0.05 - this._subBankSmooth * 0.14, pitch);
+    if (this.subFinL) this.subFinL.rotation.x = Math.sin(swimPhase * 0.75) * 0.24 + pitch * 0.55 - this._subBankSmooth * 0.35;
+    if (this.subFinR) this.subFinR.rotation.x = -Math.sin(swimPhase * 0.75) * 0.24 - pitch * 0.55 - this._subBankSmooth * 0.35;
     if (this.subPropeller) this.subPropeller.rotation.x = time * (14 + (sw.prop || 1) * 10);
     if (this.subSonarBeam) {
       this.subSonarBeam.material.opacity = 0.22 + sonarP * 0.26 + Math.sin(time * 4.2) * 0.03;
@@ -2793,17 +2890,79 @@ export class SubRenderer {
       frillFlare: 0.38 + sonarP * 0.45 + (stage.ventBoostTimer > 0 ? 0.35 : 0),
     });
 
-    // Expanding 3D Harmonic Echo Sonar Sphere
+    // Expanding 3D Harmonic Echo Sonar Sphere + Physical 3D Sonar Shockwave Ring
     if (sonarP > 0.01) {
       const origin = this._screenToWorld(stage.sonarOriginX ?? rawSwX, stage.sonarOriginY ?? rawSwY, 0);
+      const ox = clamp(origin.x, -safeHalfW, safeHalfW);
+      const oy = origin.y;
       const prog = 1 - sonarP;
       this.echoSphere.visible = true;
-      this.echoSphere.position.set(clamp(origin.x, -safeHalfW, safeHalfW), origin.y, 0);
+      this.echoSphere.position.set(ox, oy, 0);
       this.echoSphere.scale.setScalar(0.8 + prog * 8.5);
-      this.echoSphere.material.opacity = sonarP * 0.45;
+      this.echoSphere.material.opacity = sonarP * 0.34;
       this.echoSphere.rotation.y = time * 2.2;
+
+      this.sonarRingMesh.visible = true;
+      this.sonarRingMesh.position.set(ox, oy, 0.45);
+      this.sonarRingMesh.scale.setScalar(0.65 + prog * 9.2);
+      this.sonarRingMesh.rotation.set(Math.sin(time * 3.0) * 0.12, Math.cos(time * 2.4) * 0.12, prog * 0.9);
+      this.sonarRingMesh.material.opacity = clamp(sonarP * 0.88, 0, 0.92);
     } else {
       this.echoSphere.visible = false;
+      this.sonarRingMesh.visible = false;
+    }
+
+    // Underwater Cross-Current Drift Zone Streaks (pooled InstancedMesh)
+    const currents = stage.currents || [];
+    let csCnt = 0;
+    const perCur = 14;
+    for (let ci = 0; ci < currents.length && csCnt < 42; ci++) {
+      const cur = currents[ci];
+      const cw = this._pxScale(cur.w || 150, -0.4);
+      const ch = this._pxScale(cur.h || 100, -0.4);
+      const cwp = this._screenToWorld(cur.x, cur.y, -0.4);
+      const cAng = Math.atan2(-(cur.vy || 0), (cur.vx || 1) - (stage.scrollSpeed || 96) * 0.35);
+      for (let k = 0; k < perCur && csCnt < 42; k++) {
+        const u = ((time * (0.65 + (k % 3) * 0.18) + k * 0.17 + (cur.phase || 0)) % 1);
+        const lane = ((k + 0.5) / perCur) - 0.5;
+        const lx = cwp.x + (u - 0.5) * cw * (cur.vx >= 0 ? 1 : -1);
+        const ly = cwp.y + lane * ch + Math.sin(u * TAU + k) * 0.12;
+        const fade = Math.sin(u * Math.PI);
+        dm.position.set(lx, ly, -0.4 + (k % 3) * 0.08);
+        dm.rotation.set(0, 0, cAng);
+        dm.scale.set(0.75 + fade * 0.65, 0.55 + fade * 0.55, 1);
+        dm.updateMatrix();
+        this._col.set(cur.vx >= 0 ? '#67e8f9' : '#99f6e4').multiplyScalar(0.55 + fade * 0.45);
+        this.currentStreakInst.setColorAt(csCnt, this._col);
+        this.currentStreakInst.setMatrixAt(csCnt++, dm.matrix);
+      }
+    }
+    this.currentStreakInst.count = csCnt;
+    if (csCnt > 0) {
+      this.currentStreakInst.instanceMatrix.needsUpdate = true;
+      if (this.currentStreakInst.instanceColor) this.currentStreakInst.instanceColor.needsUpdate = true;
+    }
+
+    // Slipstream Speed Rings trailing behind Pelagian Sub
+    const slipRings = stage.slipRings || [];
+    let slCnt = 0;
+    for (let i = 0; i < slipRings.length && slCnt < 14; i++) {
+      const sr = slipRings[i];
+      const lifeU = clamp((sr.life || 0) / Math.max(0.01, sr.maxLife || 0.46), 0, 1);
+      const grow = 1 - lifeU;
+      const wp = this._screenToWorld(sr.x, sr.y, 0.35);
+      dm.position.set(wp.x, wp.y, 0.35);
+      dm.rotation.set(0, Math.PI * 0.48, -(sr.pitch || 0));
+      dm.scale.setScalar((0.72 + grow * 0.85) * (sr.boost ? 1.25 : 1.0));
+      dm.updateMatrix();
+      this._col.set(sr.boost ? '#5efce8' : '#bae6fd').multiplyScalar(lifeU);
+      this.slipRingInst.setColorAt(slCnt, this._col);
+      this.slipRingInst.setMatrixAt(slCnt++, dm.matrix);
+    }
+    this.slipRingInst.count = slCnt;
+    if (slCnt > 0) {
+      this.slipRingInst.instanceMatrix.needsUpdate = true;
+      if (this.slipRingInst.instanceColor) this.slipRingInst.instanceColor.needsUpdate = true;
     }
 
     // Update Rescued Sea Turtles & River Otters ONLY when real `stage.cages` gameplay rescues exist

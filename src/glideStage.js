@@ -68,6 +68,8 @@ export class GlideStage {
     this.lanterns = []; // lanterns, star kites, and golden lantern ({ type })
     this.gates = []; // ring gates to thread
     this.thermals = []; // rising warm/bioluminescent updraft columns
+    this.thermalSpirals = []; // rising mist spiral data for renderer
+    this.fovKick = 0; // 0..1 dive-rush FOV swell cue for renderer
     this.clouds = []; // storm clouds (telegraphed lightning hazard)
     this.gulls = [];
     this.gusts = [];
@@ -97,6 +99,9 @@ export class GlideStage {
       flapCd: 0,
       flapT: 9,
       lift: 0,
+      buffet: 0,
+      pitch: 0,
+      airspeed: 1,
       speed: 1,
       energy: 0,
       dive: 0,
@@ -186,6 +191,9 @@ export class GlideStage {
     this.lanterns.length = 0;
     this.gates.length = 0;
     this.thermals.length = 0;
+    this.thermalSpirals.length = 0;
+    this.fovKick = 0;
+    this._spiralSpawnT = 0;
     this.clouds.length = 0;
     this.gulls.length = 0;
     this.gusts.length = 0;
@@ -303,6 +311,7 @@ export class GlideStage {
       th.x *= kx;
       th.w *= ks;
     }
+    this.thermalSpirals.length = 0;
     for (const c of this.clouds) {
       c.x *= kx;
       c.y *= ky;
@@ -594,13 +603,20 @@ export class GlideStage {
         g.x += g.vx * dt;
         g.y += g.vy * dt;
         g.speed = lerp(0.4, 1, smooth(k));
+        g.airspeed = lerp(0.85, 1.0, smooth(k));
         g.dive = clamp(g.vy / (260 * s), 0, 1);
+        g.pitch = clamp(Math.atan2(g.vy, 240 * s), -0.45, 0.45);
+        g.buffet = 0;
+        this.fovKick *= Math.exp(-5 * dt);
       }
       return;
     }
 
     if (this.phase === 'arrive') {
       this._autoLand(dt, fx, sound);
+      this.fovKick *= Math.exp(-5 * dt);
+      g.buffet *= Math.exp(-6 * dt);
+      g.pitch += (clamp(Math.atan2(g.vy, 240 * s), -0.35, 0.35) - g.pitch) * Math.min(1, dt * 6);
       return;
     }
 
@@ -616,8 +632,12 @@ export class GlideStage {
       const damp = Math.exp(-2.2 * dt);
       g.vx *= damp;
       g.vy = g.vy * damp + 120 * s * dt;
+      g.airspeed += (0.82 - g.airspeed) * Math.min(1, dt * 2.5);
       g.speed += (0.8 - g.speed) * Math.min(1, dt * 2);
       g.dive = 0;
+      g.buffet *= Math.exp(-6 * dt);
+      g.pitch *= Math.exp(-4 * dt);
+      this.fovKick *= Math.exp(-5 * dt);
     } else {
       g.spin += (Math.round(g.spin / TAU) * TAU - g.spin) * Math.min(1, dt * 10);
 
@@ -645,26 +665,49 @@ export class GlideStage {
       // Horizontal airspeed tuck (+ix) vs air-brake (-ix) + dive-momentum forward carry
       const maxVx = 205 * s;
       const kx = ix !== 0 ? (ix * g.vx < 0 ? 8.5 : 6.0) : 2.6;
-      g.vx += (ix * maxVx + g.dive * 38 * s - g.vx) * (1 - Math.exp(-kx * dt));
+      g.vx += (ix * maxVx + g.dive * 42 * s - g.vx) * (1 - Math.exp(-kx * dt));
 
-      // Real Air-Pitch Glide Lift/Dive Physics:
-      //   - Diving (+iy) pitches nose down, accelerating forward airspeed & storing zoom-climb energy
-      //   - Pulling up (-iy / jump) converts stored kinetic energy & airspeed into soaring wing-lift!
-      const speedLift = clamp(g.speed - 0.85, 0, 0.95) * 44 * s;
-      const sink = Math.max(10 * s, 38 * s - speedLift);
-      const steer = 245 * s;
-      const holdLift = jumpNow || fireNow ? -110 * s : 0;
-      let wantVy = sink + iy * steer + holdLift;
-      const pullingUp = iy < -0.15 || holdLift < 0;
-      if (pullingUp && g.energy > 0.02) {
-        const use = Math.min(g.energy, dt * 1.55);
-        g.energy -= use;
-        wantVy -= 235 * s * (use / Math.max(dt, 1e-4)) * 0.68;
+      // Real Pitch-Lift Aerodynamic Energy Trade (SM64 Wing Cap / Zelda glider feel, gentle & fair):
+      //   - Pitch (+ = nose down, - = nose up) smoothed from vertical input & hold-lift
+      //   - Diving accelerates `g.airspeed` via gravity component along flight path & stores zoom energy
+      //   - Pulling up converts excess airspeed & stored kinetic energy into soaring upward lift,
+      //     bleeding airspeed smoothly down to a forgiving soft-sink floor (never a harsh stall drop!)
+      const holdLift = jumpNow || fireNow ? -105 * s : 0;
+      const pitchCmd = clamp(iy + (holdLift < 0 ? -0.52 : 0), -1, 1);
+      const targetPitch = pitchCmd * 0.56;
+      g.pitch += (targetPitch - g.pitch) * (1 - Math.exp(-7.5 * dt));
+
+      const sinPitch = Math.sin(g.pitch);
+      const cruiseAirspeed = 1.0 + 0.20 * ix + (g.flapT < 0.6 ? 0.22 * (1 - g.flapT / 0.6) : 0);
+      if (sinPitch > 0.02) {
+        // Diving: gravity component accelerates airspeed
+        g.airspeed += sinPitch * 1.28 * dt;
+      } else if (sinPitch < -0.02) {
+        // Climbing: kinetic airspeed converts into altitude (soft floor at 0.72 — forgiving stall!)
+        g.airspeed -= -sinPitch * 0.96 * dt;
       }
-      const ky = iy !== 0 || holdLift < 0 ? 5.8 : 2.4;
+      // Aerodynamic drag relaxes airspeed gently toward cruise trim
+      g.airspeed += (cruiseAirspeed - g.airspeed) * (1 - Math.exp(-0.92 * dt));
+      g.airspeed = clamp(g.airspeed, 0.72, 1.72);
+
+      const excessAir = Math.max(0, g.airspeed - 0.76);
+      const pullingUp = g.pitch < -0.04 || iy < -0.15 || holdLift < 0;
+      // Shallow neutral sink keeps zero-input flight gently aloft & completable (splashes <= 1)
+      const neutralSink = Math.max(5.5 * s, (11.0 - excessAir * 7.5) * s);
+      const diveSink = sinPitch > 0.02 ? sinPitch * 275 * s : 0;
+      const aeroClimb = sinPitch < -0.02 ? -(-sinPitch) * (150 + excessAir * 275) * s : 0;
+      // Gentle soft-sink near stall floor when nose pulled high with depleted airspeed
+      const softStall = g.airspeed < 0.78 && sinPitch < -0.15 ? (0.78 - g.airspeed) * 140 * s : 0;
+      let wantVy = neutralSink + diveSink + aeroClimb + softStall + holdLift * 0.72;
+      if (pullingUp && g.energy > 0.02) {
+        const use = Math.min(g.energy, dt * 1.45);
+        g.energy -= use;
+        wantVy -= 165 * s * (use / Math.max(dt, 1e-4));
+      }
+      const ky = iy !== 0 || holdLift < 0 ? 6.0 : 2.8;
       g.vy += (wantVy - g.vy) * (1 - Math.exp(-ky * dt));
 
-      // Rising warm/bioluminescent sea thermals
+      // Rising warm/bioluminescent sea thermals with turbulent wing-frill buffet
       let lift = 0;
       for (const th of this.thermals) {
         const dx = (g.x - th.x) / (th.w * 1.08);
@@ -673,25 +716,37 @@ export class GlideStage {
         }
       }
       g.lift += (lift - g.lift) * Math.min(1, dt * 6.5);
+      const wantBuffet = lift > 0.02 ? clamp(lift * 0.92 + Math.sin(this.t * 17.5) * 0.16 * lift, 0, 1) : 0;
+      g.buffet += (wantBuffet - g.buffet) * Math.min(1, dt * 9.0);
       if (lift > 0.02) {
-        g.vy -= lift * 685 * s * dt;
+        const turb = 1 + Math.sin(this.t * 15.0) * 0.10;
+        g.vy -= lift * 685 * turb * s * dt;
         g.energy = Math.min(1.4, g.energy + lift * dt * 0.65);
+        g.airspeed = Math.min(1.72, g.airspeed + lift * dt * 0.14);
         this.thermalTime += dt;
       }
       if (g.vy < -350 * s) g.vy = -350 * s;
 
       // Dive builds speed & zoom-climb kinetic energy; pull-up flares wings gracefully
-      const diving = clamp((g.vy - 70 * s) / (175 * s), 0, 1);
-      g.dive += (diving - g.dive) * Math.min(1, dt * 5.8);
-      if (diving > 0.05) g.energy = Math.min(1.45, g.energy + diving * dt * 1.25);
+      const diving = clamp((g.vy - 55 * s) / (165 * s), 0, 1);
+      const pitchDive = clamp(g.pitch / 0.52, 0, 1);
+      g.dive += (Math.max(diving, pitchDive * 0.85) - g.dive) * Math.min(1, dt * 6.0);
+      if (g.dive > 0.05) g.energy = Math.min(1.45, g.energy + g.dive * dt * 1.25);
       else g.energy = Math.max(0, g.energy - dt * 0.09);
 
-      const targetFlare = pullingUp ? clamp(0.28 + g.energy * 0.45, 0, 0.85) : 0;
+      const targetFlare = pullingUp ? clamp(0.28 + g.energy * 0.45 + excessAir * 0.25, 0, 0.88) : 0;
       g.flare += (targetFlare - g.flare) * Math.min(1, dt * 7.5);
 
-      const wantSpeed =
-        1 + 0.24 * ix + 0.52 * g.dive + g.energy * 0.14 + (g.flapT < 0.6 ? 0.28 * (1 - g.flapT / 0.6) : 0);
-      g.speed += (wantSpeed - g.speed) * (1 - Math.exp(-3.0 * dt));
+      const wantSpeed = clamp(
+        g.airspeed + g.energy * 0.12 + (g.flapT < 0.6 ? 0.20 * (1 - g.flapT / 0.6) : 0),
+        0.72,
+        1.65
+      );
+      g.speed += (wantSpeed - g.speed) * (1 - Math.exp(-4.2 * dt));
+
+      // Dynamic dive-rush FOV swell cue (0..1) when diving fast / high airspeed
+      const targetFovKick = clamp((g.airspeed - 1.06) / 0.52 + g.dive * 0.38, 0, 1);
+      this.fovKick += (targetFovKick - this.fovKick) * (1 - Math.exp(-5.0 * dt));
 
       // Wing-flap trigger with 140ms tap buffer: `firePressed` OR `jump`/`fire` edge never drops a tap!
       if (Boolean(firePressed) || jumpEdge || fireEdge) {
@@ -1243,13 +1298,37 @@ export class GlideStage {
   // ------------------------------------------------------------------ thermals
   _updateThermals(dt) {
     const s = this.s;
+    this._spiralSpawnT = (this._spiralSpawnT || 0) - dt;
     for (let i = this.thermals.length - 1; i >= 0; i--) {
       const th = this.thermals[i];
       th.age += dt;
       th.x -= this.scrollSpeed * dt;
       th.fade =
         Math.min(1, th.age * 1.5) * (this.phase === 'arrive' ? Math.max(0, 1 - this.arriveT) : 1);
-      if (th.x < -th.w - 40 * s) removeAt(this.thermals, i);
+      if (th.x < -th.w - 40 * s) {
+        removeAt(this.thermals, i);
+      } else if (this._spiralSpawnT <= 0 && this.thermalSpirals.length < 24 && th.x > -20 * s && th.x < this.width + 80 * s) {
+        this.thermalSpirals.push({
+          x: th.x,
+          y: this.seaY - 12 * s,
+          w: th.w,
+          phase: Math.random() * TAU,
+          life: 1.85,
+          maxLife: 1.85,
+          riseSpeed: (185 + Math.random() * 65) * s,
+        });
+      }
+    }
+    if (this._spiralSpawnT <= 0) this._spiralSpawnT = 0.14;
+    for (let i = this.thermalSpirals.length - 1; i >= 0; i--) {
+      const sp = this.thermalSpirals[i];
+      sp.life -= dt;
+      sp.x -= this.scrollSpeed * dt;
+      sp.y -= sp.riseSpeed * dt;
+      sp.phase += dt * 4.8;
+      if (sp.life <= 0 || sp.y < this.top - 40 * s || sp.x < -80 * s) {
+        removeAt(this.thermalSpirals, i);
+      }
     }
   }
 

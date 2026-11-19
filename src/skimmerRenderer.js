@@ -1387,6 +1387,13 @@ export class SkimmerRenderer {
 
     this._dummy = new THREE.Object3D();
     this._col = new THREE.Color();
+    this._bankSmooth = 0;
+    this._pitchSmooth = 0;
+    this._prevOnWater = true;
+    this._prevVy = 0;
+    this._landCompress = 0;
+    this._landSplashT = 0;
+    this._landSplashX = 0;
 
     const rampTexs = createWaveRampTextures(256);
     this.rampAlbedoTex = rampTexs.albedoTex;
@@ -1936,8 +1943,56 @@ export class SkimmerRenderer {
     const dist = Number(sk.distance) || time * 18;
     const boostMult = Math.max(1, Number(sk.boostMult) || 1);
     const laneX = Number(sk.laneX) || 0;
-    const heroY = Math.max(0, Number(sk.y) || 0) + Math.sin(time * 8.5) * 0.032;
-    const bank = clamp((Number(sk.vx) || 0) / 9.0, -1, 1);
+    const rawY = Math.max(0, Number(sk.y) || 0);
+    const onWater = Boolean(sk.onWater ?? rawY < 0.25);
+
+    // Sample exact river wave height & longitudinal/lateral slopes matching RAPIDS_WATER_VERT
+    const zFlow = -dist;
+    const w1Arg = zFlow * 0.44 + laneX * 0.42 + time * 2.2;
+    const w2Arg = zFlow * 0.86 - laneX * 0.68 + time * 3.4;
+    const w3Arg = zFlow * 1.48 + laneX * 1.15 - time * 4.2;
+    const w4Arg = laneX * 0.92 - zFlow * 0.58 + time * 2.7;
+    const waveH =
+      Math.sin(w1Arg) * 0.11 +
+      Math.cos(w2Arg) * 0.065 +
+      Math.sin(w3Arg) * 0.035 +
+      Math.cos(w4Arg) * 0.03;
+    const dhDz =
+      Math.cos(w1Arg) * 0.11 * 0.44 -
+      Math.sin(w2Arg) * 0.065 * 0.86 +
+      Math.cos(w3Arg) * 0.035 * 1.48 +
+      Math.sin(w4Arg) * 0.03 * 0.58;
+    const dhDx =
+      Math.cos(w1Arg) * 0.11 * 0.42 +
+      Math.sin(w2Arg) * 0.065 * 0.68 +
+      Math.cos(w3Arg) * 0.035 * 1.15 -
+      Math.sin(w4Arg) * 0.03 * 0.92;
+
+    // Detect wave-jump touchdown -> trigger physical hull compression dip + landing splash burst!
+    if (!this._prevOnWater && onWater) {
+      const impact = clamp(0.48 + Math.abs(this._prevVy) * 0.09, 0.48, 1.0);
+      this._landCompress = Math.max(this._landCompress, impact);
+      this._landSplashT = 1.0;
+      this._landSplashX = laneX;
+    }
+    this._prevOnWater = onWater;
+    this._prevVy = Number(sk.vy) || 0;
+    this._landCompress *= Math.exp(-8.2 * dt);
+    if (this._landCompress < 0.005) this._landCompress = 0;
+    if (this._landSplashT > 0) this._landSplashT = Math.max(0, this._landSplashT - dt * 1.75);
+
+    const waveRideY = onWater ? waveH * 0.55 - this._landCompress * 0.14 : 0;
+    const heroY = rawY + waveRideY + Math.sin(time * 8.5) * 0.024;
+    const rawBank = clamp((Number(sk.vx) || 0) / 7.8, -1, 1);
+    this._bankSmooth += (rawBank - this._bankSmooth) * (1 - Math.exp(-11.0 * dt));
+    const bank = this._bankSmooth;
+
+    const wavePitch = onWater ? clamp(-dhDz * 1.35, -0.24, 0.24) : 0;
+    const waveRoll = onWater ? clamp(-dhDx * 0.85, -0.18, 0.18) : 0;
+    const wantPitch = onWater
+      ? wavePitch + Math.abs(bank) * 0.09 - this._landCompress * 0.16
+      : clamp((sk.vy || 0) * 0.055, -0.32, 0.38);
+    this._pitchSmooth += (wantPitch - this._pitchSmooth) * (1 - Math.exp(-10.5 * dt));
 
     // Update GPU GLSL Fresnel Specular Water Shader uniforms (0 CPU vertex loops!)
     const u = this.riverMat.uniforms;
@@ -2036,17 +2091,22 @@ export class SkimmerRenderer {
     this.gorgeMistInst.instanceMatrix.needsUpdate = true;
 
     // Update Gateway carving in dynamic crouched surfer lean stance on her Hydro-Skimmer Board!
+    // Couple board roll & pitch visibly to lateral carving velocity + river wave slopes + landing dip!
     this.heroRoot.position.set(laneX, heroY, 0);
-    this.heroRoot.rotation.set(clamp((sk.vy || 0) * 0.04, -0.28, 0.35), -bank * 0.18, -bank * 0.28);
+    const boardRoll = -bank * 0.46 + waveRoll;
+    const boardYaw = -bank * 0.24;
+    this.heroRoot.rotation.set(this._pitchSmooth, boardYaw, boardRoll);
     this.hydroBoardGroup.visible = true;
+    this.hydroBoardGroup.position.set(0, 0.05 - this._landCompress * 0.04, 0.08);
     this.boardRuneMat.emissiveIntensity = 1.15 + (boostMult - 1) * 0.35 + Math.sin(time * 6.0) * 0.18;
-    const onWaterAlpha = clamp(1 - heroY * 2.2, 0, 1);
+    const onWaterAlpha = clamp(1 - rawY * 2.2, 0, 1);
     this.hydroWakeGroup.visible = onWaterAlpha > 0.04;
-    this.wakeRibbonMat.opacity = 0.56 * onWaterAlpha;
-    this.hydroWakeGroup.scale.set(1 + Math.abs(bank) * 0.22, 1, 1 + (boostMult - 1) * 0.18);
+    this.wakeRibbonMat.opacity = (0.56 + Math.abs(bank) * 0.18 + this._landCompress * 0.22) * onWaterAlpha;
+    this.hydroWakeGroup.position.set(-bank * 0.20, 0, 0);
+    this.hydroWakeGroup.rotation.set(0, bank * 0.14, -boardRoll * 0.35);
+    this.hydroWakeGroup.scale.set(1 + Math.abs(bank) * 0.28 + this._landCompress * 0.25, 1, 1 + (boostMult - 1) * 0.18);
     this.wakeLight.position.set(laneX, heroY + 0.85, 0.6);
 
-    const onWater = Boolean(sk.onWater ?? heroY < 0.25);
     this.surfHero.update(dt, {
       time,
       vx: sk.vx || 0,
@@ -2056,8 +2116,8 @@ export class SkimmerRenderer {
       rapidsSurf: onWater,
       anim: !onWater ? 'AirRise' : 'RapidsSurf',
       surfBank: bank,
-      landSquash: onWater ? 0.54 + Math.abs(bank) * 0.28 : 0.08,
-      frillFlare: 0.40 + (boostMult - 1) * 0.2,
+      landSquash: onWater ? clamp(0.54 + Math.abs(bank) * 0.28 + this._landCompress * 0.42, 0, 1.1) : 0.08,
+      frillFlare: 0.40 + (boostMult - 1) * 0.2 + Math.abs(bank) * 0.18,
     });
 
     // Carved Bronze-and-Sandstone Pelagian River Boost Gates + Waterline Pier Foam Collars
@@ -2214,21 +2274,52 @@ export class SkimmerRenderer {
     this.boltInst.count = bltCnt;
     if (bltCnt > 0) this.boltInst.instanceMatrix.needsUpdate = true;
 
-    // Soft Radial-Alpha Whitewater Wake Spray Mist trailing behind the swallowtail!
+    // Asymmetric Whitewater Rooster-Tail Carving Wake Spray Plumes + Landing Compression Splash (1 InstancedMesh!)
     let spCnt = 0;
-    for (let i = 0; i < MAX_SPRAY; i++) {
-      const age = (time * (2.4 + boostMult * 0.38) + i * 0.053) % 1;
-      const side = i % 2 === 0 ? -1 : 1;
-      const spreadBase = 0.24 + age * (0.65 + Math.abs(bank) * 0.72);
-      const arcSpread = (side * spreadBase - bank * 0.45 * age) * (0.75 + (i % 5) * 0.12);
-      const sy = heroY + 0.10 + Math.sin(age * Math.PI) * (0.48 + Math.abs(bank) * 0.38);
-      const sz = 1.05 + age * 4.6;
-      const puffScale = Math.sin(age * Math.PI) * (0.65 + age * 0.85) * (heroY < 0.4 ? 1.08 : 0.30);
+    const absBank = Math.abs(bank);
+    const carveRail = bank >= 0 ? 1 : -1; // inside-digging carving rail side (+X when banking right, -X when left)
+    const wakeQuota = this._landSplashT > 0.02 ? 124 : MAX_SPRAY;
+    for (let i = 0; i < wakeQuota && spCnt < MAX_SPRAY; i++) {
+      const age = (time * (2.5 + boostMult * 0.42 + absBank * 0.45) + i * 0.053) % 1;
+      // Bias 72% of rooster-tail puffs to the carving rail when leaning hard into a turn!
+      const isCarveRooster = absBank > 0.08 && (i % 4 !== 0);
+      const side = isCarveRooster ? carveRail : i % 2 === 0 ? -1 : 1;
+      const carveBoost = isCarveRooster ? 1.0 + absBank * 1.15 : 1.0 - absBank * 0.35;
+      const spreadBase = 0.22 + age * (0.62 + absBank * 0.85 * carveBoost);
+      const arcSpread = (side * spreadBase - bank * 0.52 * age) * (0.76 + (i % 5) * 0.11);
+      // Tall rooster-tail vertical arc kicking off the carving rail
+      const roosterLift = isCarveRooster ? 0.42 + absBank * 0.78 : 0.36;
+      const sy = heroY + 0.08 + Math.sin(age * Math.PI) * roosterLift * (0.72 + (i % 3) * 0.18);
+      const sz = (isCarveRooster ? 0.55 : 1.02) + age * (4.4 + absBank * 1.2);
+      const puffScale =
+        Math.sin(age * Math.PI) *
+        (0.58 + age * 0.92) *
+        (isCarveRooster ? 0.95 + absBank * 0.62 : 0.78) *
+        (rawY < 0.4 ? 1.08 : 0.24);
       dm.position.set(laneX + arcSpread, sy, sz);
-      dm.rotation.set(0, 0, i * 0.7 + time * 1.4 * side);
+      dm.rotation.set(0, 0, i * 0.7 + time * 1.6 * side);
       dm.scale.setScalar(Math.max(0.001, puffScale));
       dm.updateMatrix();
       this.sprayInst.setMatrixAt(spCnt++, dm.matrix);
+    }
+
+    // Radial Whitewater Landing Compression Splash Crown when touching down from a wave jump!
+    if (this._landSplashT > 0.02) {
+      const spProg = 1 - this._landSplashT;
+      const splashN = MAX_SPRAY - spCnt;
+      for (let i = 0; i < splashN; i++) {
+        const ang = (i / Math.max(1, splashN)) * TAU + (i % 3) * 0.17;
+        const rad = 0.42 + spProg * (1.85 + (i % 4) * 0.35);
+        const sx = this._landSplashX + Math.cos(ang) * rad;
+        const sz = 0.25 + Math.sin(ang) * rad * 1.15 + spProg * 1.8;
+        const sy = 0.10 + Math.sin(spProg * Math.PI) * (0.85 + (i % 4) * 0.24);
+        const sc = Math.sin(spProg * Math.PI) * (0.85 + (i % 3) * 0.35);
+        dm.position.set(sx, sy, sz);
+        dm.rotation.set(0, 0, ang + time * 2.2);
+        dm.scale.setScalar(Math.max(0.001, sc));
+        dm.updateMatrix();
+        this.sprayInst.setMatrixAt(spCnt++, dm.matrix);
+      }
     }
     this.sprayInst.count = spCnt;
     this.sprayInst.instanceMatrix.needsUpdate = true;

@@ -648,22 +648,33 @@ class AdaptiveFrillGliderHero {
   update(dt, time, gliderState = {}) {
     const landed = (gliderState.landed || 0) > 0.05;
     const flapPulse = gliderState.flapT < 0.42 ? Math.sin((gliderState.flapT / 0.42) * Math.PI) : 0;
-    const dihedral = 0.12 + flapPulse * 0.52 - (gliderState.dive || 0) * 0.22;
+    const buffet = clamp(gliderState.buffet || 0, 0, 1);
+    const liftVal = clamp(gliderState.lift || 0, 0, 1.5);
+    const airspeed = clamp(gliderState.airspeed ?? gliderState.speed ?? 1, 0.65, 1.8);
+    const diveVal = clamp(gliderState.dive || 0, 0, 1);
+    const buffetFlutter = (buffet * 0.28 + liftVal * 0.16) * Math.sin(time * 22.0);
+    const dihedral = 0.12 + flapPulse * 0.52 + liftVal * 0.34 + buffet * 0.22 + buffetFlutter - diveVal * 0.22;
 
     this.frillWingsGroup.visible = !landed;
     this.wingL.rotation.x = -dihedral;
     this.wingR.rotation.x = dihedral;
+    // Expressive wing-frill upward flex & slipstream rush intensity
+    const ribSpeedScale = clamp(0.85 + (airspeed - 0.85) * 0.85 + diveVal * 0.35, 0.75, 1.75);
+    this.ribbonMat.opacity = clamp(0.56 + diveVal * 0.24 + Math.max(0, airspeed - 1) * 0.28 + buffet * 0.14, 0.45, 0.94);
 
     for (const r of this.ribbons) {
       const pos = r.mesh.geometry.attributes.position;
       const base = r.basePos;
+      r.mesh.scale.x = ribSpeedScale;
       for (let i = 0; i < pos.count; i++) {
         const bx = base[i * 3];
         const by = base[i * 3 + 1];
         const u = clamp(-bx / r.len, 0, 1);
         const plumeScale = 0.65 + u * 0.95;
-        pos.setY(i, by * plumeScale + Math.sin(time * 9.5 - u * 4.8 + r.side) * u * 0.24);
-        pos.setZ(i, Math.cos(time * 7.8 - u * 3.8 + r.side * 0.7) * u * 0.14);
+        const liftUp = (liftVal * 0.24 + buffet * 0.18) * u;
+        const amp = 0.22 + buffet * 0.16 + diveVal * 0.08;
+        pos.setY(i, by * plumeScale + liftUp + Math.sin(time * (9.5 + airspeed * 3.5) - u * 4.8 + r.side) * u * amp);
+        pos.setZ(i, Math.cos(time * 7.8 - u * 3.8 + r.side * 0.7) * u * (0.14 + buffet * 0.10));
       }
       pos.needsUpdate = true;
     }
@@ -671,21 +682,21 @@ class AdaptiveFrillGliderHero {
     if (this.liveRig?.update) {
       if (this._liveMount) {
         this._liveMount.rotation.set(
-          landed ? 0 : 1.28 - (gliderState.flare || 0) * 0.42,
+          landed ? 0 : 1.28 - (gliderState.flare || 0) * 0.42 - liftVal * 0.14 + buffetFlutter * 0.18,
           Math.PI * 0.5,
-          0
+          landed ? 0 : buffetFlutter * 0.22
         );
       }
       try {
         this.liveRig.update(dt, {
           time,
-          vx: landed ? gliderState.vx * 0.02 : 2.8,
+          vx: landed ? gliderState.vx * 0.02 : 2.4 + airspeed * 0.8,
           vy: -(gliderState.vy || 0) * 0.01,
           facing: 1,
           onGround: landed,
           gliding: !landed,
           anim: landed ? 'Celebrate' : 'FrillGlide',
-          frillFlare: landed ? 0.2 : 1.0,
+          frillFlare: landed ? 0.2 : clamp(0.92 + liftVal * 0.28 + buffet * 0.25, 0.6, 1.4),
         });
         return;
       } catch {
@@ -1250,15 +1261,20 @@ export class GlideRenderer {
     }
   }
 
-  _updateGlideCamMetrics() {
+  _updateGlideCamMetrics(fovAdd = 0) {
     const aspect = this.width / Math.max(1, this.height);
     const portrait = aspect < 0.85;
     this._glideFov = portrait ? 50 : 46;
     this._glideCamZ = portrait ? 11.2 : 9.4;
+    const targetFov = this._glideFov + clamp(fovAdd, 0, 3.0);
     if (this.camera) {
-      this.camera.aspect = aspect;
-      this.camera.fov = this._glideFov;
-      this.camera.updateProjectionMatrix();
+      const aspectChanged = Math.abs(this.camera.aspect - aspect) > 1e-4;
+      const fovChanged = Math.abs(this.camera.fov - targetFov) > 0.02;
+      if (aspectChanged || fovChanged) {
+        this.camera.aspect = aspect;
+        this.camera.fov = targetFov;
+        this.camera.updateProjectionMatrix();
+      }
     }
   }
 
@@ -1696,6 +1712,43 @@ export class GlideRenderer {
     this.partInst.frustumCulled = false;
     this.scene.add(this.ringInst, this.partInst);
 
+    // Pooled Aerodynamic Wind-Streamline Streaks (1 instanced draw call; scales with airspeed/dive)
+    this.windStreakMat = new THREE.MeshBasicMaterial({
+      map: this.glowSpriteTex,
+      color: '#e0f7ff',
+      transparent: true,
+      opacity: 0.16,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.windStreakInst = new THREE.InstancedMesh(new THREE.PlaneGeometry(1.35, 0.055), this.windStreakMat, 36);
+    this.windStreakInst.frustumCulled = false;
+    this.windStreakInst.count = 0;
+    this.scene.add(this.windStreakInst);
+
+    // Pooled Rising Thermal Updraft Mist Spirals (1 instanced draw call)
+    this.thermalSpiralInst = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(0.62, 0.24),
+      new THREE.MeshBasicMaterial({
+        map: this.glowSpriteTex,
+        color: '#fef08a',
+        transparent: true,
+        opacity: 0.44,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+      48
+    );
+    this.thermalSpiralInst.frustumCulled = false;
+    this.thermalSpiralInst.count = 0;
+    this.scene.add(this.thermalSpiralInst);
+    this._fovSwellDeg = 0;
+    this._glidePitchSmooth = 0;
+    this._whiteCol = new THREE.Color('#ffffff');
+    this._mistCol = new THREE.Color('#e0f7ff');
+
     this.popupPool = [];
     for (let i = 0; i < MAX_POPUPS; i++) {
       const sp = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false }));
@@ -1737,7 +1790,9 @@ export class GlideRenderer {
     const scroll = Number(stage.scroll) || time * 110;
     const aspect = this.width / Math.max(1, this.height);
     const portrait = aspect < 0.85;
-    this._updateGlideCamMetrics();
+    const targetFovSwell = clamp(Number(stage.fovKick) || 0, 0, 1) * 3.0;
+    this._fovSwellDeg += (targetFovSwell - this._fovSwellDeg) * (1 - Math.exp(-6.5 * dt));
+    this._updateGlideCamMetrics(this._fovSwellDeg);
 
     // Aspect-cover studio-painted coastal arch & rainbow waterfall panorama
     const bgDist = this._glideCamZ + 56;
@@ -1925,11 +1980,39 @@ export class GlideRenderer {
     const heroY = clamp(hwp.y, -safeHalfH, safeHalfH);
     this.hero.group.scale.setScalar(portrait ? 0.90 : 1.04);
 
-    const pitch = clamp(Math.atan2(-(gl.vy || 0), 240), -0.62, 0.55) + (gl.flare || 0) * 0.32;
-    const roll = clamp(-(gl.vy || 0) * 0.0014, -0.34, 0.34) + (gl.spin || 0);
+    // Nose Gateway/glider down/up directly by aerodynamic `gl.pitch` (+ = nose-down in screen Y-down; Three.js +Z = nose-up)
+    const rawPitch =
+      gl.pitch != null
+        ? -clamp(gl.pitch, -0.62, 0.62) + (gl.flare || 0) * 0.24
+        : clamp(Math.atan2(-(gl.vy || 0), 240), -0.62, 0.55) + (gl.flare || 0) * 0.32;
+    this._glidePitchSmooth += (rawPitch - this._glidePitchSmooth) * (1 - Math.exp(-12 * dt));
+    const buffetRoll = (gl.buffet || 0) * Math.sin(time * 20.0) * 0.10;
+    const roll = clamp(-(gl.vy || 0) * 0.0014, -0.34, 0.34) + buffetRoll + (gl.spin || 0);
     this.hero.group.position.set(heroX, heroY, 0.3);
-    this.hero.group.rotation.set(roll, 0, pitch);
+    this.hero.group.rotation.set(roll, 0, this._glidePitchSmooth);
     this.hero.update(dt, time, gl);
+
+    // Aerodynamic Wind-Streamline Streaks (length & opacity scale smoothly with airspeed & dive rush!)
+    const airspeed = clamp(gl.airspeed ?? gl.speed ?? 1, 0.7, 1.75);
+    const diveRush = clamp((airspeed - 0.92) / 0.72 + (gl.dive || 0) * 0.55, 0, 1.25);
+    this.windStreakMat.opacity = clamp(0.10 + diveRush * 0.34, 0.08, 0.48);
+    let wsCnt = 0;
+    const wsActive = Math.min(36, Math.round(14 + diveRush * 20));
+    const wsSpeed = 4.2 + airspeed * 6.4;
+    for (let i = 0; i < wsActive; i++) {
+      const spanW = hwp.halfW * 2.4;
+      const wx = hwp.halfW * 1.2 - (((time * wsSpeed * (0.82 + (i % 4) * 0.14) + i * 2.13) % spanW) + spanW) % spanW;
+      const wy = (((i * 1.73) % 2) - 1) * hwp.halfH * 0.84;
+      const wz = -0.2 - (i % 4) * 0.45;
+      const lenScale = (0.62 + diveRush * 1.15) * (0.8 + (i % 3) * 0.18);
+      dm.position.set(wx, wy, wz);
+      dm.rotation.set(0, 0, this._glidePitchSmooth * 0.25);
+      dm.scale.set(lenScale, 0.75 + diveRush * 0.35, 1);
+      dm.updateMatrix();
+      this.windStreakInst.setMatrixAt(wsCnt++, dm.matrix);
+    }
+    this.windStreakInst.count = wsCnt;
+    if (wsCnt > 0) this.windStreakInst.instanceMatrix.needsUpdate = true;
 
     // Thermal Ring Gates
     const gates = stage.gates || [];
@@ -1948,8 +2031,9 @@ export class GlideRenderer {
       slot.rotation.z = time * 1.2 + i;
     }
 
-    // Soft Feathered Sunlit Updraft Thermals (facing camera cleanly, zero cylinder seam!)
+    // Soft Feathered Sunlit Updraft Thermals + Rising Mist Spirals (pooled InstancedMesh)
     const thermals = stage.thermals || [];
+    let tsCnt = 0;
     for (let i = 0; i < MAX_THERMALS; i++) {
       const tm = this.thermalMeshes[i];
       if (i >= thermals.length) {
@@ -1958,12 +2042,51 @@ export class GlideRenderer {
       }
       const th = thermals[i];
       const wp = this._screenToWorld(th.x, this.height * 0.55, -0.5);
+      const colRad = Math.max(0.42, this._pxScale(th.w || 48, -0.5) * 0.52);
       tm.visible = true;
       tm.position.set(wp.x, wp.y, -0.5);
       tm.scale.set(Math.max(0.5, this._pxScale(th.w || 48, -0.5) * 0.85), 1, 1);
       tm.material.color.set(pal.thermal);
       tm.material.opacity = 0.28 * (th.fade ?? 1);
       tm.rotation.y = 0;
+
+      // 6 rising swirling mist spiral bands per active thermal column
+      for (let k = 0; k < 6 && tsCnt < 48; k++) {
+        const u = (time * 0.58 + k / 6 + i * 0.19) % 1;
+        const ang = u * TAU * 2.2 + time * 3.0 + k;
+        const sx = wp.x + Math.cos(ang) * colRad * (0.75 + u * 0.35);
+        const sy = seaWorldY + 0.35 + u * 8.4;
+        const sz = -0.35 + Math.sin(ang) * 0.45;
+        const fade = Math.sin(u * Math.PI) * (th.fade ?? 1);
+        dm.position.set(sx, sy, sz);
+        dm.rotation.set(0, 0, Math.cos(ang) * 0.35 + 0.18);
+        dm.scale.set((0.85 + u * 0.65) * fade, (0.75 + fade * 0.45) * fade, 1);
+        dm.updateMatrix();
+        this._col.set(pal.thermal).lerp(this._whiteCol, 0.42);
+        this.thermalSpiralInst.setColorAt(tsCnt, this._col);
+        this.thermalSpiralInst.setMatrixAt(tsCnt++, dm.matrix);
+      }
+    }
+    const stageSpirals = stage.thermalSpirals || [];
+    for (let i = 0; i < stageSpirals.length && tsCnt < 48; i++) {
+      const sp = stageSpirals[i];
+      const u = 1 - clamp((sp.life || 0) / Math.max(0.01, sp.maxLife || 1.85), 0, 1);
+      const rad = this._pxScale(sp.w || 48, -0.3) * 0.42;
+      const wp = this._screenToWorld(sp.x, sp.y, -0.3);
+      const ang = sp.phase || time * 4.5 + i;
+      const fade = Math.sin(u * Math.PI);
+      dm.position.set(wp.x + Math.cos(ang) * rad, wp.y, -0.25 + Math.sin(ang) * 0.35);
+      dm.rotation.set(0, 0, Math.cos(ang) * 0.32);
+      dm.scale.set((0.75 + u * 0.6) * fade, (0.7 + fade * 0.4) * fade, 1);
+      dm.updateMatrix();
+      this._col.set(pal.thermal).lerp(this._mistCol, 0.5);
+      this.thermalSpiralInst.setColorAt(tsCnt, this._col);
+      this.thermalSpiralInst.setMatrixAt(tsCnt++, dm.matrix);
+    }
+    this.thermalSpiralInst.count = tsCnt;
+    if (tsCnt > 0) {
+      this.thermalSpiralInst.instanceMatrix.needsUpdate = true;
+      if (this.thermalSpiralInst.instanceColor) this.thermalSpiralInst.instanceColor.needsUpdate = true;
     }
 
     // Water-Dew Streams, Kites & Golden Harmonic Seeds (`stage.lanterns`)
