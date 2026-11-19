@@ -1432,6 +1432,9 @@ export class GameRenderer {
     const onOneSettled = () => {
       settled++;
       if (settled >= specs.length) {
+        for (const entry of this.towerCache.values()) {
+          entry?.applyGlbUpgrade?.(this.glbModels);
+        }
         this._archPropsVersion++;
         this._archGlbsSettled = true;
         this.onArchGlbsReady?.();
@@ -2828,10 +2831,8 @@ export class GameRenderer {
     return { inst, geo, mat, meta };
   }
 
-  _getOrBuildTowerGroup(tower) {
-    const MAX_TOWER_CACHE = 16;
+  _computeTowerCacheKey(tower) {
     const rbTheme = resolveArchTheme(tower);
-    const propVer = this._archPropsVersion;
     const clue = tower.clue;
     const clueSig = clue
       ? `${clue.kind}_${clue.col}_${clue.floor}_${clue.n || ''}_${(clue.pattern || clue.order || []).join('')}`
@@ -2839,7 +2840,17 @@ export class GameRenderer {
     const basePrefix = `v3_${rbTheme}_`;
     const towerIdentity = `${tower.cacheKey || tower.key || tower.id}_${tower.floors || 0}_${tower.ledges?.length || 0}`;
     const towerSuffix = `_${towerIdentity}_${clueSig}`;
-    const cacheKey = `${basePrefix}p${propVer}${towerSuffix}`;
+    return { basePrefix, towerSuffix, cacheKey: `${basePrefix}${towerSuffix}` };
+  }
+
+  hasCachedTowerGroup(tower) {
+    if (!tower || !this.towerCache) return false;
+    return this.towerCache.has(this._computeTowerCacheKey(tower).cacheKey);
+  }
+
+  _getOrBuildTowerGroup(tower) {
+    const MAX_TOWER_CACHE = 16;
+    const { basePrefix, towerSuffix, cacheKey } = this._computeTowerCacheKey(tower);
     if (this.towerCache.has(cacheKey)) {
       const hit = this.towerCache.get(cacheKey);
       // Promote active spire to MRU slot so LRU eviction never drops recent spires
@@ -4004,7 +4015,12 @@ export class GameRenderer {
 
     // Pre-compile all exact live shaders ONCE after collectibles, enemies, oceanVfx & arch GLBs are attached,
     // and incrementally re-warm once when async Arch or Enemy GLBs finish loading -> ZERO mid-climb freezes!
-    if (this._lastUploadedWebpVer !== getBakedArchWebpVersion() || isTitleShowcase) {
+    if (this._lastUploadedWebpVer !== getBakedArchWebpVersion()) {
+      this._uploadAllReadyTextures();
+      if (this.towerCache.size > 0) {
+        this.compileTowerGroups([...this.towerCache.values()].map((c) => c?.group).filter(Boolean));
+      }
+    } else if (isTitleShowcase) {
       this._uploadAllReadyTextures();
     }
     const enemiesNowReady = Boolean(this.enemyVisuals?.isReady?.());

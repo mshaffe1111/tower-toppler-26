@@ -748,13 +748,14 @@ function cloneLoadedWebpTex(srcTex, tile, isSrgb) {
 
 function applyBakedMaterialUpgrade(mat, entry) {
   if (!mat || !entry?.hasBakedWebp) return;
-  mat.map = entry.map;
-  mat.normalMap = entry.normalMap;
-  mat.roughnessMap = entry.ormMap;
-  mat.aoMap = entry.ormMap;
-  if (mat.userData?.useMetalMap) {
-    mat.metalnessMap = entry.ormMap;
-  }
+  // Preserve exact initial texture-slot presence (`null` vs non-null) so `#define USE_AOMAP` /
+  // `USE_METALNESSMAP` NEVER mutate after startup shader pre-compilation (0 `mat.needsUpdate` recompiles!).
+  if (mat.map) mat.map = entry.map;
+  if (mat.normalMap) mat.normalMap = entry.normalMap;
+  if (mat.roughnessMap) mat.roughnessMap = entry.ormMap;
+  if (mat.aoMap) mat.aoMap = entry.ormMap;
+  if (mat.metalnessMap) mat.metalnessMap = entry.ormMap;
+
   if (mat.userData?.hasRichAlbedo) {
     mat.userData.hasRichAlbedo.value = 1.0;
   }
@@ -764,7 +765,6 @@ function applyBakedMaterialUpgrade(mat, entry) {
     const lift = typeof mat.userData.richAlbedoLift === 'number' ? mat.userData.richAlbedoLift : 0.8;
     mat.color.copy(mat.userData.baseColor).lerp(_whiteColor, lift);
   }
-  mat.needsUpdate = true;
 }
 
 function subscribeMaterialToSurface(entry, mat) {
@@ -7623,6 +7623,15 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     exitSealNodes,
     siphonBarrierNodes,
     _createSiphonBarrierRing: createSiphonBarrierRing,
+    applyGlbUpgrade(extGlb) {
+      if (!extGlb) return;
+      if (extGlb.real_staircase) {
+        onGlbReady('real_staircase', markSharedSubtree(extGlb.real_staircase));
+      }
+      if (extGlb.hydro_turbine) {
+        onGlbReady('hydro_turbine', markSharedSubtree(extGlb.hydro_turbine));
+      }
+    },
     runeDoors,
     clueUpdater,
     stoneMats,

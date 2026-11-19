@@ -3213,72 +3213,91 @@ function scheduleModeSpiresPrewarm() {
 
   let step = 0;
   const warmedGroups = [];
+
+  const getStepTower = (sIdx) => {
+    if (sIdx === 0) {
+      // Step 0: Daily Tide FIRST so cold storm_ocean / daily launch is instant!
+      const now = new Date();
+      const dk = typeof getDailySeed === 'function' ? getDailySeed(now).dateKey : '';
+      if (!prestagedModeRuns.dailyTower || prestagedModeRuns.dailyDateKey !== dk) {
+        prestagedModeRuns.dailyDate = now;
+        prestagedModeRuns.dailyDateKey = dk;
+        prestagedModeRuns.dailyTower = typeof createDailyTower === 'function' ? createDailyTower(now) : null;
+      }
+      return prestagedModeRuns.dailyTower;
+    }
+    if (sIdx === 1) {
+      // Step 1: Flood Rush
+      if (!prestagedModeRuns.flood_rush.tower && typeof generateProceduralTower === 'function') {
+        prestagedModeRuns.flood_rush.tower = generateProceduralTower({
+          seed: (prestagedModeRuns.flood_rush.seed + 101) >>> 0,
+          index: 1,
+          difficulty: 1.2,
+          modeHint: 'flood_rush',
+        });
+      }
+      return prestagedModeRuns.flood_rush.tower;
+    }
+    if (sIdx === 2) {
+      // Step 2: Expedition
+      if (!prestagedModeRuns.expedition.tower && typeof generateProceduralTower === 'function') {
+        prestagedModeRuns.expedition.tower = generateProceduralTower({
+          seed: (prestagedModeRuns.expedition.seed + 509) >>> 0,
+          index: 1,
+          difficulty: 1.1,
+          modeHint: 'expedition',
+        });
+      }
+      return prestagedModeRuns.expedition.tower;
+    }
+    if (sIdx === 3) {
+      // Step 3: Spire 1 (covers campaign, purist & master_watershed)
+      return getTowersSafe()[0] || null;
+    }
+    if (sIdx === 4) {
+      // Step 4: Sanctum 1
+      if (!prestagedModeRuns.sanctum0 && typeof createSanctumTowers === 'function') {
+        prestagedModeRuns.sanctum0 = createSanctumTowers(15)?.[0] || null;
+      }
+      return prestagedModeRuns.sanctum0;
+    }
+    if (sIdx === 5) {
+      // Step 5: Warden Gauntlet Act 1
+      if (!prestagedModeRuns.gauntlet0 && typeof createWardenGauntletTowers === 'function') {
+        prestagedModeRuns.gauntlet0 = createWardenGauntletTowers()?.[0] || null;
+      }
+      return prestagedModeRuns.gauntlet0;
+    }
+    return null;
+  };
+
   const runNextSlice = () => {
     prestagedModeRuns.timerId = null;
-    if (game.mode !== 'title') return;
-    try {
-      if (step === 0) {
-        const s1 = getTowersSafe()[0];
-        const c = s1 ? renderer.prewarmTowerGroup?.(s1, false) : null;
-        if (c?.group) warmedGroups.push(c.group);
-      } else if (step === 1) {
-        if (!prestagedModeRuns.sanctum0 && typeof createSanctumTowers === 'function') {
-          prestagedModeRuns.sanctum0 = createSanctumTowers(15)?.[0] || null;
+    // Never abort mid-prewarm if game.mode changes; advance immediately past already-cached towers!
+    while (step <= 5) {
+      let builtNew = false;
+      try {
+        const tw = getStepTower(step);
+        if (tw) {
+          const alreadyCached = Boolean(renderer.hasCachedTowerGroup?.(tw));
+          const c = renderer.prewarmTowerGroup?.(tw, false);
+          if (c?.group) warmedGroups.push(c.group);
+          builtNew = !alreadyCached;
         }
-        const c = prestagedModeRuns.sanctum0 ? renderer.prewarmTowerGroup?.(prestagedModeRuns.sanctum0, false) : null;
-        if (c?.group) warmedGroups.push(c.group);
-      } else if (step === 2) {
-        if (!prestagedModeRuns.gauntlet0 && typeof createWardenGauntletTowers === 'function') {
-          prestagedModeRuns.gauntlet0 = createWardenGauntletTowers()?.[0] || null;
-        }
-        const c = prestagedModeRuns.gauntlet0 ? renderer.prewarmTowerGroup?.(prestagedModeRuns.gauntlet0, false) : null;
-        if (c?.group) warmedGroups.push(c.group);
-      } else if (step === 3) {
-        const now = new Date();
-        const dk = typeof getDailySeed === 'function' ? getDailySeed(now).dateKey : '';
-        if (!prestagedModeRuns.dailyTower || prestagedModeRuns.dailyDateKey !== dk) {
-          prestagedModeRuns.dailyDate = now;
-          prestagedModeRuns.dailyDateKey = dk;
-          prestagedModeRuns.dailyTower = typeof createDailyTower === 'function' ? createDailyTower(now) : null;
-        }
-        const c = prestagedModeRuns.dailyTower ? renderer.prewarmTowerGroup?.(prestagedModeRuns.dailyTower, false) : null;
-        if (c?.group) warmedGroups.push(c.group);
-      } else if (step === 4) {
-        if (!prestagedModeRuns.flood_rush.tower && typeof generateProceduralTower === 'function') {
-          prestagedModeRuns.flood_rush.tower = generateProceduralTower({
-            seed: (prestagedModeRuns.flood_rush.seed + 101) >>> 0,
-            index: 1,
-            difficulty: 1.2,
-            modeHint: 'flood_rush',
-          });
-        }
-        const c = prestagedModeRuns.flood_rush.tower
-          ? renderer.prewarmTowerGroup?.(prestagedModeRuns.flood_rush.tower, false)
-          : null;
-        if (c?.group) warmedGroups.push(c.group);
-      } else if (step === 5) {
-        if (!prestagedModeRuns.expedition.tower && typeof generateProceduralTower === 'function') {
-          prestagedModeRuns.expedition.tower = generateProceduralTower({
-            seed: (prestagedModeRuns.expedition.seed + 509) >>> 0,
-            index: 1,
-            difficulty: 1.1,
-            modeHint: 'expedition',
-          });
-        }
-        const c = prestagedModeRuns.expedition.tower
-          ? renderer.prewarmTowerGroup?.(prestagedModeRuns.expedition.tower, false)
-          : null;
-        if (c?.group) warmedGroups.push(c.group);
-        renderer.compileTowerGroups?.(warmedGroups);
-        prestagedModeRuns.warmedPropVer = renderer?._archPropsVersion ?? 0;
-        resetFrameClock();
+      } catch (_) {}
+      step++;
+      if (step > 5) {
+        try {
+          renderer.compileTowerGroups?.(warmedGroups);
+          prestagedModeRuns.warmedPropVer = renderer?._archPropsVersion ?? 0;
+          resetFrameClock();
+        } catch (_) {}
         return;
       }
-    } catch (_) {}
-
-    step++;
-    if (step <= 5) {
-      prestagedModeRuns.timerId = setTimeout(runNextSlice, 2);
+      if (builtNew) {
+        prestagedModeRuns.timerId = setTimeout(runNextSlice, 2);
+        return;
+      }
     }
   };
 
@@ -4070,18 +4089,27 @@ function prewarmStartupAssets() {
     scheduleModeSpiresPrewarm();
   } catch (_) {}
 
-  // 3. Dismiss transition veil once images decode + at least 2 WebGL frames rendered (capped at 360ms)
+  // 3. Dismiss transition veil once images decode + GLBs & all 6 mode spires warm + >= 2 WebGL frames (capped at 850ms)
   let decodedReady = false;
-  const tryDismiss = () => {
-    if (decodedReady && startupWarmupFrames >= 2) {
+  const isAllModeWarmReady = () =>
+    decodedReady &&
+    startupWarmupFrames >= 2 &&
+    prestagedModeRuns.warmedPropVer === (renderer?._archPropsVersion ?? 0);
+
+  const pollReady = () => {
+    if (startupVeilDismissed) return;
+    if (isAllModeWarmReady()) {
       dismissStartupTransitionVeil();
+    } else {
+      setTimeout(pollReady, 25);
     }
   };
   Promise.all(decodeJobs).then(() => {
     decodedReady = true;
-    tryDismiss();
+    pollReady();
   });
-  setTimeout(dismissStartupTransitionVeil, 360);
+  setTimeout(pollReady, 30);
+  setTimeout(dismissStartupTransitionVeil, 850);
 }
 
 applyControlMode(initSettings.controlMode || 'gesture', false);
