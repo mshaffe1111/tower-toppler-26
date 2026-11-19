@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import * as THREE from '../vendor/three/build/three.module.min.js';
 import {
   COLS,
   wrapCol,
@@ -12,6 +13,9 @@ import {
   isCanonicalStairStep,
 } from '../src/levels.js';
 import { ToweringWatersGame, FIXED_STEP } from '../src/game.js';
+import { InputController } from '../src/input.js';
+
+vi.mock('three', () => import('../vendor/three/build/three.module.min.js'));
 
 function createMockInput() {
   const state = {
@@ -541,5 +545,177 @@ describe('Round 5 Deliverable 4: Sanctum 6/9/12 Fixes & 100% Solvability Across 
         }
       }
     }
+  });
+});
+
+describe('Round 5 Deliverable 5 (#575/#576): sparkArch VFX Zero-Crash & Tilt Mode Puzzle/Mini-Game Controls', () => {
+  it('rebuilds and steps TowerFluidAndSparkVFX cleanly on sparkArch spires (daily_20261119 & sanctum_11) with sparkLights=[] and 0 errors', async () => {
+    const gradStub = { addColorStop: () => {} };
+    const ctxProxy = new Proxy(
+      {
+        createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+        getImageData: (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+        createRadialGradient: () => gradStub,
+        createLinearGradient: () => gradStub,
+      },
+      { get: (target, prop) => (prop in target ? target[prop] : () => {}) }
+    );
+    globalThis.document = {
+      createElement: () => ({
+        width: 128,
+        height: 128,
+        getContext: () => ctxProxy,
+      }),
+    };
+    const { TowerFluidAndSparkVFX } = await import('../src/oceanVfx.js');
+    const scene = new THREE.Scene();
+    const vfx = new TowerFluidAndSparkVFX(scene, { cols: COLS });
+    expect(vfx.sparkLights).toHaveLength(0);
+
+    const sanctum11 = createSanctumTowers(15).find((t) => t.id === 11);
+    const daily = createDailyTower('2026-11-19T00:00:00Z');
+    // Ensure at least one tested tower explicitly contains sparkArch doors
+    expect(sanctum11.doors.some((d) => d.tunnelStyle === 'sparkArch')).toBe(true);
+
+    for (const tower of [sanctum11, daily]) {
+      expect(() => vfx.rebuildForTower(tower, 1.5, 3.75)).not.toThrow();
+      for (let frame = 0; frame < 10; frame++) {
+        expect(() =>
+          vfx.update({ waterFloor: -0.55, waterPurified: false }, 0.5 + frame * 0.4, frame * 0.016, 0.016)
+        ).not.toThrow();
+      }
+    }
+    vfx.dispose();
+  });
+
+  it('routes Tilt mode stage touches through crisp cardinal/steering gestures inside Sanctum Puzzles and Mini-Games (0 misfired tilt_slash whips or jump flicks)', () => {
+    const listeners = new Map();
+    const makeEl = (id, tag = 'div') => {
+      const classes = new Set();
+      const el = {
+        id,
+        tagName: tag.toUpperCase(),
+        dataset: {},
+        style: {},
+        parentElement: null,
+        classList: {
+          add: (...n) => n.forEach((x) => classes.add(x)),
+          remove: (...n) => n.forEach((x) => classes.delete(x)),
+          toggle: (n, f) => (f === undefined ? (classes.has(n) ? classes.delete(n) : classes.add(n)) : f ? classes.add(n) : classes.delete(n)),
+          contains: (n) => classes.has(n),
+        },
+        setAttribute: () => {},
+        getAttribute: () => null,
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 412, height: 915, right: 412, bottom: 915 }),
+        matches: (sel) =>
+          sel
+            .split(',')
+            .map((s) => s.trim())
+            .some((s) => (s.startsWith('#') ? el.id === s.slice(1) : s.startsWith('.') ? classes.has(s.slice(1)) : false)),
+        closest(sel) {
+          let c = el;
+          while (c) {
+            if (c.matches(sel)) return c;
+            c = c.parentElement;
+          }
+          return null;
+        },
+        querySelector: () => null,
+        querySelectorAll: () => [],
+        setPointerCapture: () => {},
+        getContext: () => null,
+      };
+      return el;
+    };
+
+    const body = makeEl('body', 'body');
+    const app = makeEl('app', 'div');
+    const stageWrap = makeEl('stage-wrap', 'main');
+    const canvas = makeEl('game-canvas', 'canvas');
+    app.parentElement = body;
+    stageWrap.parentElement = app;
+    canvas.parentElement = stageWrap;
+    const byId = new Map([
+      ['app', app],
+      ['stage-wrap', stageWrap],
+      ['game-canvas', canvas],
+    ]);
+
+    globalThis.Element = Object;
+    globalThis.window = {
+      innerWidth: 412,
+      innerHeight: 915,
+      devicePixelRatio: 1,
+      DeviceOrientationEvent: function () {},
+      DeviceMotionEvent: function () {},
+      addEventListener: (t, fn) => {
+        if (!listeners.has(t)) listeners.set(t, []);
+        listeners.get(t).push(fn);
+      },
+      removeEventListener: () => {},
+      dispatchEvent: (t, evt) => (listeners.get(t) || []).forEach((fn) => fn(evt)),
+      getComputedStyle: () => ({ display: 'flex', visibility: 'visible', pointerEvents: 'auto', opacity: '1' }),
+    };
+    globalThis.document = {
+      body,
+      hidden: false,
+      getElementById: (id) => byId.get(id) || null,
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      addEventListener: () => {},
+    };
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { vibrate: () => true, userActivation: { hasBeenActive: true } },
+      configurable: true,
+      writable: true,
+    });
+
+    const firePtr = (type, { pointerId = 1, clientX = 200, clientY = 500, timeStamp = 100 } = {}) => {
+      globalThis.window.dispatchEvent(type, {
+        pointerId,
+        pointerType: 'touch',
+        button: 0,
+        clientX,
+        clientY,
+        timeStamp,
+        target: canvas,
+        cancelable: true,
+        preventDefault: () => {},
+      });
+    };
+
+    const ctrl = new InputController({ mode: 'tilt', hapticsEnabled: false });
+    ctrl.setControlMode('tilt');
+
+    // 1. Inside Aqueduct Sanctum ('puzzle'): horizontal swipe steps RIGHT without misfiring whip!
+    ctrl.setGameMode('puzzle');
+    firePtr('pointerdown', { pointerId: 1, clientX: 180, clientY: 500, timeStamp: 100 });
+    firePtr('pointermove', { pointerId: 1, clientX: 228, clientY: 502, timeStamp: 145 });
+    expect(ctrl.state.right).toBe(true);
+    expect(ctrl.state.whip).toBe(false);
+    firePtr('pointerup', { pointerId: 1, clientX: 228, clientY: 502, timeStamp: 165 });
+    expect(ctrl.state.whip).toBe(false);
+
+    // Fast upward swipe in 'puzzle' steps UP without misfiring jump!
+    ctrl.clearFrame();
+    firePtr('pointerdown', { pointerId: 2, clientX: 200, clientY: 520, timeStamp: 300 });
+    firePtr('pointermove', { pointerId: 2, clientX: 200, clientY: 468, timeStamp: 345 });
+    expect(ctrl.state.up).toBe(true);
+    expect(ctrl.state.jump).toBe(false);
+    firePtr('pointerup', { pointerId: 2, clientX: 200, clientY: 468, timeStamp: 365 });
+    expect(ctrl.state.jump).toBe(false);
+
+    // 2. Inside vehicle mini-games ('core_descent', 'reef_swim', 'frill_glide', 'rapids_surf'): touch drag steers analogX with 0 whip misfires!
+    for (const mg of ['core_descent', 'reef_swim', 'frill_glide', 'rapids_surf']) {
+      ctrl.resetState();
+      ctrl.setGameMode(mg);
+      firePtr('pointerdown', { pointerId: 3, clientX: 180, clientY: 500, timeStamp: 500 });
+      firePtr('pointermove', { pointerId: 3, clientX: 245, clientY: 500, timeStamp: 540 });
+      expect(ctrl.state.whip, `${mg}: horizontal touch drag must steer, not whip`).toBe(false);
+      expect(ctrl.state.analogX, `${mg}: horizontal touch drag must steer positive analogX`).toBeGreaterThan(0.2);
+      firePtr('pointerup', { pointerId: 3, clientX: 245, clientY: 500, timeStamp: 580 });
+    }
+
+    ctrl.resetState();
   });
 });

@@ -959,7 +959,12 @@ export class InputController {
       }
     }
 
-    if (this.controlMode === 'tilt' && !left && !right) {
+    const gmodeForTilt = this._activeGameMode();
+    const suppressTiltRollForPuzzleTouch =
+      (gmodeForTilt === 'puzzle' || gmodeForTilt === 'aqueduct_sanctum') &&
+      (up || down || this._hasPointerOfType('gesture'));
+
+    if (this.controlMode === 'tilt' && !left && !right && !suppressTiltRollForPuzzleTouch) {
       if (this._tiltLeft) {
         left = true;
         liveHorizHeld = true;
@@ -2841,6 +2846,31 @@ export class InputController {
     const now = this._resolveTimestampMs(e, entry);
     const x = e.clientX;
     const y = e.clientY;
+    const gmode = this._activeGameMode();
+    if (
+      entry.type === 'tiltTouch' &&
+      (gmode === 'puzzle' ||
+        gmode === 'aqueduct_sanctum' ||
+        gmode === 'core_descent' ||
+        gmode === 'reef_swim' ||
+        gmode === 'submarine' ||
+        gmode === 'frill_glide' ||
+        gmode === 'glide' ||
+        gmode === 'rapids_surf' ||
+        gmode === 'skimmer')
+    ) {
+      entry.type = 'gesture';
+      entry.anchorX = entry.startX ?? x;
+      entry.anchorY = entry.startY ?? y;
+      entry.extremeX = x;
+      entry.extremeY = y;
+      entry.horizDir = 0;
+      entry.left = false;
+      entry.right = false;
+      entry.analogX = 0;
+      this._updateMiniGameGesturePointer(entry, x, y, now, gmode);
+      return;
+    }
     const prevX = entry.lastX;
     const prevY = entry.lastY;
     const gapMs = Math.max(0, now - (entry.lastMoveTime ?? entry.startTime));
@@ -3414,7 +3444,19 @@ export class InputController {
         return;
       }
 
-      if (this.controlMode === 'gesture') {
+      const activeStageMode = this._activeGameMode();
+      const isMiniOrPuzzleStage =
+        activeStageMode === 'puzzle' ||
+        activeStageMode === 'aqueduct_sanctum' ||
+        activeStageMode === 'core_descent' ||
+        activeStageMode === 'reef_swim' ||
+        activeStageMode === 'submarine' ||
+        activeStageMode === 'frill_glide' ||
+        activeStageMode === 'glide' ||
+        activeStageMode === 'rapids_surf' ||
+        activeStageMode === 'skimmer';
+
+      if (this.controlMode === 'gesture' || (this.controlMode === 'tilt' && isMiniOrPuzzleStage)) {
         if (e.cancelable) e.preventDefault();
         const entry = this._createGestureEntry(e);
         if (this._hasOtherGesturePointer(null)) {

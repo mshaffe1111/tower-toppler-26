@@ -2621,8 +2621,9 @@ export class TowerFluidAndSparkVFX {
       this._glowScaleBuf[g * 4 + 2] = 0;
     }
 
-    for (let li = 0; li < SPARK_LIGHT_POOL; li++) {
+    for (let li = 0; li < this.sparkLights.length; li++) {
       const light = this.sparkLights[li];
+      if (!light) continue;
       const chosenIdx = li === 0 ? bestIdx0 : bestIdx1;
       const chosenFlicker = li === 0 ? bestGlow0 : bestGlow1;
       const chosenScore = li === 0 ? bestScore0 : bestScore1;
