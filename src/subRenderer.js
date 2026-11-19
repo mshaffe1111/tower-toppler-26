@@ -2151,7 +2151,7 @@ export class SubRenderer {
 
     // Studio-Painted Underwater Reactor Chamber Abyss Backdrop (`assets/textures/mg_bg_core_reactor.webp`)
     this.coreAbyssMat = new THREE.MeshBasicMaterial({
-      color: '#a8d8e8',
+      color: '#7ab4c8',
       map: this.backdropTex,
       fog: false,
       depthWrite: false,
@@ -2190,14 +2190,14 @@ export class SubRenderer {
       roughness: 0.32,
       metalness: 0.84,
     });
-    // Thin, recessed soft-glowing cyan plasma conduit strip (ZERO blinding solid-white hula-hoops!)
+    // Thin, recessed soft-glowing sea-glass conduit strip (blends organically into dark abyssal shaft)
     const conduitGlowGeo = new THREE.TorusGeometry(3.32, 0.022, 8, 32);
     conduitGlowGeo.rotateX(Math.PI * 0.5);
     const conduitGlowMat = new THREE.MeshStandardMaterial({
-      color: '#0e586e',
-      emissive: '#0891b2',
-      emissiveIntensity: 0.55,
-      roughness: 0.25,
+      color: '#0d4a5e',
+      emissive: '#08738f',
+      emissiveIntensity: 0.34,
+      roughness: 0.28,
       metalness: 0.35,
     });
 
@@ -2290,13 +2290,15 @@ export class SubRenderer {
     this.coreHeroAnchor.add(this.coreWhipRing);
     this.coreScene.add(this.coreHeroAnchor);
 
-    // Spinning Hydro-Turbine Rotors (`reactor_turbine`) — weathered antique-bronze + glowing sea-glass core!
+    // Spinning Hydro-Turbine Rotors (`reactor_turbine`) — weathered antique-bronze + soft translucent sea-glass core!
     this.coreSeaGlassMat = new THREE.MeshStandardMaterial({
-      color: '#1b8a99',
-      emissive: '#0e7490',
-      emissiveIntensity: 0.48,
-      roughness: 0.16,
-      metalness: 0.18,
+      color: '#156c7a',
+      emissive: '#0a4d5c',
+      emissiveIntensity: 0.32,
+      roughness: 0.22,
+      metalness: 0.22,
+      transparent: true,
+      opacity: 0.44,
     });
     this.turbineSlots = [];
     const curvedBladeGeo = buildCurvedHydrofoilBladeGeo();
@@ -2403,14 +2405,18 @@ export class SubRenderer {
     this._shardBurstT = 0;
     this._shardOrigin = { x: 0, y: 0, z: 0 };
 
+    // Soft translucent sea-glass hydro-boost rings (replaces stark white emissive ring at tunnel center!)
     this.coreBoostRingInst = new THREE.InstancedMesh(
       new THREE.TorusGeometry(0.62, 0.055, 8, 24),
       new THREE.MeshStandardMaterial({
-        color: '#fde047',
-        emissive: '#5efce8',
-        emissiveIntensity: 1.25,
-        roughness: 0.15,
-        metalness: 0.65,
+        color: '#228b99',
+        emissive: '#0d6e7d',
+        emissiveIntensity: 0.34,
+        roughness: 0.26,
+        metalness: 0.42,
+        transparent: true,
+        opacity: 0.42,
+        depthWrite: false,
       }),
       16
     );
