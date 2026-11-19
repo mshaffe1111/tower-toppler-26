@@ -931,3 +931,216 @@ describe('Round 5 Deliverable 5: All 8 Game Modes End-to-End Loops', () => {
     expect(prog.gauntletRuns[0].bossesDefeated).toBe(5);
   });
 });
+
+describe('Round 5 Addendum (#573): Exhaustive Soft-Lock & Edge-Case Guards', () => {
+  it('1. Crab-Springboard & Geyser launches vault straight through overhead +3F Valve Lofts without bonking while hard pillars still block', () => {
+    const inp = createMockInput();
+    const game = new ToweringWatersGame(null, inp, {}, createTrackingProgression());
+    const campaign = createTowers('campaign');
+    const sanctums = createSanctumTowers(15);
+
+    const springCases = [
+      { tower: campaign[0], crabFloor: 2, loftFloor: 5, steerDir: 0, label: 'Spire 1 High Valve Loft (overhead box)' },
+      { tower: campaign[5], crabFloor: 3, loftFloor: 6, steerDir: 0, label: 'Spire 6 High Valve Loft' },
+      { tower: campaign[9], crabFloor: 4, loftFloor: 7, steerDir: 0, label: 'Spire 10 Citadel Balcony' },
+      { tower: sanctums[8], crabFloor: 2, loftFloor: 5, steerDir: 1, label: 'Sanctum 9 Flip-Crab Vault' },
+    ];
+
+    for (const { tower, crabFloor, loftFloor, steerDir, label } of springCases) {
+      game.mode = 'tower';
+      game.loadTower(tower);
+      const crab = game.enemies.find((e) => e.type === 'snap_crab' && Math.abs(e.floor - crabFloor) < 0.5);
+      expect(crab, `${label} crab exists`).toBeTruthy();
+
+      game._applyAttackToEnemy(crab, 'whip');
+      expect(crab.flipped).toBe(true);
+
+      const p = game.gateway;
+      p.col = steerDir > 0 ? 7.6 : crab.col;
+      if (steerDir > 0) crab.col = 7.6;
+      p.floor = crab.floor + 0.2;
+      p.vx = 0;
+      p.vy = -1.0;
+      p.onGround = false;
+      inp.resetState();
+      if (steerDir !== 0) {
+        inp.state.analogX = steerDir;
+        inp.state.right = steerDir > 0;
+      }
+
+      let landedLoft = false;
+      for (let step = 0; step < 140; step++) {
+        game.update(FIXED_STEP);
+        if (p.onGround && Math.abs(p.floor - loftFloor) < 0.05) {
+          landedLoft = true;
+          break;
+        }
+      }
+      expect(landedLoft, `${label}: crab bounce must land on f=${loftFloor} without ceiling bonk`).toBe(true);
+    }
+
+    // Hard overhead pillar MUST still block upward head collision!
+    game.mode = 'tower';
+    game.loadTower({
+      id: 907,
+      name: 'PILLAR CEILING CHECK',
+      floors: 10,
+      spawn: { col: 3, floor: 0 },
+      ledges: [
+        { col: 3, floor: 0, type: 'solid', stairDir: 0 },
+        { col: 3, floor: 2, type: 'pillar', h: 2 },
+      ],
+      doors: [{ id: 'exit', col: 3, floor: 8, isExit: true }],
+    });
+    game.gateway.vy = 18.0;
+    game.gateway.steamBoostActive = true;
+    game.gateway.onGround = false;
+    let maxHeadFloor = 0;
+    for (let step = 0; step < 60; step++) {
+      game.update(FIXED_STEP);
+      maxHeadFloor = Math.max(maxHeadFloor, game.gateway.floor + 0.76);
+    }
+    expect(maxHeadFloor).toBeLessThanOrEqual(2.01);
+  });
+
+  it('2. Single-polarity phase bridges NEVER self-shut on step/whip (Spire 5 & Sanctum 7), and dual-polarity switches debounce post-whip step-on for 1.2s', () => {
+    const inp = createMockInput();
+    const game = new ToweringWatersGame(null, inp, {}, createTrackingProgression());
+    const campaign = createTowers('campaign');
+
+    // Spire 5: s5_pipe1 at col 6, s5_sw_red at col 7, phaseBlock [9,10] at f=4
+    game.mode = 'tower';
+    game.loadTower(campaign[4]);
+    game.enemies = [];
+
+    const p = game.gateway;
+    p.col = 6.5;
+    p.floor = 3;
+    p.onGround = true;
+
+    // Whipping s5_pipe1 at col 6.5 also hits s5_sw_red at col 7.5 -> opens red bridge!
+    inp.press('whip');
+    game.update(FIXED_STEP);
+    inp.release('whip');
+    for (let i = 0; i < 8; i++) game.update(FIXED_STEP); // clear 35ms hit-stop if any
+    expect(game.switchStates.red).toBe(true);
+
+    // Walking right across col 7.5 immediately afterward MUST NOT shut the single-polarity red bridge!
+    inp.state.right = true;
+    inp.state.analogX = 1.0;
+    for (let step = 0; step < 75; step++) {
+      game.update(FIXED_STEP);
+      if (p.col >= 8.4) break;
+    }
+    inp.resetState();
+    expect(game.switchStates.red).toBe(true);
+    expect(game.ledges.filter((l) => l.switchGroup === 'red').every((l) => l.active)).toBe(true);
+
+    // Dual-polarity switch test: whipping toggles ON, walking over within 0.4s is debounced, stepping after 1.3s toggles OFF!
+    game.mode = 'tower';
+    game.loadTower({
+      id: 908,
+      name: 'DUAL POLARITY DEBOUNCE',
+      floors: 10,
+      spawn: { col: 1, floor: 0 },
+      ledges: [
+        { col: 1, floor: 0, type: 'solid', stairDir: 0 },
+        { col: 2, floor: 0, type: 'solid', stairDir: 0 },
+        { col: 3, floor: 0, type: 'solid', stairDir: 0 },
+        { col: 4, floor: 0, type: 'phaseBlock', switchGroup: 'red', inverted: false, stairDir: 0 },
+        { col: 8, floor: 4, type: 'phaseBlock', switchGroup: 'red', inverted: true, stairDir: 0 },
+      ],
+      switches: [{ id: 'dual_sw', col: 2, floor: 0, group: 'red', mode: 'toggle' }],
+      doors: [{ id: 'exit', col: 8, floor: 8, isExit: true }],
+    });
+
+    // Whip from col 1.5 -> opens dual_sw at col 2.5 and arms 1.2s step-on debounce!
+    inp.press('whip');
+    game.update(FIXED_STEP);
+    inp.release('whip');
+    expect(game.switchStates.red).toBe(true);
+
+    // Walk across col 2.5 within ~0.55s -> stays true!
+    inp.state.right = true;
+    inp.state.analogX = 1.0;
+    for (let step = 0; step < 68; step++) game.update(FIXED_STEP);
+    inp.resetState();
+    expect(game.gateway.col).toBeGreaterThan(2.7);
+    expect(game.switchStates.red).toBe(true);
+
+    // Wait 1.3s for debounce to expire, then walk back onto col 2.5 -> toggles to false!
+    for (let step = 0; step < 160; step++) game.update(FIXED_STEP);
+    inp.state.left = true;
+    inp.state.analogX = -1.0;
+    for (let step = 0; step < 68; step++) game.update(FIXED_STEP);
+    inp.resetState();
+    expect(game.switchStates.red).toBe(false);
+  });
+
+  it('3. sluiceSeal auto-unlocks when standing on it at Lock-Keeper death, UP triggers nearby valves/levers, and tunnels grant >=1.0s exit invuln', () => {
+    const inp = createMockInput();
+    const game = new ToweringWatersGame(null, inp, {}, createTrackingProgression());
+    const campaign = createTowers('campaign');
+
+    // A) Standing on s1_seal3_sluice when Lock-Keeper dies auto-breaks Seal 3!
+    game.mode = 'tower';
+    game.loadTower(campaign[0]);
+    const sluice = game.switches.find((s) => s.mode === 'sluiceSeal');
+    const keeper = game.enemies.find((e) => e.isLockKeeper);
+    const p = game.gateway;
+    p.col = sluice.col + 0.5;
+    p.floor = sluice.floor;
+    p.onGround = true;
+    p.invuln = 10;
+
+    // Step 1 while keeper is alive -> denied
+    game.update(FIXED_STEP);
+    expect(sluice.active).toBe(false);
+
+    // Defeat keeper while Gateway remains standing on sluiceSeal -> next tick auto-pulls lever!
+    keeper.shielded = false;
+    keeper.coreExposed = true;
+    keeper.bossPhase = 'vulnerable';
+    keeper.hp = 1;
+    keeper.bossHitCooldown = 0;
+    game._applyAttackToEnemy(keeper, 'pulse');
+    expect(keeper.dead).toBe(true);
+
+    game.update(FIXED_STEP);
+    expect(sluice.active).toBe(true);
+    expect(game.sealObjectives.find((s) => s.id === 'seal_3').broken).toBe(true);
+
+    // B) UP interact triggers nearby pipeValve within 0.85 cols
+    const valve1 = game.switches.find((s) => s.mode === 'pipeValve' && !s.active);
+    p.col = valve1.col + 0.5 + 0.72; // outside 0.58 step-on, inside 0.85 UP interact!
+    p.floor = valve1.floor;
+    p.onGround = true;
+    game._upDoorLatch = false;
+    inp.press('up');
+    game.update(FIXED_STEP);
+    inp.release('up');
+    expect(valve1.active).toBe(true);
+
+    // C) Cross-Tower Tunnel exit grants >= 1.0s invulnerability against patrolling enemies on exit terrace!
+    const entryDoor = game.tower.doors.find((d) => d.targetId);
+    const exitTarget = game.tower.doors.find((d) => d.id === entryDoor.targetId);
+    game.enemies.push(
+      game._instantiateEnemy({ type: 'snap_crab', col: exitTarget.col + 0.5, floor: exitTarget.floor, dir: 1 }, 99)
+    );
+    p.col = entryDoor.col + 0.5;
+    p.floor = entryDoor.floor;
+    p.onGround = true;
+    p.invuln = 0;
+    const hurtBefore = game.towerHurtCount;
+    game._upDoorLatch = false;
+    inp.press('up');
+    for (let step = 0; step < 95; step++) {
+      game.update(FIXED_STEP);
+      inp.release('up');
+    }
+    expect(p.doorPhase).toBeNull();
+    expect(Math.abs(colDistSigned(p.col, exitTarget.col + 0.5))).toBeLessThan(0.2);
+    expect(p.invuln).toBeGreaterThanOrEqual(1.0);
+    expect(game.towerHurtCount).toBe(hurtBefore);
+  });
+});

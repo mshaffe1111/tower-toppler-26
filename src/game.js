@@ -1140,6 +1140,7 @@ export class ToweringWatersGame {
       valveAngle: 0,
       targetValveAngle: 0,
       cooldown: 0,
+      _stepDebounce: 0,
       _playerInside: false,
     }));
 
@@ -2690,16 +2691,35 @@ export class ToweringWatersGame {
     }
   }
 
-  _triggerSwitch(sw) {
-    if (!sw || sw.cooldown > 0) return;
+  _isSinglePolarityBridgeGroup(grp) {
+    if (!grp) return false;
+    let hasControlled = false;
+    for (const l of this.ledges) {
+      const isGateOrPhase =
+        l.origType === 'phaseBlock' ||
+        l.origType === 'laserGate' ||
+        l.type === 'phaseBlock' ||
+        l.type === 'laserGate';
+      if (!isGateOrPhase) continue;
+      if (l.pipeGroup !== grp && l.switchGroup !== grp) continue;
+      hasControlled = true;
+      if (l.inverted) return false;
+    }
+    return hasControlled;
+  }
+
+  _triggerSwitch(sw, source = 'attack') {
+    if (!sw || sw.cooldown > 0) return false;
+    if (source === 'step' && (sw._stepDebounce || 0) > 0) return false;
 
     // Upper Sluice Seal Lever (`sluiceSeal`): requires defeating the spire's Lock-Keeper/Warden first!
     if (sw.mode === 'sluiceSeal') {
-      if (sw.active) return;
+      if (sw.active) return false;
       if (sw.requiresLockKeeper) {
         const liveKeeper = this.enemies.find((e) => !e.dead && (e.isLockKeeper || e.type === 'siphon_warden'));
         if (liveKeeper) {
           sw.cooldown = 0.7;
+          sw._playerInside = false;
           if (typeof sound?.hitBlock === 'function') sound.hitBlock();
           sound?.vaultTick?.(false);
           this.addShake(3.2);
@@ -2713,7 +2733,7 @@ export class ToweringWatersGame {
             color: '#fb7185',
             maxLife: 1.45,
           });
-          return;
+          return false;
         }
       }
       sw.cooldown = 0.8;
@@ -2737,7 +2757,23 @@ export class ToweringWatersGame {
       }
       this._emitProgEvent('switch_trigger', { mode: 'sluiceSeal', group: sId, poweredLift: false });
       this._syncDynamicLedges(0, true);
-      return;
+      return true;
+    }
+
+    // Never re-fire already-completed one-way valves or shut an already-open single-polarity phase bridge!
+    if ((sw.mode === 'pipeValve' || sw.mode === 'floodValve') && sw.active) {
+      return false;
+    }
+    const isStandardToggle = !sw.mode || sw.mode === 'toggle';
+    if (isStandardToggle) {
+      const grp = sw.group || 'red';
+      if (this._isSinglePolarityBridgeGroup(grp) && this.switchStates[grp]) {
+        return false;
+      }
+    }
+
+    if (source !== 'step' && (isStandardToggle || sw.mode === 'conveyorFlip')) {
+      sw._stepDebounce = 1.2;
     }
 
     sw.cooldown = sw.mode === 'drainValve' ? 2.8 : 0.55;
@@ -2854,6 +2890,7 @@ export class ToweringWatersGame {
       poweredLift,
     });
     this._syncDynamicLedges(0, true);
+    return true;
   }
 
   // ===========================================================================
@@ -3004,7 +3041,7 @@ export class ToweringWatersGame {
     // 1. Spin adjacent Pipe-Valves & Switches!
     for (const sw of this.switches) {
       if (sw.cooldown <= 0 && Math.abs(sw.floor - p.floor) <= reachFloors && Math.abs(colDist(p.col, sw.col + 0.5)) <= reachCols) {
-        this._triggerSwitch(sw);
+        this._triggerSwitch(sw, 'whip');
       }
     }
 
@@ -3156,6 +3193,12 @@ export class ToweringWatersGame {
         en.velFloor = 0;
         en.deathTimer = 0.45;
         this.bossHazards = [];
+        for (const sw of this.switches) {
+          if (sw.mode === 'sluiceSeal') {
+            sw._playerInside = false;
+            sw.cooldown = 0;
+          }
+        }
         this.towerEnemiesDestroyed += 1;
         this._awardGears(8);
         this._scoreActionHit(1500 + breakerRank * 150, { col: en.col, floor: en.floor + 0.9 }, '#fde047');
@@ -3471,6 +3514,7 @@ export class ToweringWatersGame {
     }
     for (const sw of this.switches) {
       if (sw.cooldown > 0) sw.cooldown = Math.max(0, sw.cooldown - dt);
+      if (sw._stepDebounce > 0) sw._stepDebounce = Math.max(0, sw._stepDebounce - dt);
       if (sw.valveAngle !== sw.targetValveAngle) {
         sw.valveAngle = approach(sw.valveAngle || 0, sw.targetValveAngle || 0, 9.5 * dt);
       }
@@ -4042,7 +4086,15 @@ export class ToweringWatersGame {
     for (const sw of this.switches) {
       const inside = Math.abs(sw.floor - p.floor) < 0.68 && Math.abs(colDist(p.col, sw.col + 0.5)) < 0.58;
       if (inside && !sw._playerInside) {
-        this._triggerSwitch(sw);
+        this._triggerSwitch(sw, 'step');
+      } else if (
+        inside &&
+        sw.mode === 'sluiceSeal' &&
+        !sw.active &&
+        sw.cooldown <= 0 &&
+        (!sw.requiresLockKeeper || !this.enemies.some((e) => !e.dead && (e.isLockKeeper || e.type === 'siphon_warden')))
+      ) {
+        this._triggerSwitch(sw, 'step');
       }
       sw._playerInside = inside;
     }
@@ -4214,6 +4266,7 @@ export class ToweringWatersGame {
             p.enteringDoor = 0.1;
             p.tunnelTimer = 0.14;
             p.tunnelTarget = target;
+            p.invuln = Math.max(p.invuln || 0, 1.0);
             p.vx = 0;
             p.vy = 0;
             sound?.door?.();
@@ -4223,6 +4276,24 @@ export class ToweringWatersGame {
             return;
           }
         }
+      }
+      // Also allow UP interact to pull an unlocked sluiceSeal or spin an adjacent pipe/flood/drain valve within 0.85 cols!
+      const nearUpSwitch = this.switches?.find(
+        (sw) =>
+          !sw.active &&
+          sw.cooldown <= 0 &&
+          (sw.mode === 'sluiceSeal' ||
+            sw.mode === 'pipeValve' ||
+            sw.mode === 'floodValve' ||
+            sw.mode === 'drainValve') &&
+          Math.abs(sw.floor - p.floor) < 0.72 &&
+          Math.abs(colDist(p.col, sw.col + 0.5)) <= 0.85
+      );
+      if (nearUpSwitch) {
+        this._upDoorLatch = true;
+        p.jumpBufferTimer = 0;
+        this._triggerSwitch(nearUpSwitch, 'up');
+        return;
       }
     }
 
@@ -4533,22 +4604,22 @@ export class ToweringWatersGame {
       p.floor += p.vy * dt;
       p.onGround = false;
 
-      // Overhead ceiling check (ignores stairs & diagonal destination ledges)
+      // Overhead ceiling check: hard `pillar` bulkheads always block; `steamBoostActive` shatters overhead `box` crates & passes through exterior terraces!
       if (p.vy > 0) {
         const head = p.floor + 0.76;
         const prevHead = prevFloor + 0.76;
-        const startCol = p.jumpStartCol ?? p.col;
         const startFloor = p.jumpStartFloor ?? prevFloor;
-        const diagFloorReach = p.steamBoostActive ? 3.45 : 1.35;
         for (const l of this.ledges) {
           if (l.gone || !l.active || l.type === 'laserGate') continue;
           if (Math.abs(colDist(p.col, l.col + 0.5)) >= 0.34) continue;
+          if (l.type === 'box' && p.steamBoostActive) {
+            if (prevHead <= l.floor + 0.08 && head >= l.floor - 0.05) {
+              this._shatterSiphonBox(l, p.facing, 75);
+            }
+            continue;
+          }
           const isWallBlock = l.type === 'box' || l.type === 'pillar';
-          if (
-            !isWallBlock &&
-            l.floor <= startFloor + diagFloorReach &&
-            Math.abs(colDist(startCol, l.col + 0.5)) >= 0.42
-          ) {
+          if (!isWallBlock && (p.steamBoostActive || l.floor >= startFloor + 0.9)) {
             continue;
           }
           const bottom = isWallBlock ? l.floor : l.floor - 0.14;
@@ -5210,8 +5281,7 @@ export class ToweringWatersGame {
       const hitSw = this.switches.find(
         (sw) => sw.cooldown <= 0 && Math.abs(sw.floor - sb.floor) < 0.8 && Math.abs(colDist(sb.col, sw.col + 0.5)) < 0.65
       );
-      if (hitSw) {
-        this._triggerSwitch(hitSw);
+      if (hitSw && this._triggerSwitch(hitSw, 'pulse')) {
         if ((sb.pierce || 1) <= 1) {
           this.hydroPulses.splice(i, 1);
           continue;
