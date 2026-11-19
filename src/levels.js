@@ -441,6 +441,16 @@ function stairFlight(ledges, startFloor, startCol, steps, dir = 1, topLandingLen
   };
 }
 
+const ARCHETYPE_ENEMY_SPEEDS = Object.freeze({
+  snap_crab: 0.88,
+  gulp_hopper: 0.0,
+  volt_eel: 1.15,
+  rail_skater: 2.35,
+  barnacle_mortar: 0.0,
+  vent_stalker: 0.78,
+  siphon_warden: 2.05
+});
+
 function normalizeEnemy(en, idx = 0) {
   const canonical = CANONICAL_ENEMY_MAP[en.type] || 'snap_crab';
   const defaultAmp =
@@ -451,12 +461,16 @@ function normalizeEnemy(en, idx = 0) {
       : canonical === 'siphon_warden'
       ? 0.55
       : 0.22;
+  const resolvedSpeed =
+    canonical === 'siphon_warden'
+      ? Math.max(1.85, Math.min(2.35, Number(en.speed ?? ARCHETYPE_ENEMY_SPEEDS.siphon_warden)))
+      : ARCHETYPE_ENEMY_SPEEDS[canonical];
   return {
     type: canonical,
     col: ((Number(en.col) % COLS) + COLS) % COLS,
     floor: Number(en.floor),
     dir: en.dir === -1 ? -1 : 1,
-    speed: Number(en.speed ?? (canonical === 'barnacle_mortar' ? 0 : canonical === 'siphon_warden' ? 2.1 : 1.65)),
+    speed: resolvedSpeed,
     amp: Number(en.amp ?? defaultAmp),
     axis: en.axis || (en.type === 'robotV' || canonical === 'vent_stalker' ? 'v' : 'h'),
     hp: Number(en.hp ?? (canonical === 'siphon_warden' ? 3 : 1)),
@@ -465,6 +479,7 @@ function normalizeEnemy(en, idx = 0) {
     phaseOffset: Number(en.phaseOffset ?? (idx * 1.17) % 6.28),
     minFloor: en.minFloor !== undefined && en.minFloor !== null ? Number(en.minFloor) : null,
     maxFloor: en.maxFloor !== undefined && en.maxFloor !== null ? Number(en.maxFloor) : null,
+    ...(en.act !== undefined ? { act: Number(en.act) } : {}),
     ...(en.harmless ? { harmless: true } : {}),
     ...(en.bossTitle ? { bossTitle: String(en.bossTitle) } : {}),
     ...(en.isLockKeeper ? { isLockKeeper: true } : {}),
@@ -4071,27 +4086,27 @@ export function createWardenGauntletTowers() {
     {
       act: 1, theme: 'canyon_river', name: 'ACT I • REDWOOD DREDGE-LORD',
       subtitle: 'WARDEN GAUNTLET 1/5 • CANYON ARENA', bossTitle: 'REDWOOD DREDGE-LORD',
-      hp: 4, speed: 2.05, windForce: 0, lightningInterval: 0
+      hp: 4, speed: 1.85, windForce: 0, lightningInterval: 0
     },
     {
       act: 2, theme: 'alpine_lake', name: 'ACT II • GLACIER CRYO-WARDEN',
       subtitle: 'WARDEN GAUNTLET 2/5 • ALPINE ARENA', bossTitle: 'GLACIER CRYO-WARDEN',
-      hp: 4, speed: 2.15, windForce: 0.28, lightningInterval: 0
+      hp: 4, speed: 1.98, windForce: 0.28, lightningInterval: 0
     },
     {
       act: 3, theme: 'mist_bayou', name: 'ACT III • BAYOU MIRE-HYDRA',
       subtitle: 'WARDEN GAUNTLET 3/5 • BAYOU ARENA', bossTitle: 'BAYOU MIRE-HYDRA',
-      hp: 5, speed: 2.25, windForce: 0, lightningInterval: 9.0
+      hp: 5, speed: 2.10, windForce: 0, lightningInterval: 9.0
     },
     {
       act: 4, theme: 'coral_sea', name: 'ACT IV • CORAL REEF TYRANT',
       subtitle: 'WARDEN GAUNTLET 4/5 • CORAL ARENA', bossTitle: 'CORAL REEF TYRANT',
-      hp: 5, speed: 2.35, windForce: 0.25, lightningInterval: 0
+      hp: 5, speed: 2.22, windForce: 0.25, lightningInterval: 0
     },
     {
       act: 5, theme: 'storm_ocean', name: 'ACT V • MOTHER SIPHON PRIME',
       subtitle: 'WARDEN GAUNTLET 5/5 • APEX LEVIATHAN', bossTitle: 'MOTHER SIPHON PRIME',
-      hp: 6, speed: 2.5, windForce: 0.36, lightningInterval: 6.8
+      hp: 6, speed: 2.35, windForce: 0.36, lightningInterval: 6.8
     }
   ];
 
