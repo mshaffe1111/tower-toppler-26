@@ -382,6 +382,14 @@ const CANONICAL_ENEMY_MAP = {
 // SHARED BUILDERS & STAIRCASE / MECHANISM HELPERS
 // ============================================================================
 
+function isBarrierLedgeType(type) {
+  return type === 'box' || type === 'pillar' || type === 'laserGate';
+}
+
+function isSolidStairMasonryType(type) {
+  return type === 'solid' || type === 'stair' || type === 'stairR' || type === 'stairL';
+}
+
 function span(ledges, floor, startCol, count, type = 'solid', extra = {}) {
   for (let i = 0; i < count; i++) {
     ledges.push({
@@ -394,6 +402,12 @@ function span(ledges, floor, startCol, count, type = 'solid', extra = {}) {
       phasePeriod: extra.phasePeriod ?? 3.2,
       phaseOffset: extra.phaseOffset ?? 0,
       ...(extra.stairDir !== undefined ? { stairDir: extra.stairDir } : {}),
+      ...(extra.isExplicitStair
+        ? {
+            isExplicitStair: true,
+            explicitStairDir: Number(extra.explicitStairDir ?? extra.stairDir ?? 0)
+          }
+        : {}),
       ...(extra.h !== undefined ? { h: extra.h } : {})
     });
   }
@@ -410,6 +424,12 @@ function tile(ledges, col, floor, type = 'solid', extra = {}) {
     phasePeriod: extra.phasePeriod ?? 3.2,
     phaseOffset: extra.phaseOffset ?? 0,
     ...(extra.stairDir !== undefined ? { stairDir: extra.stairDir } : {}),
+    ...(extra.isExplicitStair
+      ? {
+          isExplicitStair: true,
+          explicitStairDir: Number(extra.explicitStairDir ?? extra.stairDir ?? 0)
+        }
+      : {}),
     ...(extra.h !== undefined ? { h: extra.h } : {})
   });
 }
@@ -422,23 +442,90 @@ function tile(ledges, col, floor, type = 'solid', extra = {}) {
  */
 function stairFlight(ledges, startFloor, startCol, steps, dir = 1, topLandingLen = 3, type = 'solid') {
   const stepSign = dir >= 0 ? 1 : -1;
-  // Base landing lead-in (2 cols: startCol - stepSign, startCol)
-  tile(ledges, startCol - stepSign, startFloor, type);
-  tile(ledges, startCol, startFloor, type, { stairDir: stepSign });
+  const nSteps = Math.max(0, Math.round(Number(steps) || 0));
+  const stairMeta = isSolidStairMasonryType(type)
+    ? { stairDir: stepSign, isExplicitStair: true, explicitStairDir: stepSign }
+    : {};
 
-  for (let s = 1; s < steps; s++) {
-    tile(ledges, startCol + stepSign * s, startFloor + s, type, { stairDir: stepSign });
+  // Base landing lead-in on startFloor before the first ascending step at startCol
+  tile(ledges, startCol - stepSign, startFloor, type);
+  for (let s = 0; s < nSteps; s++) {
+    tile(ledges, startCol + stepSign * s, startFloor + s, type, stairMeta);
   }
 
-  // Top landing terrace starting at startCol + stepSign * steps on floor startFloor + steps
-  const topAnchor = startCol + stepSign * steps;
+  // Top landing terrace starting at startCol + stepSign * nSteps on floor startFloor + nSteps
+  const topAnchor = startCol + stepSign * nSteps;
   const terraceStart = stepSign === 1 ? topAnchor : topAnchor - (topLandingLen - 1);
-  span(ledges, startFloor + steps, terraceStart, topLandingLen, type);
+  span(ledges, startFloor + nSteps, terraceStart, topLandingLen, type);
   return {
-    topFloor: startFloor + steps,
+    topFloor: startFloor + nSteps,
     endCol: wrapCol(topAnchor + stepSign * (topLandingLen - 1)),
     midCol: wrapCol(topAnchor + stepSign * Math.floor(topLandingLen / 2))
   };
+}
+
+/**
+ * Canonical 1:1 Staircase Step Predicate shared across level validation, physics (`game.js`),
+ * and 3D staircase mesh baking (`towerArchitecture.js`).
+ * Returns true iff `(col, floor)` climbs via an explicit 5-riser stone staircase in `dir` (-1 | +1)
+ * to `(wrapCol(col + dir), floor + 1)` with solid-to-solid masonry, zero flat bridge at `(c1, floor)`,
+ * zero overhead ceiling/barrier, and zero elevator shaft obstruction.
+ */
+export function isCanonicalStairStep(ledges, elevators = [], col, floor, dir) {
+  if (!Array.isArray(ledges) || (dir !== 1 && dir !== -1)) return false;
+  const c0 = wrapCol(col);
+  const f0 = Math.round(Number(floor) || 0);
+  const c1 = wrapCol(c0 + dir);
+  const f1 = f0 + 1;
+
+  let l0 = null;
+  let l1 = null;
+
+  for (const b of ledges) {
+    if (!b || b.gone) continue;
+    const bc = wrapCol(b.col);
+    const bf = Math.round(Number(b.floor) || 0);
+    const bType = b.type || 'solid';
+
+    if (isBarrierLedgeType(bType)) {
+      const bh = Math.max(1, Math.round(Number(b.h) || 1));
+      const bMax = bf + bh - 1;
+      if (bc === c0 && ((f0 >= bf && f0 <= bMax) || (f1 >= bf && f1 <= bMax))) return false;
+      if (bc === c1 && f1 >= bf && f1 <= bMax) return false;
+      continue;
+    }
+
+    if (bc === c1 && bf === f0) return false; // Flat bridge of any walkable ledge type
+    if (bc === c0 && bf === f1) return false; // Ceiling directly above lower step
+    if (bc === c0 && bf === f0) l0 = b;
+    else if (bc === c1 && bf === f1) l1 = b;
+  }
+
+  if (!l0 || !l1 || l0.active === false || l1.active === false) return false;
+  if (!isSolidStairMasonryType(l0.type || 'solid') || !isSolidStairMasonryType(l1.type || 'solid')) {
+    return false;
+  }
+
+  const typeIntent = l0.type === (dir === 1 ? 'stairR' : 'stairL');
+  const explicitIntent =
+    l0.stairDir !== undefined
+      ? Number(l0.stairDir) === dir
+      : l0.isExplicitStair === true && Number(l0.explicitStairDir) === dir;
+  if (!typeIntent && !explicitIntent) return false;
+
+  if (Array.isArray(elevators)) {
+    for (const el of elevators) {
+      if (!el) continue;
+      const ec = wrapCol(el.col);
+      if (ec !== c0 && ec !== c1) continue;
+      const minF = Math.round(Number(el.minFloor) || 0);
+      const maxF = Math.round(Number(el.maxFloor) || 0);
+      if (f1 >= minF && f1 <= maxF) return false;
+      if (ec === c0 && f0 >= minF && f0 <= maxF) return false;
+    }
+  }
+
+  return true;
 }
 
 const ARCHETYPE_ENEMY_SPEEDS = Object.freeze({
@@ -490,33 +577,27 @@ function normalizeEnemy(en, idx = 0) {
 }
 
 function computeLedgeSpanAt(ledges, col, floor) {
-  const hasTile = (c) => {
-    const wc = wrapCol(c);
-    const blocked = ledges.some(
-      (b) =>
-        (b.type === 'box' || b.type === 'pillar' || b.type === 'laserGate') &&
-        wrapCol(b.col) === wc &&
-        (b.h ? b.floor < floor + 1.2 && b.floor + b.h > floor + 0.15 : Math.abs(b.floor - floor) < 0.5)
-    );
-    if (blocked) return false;
-    return ledges.some(
-      (l) =>
-        l.type !== 'box' &&
-        l.type !== 'pillar' &&
-        l.type !== 'laserGate' &&
-        l.type !== 'phaseBlock' &&
-        Math.abs(l.floor - floor) < 0.25 &&
-        wrapCol(l.col) === wc
-    );
-  };
+  let walkMask = 0;
+  let blockMask = 0;
+  for (let i = 0; i < ledges.length; i++) {
+    const l = ledges[i];
+    const t = l.type;
+    if (t === 'box' || t === 'pillar' || t === 'laserGate') {
+      const hit = l.h ? l.floor < floor + 1.2 && l.floor + l.h > floor + 0.15 : Math.abs(l.floor - floor) < 0.5;
+      if (hit) blockMask |= 1 << wrapCol(l.col);
+    } else if (t !== 'phaseBlock' && Math.abs(l.floor - floor) < 0.25) {
+      walkMask |= 1 << wrapCol(l.col);
+    }
+  }
+  const validMask = walkMask & ~blockMask;
   const startTile = Math.floor(wrapFloatCol(col));
-  if (!hasTile(startTile)) {
+  if (!(validMask & (1 << startTile))) {
     return { onRealTile: false, startCol: startTile, length: 0 };
   }
   let leftSteps = 0;
-  while (leftSteps < COLS - 1 && hasTile(startTile - leftSteps - 1)) leftSteps++;
+  while (leftSteps < COLS - 1 && (validMask & (1 << wrapCol(startTile - leftSteps - 1)))) leftSteps++;
   let rightSteps = 0;
-  while (rightSteps < COLS - 1 - leftSteps && hasTile(startTile + rightSteps + 1)) rightSteps++;
+  while (rightSteps < COLS - 1 - leftSteps && (validMask & (1 << wrapCol(startTile + rightSteps + 1)))) rightSteps++;
   return {
     onRealTile: true,
     startCol: wrapCol(startTile - leftSteps),
@@ -927,51 +1008,80 @@ function resolveClueColOffset(dc, df, sortedLedges, normElevators) {
 
 function annotateStairDirections(sortedLedges, normElevators) {
   const walkableAt = new Map();
-  const blockedOverhead = new Set();
+  const barrierCells = new Set();
+  const shaftCells = new Set();
 
   for (const el of normElevators) {
+    const ec = wrapCol(el.col);
     for (let f = Math.round(el.minFloor); f <= Math.round(el.maxFloor); f++) {
-      blockedOverhead.add(`${el.col}:${f}`);
+      shaftCells.add(`${ec}:${f}`);
     }
   }
 
   for (const l of sortedLedges) {
-    if (l.type === 'box' || l.type === 'pillar' || l.type === 'laserGate') {
+    if (isBarrierLedgeType(l.type)) {
       const h = Math.max(1, Math.round(l.h || 1));
-      for (let k = 0; k <= h; k++) {
-        blockedOverhead.add(`${l.col}:${l.floor + k}`);
+      for (let k = 0; k < h; k++) {
+        barrierCells.add(`${l.col}:${l.floor + k}`);
       }
       continue;
     }
     walkableAt.set(`${l.col}:${l.floor}`, l);
   }
 
-  for (const l of sortedLedges) {
-    if (l.type === 'box' || l.type === 'pillar' || l.type === 'laserGate') continue;
-    const cPlus = wrapCol(l.col + 1);
-    const cMinus = wrapCol(l.col - 1);
-    const upPlus =
-      walkableAt.has(`${cPlus}:${l.floor + 1}`) &&
-      !walkableAt.has(`${l.col}:${l.floor + 1}`) &&
-      !blockedOverhead.has(`${l.col}:${l.floor + 1}`);
-    const upMinus =
-      walkableAt.has(`${cMinus}:${l.floor + 1}`) &&
-      !walkableAt.has(`${l.col}:${l.floor + 1}`) &&
-      !blockedOverhead.has(`${l.col}:${l.floor + 1}`);
+  const canClimbInDir = (l, dir) => {
+    if (dir !== 1 && dir !== -1) return false;
+    if (!isSolidStairMasonryType(l.type)) return false;
+    const c0 = l.col;
+    const f0 = l.floor;
+    const c1 = wrapCol(c0 + dir);
+    const f1 = f0 + 1;
 
-    const downPlus =
-      walkableAt.has(`${cPlus}:${l.floor - 1}`) && !walkableAt.has(`${cPlus}:${l.floor}`);
-    const downMinus =
-      walkableAt.has(`${cMinus}:${l.floor - 1}`) && !walkableAt.has(`${cMinus}:${l.floor}`);
-
-    if (l.stairDir === undefined) {
-      if (upPlus && !upMinus) l.stairDir = 1;
-      else if (upMinus && !upPlus) l.stairDir = -1;
-      else if (upPlus) l.stairDir = 1;
-      else l.stairDir = 0;
+    const l1 = walkableAt.get(`${c1}:${f1}`);
+    if (!l1 || !isSolidStairMasonryType(l1.type)) return false;
+    if (walkableAt.has(`${c1}:${f0}`)) return false; // Flat bridge of any walkable ledge type
+    if (walkableAt.has(`${c0}:${f1}`)) return false; // Ceiling directly above lower step
+    if (barrierCells.has(`${c0}:${f0}`) || barrierCells.has(`${c0}:${f1}`) || barrierCells.has(`${c1}:${f1}`)) {
+      return false;
     }
-    l.stairDownDir = downPlus ? 1 : downMinus ? -1 : 0;
-    l.isStair = Boolean(l.stairDir !== 0 || l.stairDownDir !== 0);
+    if (shaftCells.has(`${c0}:${f0}`) || shaftCells.has(`${c0}:${f1}`) || shaftCells.has(`${c1}:${f1}`)) {
+      return false;
+    }
+    return true;
+  };
+
+  for (const l of sortedLedges) {
+    if (isBarrierLedgeType(l.type)) continue;
+    let candidateDir = 0;
+    if (l.type === 'stairR') {
+      candidateDir = 1;
+    } else if (l.type === 'stairL') {
+      candidateDir = -1;
+    } else if (l.isExplicitStair && (l.explicitStairDir === 1 || l.explicitStairDir === -1)) {
+      candidateDir = l.explicitStairDir;
+    } else if (l.stairDir === 1 || l.stairDir === -1) {
+      candidateDir = l.stairDir;
+    }
+
+    if (candidateDir !== 0 && canClimbInDir(l, candidateDir)) {
+      l.stairDir = candidateDir;
+      l.isExplicitStair = true;
+      l.explicitStairDir = candidateDir;
+    } else {
+      l.stairDir = 0;
+      l.isExplicitStair = false;
+      l.explicitStairDir = 0;
+    }
+  }
+
+  for (const l of sortedLedges) {
+    if (isBarrierLedgeType(l.type)) continue;
+    const lowLeft = walkableAt.get(`${wrapCol(l.col - 1)}:${l.floor - 1}`);
+    const lowRight = walkableAt.get(`${wrapCol(l.col + 1)}:${l.floor - 1}`);
+    if (lowRight && lowRight.stairDir === -1) l.stairDownDir = 1;
+    else if (lowLeft && lowLeft.stairDir === 1) l.stairDownDir = -1;
+    else l.stairDownDir = 0;
+    l.isStair = Boolean(l.stairDir !== 0);
   }
 }
 
@@ -993,6 +1103,7 @@ function finalizeTower({
   timeLimit = 100,
   parTime = 38,
   spawn = { col: 0, floor: 0 },
+  spawnDir = null,
   palette,
   mechanics = {},
   ledges = [],
@@ -1034,7 +1145,7 @@ function finalizeTower({
     const c = wrapCol(raw.col);
     const f = Math.round(Number(raw.floor));
     const t = raw.type || 'solid';
-    const isBarrier = t === 'box' || t === 'pillar' || t === 'laserGate';
+    const isBarrier = isBarrierLedgeType(t);
     if (!isBarrier) {
       const inShaft = normElevators.some((el) => el.col === c && f >= el.minFloor && f <= el.maxFloor);
       if (inShaft) continue;
@@ -1042,6 +1153,21 @@ function finalizeTower({
       if (inStripMid) continue;
     }
     const slotKey = isBarrier ? `${c}:${f}:${t}` : `${c}:${f}:step`;
+    const prev = isBarrier ? null : byCoord.get(slotKey);
+    const explicitStairDir =
+      !isBarrier && isSolidStairMasonryType(t)
+        ? raw.isExplicitStair && (Number(raw.explicitStairDir) === 1 || Number(raw.explicitStairDir) === -1)
+          ? Number(raw.explicitStairDir)
+          : t === 'stairR'
+          ? 1
+          : t === 'stairL'
+          ? -1
+          : raw.stairDir === 1 || raw.stairDir === -1
+          ? Number(raw.stairDir)
+          : prev?.isExplicitStair && (prev.explicitStairDir === 1 || prev.explicitStairDir === -1)
+          ? prev.explicitStairDir
+          : 0
+        : 0;
     byCoord.set(slotKey, {
       col: c,
       floor: f,
@@ -1052,6 +1178,7 @@ function finalizeTower({
       phasePeriod: Number(raw.phasePeriod ?? 3.2),
       phaseOffset: Number(raw.phaseOffset ?? 0),
       ...(raw.stairDir !== undefined ? { stairDir: Number(raw.stairDir) } : {}),
+      ...(explicitStairDir !== 0 ? { isExplicitStair: true, explicitStairDir } : {}),
       ...(raw.h !== undefined ? { h: Number(raw.h) } : {})
     });
   }
@@ -1301,6 +1428,21 @@ function finalizeTower({
     timeLimit: Math.max(45, Math.round(Number(timeLimit))),
     parTime: Math.max(15, Math.round(Number(parTime))),
     spawn: { col: spawnCol, floor: spawnFloor },
+    spawnDir: (() => {
+      if (spawnDir === -1 || spawnDir === 1) return spawnDir;
+      let bestDir = 1;
+      let bestDist = Infinity;
+      for (const l of sortedLedges) {
+        if (l.floor !== spawnFloor || !l.stairDir) continue;
+        const d = colDist(spawnCol, l.col);
+        const ad = Math.abs(d);
+        if (ad < bestDist) {
+          bestDist = ad;
+          bestDir = d === 0 ? l.stairDir : Math.sign(d) || l.stairDir;
+        }
+      }
+      return bestDir === -1 ? -1 : 1;
+    })(),
     palette: { ...resolvedPalette },
     mechanics: {
       ...DEFAULT_MECHANICS,
@@ -1372,9 +1514,9 @@ export function createCampaignTowers() {
   // Jump left across dead elevator shaft col 13 onto Snap-Crab Courtyard [7..12] at f=2!
   span(s1Ledges, 2, 7, 6, 'solid');                     // [7,8,9,10,11,12] at f=2
   tile(s1Ledges, 8, 2, 'box');                          // Siphon Clamp Box guarding Pipe-Valve 1 at col 7
-  // High Valve Loft at f=5 (+3F above f=2 — requires flipping Snap-Crab & bouncing off carapace!)
-  span(s1Ledges, 5, 8, 4, 'solid');                     // [8,9,10,11] at f=5 (clear of col 13 lift shaft!)
-  tile(s1Ledges, 9, 5, 'box');                          // Siphon Clamp Box guarding Pipe-Valve 2 at col 10
+  // High Valve Loft at f=5 (+3F above f=2 — 3 open cols [7,8,9] directly above Snap-Crab 9.5, clear of box at 10!)
+  span(s1Ledges, 5, 7, 5, 'solid');                     // [7,8,9,10,11] at f=5 (clear of col 13 lift shaft!)
+  tile(s1Ledges, 10, 5, 'box');                         // Siphon Clamp Box guarding Pipe-Valve 2 at col 11
   // Unpowered Main Lift s1_lift1 at col 13 (f=2..9) -> Mid-Spire Aqueduct Ring at f=9
   span(s1Ledges, 9, 9, 4, 'solid');                     // Sanctum Courtyard [9,10,11,12] at f=9
   span(s1Ledges, 8, 6, 2, 'solid');                     // Left one-way drop scout spur [6,7] at f=8 (Gear + Rail-Skater)
@@ -1419,7 +1561,7 @@ export function createCampaignTowers() {
     ],
     switches: [
       { id: 's1_pipe1', col: 7, floor: 2, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
-      { id: 's1_pipe2', col: 10, floor: 5, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's1_pipe2', col: 11, floor: 5, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
       { id: 's1_seal3_sluice', col: 5, floor: 16, group: 'seal_3', mode: 'sluiceSeal', sealId: 'seal_3', requiresLockKeeper: true }
     ],
     grappleRings: [
@@ -1462,7 +1604,7 @@ export function createCampaignTowers() {
   const s2Ledges = [];
   span(s2Ledges, 0, 18, 4, 'solid');                    // Spawn [18,19,0,1]
   stairFlight(s2Ledges, 0, 2, 2, 1, 5, 'solid');        // 2F stepped rise onto [4,5,6,7,8] at f=2 (FloodValve 6, Crab 5.5)
-  span(s2Ledges, 5, 6, 3, 'solid');                     // High Valve Loft [6,7,8] at f=5 (Crab Springboard!)
+  span(s2Ledges, 5, 5, 4, 'solid');                     // High Valve Loft [5,6,7,8] at f=5 (2 open cols [5,6] above Crab 5.5!)
   tile(s2Ledges, 7, 5, 'box');                          // Siphon Clamp Crate guarding Pipe-Valve 2 at col 8
   span(s2Ledges, 3, 9, 2, 'crumble');                   // Floodgate crumble crossing [9,10] at f=3
   span(s2Ledges, 3, 11, 5, 'solid');                    // [11,12,13,14,15] at f=3 (Pipe-Valve 1 at 14)
@@ -1647,7 +1789,7 @@ export function createCampaignTowers() {
   stairFlight(s4Ledges, 0, 2, 2, 1, 2, 'solid');        // 2F accent onto [4,5] at f=2
   span(s4Ledges, 3, 6, 4, 'solid');                     // Step/jump up to [6,7,8,9] at f=3 (Snap-Crab 6.5, ice at 8)
   tile(s4Ledges, 8, 3, 'ice');
-  span(s4Ledges, 6, 7, 3, 'solid');                     // High Valve Loft [7,8,9] at f=6 (Crab Springboard lands cleanly on col 7!)
+  span(s4Ledges, 6, 6, 4, 'solid');                     // High Valve Loft [6,7,8,9] at f=6 (2 open cols [6,7] above Crab 6.5!)
   tile(s4Ledges, 8, 6, 'box');                          // Siphon Clamp Crate guarding Pipe-Valve 2 at col 9
   span(s4Ledges, 3, 11, 1, 'solid');                    // Grapple stepping stone [11] at f=3
   span(s4Ledges, 4, 12, 4, 'solid');                    // [12,13,14,15] at f=4 (Pipe-Valve 1 at 14)
@@ -1830,7 +1972,7 @@ export function createCampaignTowers() {
   span(s6Ledges, 0, 18, 4, 'solid');
   stairFlight(s6Ledges, 0, 2, 2, 1, 2, 'solid');        // 2F accent -> [4,5] at f=2
   span(s6Ledges, 3, 6, 4, 'solid');                     // [6,7,8,9] at f=3 (Pipe-Valve 1 at 6, Drain 1 at 8, Snap-Crab 7.5)
-  span(s6Ledges, 6, 7, 3, 'solid');                     // High Valve Loft [7,8,9] at f=6 (Crab Springboard!)
+  span(s6Ledges, 6, 6, 4, 'solid');                     // High Valve Loft [6,7,8,9] at f=6 (2 open cols [6,7] above Crab 7.5!)
   tile(s6Ledges, 8, 6, 'box');
   // Pipe-powered Lift s6_lift1 at col 10 (f=3..10) -> Mid-Spire Delta Plaza [11..17] at f=10
   span(s6Ledges, 10, 11, 7, 'solid');                   // [11,12,13,14,15,16,17] at f=10
@@ -2194,7 +2336,7 @@ export function createCampaignTowers() {
   stairFlight(s10Ledges, 0, 2, 2, 1, 2, 'solid');        // 2F accent -> [4,5] at f=2
   span(s10Ledges, 3, 7, 1, 'crumble');                  // Running jump over col 6 -> crumble [7] at f=3
   span(s10Ledges, 4, 8, 6, 'solid');                    // [8,9,10,11,12,13] at f=4 (Pipe-Valve 1 at 8, Drain 1 at 10, Snap-Crab 11.5)
-  span(s10Ledges, 7, 11, 3, 'solid');                   // High Valve Loft [11,12,13] at f=7 (Crab Springboard!)
+  span(s10Ledges, 7, 10, 4, 'solid');                   // High Valve Loft [10,11,12,13] at f=7 (2 open cols [10,11] above Crab 11.5!)
   tile(s10Ledges, 12, 7, 'box');
   // Pipe-powered Lift s10_lift1 at col 14 (f=4..10) -> Mid-Spire Citadel Plaza [15..0] at f=10
   span(s10Ledges, 10, 15, 6, 'solid');                  // [15,16,17,18,19,0] at f=10
@@ -2338,41 +2480,19 @@ function isLedgeSupportActive(ledge, mask) {
   return true;
 }
 
-function isLaserBlockingAt(laserLedges, col, minF, maxF, mask) {
-  const c = wrapCol(col);
-  for (const lg of laserLedges) {
-    if (lg.col !== c) continue;
-    const active = lg.switchGroup
-      ? lg.inverted
-        ? isSwitchGroupOn(mask, lg.switchGroup)
-        : !isSwitchGroupOn(mask, lg.switchGroup)
-      : true;
-    const lgTop = lg.floor + Math.max(0.8, Number(lg.h || 1) - 0.1);
-    if (active && lgTop >= minF - 0.5 && lg.floor <= maxF + 0.8) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
- * Verifies 100% reachability across ledges, staircases, jumps, pipe-valve elevators (including
- * multi-valve pressure groups), Snap-Crab springboard bounces, Gecko wall-scamper strips,
- * grapple rings, interior portals, mandatory Inner Aqueduct Sanctum seals, and switches.
- * @param {object} tower
- * @param {{ enforceSeals?: boolean, allowSanctumSolve?: boolean }} [opts]
- * @returns {{ solvable: boolean, minSteps: number, reachableExit: boolean, crownSealsTotal: number }}
- */
-export function verifyTowerSolvable(tower, opts = {}) {
+function runTowerReachabilityBfs(tower, opts = {}) {
   const enforceSeals = opts.enforceSeals !== false;
   const allowSanctumSolve = opts.allowSanctumSolve !== false;
+  const collectAll = Boolean(opts.collectAll);
+  const reachableCoords = new Set();
+
   if (!tower || !Array.isArray(tower.ledges) || !Array.isArray(tower.doors)) {
-    return { solvable: false, minSteps: -1, reachableExit: false, crownSealsTotal: 0 };
+    return { solvable: false, minSteps: -1, reachableExit: false, crownSealsTotal: 0, reachableCoords };
   }
 
   const exitDoors = tower.doors.filter((d) => d.isExit);
-  if (exitDoors.length === 0) {
-    return { solvable: false, minSteps: -1, reachableExit: false, crownSealsTotal: 0 };
+  if (exitDoors.length === 0 && !collectAll) {
+    return { solvable: false, minSteps: -1, reachableExit: false, crownSealsTotal: 0, reachableCoords };
   }
 
   const crownSeals = Array.isArray(tower.crownSeals) ? tower.crownSeals : [];
@@ -2384,18 +2504,48 @@ export function verifyTowerSolvable(tower, opts = {}) {
     }
   }
 
-  const laserLedges = tower.ledges.filter((l) => l.type === 'laserGate');
-  const pillarLedges = tower.ledges.filter((l) => l.type === 'pillar');
-  const isPillarBlockingAt = (col, minF, maxF) => {
-    const c = wrapCol(col);
-    for (const pl of pillarLedges) {
-      if (pl.col !== c) continue;
+  const laserByCol = Array.from({ length: COLS }, () => []);
+  const pillarByCol = Array.from({ length: COLS }, () => []);
+  let relevantGroupMask = requiredSealMask;
+
+  for (const l of tower.ledges) {
+    if (l.switchGroup && GROUP_BITS[l.switchGroup]) {
+      relevantGroupMask |= GROUP_BITS[l.switchGroup];
+    }
+    if (l.type === 'laserGate') {
+      laserByCol[wrapCol(l.col)].push(l);
+    } else if (l.type === 'pillar') {
+      pillarByCol[wrapCol(l.col)].push(l);
+    }
+  }
+
+  const isLaserColBlocking = (c, minF, maxF, mask) => {
+    const arr = laserByCol[c];
+    for (let i = 0; i < arr.length; i++) {
+      const lg = arr[i];
+      const active = lg.switchGroup
+        ? lg.inverted
+          ? isSwitchGroupOn(mask, lg.switchGroup)
+          : !isSwitchGroupOn(mask, lg.switchGroup)
+        : true;
+      if (!active) continue;
+      const lgTop = lg.floor + Math.max(0.8, Number(lg.h || 1) - 0.1);
+      if (lgTop >= minF - 0.5 && lg.floor <= maxF + 0.8) return true;
+    }
+    return false;
+  };
+
+  const isPillarColBlocking = (c, minF, maxF) => {
+    const arr = pillarByCol[c];
+    for (let i = 0; i < arr.length; i++) {
+      const pl = arr[i];
       const top = pl.floor + Math.max(1, Number(pl.h || 1)) - 0.1;
       if (top >= minF + 0.1 && pl.floor <= maxF + 0.5) return true;
     }
     return false;
   };
 
+  const coordInt = (c, f) => c * 128 + (f + 16);
   const supportNodes = [];
   const nodeIndicesByCoord = new Map();
   const nodesByCol = Array.from({ length: COLS }, () => []);
@@ -2404,9 +2554,13 @@ export function verifyTowerSolvable(tower, opts = {}) {
     const idx = supportNodes.length;
     supportNodes.push(node);
     nodesByCol[node.col].push(idx);
-    const key = `${node.col}:${node.floor}`;
-    if (!nodeIndicesByCoord.has(key)) nodeIndicesByCoord.set(key, []);
-    nodeIndicesByCoord.get(key).push(idx);
+    const key = coordInt(node.col, node.floor);
+    let bucket = nodeIndicesByCoord.get(key);
+    if (!bucket) {
+      bucket = [];
+      nodeIndicesByCoord.set(key, bucket);
+    }
+    bucket.push(idx);
     return idx;
   };
 
@@ -2427,6 +2581,8 @@ export function verifyTowerSolvable(tower, opts = {}) {
     const c = wrapCol(el.col);
     const minF = Math.round(el.minFloor);
     const maxF = Math.round(el.maxFloor);
+    const pg = el.powered === false && el.pipeGroup ? el.pipeGroup : null;
+    if (pg && GROUP_BITS[pg]) relevantGroupMask |= GROUP_BITS[pg];
     for (let f = minF; f <= maxF; f++) {
       registerNode({
         col: c,
@@ -2434,7 +2590,7 @@ export function verifyTowerSolvable(tower, opts = {}) {
         kind: 'elevator',
         ledge: null,
         elevatorId: elIdx,
-        pipeGroup: el.powered === false && el.pipeGroup ? el.pipeGroup : null
+        pipeGroup: pg
       });
     }
   });
@@ -2463,25 +2619,36 @@ export function verifyTowerSolvable(tower, opts = {}) {
     return isLedgeSupportActive(node.ledge, mask);
   };
 
-  const hasCeilingAt = (col, floor, mask) => {
-    const indices = nodeIndicesByCoord.get(`${wrapCol(col)}:${floor}`);
+  const hasCeilingAtCol = (c, floor, mask) => {
+    const indices = nodeIndicesByCoord.get(coordInt(c, floor));
     if (!indices) return false;
-    return indices.some((idx) => {
-      const n = supportNodes[idx];
-      return n.kind === 'ledge' && isNodeActive(n, mask);
-    });
+    for (let i = 0; i < indices.length; i++) {
+      const n = supportNodes[indices[i]];
+      if (n.kind === 'ledge' && isNodeActive(n, mask)) return true;
+    }
+    return false;
   };
 
   const spawnCol = wrapCol(tower.spawn?.col ?? 0);
   const spawnFloor = Math.round(tower.spawn?.floor ?? 0);
-  const startCandidates = (nodeIndicesByCoord.get(`${spawnCol}:${spawnFloor}`) || []).filter((idx) =>
+  const startCandidates = (nodeIndicesByCoord.get(coordInt(spawnCol, spawnFloor)) || []).filter((idx) =>
     isNodeActive(supportNodes[idx], 0)
   );
   if (startCandidates.length === 0) {
-    return { solvable: false, minSteps: -1, reachableExit: false, crownSealsTotal: crownSeals.length };
+    return { solvable: false, minSteps: -1, reachableExit: false, crownSealsTotal: crownSeals.length, reachableCoords };
   }
 
   const doorById = new Map(tower.doors.map((d) => [d.id, d]));
+  const doorsByCoord = new Map();
+  for (const d of tower.doors) {
+    const dk = coordInt(wrapCol(d.col), Math.round(d.floor));
+    let arr = doorsByCoord.get(dk);
+    if (!arr) {
+      arr = [];
+      doorsByCoord.set(dk, arr);
+    }
+    arr.push(d);
+  }
   const switches = Array.isArray(tower.switches) ? tower.switches : [];
   const grappleRings = Array.isArray(tower.grappleRings) ? tower.grappleRings : [];
   const enemies = Array.isArray(tower.enemies) ? tower.enemies : [];
@@ -2501,62 +2668,93 @@ export function verifyTowerSolvable(tower, opts = {}) {
   }
 
   // Precompute Snap-Crab springboard terraces so BFS recognizes +3F carapace bounces!
-  const crabSpringCoords = new Set();
+  const crabSpringSet = new Set();
   for (const en of enemies) {
     if (en.type !== 'snap_crab') continue;
     const f = Math.round(en.floor);
     const sp = computeLedgeSpanAt(tower.ledges, en.col, f);
     if (sp.onRealTile) {
       for (let i = 0; i < sp.length; i++) {
-        crabSpringCoords.add(`${wrapCol(sp.startCol + i)}:${f}`);
+        crabSpringSet.add(coordInt(wrapCol(sp.startCol + i), f));
       }
     }
   }
 
+  const exitCoordSet = new Set(exitDoors.map((d) => coordInt(wrapCol(d.col), Math.round(d.floor))));
   const isGoalNode = (node, mask) =>
+    exitCoordSet.size > 0 &&
     (mask & requiredSealMask) === requiredSealMask &&
-    exitDoors.some((d) => wrapCol(d.col) === node.col && Math.abs(d.floor - node.floor) <= 0.5);
+    exitCoordSet.has(coordInt(node.col, node.floor));
 
-  const visited = new Map();
-  const queue = [];
+  const numNodes = supportNodes.length;
+  const visited = new Set();
+  const qIdx = [];
+  const qMask = [];
+  const qSteps = [];
 
   for (const idx of startCandidates) {
-    const key = `${idx}|0`;
-    visited.set(key, 0);
-    queue.push({ idx, mask: 0, steps: 0 });
+    visited.add(idx);
+    qIdx.push(idx);
+    qMask.push(0);
+    qSteps.push(0);
   }
 
+  const recordedReachable = new Uint8Array(COLS * 128);
+  let bestExitSteps = -1;
   let head = 0;
-  while (head < queue.length) {
-    const { idx, mask, steps } = queue[head++];
+  while (head < qIdx.length) {
+    const idx = qIdx[head];
+    const mask = qMask[head];
+    const steps = qSteps[head];
+    head++;
     const cur = supportNodes[idx];
 
+    if (cur.kind === 'ledge') {
+      const rk = coordInt(cur.col, cur.floor);
+      if (!recordedReachable[rk]) {
+        recordedReachable[rk] = 1;
+        reachableCoords.add(`${cur.col}:${cur.floor}`);
+      }
+    }
+
     if (isGoalNode(cur, mask)) {
-      return { solvable: true, minSteps: steps, reachableExit: true, crownSealsTotal: crownSeals.length };
+      if (bestExitSteps < 0 || steps < bestExitSteps) bestExitSteps = steps;
+      if (!collectAll) {
+        return { solvable: true, minSteps: steps, reachableExit: true, crownSealsTotal: crownSeals.length, reachableCoords };
+      }
     }
 
     const pushState = (nextIdx, nextMask, stepCost = 1) => {
-      const k = `${nextIdx}|${nextMask}`;
-      if (!visited.has(k)) {
-        visited.set(k, steps + stepCost);
-        queue.push({ idx: nextIdx, mask: nextMask, steps: steps + stepCost });
+      const stateKey = nextMask * numNodes + nextIdx;
+      if (!visited.has(stateKey)) {
+        visited.add(stateKey);
+        qIdx.push(nextIdx);
+        qMask.push(nextMask);
+        qSteps.push(steps + stepCost);
       }
     };
 
     // 1. Toggle switches, spin Pipe-Valves (multi-valve groups!), or pull Upper Sluice Levers
-    for (const sw of switches) {
-      const grpKey = sw.pipeGroup || sw.group;
-      const dc = colDist(cur.col, sw.col);
+    for (let sIdx = 0; sIdx < switches.length; sIdx++) {
+      const sw = switches[sIdx];
       const sameFloor = Math.abs(sw.floor - cur.floor) <= 0.6;
-      if (!sameFloor || Math.abs(dc) > 6) continue;
+      if (!sameFloor) continue;
+      const dc = colDist(cur.col, sw.col);
+      if (Math.abs(dc) > 6) continue;
+
+      const grpKey = sw.pipeGroup || sw.group;
+      if (sw.mode !== 'pipeValve' && sw.mode !== 'sluiceSeal') {
+        const bit = GROUP_BITS[grpKey] || 0;
+        if (!(bit & relevantGroupMask)) continue;
+      }
 
       let blocked = false;
       const stepDir = Math.sign(dc);
       for (let s = 1; s <= Math.abs(dc); s++) {
         const checkCol = wrapCol(cur.col + stepDir * s);
         if (
-          isLaserBlockingAt(laserLedges, checkCol, cur.floor, cur.floor, mask) ||
-          isPillarBlockingAt(checkCol, cur.floor, cur.floor)
+          isLaserColBlocking(checkCol, cur.floor, cur.floor, mask) ||
+          isPillarColBlocking(checkCol, cur.floor, cur.floor)
         ) {
           blocked = true;
           break;
@@ -2591,23 +2789,26 @@ export function verifyTowerSolvable(tower, opts = {}) {
 
     // 2. Interior through-spire portals AND Mandatory Mid-Spire Inner Aqueduct Sanctums (`isRune`)
     if (cur.kind === 'ledge') {
-      for (const d of tower.doors) {
-        if (wrapCol(d.col) !== cur.col || Math.abs(d.floor - cur.floor) > 0.5) continue;
-        if (d.isRune && allowSanctumSolve && d.sealId && GROUP_BITS[d.sealId]) {
-          const sBit = GROUP_BITS[d.sealId];
-          if (!(mask & sBit)) {
-            pushState(idx, mask | sBit, 1);
+      const localDoors = doorsByCoord.get(coordInt(cur.col, cur.floor));
+      if (localDoors) {
+        for (let di = 0; di < localDoors.length; di++) {
+          const d = localDoors[di];
+          if (d.isRune && allowSanctumSolve && d.sealId && GROUP_BITS[d.sealId]) {
+            const sBit = GROUP_BITS[d.sealId];
+            if (!(mask & sBit)) {
+              pushState(idx, mask | sBit, 1);
+            }
+            continue;
           }
-          continue;
-        }
-        if (d.isExit || d.isVault || d.isRune || !d.targetId) continue;
-        const target = doorById.get(d.targetId);
-        if (target) {
-          const destIndices =
-            nodeIndicesByCoord.get(`${wrapCol(target.col)}:${Math.round(target.floor)}`) || [];
-          for (const destIdx of destIndices) {
-            if (isNodeActive(supportNodes[destIdx], mask)) {
-              pushState(destIdx, mask, 1);
+          if (d.isExit || d.isVault || d.isRune || !d.targetId) continue;
+          const target = doorById.get(d.targetId);
+          if (target) {
+            const destIndices = nodeIndicesByCoord.get(coordInt(wrapCol(target.col), Math.round(target.floor))) || [];
+            for (let k = 0; k < destIndices.length; k++) {
+              const destIdx = destIndices[k];
+              if (isNodeActive(supportNodes[destIdx], mask)) {
+                pushState(destIdx, mask, 1);
+              }
             }
           }
         }
@@ -2617,18 +2818,20 @@ export function verifyTowerSolvable(tower, opts = {}) {
     // 3. Steam/Hydro-Geyser OR Flipped Snap-Crab Springboard vertical launch (+3 floors)
     const canSpringLaunch =
       cur.kind === 'ledge' &&
-      (cur.ledge?.type === 'steamVent' || crabSpringCoords.has(`${cur.col}:${cur.floor}`));
+      (cur.ledge?.type === 'steamVent' || crabSpringSet.has(coordInt(cur.col, cur.floor)));
     if (canSpringLaunch) {
       for (let dc = -2; dc <= 2; dc++) {
         const tc = wrapCol(cur.col + dc);
-        for (const nextIdx of nodesByCol[tc]) {
+        const tcNodes = nodesByCol[tc];
+        for (let k = 0; k < tcNodes.length; k++) {
+          const nextIdx = tcNodes[k];
           const nxt = supportNodes[nextIdx];
           if (!isNodeActive(nxt, mask)) continue;
           const df = nxt.floor - cur.floor;
           if (df >= 1 && df <= 3) {
             if (
-              !isLaserBlockingAt(laserLedges, tc, cur.floor, nxt.floor, mask) &&
-              !isLaserBlockingAt(laserLedges, cur.col, cur.floor, nxt.floor, mask)
+              !isLaserColBlocking(tc, cur.floor, nxt.floor, mask) &&
+              !isLaserColBlocking(cur.col, cur.floor, nxt.floor, mask)
             ) {
               pushState(nextIdx, mask, 1);
             }
@@ -2638,20 +2841,24 @@ export function verifyTowerSolvable(tower, opts = {}) {
     }
 
     // 4. Tail-Grapple Swing Rings across chasms (3..4 col span)
-    for (const ring of grappleRings) {
-      const distToRing = colDist(cur.col, ring.col);
+    for (let ri = 0; ri < grappleRings.length; ri++) {
+      const ring = grappleRings[ri];
       const dfRing = ring.floor - cur.floor;
-      if (Math.abs(distToRing) >= 1 && Math.abs(distToRing) <= 2.4 && dfRing >= -0.5 && dfRing <= 2.2) {
+      if (dfRing < -0.5 || dfRing > 2.2) continue;
+      const distToRing = colDist(cur.col, ring.col);
+      if (Math.abs(distToRing) >= 1 && Math.abs(distToRing) <= 2.4) {
         const swingDir = Math.sign(distToRing) || 1;
         for (let spanStep = 1; spanStep <= 2; spanStep++) {
           const landCol = wrapCol(Math.round(ring.col + swingDir * spanStep));
-          for (const nextIdx of nodesByCol[landCol]) {
+          const landNodes = nodesByCol[landCol];
+          for (let k = 0; k < landNodes.length; k++) {
+            const nextIdx = landNodes[k];
             const nxt = supportNodes[nextIdx];
             if (!isNodeActive(nxt, mask)) continue;
             if (
               nxt.floor >= cur.floor - 2 &&
               nxt.floor <= cur.floor + 2 &&
-              !isLaserBlockingAt(laserLedges, landCol, Math.min(cur.floor, nxt.floor), Math.max(cur.floor, nxt.floor), mask)
+              !isLaserColBlocking(landCol, Math.min(cur.floor, nxt.floor), Math.max(cur.floor, nxt.floor), mask)
             ) {
               pushState(nextIdx, mask, 1);
             }
@@ -2693,12 +2900,12 @@ export function verifyTowerSolvable(tower, opts = {}) {
           } else if (df < 0) {
             let intercepted = false;
             for (let f = cur.floor - 1; f > nxt.floor; f--) {
-              if (hasCeilingAt(cur.col, f, mask) || isLaserBlockingAt(laserLedges, cur.col, f, f, mask)) {
+              if (hasCeilingAtCol(cur.col, f, mask) || isLaserColBlocking(cur.col, f, f, mask)) {
                 intercepted = true;
                 break;
               }
             }
-            if (!intercepted && !isLaserBlockingAt(laserLedges, nxt.col, nxt.floor, cur.floor, mask)) {
+            if (!intercepted && !isLaserColBlocking(nxt.col, nxt.floor, cur.floor, mask)) {
               pushState(nextIdx, mask, 1);
             }
           }
@@ -2709,14 +2916,14 @@ export function verifyTowerSolvable(tower, opts = {}) {
           const minF = Math.min(cur.floor, nxt.floor);
           const maxF = Math.max(cur.floor, nxt.floor);
           if (
-            isLaserBlockingAt(laserLedges, cur.col, minF, maxF, mask) ||
-            isLaserBlockingAt(laserLedges, nxt.col, minF, maxF, mask) ||
-            isPillarBlockingAt(nxt.col, minF, maxF)
+            isLaserColBlocking(cur.col, minF, maxF, mask) ||
+            isLaserColBlocking(nxt.col, minF, maxF, mask) ||
+            isPillarColBlocking(nxt.col, minF, maxF)
           ) {
             continue;
           }
           if (df === 1) {
-            if (!hasCeilingAt(cur.col, cur.floor + 1, mask)) {
+            if (!hasCeilingAtCol(cur.col, cur.floor + 1, mask)) {
               pushState(nextIdx, mask, 1);
             }
           } else if (df === 0) {
@@ -2724,7 +2931,7 @@ export function verifyTowerSolvable(tower, opts = {}) {
           } else if (df < 0) {
             let blockedDrop = false;
             for (let f = cur.floor; f > nxt.floor; f--) {
-              if (hasCeilingAt(nxt.col, f, mask) || isLaserBlockingAt(laserLedges, nxt.col, f, f, mask)) {
+              if (hasCeilingAtCol(nxt.col, f, mask) || isLaserColBlocking(nxt.col, f, f, mask)) {
                 blockedDrop = true;
                 break;
               }
@@ -2743,16 +2950,16 @@ export function verifyTowerSolvable(tower, opts = {}) {
           const maxF = Math.max(cur.floor, nxt.floor);
 
           if (
-            isLaserBlockingAt(laserLedges, cur.col, minF, maxF, mask) ||
-            isLaserBlockingAt(laserLedges, midCol, minF, maxF, mask) ||
-            isLaserBlockingAt(laserLedges, nxt.col, minF, maxF, mask) ||
-            isPillarBlockingAt(midCol, minF, maxF) ||
-            isPillarBlockingAt(nxt.col, minF, maxF)
+            isLaserColBlocking(cur.col, minF, maxF, mask) ||
+            isLaserColBlocking(midCol, minF, maxF, mask) ||
+            isLaserColBlocking(nxt.col, minF, maxF, mask) ||
+            isPillarColBlocking(midCol, minF, maxF) ||
+            isPillarColBlocking(nxt.col, minF, maxF)
           ) {
             continue;
           }
-          if (hasCeilingAt(cur.col, cur.floor + 1, mask)) continue;
-          if (df >= 0 && hasCeilingAt(midCol, cur.floor + 1, mask)) continue;
+          if (hasCeilingAtCol(cur.col, cur.floor + 1, mask)) continue;
+          if (df >= 0 && hasCeilingAtCol(midCol, cur.floor + 1, mask)) continue;
 
           pushState(nextIdx, mask, 1);
         }
@@ -2760,7 +2967,29 @@ export function verifyTowerSolvable(tower, opts = {}) {
     }
   }
 
-  return { solvable: false, minSteps: -1, reachableExit: false, crownSealsTotal: crownSeals.length };
+  return {
+    solvable: bestExitSteps >= 0,
+    minSteps: bestExitSteps,
+    reachableExit: bestExitSteps >= 0,
+    crownSealsTotal: crownSeals.length,
+    reachableCoords
+  };
+}
+
+/**
+ * Verifies 100% reachability across ledges, staircases, jumps, pipe-valve elevators (including
+ * multi-valve pressure groups), Snap-Crab springboard bounces, Gecko wall-scamper strips,
+ * grapple rings, interior portals, mandatory Inner Aqueduct Sanctum seals, and switches.
+ * @param {object} tower
+ * @param {{ enforceSeals?: boolean, allowSanctumSolve?: boolean }} [opts]
+ * @returns {{ solvable: boolean, minSteps: number, reachableExit: boolean, crownSealsTotal: number }}
+ */
+export function verifyTowerSolvable(tower, opts = {}) {
+  const { solvable, minSteps, reachableExit, crownSealsTotal } = runTowerReachabilityBfs(tower, {
+    ...opts,
+    collectAll: false
+  });
+  return { solvable, minSteps, reachableExit, crownSealsTotal };
 }
 
 // ============================================================================
@@ -2801,40 +3030,25 @@ const SPIRE_NOUNS = [
   'BASTION'
 ];
 
-function findReachableSolidCandidates(tower) {
+function findReachableSolidCandidates(tower, precomputedReachable = null) {
   const occupied = new Set();
   for (const d of tower.doors) occupied.add(`${d.col}:${d.floor}`);
   for (const sw of tower.switches) occupied.add(`${sw.col}:${sw.floor}`);
   for (const c of tower.collectibles) occupied.add(`${c.col}:${Math.round(c.floor)}`);
   occupied.add(`${tower.spawn.col}:${tower.spawn.floor}`);
 
+  const reachable =
+    precomputedReachable ||
+    runTowerReachabilityBfs(tower, { enforceSeals: false, allowSanctumSolve: true, collectAll: true })
+      .reachableCoords;
+
   const candidates = [];
-  const solidSteps = tower.ledges.filter(
-    (l) => l.type === 'solid' && l.floor >= 2 && l.floor <= tower.exitFloor
-  );
-  for (const l of solidSteps) {
+  for (const l of tower.ledges) {
+    if (l.type !== 'solid' || l.floor < 2 || l.floor > tower.exitFloor) continue;
     const k = `${l.col}:${l.floor}`;
-    if (occupied.has(k)) continue;
-    const probe = {
-      ...tower,
-      doors: [
-        ...tower.doors.map((d) => ({ ...d, isExit: false })),
-        {
-          id: '__probe__',
-          col: l.col,
-          floor: l.floor,
-          targetId: null,
-          isExit: true,
-          isVault: false,
-          isRune: false,
-          tunnelStyle: 'stone'
-        }
-      ]
-    };
-    if (verifyTowerSolvable(probe).solvable) {
-      candidates.push({ col: l.col, floor: l.floor });
-      occupied.add(k);
-    }
+    if (occupied.has(k) || !reachable.has(k)) continue;
+    candidates.push({ col: l.col, floor: l.floor });
+    occupied.add(k);
   }
   return candidates;
 }
@@ -2887,7 +3101,7 @@ export function generateProceduralTower({
 
   const mechanics = { ...DEFAULT_MECHANICS };
   if (isFloodRush) {
-    mechanics.waterRiseRate = Number(Math.min(0.42, 0.24 + (depth - 1) * 0.035).toFixed(3));
+    mechanics.waterRiseRate = Number(Math.min(0.28, 0.14 + depth * 0.018).toFixed(3));
   } else if (!isSanctum) {
     if (theme === 'alpine_lake') {
       mechanics.windForce = 0.30;
@@ -2934,34 +3148,184 @@ export function generateProceduralTower({
   const collectibles = [];
   const enemies = [];
 
-  span(ledges, 0, 18, 4, 'solid');
-  let curCol = 1;
-  let curFloor = 0;
-  let dir = rng() < 0.5 ? 1 : -1;
-  if (dir === -1) curCol = 18;
+  const walkableMap = new Map();
+  const barrierSet = new Set();
+  const stairSolidCells = new Set();
+  const stairAirCells = new Set();
+
+  const hasShaftOrStripAt = (col, minF, maxF) => {
+    const wc = wrapCol(col);
+    for (const el of elevators) {
+      if (wrapCol(el.col) === wc && maxF >= el.minFloor && minF <= el.maxFloor) return true;
+    }
+    for (const ws of wallStrips) {
+      if (wrapCol(ws.col) === wc && maxF > ws.minFloor && minF <= ws.maxFloor) return true;
+    }
+    return false;
+  };
+
+  const canPlaceSolid = (col, fl) => {
+    const wc = wrapCol(col);
+    const k = `${wc}:${fl}`;
+    if (stairAirCells.has(k) || barrierSet.has(k)) return false;
+    if (hasShaftOrStripAt(wc, fl, fl)) return false;
+    return true;
+  };
+
+  const canPlaceNonSolid = (col, fl) => {
+    const wc = wrapCol(col);
+    const k = `${wc}:${fl}`;
+    if (stairSolidCells.has(k)) return false;
+    return canPlaceSolid(wc, fl);
+  };
+
+  const canPlaceSolidRun = (fl, anchorCol, count, stepDir) => {
+    const s = stepDir >= 0 ? 1 : -1;
+    for (let i = 0; i < count; i++) {
+      if (!canPlaceSolid(anchorCol + s * i, fl)) return false;
+    }
+    return true;
+  };
+
+  const canPlaceNonSolidRun = (fl, anchorCol, count, stepDir) => {
+    const s = stepDir >= 0 ? 1 : -1;
+    for (let i = 0; i < count; i++) {
+      if (!canPlaceNonSolid(anchorCol + s * i, fl)) return false;
+    }
+    return true;
+  };
+
+  const canPlaceVerticalShaft = (col, minF, maxF) => {
+    const wc = wrapCol(col);
+    if (
+      elevators.some((e) => wrapCol(e.col) === wc && minF <= e.maxFloor + 1 && maxF >= e.minFloor - 1) ||
+      wallStrips.some((w) => wrapCol(w.col) === wc && minF <= w.maxFloor + 1 && maxF >= w.minFloor - 1)
+    ) {
+      return false;
+    }
+    for (let f = minF; f <= maxF; f++) {
+      const k = `${wc}:${f}`;
+      if (stairSolidCells.has(k) || stairAirCells.has(k) || barrierSet.has(k)) return false;
+    }
+    return true;
+  };
+
+  const putTile = (col, fl, type = 'solid', extra = {}) => {
+    const wc = wrapCol(col);
+    const k = `${wc}:${fl}`;
+    tile(ledges, wc, fl, type, extra);
+    if (isBarrierLedgeType(type)) {
+      const h = Math.max(1, Math.round(extra.h || 1));
+      for (let step = 0; step < h; step++) {
+        barrierSet.add(`${wc}:${fl + step}`);
+      }
+    } else {
+      walkableMap.set(k, type);
+    }
+  };
+
+  const putSpanDir = (fl, anchorCol, count, stepDir, type = 'solid', extra = {}) => {
+    const s = stepDir >= 0 ? 1 : -1;
+    for (let i = 0; i < count; i++) {
+      putTile(anchorCol + s * i, fl, type, extra);
+    }
+    return wrapCol(anchorCol + s * (count - 1));
+  };
+
+  const canPlaceStairFlight = (startFloor, startCol, steps, stepDir, topLandingLen = 3) => {
+    const s = stepDir >= 0 ? 1 : -1;
+    const nSteps = Math.max(1, Math.round(steps));
+    if (!canPlaceSolid(startCol - s, startFloor)) return false;
+    for (let k = 0; k < nSteps; k++) {
+      const sc = wrapCol(startCol + s * k);
+      const sf = startFloor + k;
+      const nc = wrapCol(sc + s);
+      if (!canPlaceSolid(sc, sf) || !canPlaceSolid(nc, sf + 1)) return false;
+      if (walkableMap.has(`${nc}:${sf}`) || hasShaftOrStripAt(nc, sf, sf)) return false;
+      if (k > 0 && walkableMap.has(`${nc}:${sf - 1}`)) return false;
+      if (
+        walkableMap.has(`${sc}:${sf + 1}`) ||
+        barrierSet.has(`${sc}:${sf + 1}`) ||
+        hasShaftOrStripAt(sc, sf + 1, sf + 1)
+      ) {
+        return false;
+      }
+      if (barrierSet.has(`${nc}:${sf + 1}`) || hasShaftOrStripAt(nc, sf + 1, sf + 1)) return false;
+    }
+    for (let i = 0; i < topLandingLen; i++) {
+      if (!canPlaceSolid(startCol + s * (nSteps + i), startFloor + nSteps)) return false;
+    }
+    return true;
+  };
+
+  const placeStairFlight = (startFloor, startCol, steps, stepDir, topLandingLen = 3) => {
+    const s = stepDir >= 0 ? 1 : -1;
+    const nSteps = Math.max(1, Math.round(steps));
+    const res = stairFlight(ledges, startFloor, startCol, nSteps, s, topLandingLen, 'solid');
+    walkableMap.set(`${wrapCol(startCol - s)}:${startFloor}`, 'solid');
+    for (let k = 0; k < nSteps; k++) {
+      const sc = wrapCol(startCol + s * k);
+      const sf = startFloor + k;
+      const nc = wrapCol(sc + s);
+      walkableMap.set(`${sc}:${sf}`, 'solid');
+      walkableMap.set(`${nc}:${sf + 1}`, 'solid');
+      stairSolidCells.add(`${sc}:${sf}`);
+      stairSolidCells.add(`${nc}:${sf + 1}`);
+      stairAirCells.add(`${nc}:${sf}`);
+      stairAirCells.add(`${sc}:${sf + 1}`);
+      if (k > 0) stairAirCells.add(`${nc}:${sf - 1}`);
+    }
+    for (let i = 0; i < topLandingLen; i++) {
+      const tc = wrapCol(startCol + s * (nSteps + i));
+      walkableMap.set(`${tc}:${startFloor + nSteps}`, 'solid');
+    }
+    return res;
+  };
+
+  const isClearVerticalAir = (col, minF, maxF) => {
+    const wc = wrapCol(col);
+    if (hasShaftOrStripAt(wc, minF, maxF)) return false;
+    for (let f = minF; f <= maxF; f++) {
+      const k = `${wc}:${f}`;
+      if (walkableMap.has(k) || barrierSet.has(k)) return false;
+    }
+    return true;
+  };
+
+  // Safe 5-column Spawn Quay [18, 19, 0, 1, 2] centered on { col: 0, floor: 0 }
+  const spawnDir = rng() < 0.5 ? 1 : -1;
+  let dir = spawnDir;
+  for (let i = 0; i < 5; i++) {
+    putTile(18 + i, 0, 'solid');
+  }
+  const firstStartCol = spawnDir > 0 ? 3 : 17;
+  const openRes = placeStairFlight(0, firstStartCol, 2, dir, 3);
+  let curFloor = openRes.topFloor;
+  let curCol = openRes.endCol;
 
   let doorSeq = 1;
   let switchSeq = 1;
   let gearSeq = 1;
   let secretPlaced = false;
   let usedPipeA = false;
-  const switchStateTracker = { red: false, cyan: false };
+  const switchStateTracker = { red: false, cyan: false, conv: false };
 
   const gearMult = dailyModifier?.mechanicsPatch?.doubleGears ? 2 : 1;
   const addGear = (col, floor) => {
     for (let g = 0; g < gearMult; g++) {
       collectibles.push({
         id: `${key}_g${gearSeq++}`,
-        col: wrapCol(col + g),
+        col: wrapCol(col + g * dir),
         floor,
         type: 'gear'
       });
     }
   };
+  addGear(openRes.midCol, curFloor);
 
   const ENEMY_ROTATION = ['snap_crab', 'gulp_hopper', 'volt_eel', 'rail_skater', 'barnacle_mortar', 'vent_stalker'];
   const addEnemy = (en) => {
-    if (!isSanctum) enemies.push(en);
+    if (!isSanctum || en.harmless) enemies.push(en);
   };
 
   const pushSecretDoor = (col, floor) => {
@@ -2984,45 +3348,60 @@ export function generateProceduralTower({
     }
   };
 
-  while (curFloor < exitFloor - 2) {
+  let loopGuard = 0;
+  while (curFloor < exitFloor - 2 && loopGuard++ < 64) {
     const remaining = exitFloor - curFloor;
 
-    if (mechanics.waterRiseRate > 0 && curFloor > 2 && curFloor % 5 <= 1) {
-      switches.push({
-        id: `${key}_drain_${switchSeq++}`,
-        col: wrapCol(curCol),
-        floor: curFloor,
-        group: 'drain',
-        mode: 'drainValve'
-      });
+    if (mechanics.waterRiseRate > 0 && curFloor >= 3 && switches.filter((s) => s.mode === 'drainValve').length < 2) {
+      const targetFirstDrain = Math.max(3, Math.floor(exitFloor * 0.32));
+      const targetSecondDrain = Math.max(targetFirstDrain + 4, Math.floor(exitFloor * 0.66));
+      const drainCount = switches.filter((s) => s.mode === 'drainValve').length;
+      if (
+        (drainCount === 0 && curFloor >= targetFirstDrain) ||
+        (drainCount === 1 && curFloor >= targetSecondDrain)
+      ) {
+        const dCol = wrapCol(curCol - dir);
+        if (!switches.some((s) => s.col === dCol && s.floor === curFloor)) {
+          switches.push({
+            id: `${key}_drain_${switchSeq++}`,
+            col: dCol,
+            floor: curFloor,
+            group: 'drain',
+            mode: 'drainValve'
+          });
+        }
+      }
     }
 
     const chunkPool = ['realStairFlight', 'realStairFlight', 'grappleChasm', 'conveyorFlume'];
     if (remaining >= 4) {
-      chunkPool.push('geckoWallClimb', 'mechLiftShaft', 'conduitArchWarp');
-      if (!usedPipeA) chunkPool.push('pipeValveLift');
+      chunkPool.push('geckoScamperWall', 'mechLiftShaft', 'conduitArchWarp', 'crabSpringVault');
+      if (!usedPipeA) chunkPool.push('pipePoweredLift');
     }
     if (remaining >= 3) {
-      chunkPool.push('geyserUpdraftTier', 'switchPhaseSluice');
+      chunkPool.push('geyserUpdraftTier', 'switchPhaseSluice', 'stairwayWithGate', 'reversibleFlumePuzzle');
       if (isSanctum) {
-        chunkPool.push('switchPhaseSluice', 'pipeValveLift', 'reversibleFlumePuzzle');
+        chunkPool.push('switchPhaseSluice', 'pipePoweredLift', 'reversibleFlumePuzzle');
       }
       if (isFloodRush) {
-        chunkPool.push('geyserUpdraftTier', 'geckoWallClimb', 'grappleChasm');
+        chunkPool.push('geyserUpdraftTier', 'geckoScamperWall', 'grappleChasm');
       }
     }
 
     const chunk = pick(chunkPool);
 
-    // 1. Pipe-Valve Powered Mechanical Elevator
-    if (chunk === 'pipeValveLift' && !usedPipeA && remaining >= 4) {
-      const valveCol = wrapCol(curCol);
-      const shaftCol = wrapCol(valveCol + dir * 2);
-      const conflict = elevators.some((e) => e.col === shaftCol && curFloor <= e.maxFloor + 1);
-      if (!conflict) {
+    // 1. Pipe-Valve Powered Mechanical Elevator (valve safely on interior of 3-col solid terrace)
+    if (chunk === 'pipePoweredLift' && !usedPipeA && remaining >= 4) {
+      const valveCol = wrapCol(curCol - dir);
+      const shaftCol = wrapCol(curCol + dir);
+      const spanH = Math.min(4, remaining - 1);
+      const topStart = wrapCol(shaftCol + dir);
+      if (
+        !switches.some((s) => s.col === valveCol && s.floor === curFloor) &&
+        canPlaceVerticalShaft(shaftCol, curFloor, curFloor + spanH) &&
+        canPlaceSolidRun(curFloor + spanH, topStart, 3, dir)
+      ) {
         usedPipeA = true;
-        const baseStart = dir === 1 ? wrapCol(valveCol - 1) : wrapCol(valveCol - 1);
-        span(ledges, curFloor, baseStart, 3, 'solid');
         switches.push({
           id: `${key}_pipe_${switchSeq++}`,
           col: valveCol,
@@ -3031,7 +3410,6 @@ export function generateProceduralTower({
           pipeGroup: 'pipeA',
           mode: 'pipeValve'
         });
-        const spanH = Math.min(4, remaining - 1);
         elevators.push({
           id: `${key}_lift_pipe`,
           col: shaftCol,
@@ -3042,81 +3420,127 @@ export function generateProceduralTower({
           pipeGroup: 'pipeA',
           powered: false
         });
-        const topStart = dir === 1 ? wrapCol(shaftCol + 1) : wrapCol(shaftCol - 3);
-        span(ledges, curFloor + spanH, topStart, 3, 'solid');
-        addGear(wrapCol(shaftCol + dir * 2), curFloor + spanH);
+        const nextEnd = putSpanDir(curFloor + spanH, topStart, 3, dir, 'solid');
+        addGear(wrapCol(topStart + dir), curFloor + spanH);
         curFloor += spanH;
-        curCol = dir === 1 ? wrapCol(topStart + 2) : topStart;
+        curCol = nextEnd;
         continue;
       }
     }
 
     // 2. Gecko Crystal/Moss Wall-Scamper Strip
-    if (chunk === 'geckoWallClimb' && remaining >= 4) {
+    if (chunk === 'geckoScamperWall' && remaining >= 4) {
       const stripCol = wrapCol(curCol + dir);
-      const conflict =
-        elevators.some((e) => e.col === stripCol) || wallStrips.some((w) => w.col === stripCol);
-      if (!conflict) {
-        const climbH = Math.min(3, remaining - 1);
-        tile(ledges, curCol, curFloor, 'solid');
-        tile(ledges, stripCol, curFloor, 'solid');
+      const climbH = Math.min(3, remaining - 1);
+      const topStart = wrapCol(stripCol + dir);
+      if (
+        canPlaceSolid(stripCol, curFloor) &&
+        canPlaceVerticalShaft(stripCol, curFloor, curFloor + climbH) &&
+        canPlaceSolidRun(curFloor + climbH, topStart, 3, dir)
+      ) {
+        putTile(stripCol, curFloor, 'solid');
         wallStrips.push({
           id: `${key}_gecko_${wallStrips.length + 1}`,
           col: stripCol,
           minFloor: curFloor,
           maxFloor: curFloor + climbH
         });
-        const topStart = dir === 1 ? wrapCol(stripCol + 1) : wrapCol(stripCol - 3);
-        span(ledges, curFloor + climbH, topStart, 3, 'solid');
+        const nextEnd = putSpanDir(curFloor + climbH, topStart, 3, dir, 'solid');
         addGear(stripCol, curFloor + Math.ceil(climbH / 2));
         curFloor += climbH;
-        curCol = dir === 1 ? wrapCol(topStart + 2) : topStart;
+        curCol = nextEnd;
         continue;
       }
     }
 
-    // 3. Tail-Grapple Swing Ring Chasm (+ safe stepping backup)
+    // 3. Tail-Grapple Swing Ring Chasm (3-col solid run-up + 1-col chasm + grapple ring -> +1F 3-col solid landing)
     if (chunk === 'grappleChasm' && remaining >= 2) {
-      const launchStart = dir === 1 ? wrapCol(curCol - 1) : wrapCol(curCol - 1);
-      span(ledges, curFloor, launchStart, 3, 'solid');
-      const ringCol = ((curCol + dir * 2 + COLS) % COLS) + 0.2 * dir;
-      grappleRings.push({
-        id: `${key}_ring_${grappleRings.length + 1}`,
-        col: ringCol,
-        floor: curFloor + 1.4
-      });
-      tile(ledges, wrapCol(curCol + dir * 2), curFloor, 'crumble');
-      const landCol = wrapCol(curCol + dir * 3);
-      const landStart = dir === 1 ? landCol : wrapCol(landCol - 2);
-      span(ledges, curFloor + 1, landStart, 3, 'solid');
-      addGear(wrapCol(curCol + dir * 2), curFloor + 2);
-      curFloor += 1;
-      curCol = dir === 1 ? wrapCol(landStart + 2) : landStart;
-      continue;
+      const gapCol = wrapCol(curCol + dir);
+      const landStart = wrapCol(curCol + dir * 2);
+      if (
+        isClearVerticalAir(gapCol, curFloor, curFloor + 1) &&
+        isClearVerticalAir(curCol, curFloor + 1, curFloor + 1) &&
+        canPlaceSolidRun(curFloor + 1, landStart, 3, dir)
+      ) {
+        const ringCol = wrapFloatCol(curCol + 0.5 + dir * 1.2);
+        grappleRings.push({
+          id: `${key}_ring_${grappleRings.length + 1}`,
+          col: Number(ringCol.toFixed(2)),
+          floor: Number((curFloor + 1.45).toFixed(2))
+        });
+        const nextEnd = putSpanDir(curFloor + 1, landStart, 3, dir, 'solid');
+        addGear(gapCol, curFloor + 2);
+        curFloor += 1;
+        curCol = nextEnd;
+        continue;
+      }
     }
 
-    // 4. Hydro-Geyser Updraft Launch Tier
+    // 4. Hydro-Geyser Updraft Launch Tier (same-floor steamVent -> +2..3F 3-col solid terrace)
     if (chunk === 'geyserUpdraftTier' && remaining >= 3) {
       const ventCol = wrapCol(curCol + dir);
-      tile(ledges, curCol, curFloor, 'solid');
-      tile(ledges, ventCol, curFloor, 'steamVent', {
-        phasePeriod: 3.1,
-        phaseOffset: Number((rng() * 1.5).toFixed(2))
-      });
-      const upperStart = dir === 1 ? wrapCol(ventCol + 1) : wrapCol(ventCol - 3);
-      span(ledges, curFloor + 2, upperStart, 3, 'solid');
-      addGear(ventCol, curFloor + 2);
-      curFloor += 2;
-      curCol = dir === 1 ? wrapCol(upperStart + 2) : upperStart;
-      continue;
+      const upH = remaining >= 4 ? 3 : 2;
+      const upperStart = wrapCol(ventCol + dir);
+      if (
+        canPlaceNonSolid(ventCol, curFloor) &&
+        isClearVerticalAir(ventCol, curFloor + 1, curFloor + upH) &&
+        canPlaceSolidRun(curFloor + upH, upperStart, 3, dir)
+      ) {
+        putTile(ventCol, curFloor, 'steamVent', {
+          phasePeriod: 3.1,
+          phaseOffset: Number((rng() * 1.5).toFixed(2))
+        });
+        const nextEnd = putSpanDir(curFloor + upH, upperStart, 3, dir, 'solid');
+        addGear(ventCol, curFloor + upH);
+        curFloor += upH;
+        curCol = nextEnd;
+        continue;
+      }
     }
 
-    // 5. Standard Mechanical Elevator Shaft
+    // 5. Flip-Crab Springboard + Backup Geyser Vault (+3F launch to upper loft)
+    if (chunk === 'crabSpringVault' && remaining >= 4) {
+      const c1 = wrapCol(curCol + dir);
+      const c2 = wrapCol(curCol + dir * 2);
+      const ventCol = wrapCol(curCol + dir * 3);
+      const upperStart = wrapCol(ventCol + dir);
+      if (
+        canPlaceSolidRun(curFloor, c1, 2, dir) &&
+        canPlaceNonSolid(ventCol, curFloor) &&
+        isClearVerticalAir(c1, curFloor + 1, curFloor + 3) &&
+        isClearVerticalAir(c2, curFloor + 1, curFloor + 3) &&
+        isClearVerticalAir(ventCol, curFloor + 1, curFloor + 3) &&
+        canPlaceSolidRun(curFloor + 3, upperStart, 3, dir)
+      ) {
+        putSpanDir(curFloor, c1, 2, dir, 'solid');
+        putTile(ventCol, curFloor, 'steamVent', {
+          phasePeriod: 3.1,
+          phaseOffset: Number((rng() * 1.4).toFixed(2))
+        });
+        addEnemy({
+          type: 'snap_crab',
+          col: c1 + 0.5,
+          floor: curFloor,
+          dir: -dir,
+          ...(isSanctum ? { harmless: true } : {})
+        });
+        const nextEnd = putSpanDir(curFloor + 3, upperStart, 3, dir, 'solid');
+        addGear(c2, curFloor + 3);
+        curFloor += 3;
+        curCol = nextEnd;
+        continue;
+      }
+    }
+
+    // 6. Standard Mechanical Elevator Shaft
     if (chunk === 'mechLiftShaft' && remaining >= 4) {
       const liftSpan = Math.min(4, remaining - 1);
       const shaftCol = wrapCol(curCol + dir);
-      const conflict = elevators.some((e) => e.col === shaftCol && curFloor <= e.maxFloor + 1);
-      if (!conflict) {
+      const landStart = wrapCol(shaftCol + dir);
+      if (
+        canPlaceVerticalShaft(shaftCol, curFloor, curFloor + liftSpan) &&
+        canPlaceSolidRun(curFloor + liftSpan, landStart, 3, dir)
+      ) {
         elevators.push({
           id: `${key}_lift_${elevators.length + 1}`,
           col: shaftCol,
@@ -3125,10 +3549,9 @@ export function generateProceduralTower({
           startFloor: curFloor,
           speed: Number((1.75 + Math.min(0.6, diff * 0.08)).toFixed(2))
         });
-        const landStart = dir === 1 ? wrapCol(shaftCol + 1) : wrapCol(shaftCol - 3);
-        span(ledges, curFloor + liftSpan, landStart, 3, 'solid');
+        const nextEnd = putSpanDir(curFloor + liftSpan, landStart, 3, dir, 'solid');
         curFloor += liftSpan;
-        curCol = dir === 1 ? wrapCol(landStart + 2) : landStart;
+        curCol = nextEnd;
         addEnemy({
           type: ENEMY_ROTATION[(depth + curFloor) % ENEMY_ROTATION.length],
           col: wrapCol(shaftCol + 10) + 0.5,
@@ -3140,159 +3563,326 @@ export function generateProceduralTower({
       }
     }
 
-    // 6. Conduit Archway Shortcut
+    // 7. Conduit Archway Shortcut (+9..11 col cross-spire warp onto 4-col solid terrace)
     if (chunk === 'conduitArchWarp' && remaining >= 4) {
-      const enterCol = wrapCol(curCol);
-      const exitCol = wrapCol(enterCol + 9 + randInt(0, 2));
+      const enterCol = wrapCol(curCol - dir);
+      const nextDir = rng() < 0.4 ? -dir : dir;
+      const platStart = wrapCol(enterCol + 9 + randInt(0, 2));
       const jumpFloors = Math.min(3, remaining - 1);
       const targetFloor = curFloor + jumpFloors;
-      const dA = `${key}_d${doorSeq}a`;
-      const dB = `${key}_d${doorSeq}b`;
-      doorSeq++;
-
-      span(ledges, curFloor, dir === 1 ? wrapCol(enterCol - 1) : enterCol, 2, 'solid');
-      const platStart = dir === 1 ? wrapCol(exitCol - 1) : wrapCol(exitCol - 2);
-      span(ledges, targetFloor, platStart, 4, 'solid');
-
-      doors.push(
-        { id: dA, col: enterCol, floor: curFloor, targetId: dB, tunnelStyle: 'sparkArch' },
-        { id: dB, col: exitCol, floor: targetFloor, targetId: dA, tunnelStyle: 'sparkArch' }
-      );
-
-      if (rng() < 0.4) dir = -dir;
-      curFloor = targetFloor;
-      curCol = dir === 1 ? wrapCol(platStart + 3) : platStart;
-      continue;
+      if (
+        !doors.some((d) => d.col === enterCol && d.floor === curFloor) &&
+        !switches.some((s) => s.col === enterCol && s.floor === curFloor) &&
+        canPlaceSolidRun(targetFloor, platStart, 4, nextDir)
+      ) {
+        const dA = `${key}_d${doorSeq}a`;
+        const dB = `${key}_d${doorSeq}b`;
+        doorSeq++;
+        const exitPortalCol = wrapCol(platStart + nextDir);
+        const nextEnd = putSpanDir(targetFloor, platStart, 4, nextDir, 'solid');
+        doors.push(
+          { id: dA, col: enterCol, floor: curFloor, targetId: dB, tunnelStyle: 'sparkArch' },
+          { id: dB, col: exitPortalCol, floor: targetFloor, targetId: dA, tunnelStyle: 'sparkArch' }
+        );
+        dir = nextDir;
+        curFloor = targetFloor;
+        curCol = nextEnd;
+        continue;
+      }
     }
 
-    // 7. Switch + Phase Sluice Bridge
+    // 8. Switch + Same-Floor Phase Sluice Bridge -> Canonical Stair Flight (100% single-polarity, zero fake stairs, zero double-toggle!)
     if (chunk === 'switchPhaseSluice' && remaining >= 3) {
-      const group = switchSeq % 2 === 1 ? 'red' : 'cyan';
-      const swCol = wrapCol(curCol);
-      span(ledges, curFloor, dir === 1 ? wrapCol(swCol - 1) : swCol, 2, 'solid');
-      switches.push({
-        id: `${key}_sw_${switchSeq++}`,
-        col: swCol,
-        floor: curFloor,
-        group,
-        mode: 'toggle'
-      });
-      const nextGroupState = !switchStateTracker[group];
-      switchStateTracker[group] = nextGroupState;
-
-      const brStart = dir === 1 ? wrapCol(swCol + 1) : wrapCol(swCol - 2);
-      span(ledges, curFloor + 1, brStart, 2, 'phaseBlock', {
-        switchGroup: group,
-        inverted: !nextGroupState
-      });
-      const brEnd = dir === 1 ? wrapCol(brStart + 1) : brStart;
-      const destStart = dir === 1 ? wrapCol(brEnd + 1) : wrapCol(brEnd - 3);
-      span(ledges, curFloor + 2, destStart, 3, 'solid');
-      curFloor += 2;
-      curCol = dir === 1 ? wrapCol(destStart + 2) : destStart;
-      addGear(brEnd, curFloor - 1);
-      continue;
-    }
-
-    // 8. Reversible Hydro-Flume Puzzle
-    if ((chunk === 'reversibleFlumePuzzle' || chunk === 'conveyorFlume') && remaining >= 2) {
-      const swCol = wrapCol(curCol);
-      span(ledges, curFloor, dir === 1 ? wrapCol(swCol - 1) : swCol, 2, 'solid');
-      if (chunk === 'reversibleFlumePuzzle') {
+      const availGroup = !switchStateTracker.red ? 'red' : !switchStateTracker.cyan ? 'cyan' : null;
+      const swCol = wrapCol(curCol - dir);
+      const brStart = wrapCol(curCol + dir);
+      const exitStart = wrapCol(curCol + dir * 3);
+      const stairStart = wrapCol(curCol + dir * 6);
+      const flightSteps = Math.min(2, remaining - 1);
+      if (
+        availGroup &&
+        !switches.some((s) => s.col === swCol && s.floor === curFloor) &&
+        !doors.some((d) => d.col === swCol && d.floor === curFloor) &&
+        canPlaceNonSolidRun(curFloor, brStart, 2, dir) &&
+        canPlaceSolidRun(curFloor, exitStart, 3, dir) &&
+        canPlaceStairFlight(curFloor, stairStart, flightSteps, dir, 3)
+      ) {
+        switchStateTracker[availGroup] = true;
         switches.push({
-          id: `${key}_conv_${switchSeq++}`,
+          id: `${key}_sw_${switchSeq++}`,
           col: swCol,
           floor: curFloor,
-          group: 'conv',
-          mode: 'conveyorFlip'
+          group: availGroup,
+          mode: 'toggle'
         });
+        putSpanDir(curFloor, brStart, 2, dir, 'phaseBlock', {
+          switchGroup: availGroup,
+          inverted: false
+        });
+        putSpanDir(curFloor, exitStart, 3, dir, 'solid');
+        addGear(wrapCol(brStart + dir), curFloor);
+        const res = placeStairFlight(curFloor, stairStart, flightSteps, dir, 3);
+        curFloor = res.topFloor;
+        curCol = res.endCol;
+        continue;
       }
-      const flumeType =
-        chunk === 'reversibleFlumePuzzle'
-          ? dir === 1
-            ? 'conveyorL'
-            : 'conveyorR'
-          : dir === 1
-          ? 'conveyorR'
-          : 'conveyorL';
-      const cStart = dir === 1 ? wrapCol(curCol + 1) : wrapCol(curCol - 3);
-      span(ledges, curFloor + 1, cStart, 3, flumeType);
-      const endCol = dir === 1 ? wrapCol(cStart + 2) : cStart;
-      const nextStart = dir === 1 ? wrapCol(endCol + 1) : wrapCol(endCol - 3);
-      span(ledges, curFloor + 2, nextStart, 3, 'solid');
-      curFloor += 2;
-      curCol = dir === 1 ? wrapCol(nextStart + 2) : nextStart;
-      continue;
+    }
+
+    // 9. Same-Floor Reversible / Booster Hydro-Flume -> Canonical Stair or Chasm Leap (zero fake stairs!)
+    if ((chunk === 'reversibleFlumePuzzle' || chunk === 'conveyorFlume') && remaining >= 2) {
+      if (chunk === 'reversibleFlumePuzzle' && !switchStateTracker.conv) {
+        const swCol = wrapCol(curCol - dir);
+        const flumeStart = wrapCol(curCol + dir);
+        const exitStart = wrapCol(curCol + dir * 4);
+        const stairStart = wrapCol(curCol + dir * 7);
+        const flightSteps = Math.min(2, remaining - 1);
+        if (
+          flightSteps >= 1 &&
+          !switches.some((s) => s.col === swCol && s.floor === curFloor) &&
+          !doors.some((d) => d.col === swCol && d.floor === curFloor) &&
+          canPlaceNonSolidRun(curFloor, flumeStart, 3, dir) &&
+          canPlaceSolidRun(curFloor, exitStart, 3, dir) &&
+          canPlaceStairFlight(curFloor, stairStart, flightSteps, dir, 3)
+        ) {
+          switchStateTracker.conv = true;
+          switches.push({
+            id: `${key}_conv_${switchSeq++}`,
+            col: swCol,
+            floor: curFloor,
+            group: 'conv',
+            mode: 'conveyorFlip'
+          });
+          // Starts opposing before swCol; flips to boosting +dir when Gateway steps on swCol!
+          const flumeType = dir === 1 ? 'conveyorL' : 'conveyorR';
+          putSpanDir(curFloor, flumeStart, 3, dir, flumeType);
+          putSpanDir(curFloor, exitStart, 3, dir, 'solid');
+          addGear(wrapCol(flumeStart + dir), curFloor);
+          const res = placeStairFlight(curFloor, stairStart, flightSteps, dir, 3);
+          curFloor = res.topFloor;
+          curCol = res.endCol;
+          continue;
+        }
+      } else {
+        // Booster conveyorFlume on curFloor launching across a 1-col chasm onto a +1F 3-col solid terrace!
+        const flumeStart = wrapCol(curCol + dir);
+        const gapCol = wrapCol(curCol + dir * 3);
+        const landStart = wrapCol(curCol + dir * 4);
+        if (
+          canPlaceNonSolidRun(curFloor, flumeStart, 2, dir) &&
+          isClearVerticalAir(gapCol, curFloor, curFloor + 1) &&
+          isClearVerticalAir(wrapCol(curCol + dir * 2), curFloor + 1, curFloor + 1) &&
+          canPlaceSolidRun(curFloor + 1, landStart, 3, dir)
+        ) {
+          const boostType = switchStateTracker.conv
+            ? dir === 1
+              ? 'conveyorL'
+              : 'conveyorR'
+            : dir === 1
+            ? 'conveyorR'
+            : 'conveyorL';
+          putSpanDir(curFloor, flumeStart, 2, dir, boostType);
+          const nextEnd = putSpanDir(curFloor + 1, landStart, 3, dir, 'solid');
+          addGear(gapCol, curFloor + 1);
+          curFloor += 1;
+          curCol = nextEnd;
+          continue;
+        }
+      }
+    }
+
+    // 10. Stairway With Switch-Retracted Siphon Gate (100% single-polarity, gate on flat terrace clear of stairs!)
+    if (chunk === 'stairwayWithGate' && remaining >= 3) {
+      const availGroup = !switchStateTracker.red ? 'red' : !switchStateTracker.cyan ? 'cyan' : null;
+      const swCol = wrapCol(curCol - dir);
+      const gateCol = wrapCol(curCol + dir);
+      const leadCol = wrapCol(curCol + dir * 2);
+      const stairStart = wrapCol(curCol + dir * 3);
+      const flightSteps = Math.min(2, remaining - 1);
+      if (
+        availGroup &&
+        !switches.some((s) => s.col === swCol && s.floor === curFloor) &&
+        !doors.some((d) => d.col === swCol && d.floor === curFloor) &&
+        canPlaceNonSolid(gateCol, curFloor) &&
+        isClearVerticalAir(gateCol, curFloor + 1, curFloor + 2) &&
+        canPlaceSolid(leadCol, curFloor) &&
+        canPlaceStairFlight(curFloor, stairStart, flightSteps, dir, 3)
+      ) {
+        switchStateTracker[availGroup] = true;
+        switches.push({
+          id: `${key}_sw_${switchSeq++}`,
+          col: swCol,
+          floor: curFloor,
+          group: availGroup,
+          mode: 'toggle'
+        });
+        putTile(gateCol, curFloor, 'solid');
+        putTile(gateCol, curFloor, 'laserGate', {
+          switchGroup: availGroup,
+          inverted: false,
+          h: 2
+        });
+        putTile(leadCol, curFloor, 'solid');
+        const res = placeStairFlight(curFloor, stairStart, flightSteps, dir, 3);
+        addGear(res.midCol, res.topFloor);
+        curFloor = res.topFloor;
+        curCol = res.endCol;
+        continue;
+      }
     }
 
     // Default: Smooth Multi-Tread Real Staircase Flight! (Always 'solid' so 3D 5-riser stairs match physics 1:1!)
-    const flightSteps = Math.min(3, remaining);
-    const res = stairFlight(ledges, curFloor, wrapCol(curCol + dir), flightSteps, dir, 3, 'solid');
-    curFloor = res.topFloor;
-    curCol = res.endCol;
-    addGear(res.midCol, curFloor);
+    const flightSteps = Math.min(3, remaining - 1);
+    let placedDefault = false;
+    for (let pad = 0; pad <= 3; pad++) {
+      if (pad > 0) {
+        const padCol = wrapCol(curCol + dir);
+        if (!canPlaceSolid(padCol, curFloor)) break;
+        putTile(padCol, curFloor, 'solid');
+        curCol = padCol;
+      }
+      const stairStart = wrapCol(curCol + dir);
+      if (canPlaceStairFlight(curFloor, stairStart, flightSteps, dir, 3)) {
+        const res = placeStairFlight(curFloor, stairStart, flightSteps, dir, 3);
+        curFloor = res.topFloor;
+        curCol = res.endCol;
+        addGear(res.midCol, curFloor);
+        placedDefault = true;
 
-    if (curFloor > 2 && rng() < 0.7) {
-      addEnemy({
-        type: ENEMY_ROTATION[(depth + curFloor) % ENEMY_ROTATION.length],
-        col: wrapCol(res.midCol + 9) + 0.5,
-        floor: curFloor,
-        dir,
-        speed: Number((1.65 + Math.min(0.7, diff * 0.08)).toFixed(2))
-      });
+        if (curFloor > 2 && rng() < 0.7) {
+          addEnemy({
+            type: ENEMY_ROTATION[(depth + curFloor) % ENEMY_ROTATION.length],
+            col: wrapCol(res.midCol + 9) + 0.5,
+            floor: curFloor,
+            dir,
+            speed: Number((1.65 + Math.min(0.7, diff * 0.08)).toFixed(2))
+          });
+        }
+        break;
+      }
+    }
+
+    if (!placedDefault) {
+      // Safe shaft fallback if columns ahead had prior vertical obstacles
+      for (let step = 1; step <= COLS; step++) {
+        const shaftCol = wrapCol(curCol + dir * step);
+        const topStart = wrapCol(shaftCol + dir);
+        const spanH = Math.min(3, remaining - 1);
+        if (step > 1 && !canPlaceSolid(wrapCol(curCol + dir * (step - 1)), curFloor)) break;
+        if (step > 1) putTile(wrapCol(curCol + dir * (step - 1)), curFloor, 'solid');
+        if (
+          canPlaceVerticalShaft(shaftCol, curFloor, curFloor + spanH) &&
+          canPlaceSolidRun(curFloor + spanH, topStart, 3, dir)
+        ) {
+          elevators.push({
+            id: `${key}_lift_${elevators.length + 1}`,
+            col: shaftCol,
+            minFloor: curFloor,
+            maxFloor: curFloor + spanH,
+            startFloor: curFloor,
+            speed: 1.9
+          });
+          curCol = putSpanDir(curFloor + spanH, topStart, 3, dir, 'solid');
+          curFloor += spanH;
+          break;
+        }
+      }
     }
 
     if (!secretPlaced && curFloor >= Math.floor(exitFloor * 0.45) && curFloor <= exitFloor - 3) {
+      const bridgeCol = wrapCol(curCol + dir);
       const sideCol = wrapCol(curCol + dir * 2);
       const starCol = wrapCol(curCol + dir * 3);
-      tile(ledges, wrapCol(curCol + dir), curFloor, 'solid');
-      span(ledges, curFloor, dir === 1 ? sideCol : starCol, 2, 'solid');
-      pushSecretDoor(sideCol, curFloor);
-      collectibles.push({
-        id: `${key}_seed`,
-        col: starCol,
-        floor: curFloor,
-        type: 'starCore'
-      });
-      curCol = starCol;
-      secretPlaced = true;
+      if (canPlaceSolidRun(curFloor, bridgeCol, 3, dir)) {
+        putSpanDir(curFloor, bridgeCol, 3, dir, 'solid');
+        pushSecretDoor(sideCol, curFloor);
+        collectibles.push({
+          id: `${key}_seed`,
+          col: starCol,
+          floor: curFloor,
+          type: 'starCore'
+        });
+        curCol = starCol;
+        secretPlaced = true;
+      }
     }
   }
 
-  while (curFloor < exitFloor) {
-    const res = stairFlight(ledges, curFloor, wrapCol(curCol + dir), 1, dir, 3, 'solid');
-    curFloor = res.topFloor;
-    curCol = res.endCol;
+  let finishGuard = 0;
+  while (curFloor < exitFloor && finishGuard++ < 12) {
+    const stepCount = Math.min(2, exitFloor - curFloor);
+    const stairStart = wrapCol(curCol + dir);
+    if (canPlaceStairFlight(curFloor, stairStart, stepCount, dir, 3)) {
+      const res = placeStairFlight(curFloor, stairStart, stepCount, dir, 3);
+      curFloor = res.topFloor;
+      curCol = res.endCol;
+    } else {
+      const shaftCol = wrapCol(curCol + dir);
+      const rem = exitFloor - curFloor;
+      const topStart = wrapCol(shaftCol + dir);
+      if (canPlaceVerticalShaft(shaftCol, curFloor, exitFloor)) {
+        elevators.push({
+          id: `${key}_lift_crown`,
+          col: shaftCol,
+          minFloor: curFloor,
+          maxFloor: exitFloor,
+          startFloor: curFloor,
+          speed: 1.95
+        });
+        curCol = putSpanDir(exitFloor, topStart, 3, dir, 'solid');
+        curFloor = exitFloor;
+      } else {
+        const res = stairFlight(ledges, curFloor, stairStart, rem, dir, 3, 'solid');
+        curFloor = res.topFloor;
+        curCol = res.endCol;
+      }
+    }
   }
 
-  const summitStart = wrapCol(curCol - 2);
-  span(ledges, exitFloor, summitStart, 5, 'solid');
-  const exitCol = wrapCol(summitStart + 2);
+  // Extend Crown Summit Terrace strictly forward in `dir` so incoming staircase behind curCol stays untouched!
+  let crownEnd = curCol;
+  for (let i = 1; i <= 2; i++) {
+    const cNext = wrapCol(curCol + dir * i);
+    if (canPlaceSolid(cNext, exitFloor)) {
+      putTile(cNext, exitFloor, 'solid');
+      crownEnd = cNext;
+    } else {
+      break;
+    }
+  }
+  const exitCol = curCol;
   doors.push({
     id: `${key}_crown`,
     col: exitCol,
     floor: exitFloor,
     isExit: true
   });
-  addGear(wrapCol(summitStart + 4), exitFloor);
+  addGear(crownEnd, exitFloor);
 
   if (!secretPlaced) {
-    const bonusStart = dir === 1 ? wrapCol(curCol + 3) : wrapCol(curCol - 4);
-    const bonusDoorCol = dir === 1 ? wrapCol(curCol + 3) : wrapCol(curCol - 3);
-    const bonusStarCol = dir === 1 ? wrapCol(curCol + 4) : wrapCol(curCol - 4);
-    tile(ledges, wrapCol(curCol + dir * 2), exitFloor, 'solid');
-    span(ledges, exitFloor, bonusStart, 2, 'solid');
-    pushSecretDoor(bonusDoorCol, exitFloor);
-    collectibles.push({ id: `${key}_seed`, col: bonusStarCol, floor: exitFloor, type: 'starCore' });
+    const spur1 = wrapCol(crownEnd + dir);
+    const spur2 = wrapCol(crownEnd + dir * 2);
+    const spur3 = wrapCol(crownEnd + dir * 3);
+    if (canPlaceSolidRun(exitFloor, spur1, 3, dir)) {
+      putSpanDir(exitFloor, spur1, 3, dir, 'solid');
+      pushSecretDoor(spur2, exitFloor);
+      collectibles.push({ id: `${key}_seed`, col: spur3, floor: exitFloor, type: 'starCore' });
+      secretPlaced = true;
+    } else {
+      const backDoorCol = wrapCol(exitCol - dir);
+      const backStarCol = wrapCol(exitCol - dir * 2);
+      pushSecretDoor(backDoorCol, exitFloor);
+      collectibles.push({ id: `${key}_seed`, col: backStarCol, floor: exitFloor, type: 'starCore' });
+      secretPlaced = true;
+    }
   }
 
   // Expedition boss encounter every 3rd spire!
   if (isExpedition && depth % 3 === 0) {
     addEnemy({
       type: 'siphon_warden',
-      col: wrapCol(exitCol + 10) + 0.5,
+      col: wrapCol(exitCol - dir) + 0.5,
       floor: exitFloor - 0.2,
-      dir: -1,
+      dir: -dir,
       speed: 2.1,
       hp: 3
     });
@@ -3314,6 +3904,7 @@ export function generateProceduralTower({
     timeLimit,
     parTime,
     spawn: { col: 0, floor: 0 },
+    spawnDir,
     palette,
     mechanics,
     ledges,
@@ -3326,23 +3917,59 @@ export function generateProceduralTower({
     enemies
   });
 
-  const check = verifyTowerSolvable(tower);
+  // Single-pass state-space BFS verifies exit solvability, secret door reachability, AND candidate spots in < 0.2ms!
+  let bfsResult = runTowerReachabilityBfs(tower, {
+    enforceSeals: true,
+    allowSanctumSolve: true,
+    collectAll: true
+  });
   const secretDoor = tower.doors.find((d) => d.isRune || d.isVault);
   const secretReachable =
-    !secretDoor ||
-    verifyTowerSolvable({
-      ...tower,
-      doors: tower.doors.map((d) => ({ ...d, isExit: d.id === secretDoor.id }))
-    }).solvable;
+    !secretDoor || bfsResult.reachableCoords.has(`${wrapCol(secretDoor.col)}:${Math.round(secretDoor.floor)}`);
 
-  if (!check.solvable || !secretReachable) {
+  if (!bfsResult.solvable || !secretReachable) {
     tower = repairProceduralTower(tower, exitCol, exitFloor);
+    bfsResult = runTowerReachabilityBfs(tower, {
+      enforceSeals: true,
+      allowSanctumSolve: true,
+      collectAll: true
+    });
+  }
+
+  // Guarantee >= 2 reachable drainValve wheels on every rising-tide spire (especially Flood Rush!)
+  if (tower.mechanics.waterRiseRate > 0) {
+    const reachableDrains = tower.switches.filter(
+      (sw) => sw.mode === 'drainValve' && bfsResult.reachableCoords.has(`${sw.col}:${sw.floor}`)
+    );
+    if (reachableDrains.length < 2) {
+      const drainSpots = findReachableSolidCandidates(tower, bfsResult.reachableCoords);
+      const needed = 2 - reachableDrains.length;
+      const fracs = needed === 2 ? [0.32, 0.68] : [0.58];
+      const usedDrainIdx = new Set();
+      for (const f of fracs) {
+        if (!drainSpots.length) break;
+        let idx = Math.min(drainSpots.length - 1, Math.floor(drainSpots.length * f));
+        while (usedDrainIdx.has(idx) && idx + 1 < drainSpots.length) idx++;
+        while (usedDrainIdx.has(idx) && idx - 1 >= 0) idx--;
+        if (usedDrainIdx.has(idx)) continue;
+        usedDrainIdx.add(idx);
+        const sp = drainSpots[idx];
+        tower.switches.push({
+          id: `${key}_drain_${switchSeq++}`,
+          col: wrapCol(sp.col),
+          floor: Math.round(sp.floor),
+          group: 'drain',
+          pipeGroup: null,
+          mode: 'drainValve'
+        });
+      }
+    }
   }
 
   if (isSanctum && missionType) {
-    const reachSpots = findReachableSolidCandidates(tower);
+    const reachSpots = findReachableSolidCandidates(tower, bfsResult.reachableCoords);
     const pickAtFrac = (frac, usedIdx) => {
-      if (!reachSpots.length) return { col: wrapCol(exitCol - 1), floor: exitFloor };
+      if (!reachSpots.length) return { col: wrapCol(exitCol - dir), floor: exitFloor };
       let idx = Math.min(reachSpots.length - 1, Math.floor(reachSpots.length * frac));
       while (usedIdx.has(idx) && idx + 1 < reachSpots.length) idx++;
       while (usedIdx.has(idx) && idx - 1 >= 0) idx--;
@@ -3435,12 +4062,14 @@ export function generateProceduralTower({
         type: 'curio',
         curioId
       });
+      const hasRune = tower.runeDoors && tower.runeDoors.length > 0;
       tower.casualMission = {
         type: 'puzzle_architect',
         title: 'AQUEDUCT SANCTUM TRIAL',
         subtitle: 'Route Multi-Valve Conduits & Solve the Interior Aqueduct Sanctum',
         targetCount: 1,
-        requiresRune: true
+        requiresRune: hasRune,
+        ...(hasRune ? {} : { requiresVault: Boolean(tower.vaultDoor) })
       };
     }
   }
@@ -3449,10 +4078,14 @@ export function generateProceduralTower({
 }
 
 function repairProceduralTower(tower, exitCol, exitFloor) {
+  const rDir = tower.spawnDir === -1 ? -1 : 1;
   const repairMap = new Map();
   for (const l of tower.ledges) {
-    const isBarrier = l.type === 'box' || l.type === 'pillar' || l.type === 'laserGate';
-    repairMap.set(isBarrier ? `${l.col}:${l.floor}:${l.type}` : `${l.col}:${l.floor}:step`, { ...l });
+    const isBarrier = isBarrierLedgeType(l.type);
+    repairMap.set(isBarrier ? `${l.col}:${l.floor}:${l.type}` : `${l.col}:${l.floor}:step`, {
+      ...l,
+      ...(isBarrier ? {} : { stairDir: 0, isExplicitStair: false, explicitStairDir: 0 })
+    });
   }
 
   let elevators = [...tower.elevators];
@@ -3465,10 +4098,12 @@ function repairProceduralTower(tower, exitCol, exitFloor) {
     wallStrips = wallStrips.filter((w) => wrapCol(w.col) !== wc);
   };
 
-  const placeSolidAt = (col, fl) => {
+  const placeSolidAt = (col, fl, asStair = false) => {
     const wc = wrapCol(col);
     dropVerticalAt(wc);
     repairMap.delete(`${wc}:${fl}:laserGate`);
+    repairMap.delete(`${wc}:${fl}:pillar`);
+    repairMap.delete(`${wc}:${fl}:box`);
     repairMap.set(`${wc}:${fl}:step`, {
       col: wc,
       floor: fl,
@@ -3477,14 +4112,18 @@ function repairProceduralTower(tower, exitCol, exitFloor) {
       pipeGroup: null,
       inverted: false,
       phasePeriod: 3.2,
-      phaseOffset: 0
+      phaseOffset: 0,
+      ...(asStair ? { stairDir: rDir, isExplicitStair: true, explicitStairDir: rDir } : {})
     });
   };
 
-  const forceClearStepAndLaser = (col, fl) => {
+  const forceClearAirAt = (col, fl) => {
     const wc = wrapCol(col);
+    dropVerticalAt(wc);
     repairMap.delete(`${wc}:${fl}:step`);
     repairMap.delete(`${wc}:${fl}:laserGate`);
+    repairMap.delete(`${wc}:${fl}:pillar`);
+    repairMap.delete(`${wc}:${fl}:box`);
     switches = switches.filter((sw) => !(wrapCol(sw.col) === wc && Math.round(sw.floor) === fl));
     const victimIds = new Set(
       doors
@@ -3496,40 +4135,42 @@ function repairProceduralTower(tower, exitCol, exitFloor) {
     }
   };
 
-  // Build a guaranteed 2-column-wide non-overlapping +1 spiral staircase ending directly at (exitCol, exitFloor)
+  // Build a guaranteed 2-column-wide non-overlapping canonical staircase spiral in `rDir` ending at (exitCol, exitFloor)
   const sf = Math.round(tower.spawn.floor);
   const stairPairAt = new Map();
   for (let f = exitFloor; f >= sf; f--) {
     const d = exitFloor - f;
-    stairPairAt.set(f, [wrapCol(exitCol - 2 * d - 1), wrapCol(exitCol - 2 * d)]);
+    stairPairAt.set(f, [wrapCol(exitCol - rDir * (2 * d + 1)), wrapCol(exitCol - rDir * (2 * d))]);
   }
 
+  // Ensure safe 5-col spawn quay on sf
+  for (let k = -2; k <= 2; k++) {
+    placeSolidAt(wrapCol(tower.spawn.col + k), sf, false);
+  }
   const [startStairBack] = stairPairAt.get(sf);
   let hc = wrapCol(tower.spawn.col);
-  placeSolidAt(hc, sf);
   while (hc !== startStairBack) {
-    const d = colDist(hc, startStairBack);
-    hc = wrapCol(hc + Math.sign(d));
-    placeSolidAt(hc, sf);
+    hc = wrapCol(hc + rDir);
+    placeSolidAt(hc, sf, false);
   }
-  placeSolidAt(wrapCol(hc + 1), sf);
 
   for (let f = sf; f <= exitFloor; f++) {
     const [cBack, cFront] = stairPairAt.get(f);
-    placeSolidAt(cBack, f);
-    placeSolidAt(cFront, f);
+    placeSolidAt(cBack, f, false);
+    placeSolidAt(cFront, f, f < exitFloor);
     if (f < exitFloor) {
-      forceClearStepAndLaser(cBack, f + 1);
-      forceClearStepAndLaser(cFront, f + 1);
+      forceClearAirAt(wrapCol(cFront + rDir), f); // No flat bridge
+      forceClearAirAt(cBack, f + 1);
+      forceClearAirAt(cFront, f + 1); // No ceiling above stair step
     }
   }
 
-  let secretOffset = 2;
+  let secretOffset = 1;
   for (const sd of doors) {
     if (!sd.isRune && !sd.isVault) continue;
-    const targetSecretCol = wrapCol(exitCol + secretOffset);
-    for (let s = 1; s <= secretOffset + 1; s++) {
-      placeSolidAt(wrapCol(exitCol + s), exitFloor);
+    const targetSecretCol = wrapCol(exitCol + rDir * (secretOffset + 1));
+    for (let s = 1; s <= secretOffset + 2; s++) {
+      placeSolidAt(wrapCol(exitCol + rDir * s), exitFloor, false);
     }
     sd.col = targetSecretCol;
     sd.floor = exitFloor;
@@ -3539,6 +4180,7 @@ function repairProceduralTower(tower, exitCol, exitFloor) {
 
   return finalizeTower({
     ...tower,
+    spawnDir: rDir,
     elevators,
     wallStrips,
     switches,
@@ -3749,7 +4391,7 @@ export function createSanctumTowers(count = 15) {
         { id: 'st6_g2', col: 0, floor: 8, type: 'gear' },
         { id: 'st6_seed', col: 12, floor: 13, type: 'starCore' }
       ],
-      casualMission: { type: 'puzzle_architect', title: 'DUAL FLOODGATE MASTER', subtitle: 'Raise Both Glacial Floodgates • Crack Core Vault • Reach Crown', targetCount: 1, requiresRune: true }
+      casualMission: { type: 'puzzle_architect', title: 'DUAL FLOODGATE MASTER', subtitle: 'Raise Both Glacial Floodgates • Crack Core Vault • Reach Crown', targetCount: 1, requiresVault: true, requiresRune: false }
     });
   }
 
@@ -3850,7 +4492,7 @@ export function createSanctumTowers(count = 15) {
         { id: 'st9_g2', col: 10, floor: 5, type: 'gear' },
         { id: 'st9_seed', col: 7, floor: 12, type: 'starCore' }
       ],
-      casualMission: { type: 'puzzle_architect', title: 'FLIP-CRAB VAULT', subtitle: 'Tail-Whip Training Crabs into Springboards • Vault to Core Chamber', targetCount: 1, requiresRune: true }
+      casualMission: { type: 'puzzle_architect', title: 'FLIP-CRAB VAULT', subtitle: 'Tail-Whip Training Crabs into Springboards • Vault to Core Chamber', targetCount: 1, requiresVault: true, requiresRune: false }
     });
   }
 
@@ -3929,7 +4571,7 @@ export function createSanctumTowers(count = 15) {
     span(L, 0, 18, 4, 'solid');
     stairFlight(L, 0, 2, 2, 1, 4, 'solid'); // [4,5,6,7] f=2 (PipeA valve at 6)
     span(L, 7, 9, 4, 'solid'); // [9,10,11,12] f=7 (PipeB valve at 11)
-    span(L, 12, 14, 4, 'solid'); // [14,15,16,17] f=12 (Bells Sanctum at 16)
+    span(L, 12, 14, 4, 'solid'); // [14,15,16,17] f=12 (Tide-Locks Sanctum at 16)
     span(L, 16, 19, 5, 'solid'); // [19,0,1,2,3] f=16 Crown
     pushSanctum({
       id: 12, key: 'sanctum_12', theme: 'coral_sea', floors: 19,
@@ -3953,7 +4595,7 @@ export function createSanctumTowers(count = 15) {
         { id: 'st12_g2', col: 15, floor: 12, type: 'gear' },
         { id: 'st12_seed', col: 3, floor: 16, type: 'starCore' }
       ],
-      casualMission: { type: 'puzzle_architect', title: 'CORAL LOCKS', subtitle: 'Pressurize Pipe A & B • Harmonize Coral Bells Sanctum', targetCount: 1, requiresRune: true }
+      casualMission: { type: 'puzzle_architect', title: 'CORAL LOCKS', subtitle: 'Pressurize Pipe A & B • Harmonize Coral Tide-Locks Sanctum', targetCount: 1, requiresRune: true }
     });
   }
 
@@ -4112,8 +4754,9 @@ export function createWardenGauntletTowers() {
 
   return specs.map((sp) => {
     const L = [];
-    // Continuous circular lower combat ring (f=1) + twin stairways up to upper tactical decks (f=4) + geysers & grapple rings!
-    span(L, 1, 0, 20, 'solid');
+    // Lower combat ring segments (f=1, clear beneath cols 3..4 & 13..14 grand stairways!) + twin stairways to f=4 + geysers & grapple rings!
+    span(L, 1, 15, 8, 'solid'); // [15,16,17,18,19,0,1,2]
+    span(L, 1, 5, 8, 'solid');  // [5,6,7,8,9,10,11,12]
     tile(L, 5, 1, 'steamVent', { phasePeriod: 3.2, phaseOffset: 0.0 });
     tile(L, 15, 1, 'steamVent', { phasePeriod: 3.2, phaseOffset: 1.6 });
     stairFlight(L, 1, 2, 3, 1, 5, 'solid');  // Upper Deck A [5,6,7,8,9] at f=4
