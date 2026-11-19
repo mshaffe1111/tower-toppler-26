@@ -526,6 +526,7 @@ function buildHexBasaltGeo(radiusHalfW, height, rf, bevel = 0.022) {
 // ============================================================================
 
 const SURFACE_TEX_SIZE = 256;
+const RAW_SURFACE_PIXELS_CACHE = new Map();
 const SURFACE_CACHE = new Map();
 
 function createLattice256(px, py, rand) {
@@ -536,80 +537,130 @@ function createLattice256(px, py, rand) {
   const out = new Float32Array(256 * 256);
   const invX = px / 256;
   const invY = py / 256;
+  const x0Arr = new Int32Array(256);
+  const x1Arr = new Int32Array(256);
+  const uxArr = new Float32Array(256);
+  for (let x = 0; x < 256; x++) {
+    const fx = x * invX;
+    const ix = fx | 0;
+    const tx = fx - ix;
+    uxArr[x] = tx * tx * (3 - 2 * tx);
+    x0Arr[x] = ix & mx;
+    x1Arr[x] = (ix + 1) & mx;
+  }
   for (let y = 0; y < 256; y++) {
     const fy = y * invY;
     const iy = fy | 0;
     const ty = fy - iy;
     const uy = ty * ty * (3 - 2 * ty);
+    const invUy = 1 - uy;
     const y0 = (iy & my) * px;
     const y1 = ((iy + 1) & my) * px;
-    const row = y * 256;
+    const row = y << 8;
     for (let x = 0; x < 256; x++) {
-      const fx = x * invX;
-      const ix = fx | 0;
-      const tx = fx - ix;
-      const ux = tx * tx * (3 - 2 * tx);
-      const x0 = ix & mx;
-      const x1 = (ix + 1) & mx;
+      const ux = uxArr[x];
+      const x0 = x0Arr[x];
+      const x1 = x1Arr[x];
       const a = g[y0 + x0];
       const b = g[y0 + x1];
       const c = g[y1 + x0];
       const d = g[y1 + x1];
-      out[row + x] = (a + (b - a) * ux) * (1 - uy) + (c + (d - c) * ux) * uy;
+      out[row + x] = (a + (b - a) * ux) * invUy + (c + (d - c) * ux) * uy;
     }
   }
   return out;
 }
 
-function precomputeVoronoiField(gridN, rand) {
+function precomputeVoronoiField(gridN, rand, needTone = false) {
   const V_SIZE = 256;
-  const pts = new Float32Array(gridN * gridN * 5);
+  const pts = new Float32Array(gridN * gridN * 3);
   for (let j = 0; j < gridN; j++) {
     for (let i = 0; i < gridN; i++) {
-      const idx = (j * gridN + i) * 5;
+      const idx = (j * gridN + i) * 3;
       pts[idx] = (i + 0.14 + rand() * 0.72) / gridN;
       pts[idx + 1] = (j + 0.14 + rand() * 0.72) / gridN;
+      rand();
+      rand();
       pts[idx + 2] = rand();
-      pts[idx + 3] = rand();
-      pts[idx + 4] = rand();
     }
   }
   const edgeBuf = new Float32Array(V_SIZE * V_SIZE);
-  const toneBuf = new Float32Array(V_SIZE * V_SIZE);
+  const toneBuf = needTone ? new Float32Array(V_SIZE * V_SIZE) : null;
 
+  const invV = 1 / V_SIZE;
+  const xWrap0 = new Int32Array(V_SIZE);
+  const xWrap1 = new Int32Array(V_SIZE);
+  const xWrap2 = new Int32Array(V_SIZE);
+  const xOff0 = new Float32Array(V_SIZE);
+  const xOff1 = new Float32Array(V_SIZE);
+  const xOff2 = new Float32Array(V_SIZE);
+  const uScaled = new Float32Array(V_SIZE);
+  for (let x = 0; x < V_SIZE; x++) {
+    const u = x * invV;
+    uScaled[x] = u * gridN;
+    const ci = (u * gridN) | 0;
+    const i0 = ci - 1;
+    const i1 = ci;
+    const i2 = ci + 1;
+    xWrap0[x] = ((i0 % gridN) + gridN) % gridN * 3;
+    xWrap1[x] = ((i1 % gridN) + gridN) % gridN * 3;
+    xWrap2[x] = ((i2 % gridN) + gridN) % gridN * 3;
+    xOff0[x] = Math.floor(i0 / gridN) * gridN;
+    xOff1[x] = Math.floor(i1 / gridN) * gridN;
+    xOff2[x] = Math.floor(i2 / gridN) * gridN;
+  }
+
+  const rowStride = gridN * 3;
   for (let y = 0; y < V_SIZE; y++) {
-    const v = y / V_SIZE;
-    const cj = Math.floor(v * gridN);
+    const v = y * invV;
+    const vS = v * gridN;
+    const cj = (v * gridN) | 0;
+    const j0 = cj - 1;
+    const j1 = cj;
+    const j2 = cj + 1;
+    const r0 = (((j0 % gridN) + gridN) % gridN) * rowStride;
+    const r1 = (((j1 % gridN) + gridN) % gridN) * rowStride;
+    const r2 = (((j2 % gridN) + gridN) % gridN) * rowStride;
+    const oy0 = Math.floor(j0 / gridN) * gridN;
+    const oy1 = Math.floor(j1 / gridN) * gridN;
+    const oy2 = Math.floor(j2 / gridN) * gridN;
+    const yRow = y << 8;
+
     for (let x = 0; x < V_SIZE; x++) {
-      const u = x / V_SIZE;
-      const ci = Math.floor(u * gridN);
-      let d1 = 99;
-      let d2 = 99;
+      const uS = uScaled[x];
+      const w0 = xWrap0[x];
+      const w1 = xWrap1[x];
+      const w2 = xWrap2[x];
+      const ox0 = xOff0[x];
+      const ox1 = xOff1[x];
+      const ox2 = xOff2[x];
+      let d1Sq = 999;
+      let d2Sq = 999;
       let bestIdx = 0;
-      for (let dj = -1; dj <= 1; dj++) {
-        const jj = cj + dj;
-        const wj = ((jj % gridN) + gridN) % gridN;
-        const offY = Math.floor(jj / gridN);
-        for (let di = -1; di <= 1; di++) {
-          const ii = ci + di;
-          const wi = ((ii % gridN) + gridN) % gridN;
-          const offX = Math.floor(ii / gridN);
-          const pIdx = (wj * gridN + wi) * 5;
-          const dx = (u - (pts[pIdx] + offX)) * gridN;
-          const dy = (v - (pts[pIdx + 1] + offY)) * gridN;
-          const d = Math.sqrt(dx * dx + dy * dy);
-          if (d < d1) {
-            d2 = d1;
-            d1 = d;
+
+      // Unrolled 3x3 squared-distance search (ZERO Math.sqrt / % / Math.floor in inner loop!)
+      for (let rPass = 0; rPass < 3; rPass++) {
+        const rBase = rPass === 0 ? r0 : rPass === 1 ? r1 : r2;
+        const oy = rPass === 0 ? oy0 : rPass === 1 ? oy1 : oy2;
+        for (let cPass = 0; cPass < 3; cPass++) {
+          const pIdx = rBase + (cPass === 0 ? w0 : cPass === 1 ? w1 : w2);
+          const ox = cPass === 0 ? ox0 : cPass === 1 ? ox1 : ox2;
+          const dx = uS - (pts[pIdx] * gridN + ox);
+          const dy = vS - (pts[pIdx + 1] * gridN + oy);
+          const dSq = dx * dx + dy * dy;
+          if (dSq < d1Sq) {
+            d2Sq = d1Sq;
+            d1Sq = dSq;
             bestIdx = pIdx;
-          } else if (d < d2) {
-            d2 = d;
+          } else if (dSq < d2Sq) {
+            d2Sq = dSq;
           }
         }
       }
-      const k = y * V_SIZE + x;
-      edgeBuf[k] = d2 - d1;
-      toneBuf[k] = pts[bestIdx + 4];
+
+      const k = yRow + x;
+      edgeBuf[k] = Math.sqrt(d2Sq) - Math.sqrt(d1Sq);
+      if (toneBuf) toneBuf[k] = pts[bestIdx + 2];
     }
   }
   return { edgeBuf, toneBuf };
@@ -700,6 +751,8 @@ function applyBakedMaterialUpgrade(mat, entry) {
 
 function subscribeMaterialToSurface(entry, mat) {
   if (!entry || !mat) return;
+  mat.userData = mat.userData || {};
+  mat.userData._surfaceSubEntry = entry;
   entry.subscribers.add(mat);
   if (entry.hasBakedWebp) {
     applyBakedMaterialUpgrade(mat, entry);
@@ -777,10 +830,27 @@ function ensureBakedWebpSurface(kind) {
   return record;
 }
 
-export function getSurfaceMaps1024(rawKind = 'canyon_sandstone', tile = 0.55) {
-  const kind = SURFACE_ALIAS[rawKind] || 'canyon_sandstone';
-  const cacheKey = `${kind}_${tile}`;
-  if (SURFACE_CACHE.has(cacheKey)) return SURFACE_CACHE.get(cacheKey);
+let SHARED_NOISE_BANK = null;
+function getSharedNoiseBank() {
+  if (SHARED_NOISE_BANK) return SHARED_NOISE_BANK;
+  const vor = precomputeVoronoiField(9, mulberry32(2244), true);
+  SHARED_NOISE_BANK = {
+    b8: createLattice256(8, 8, mulberry32(2124)),
+    b16: createLattice256(16, 16, mulberry32(2136)),
+    b32: createLattice256(32, 32, mulberry32(2150)),
+    b64: createLattice256(64, 64, mulberry32(2166)),
+    bHoriz: createLattice256(8, 128, mulberry32(2184)),
+    bVert: createLattice256(128, 8, mulberry32(2202)),
+    fine128: createLattice256(64, 64, mulberry32(2220)),
+    edgeBuf: vor.edgeBuf,
+    toneBuf: vor.toneBuf,
+  };
+  return SHARED_NOISE_BANK;
+}
+
+function getOrBuildRawSurfacePixels(kind) {
+  const existing = RAW_SURFACE_PIXELS_CACHE.get(kind);
+  if (existing) return existing;
 
   const N = SURFACE_TEX_SIZE;
   const seedMap = {
@@ -792,23 +862,7 @@ export function getSurfaceMaps1024(rawKind = 'canyon_sandstone', tile = 0.55) {
     redwood_timber: 7789,
     antique_bronze: 8893,
   };
-  const rand = mulberry32(seedMap[kind] || 2113);
-
-  const b8 = createLattice256(8, 8, rand);
-  const b16 = createLattice256(16, 16, rand);
-  const b32 = createLattice256(32, 32, rand);
-  const b64 = createLattice256(64, 64, rand);
-  const bHoriz = createLattice256(8, 128, rand);
-  const bVert = createLattice256(128, 8, rand);
-  const fine128 = createLattice256(64, 64, rand);
-  const vor = precomputeVoronoiField(9, rand);
-  const edgeBuf = vor.edgeBuf;
-  const toneBuf = vor.toneBuf;
-
-  const hBuf = new Float32Array(N * N);
-  const albData = new Uint8Array(N * N * 4);
-  const ormData = new Uint8Array(N * N * 4);
-  const nrmData = new Uint8Array(N * N * 4);
+  const baseSeed = seedMap[kind] || 2113;
 
   const kindId =
     kind === 'canyon_sandstone'
@@ -825,22 +879,34 @@ export function getSurfaceMaps1024(rawKind = 'canyon_sandstone', tile = 0.55) {
       ? 6
       : 5;
 
+  const bank = getSharedNoiseBank();
+  const { b8, b16, b32, b64, bHoriz, bVert, fine128, edgeBuf, toneBuf } = bank;
+  const ox = (baseSeed * 37) & 255;
+  const oy = (baseSeed * 73) & 255;
+
+  const hBuf = new Float32Array(N * N);
+  const albData = new Uint8Array(N * N * 4);
+  const ormData = new Uint8Array(N * N * 4);
+  const nrmData = new Uint8Array(N * N * 4);
+
   for (let y = 0; y < N; y++) {
-    const uy0 = y & 255;
+    const uy0 = (y + oy) & 255;
     const wy0 = uy0 << 8;
     const fyRow = wy0;
     const yRow = y * N;
+    const subRow = y >> 5;
+    const colShift = (subRow & 1) * 32 + ((subRow * 73) & 3) * 8;
 
     for (let x = 0; x < N; x++) {
       const i = yRow + x;
       const i4 = i << 2;
-      const ux0 = x & 255;
+      const ux0 = (x + ox) & 255;
       const i00 = wy0 + ux0;
 
+      const fine = b64[i00] * 0.45 + fine128[i00] * 0.55;
       const n8v = b8[i00];
       const n16v = b16[i00];
       const mid = b32[i00];
-      const fine = b64[i00] * 0.45 + fine128[i00] * 0.55;
       const broad = n8v * 0.58 + n16v * 0.42;
       const eVal = edgeBuf[i00];
 
@@ -849,14 +915,16 @@ export function getSurfaceMaps1024(rawKind = 'canyon_sandstone', tile = 0.55) {
       const gNorm = (hHash & 1023) * 0.0009775;
 
       // Chiseled running-bond sub-ashlar courses (scaled for fast 256x256 instant fallback!)
-      const dyRow = (y + ((mid * 2.0) | 0)) & 31;
-      const hDist = dyRow < 16 ? dyRow : 32 - dyRow;
-      const subRow = y >> 5;
-      const colShift = (subRow & 1) * 32 + ((subRow * 73) & 3) * 8;
-      const dxCol = (x + colShift + ((n16v * 2.0) | 0)) & 63;
-      const vDist = dxCol < 32 ? dxCol : 64 - dxCol;
-      const subMortar = Math.max(hDist < 2 ? 1.0 - hDist * 0.5 : 0.0, vDist < 2 ? 1.0 - vDist * 0.5 : 0.0);
-      const subBevel = (hDist < 4 ? (4 - hDist) * 0.065 : 0) + (vDist < 4 ? (4 - vDist) * 0.055 : 0);
+      let subMortar = 0;
+      let subBevel = 0;
+      if (kindId <= 3) {
+        const dyRow = (y + ((mid * 2.0) | 0)) & 31;
+        const hDist = dyRow < 16 ? dyRow : 32 - dyRow;
+        const dxCol = (x + colShift + ((n16v * 2.0) | 0)) & 63;
+        const vDist = dxCol < 32 ? dxCol : 64 - dxCol;
+        subMortar = Math.max(hDist < 2 ? 1.0 - hDist * 0.5 : 0.0, vDist < 2 ? 1.0 - vDist * 0.5 : 0.0);
+        subBevel = (hDist < 4 ? (4 - hDist) * 0.065 : 0) + (vDist < 4 ? (4 - vDist) * 0.055 : 0);
+      }
 
       let ht = 0.5;
       let cr = 0.9;
@@ -923,7 +991,7 @@ export function getSurfaceMaps1024(rawKind = 'canyon_sandstone', tile = 0.55) {
         metal = 0.07;
       } else if (kindId === 4) {
         // storm_basalt — Columnar volcanic basalt + machined titanium armor seams
-        const stria = bVert[(uy0 << 8) + (x & 255)];
+        const stria = bVert[(uy0 << 8) + ux0];
         const crack = eVal < 0.042 ? 1 - eVal / 0.042 : 0;
         const seam = ((x & 127) < 3 || (y & 127) < 3) ? 1.0 : 0.0;
         ht = stria * 0.34 + broad * 0.24 + fine * 0.18 - seam * 0.46 - crack * 0.28 + (gNorm - 0.5) * 0.04;
@@ -936,7 +1004,7 @@ export function getSurfaceMaps1024(rawKind = 'canyon_sandstone', tile = 0.55) {
         metal = 0.38 + (1.0 - seam) * 0.18;
       } else if (kindId === 6) {
         // antique_bronze — Planished hammered bronze + embossed filigree + rivet straps + cavity patina
-        const strap = ((x & 255) < 12 || (y & 255) < 12) ? 1.0 : 0.0;
+        const strap = (ux0 < 12 || uy0 < 12) ? 1.0 : 0.0;
         const dimple = Math.max(0, 0.09 - eVal) * 8.5;
         const scroll = 0.5 + 0.5 * Math.sin(x * 0.049087 + Math.sin(y * 0.049087) * 1.4);
         const emboss = (1 - strap) * (scroll > 0.72 ? (scroll - 0.72) * 1.8 : 0);
@@ -950,7 +1018,7 @@ export function getSurfaceMaps1024(rawKind = 'canyon_sandstone', tile = 0.55) {
         metal = 0.9;
       } else {
         // redwood_timber — Deep grained seasoned redwood planks & beams
-        const grain = bVert[(uy0 << 8) + (x & 255)] * 0.65 + bHoriz[fyRow + ux0] * 0.35;
+        const grain = bVert[(uy0 << 8) + ux0] * 0.65 + bHoriz[fyRow + ux0] * 0.35;
         const plank = (y & 63) < 3 ? 1.0 : 0.0;
         ht = grain * 0.38 + fine * 0.18 - plank * 0.52;
         const v = 0.86 + (grain - 0.5) * 0.26 - plank * 0.38;
@@ -1005,14 +1073,27 @@ export function getSurfaceMaps1024(rawKind = 'canyon_sandstone', tile = 0.55) {
     }
   }
 
+  const raw = { albData, nrmData, ormData, size: N };
+  RAW_SURFACE_PIXELS_CACHE.set(kind, raw);
+  return raw;
+}
+
+export function getSurfaceMaps1024(rawKind = 'canyon_sandstone', tile = 0.55) {
+  const kind = SURFACE_ALIAS[rawKind] || 'canyon_sandstone';
+  const cacheKey = `${kind}_${tile}`;
+  if (SURFACE_CACHE.has(cacheKey)) return SURFACE_CACHE.get(cacheKey);
+
+  const raw = getOrBuildRawSurfacePixels(kind);
+  const N = raw.size;
+
   const entry = {
     kind,
     tile,
     hasBakedWebp: false,
     subscribers: new Set(),
-    map: makeDataTex(albData, N, true, tile),
-    normalMap: makeDataTex(nrmData, N, false, tile),
-    ormMap: makeDataTex(ormData, N, false, tile),
+    map: makeDataTex(raw.albData, N, true, tile),
+    normalMap: makeDataTex(raw.nrmData, N, false, tile),
+    ormMap: makeDataTex(raw.ormData, N, false, tile),
   };
   SURFACE_CACHE.set(cacheKey, entry);
 
@@ -1089,24 +1170,44 @@ function buildWallAoLightTexture(tower, fh, totalH, clueEntries = null, conduitA
   const invTotalH = 1 / Math.max(3, totalH);
 
   const stamp = (phiCenter, yTop, yBot, halfAng, rAmt, gAmt, bAmt) => {
+    if (halfAng <= 0.001) return;
     const v0 = Math.max(0, Math.min(H - 1, Math.floor(yBot * invTotalH * H)));
     const v1 = Math.max(0, Math.min(H - 1, Math.ceil(yTop * invTotalH * H)));
+    if (v0 > v1) return;
     const spanY = Math.max(0.05, yTop - yBot);
+    const invSpanY = 1 / spanY;
+    const invHalfAng = 1 / halfAng;
+    const normPhi = ((phiCenter % TWO_PI) + TWO_PI) % TWO_PI;
+    const uCenter = Math.floor((normPhi / TWO_PI) * W);
+    const uSpan = Math.min(W >> 1, Math.ceil((halfAng / TWO_PI) * W) + 1);
+
     for (let vy = v0; vy <= v1; vy++) {
       const wy = ((vy + 0.5) / H) * totalH;
-      const tVert = Math.max(0, Math.min(1, (yTop - wy) / spanY));
-      const vWeight = rAmt > 0 ? Math.pow(1 - tVert, 1.35) : Math.sin(tVert * Math.PI);
+      const tVert = Math.max(0, Math.min(1, (yTop - wy) * invSpanY));
+      const oneMinusT = 1 - tVert;
+      const vWeight = rAmt > 0 ? oneMinusT * Math.sqrt(oneMinusT) : Math.sin(tVert * Math.PI);
       const rowOff = vy * W;
-      for (let ux = 0; ux < W; ux++) {
+      for (let du = -uSpan; du <= uSpan; du++) {
+        const ux = (((uCenter + du) % W) + W) % W;
         const ang = ((ux + 0.5) / W) * TWO_PI;
-        const da = Math.abs(angDist(ang, phiCenter));
+        const da = Math.abs(angDist(ang, normPhi));
         if (da >= halfAng) continue;
-        const hWeight = 1 - Math.pow(da / halfAng, 2.2);
+        const q = da * invHalfAng;
+        const hWeight = 1 - q * q;
         const w = vWeight * hWeight;
         const idx = rowOff + ux;
-        if (rAmt > 0) aoGrid[idx] = Math.min(1, Math.max(aoGrid[idx], w * rAmt));
-        if (gAmt > 0) warmGrid[idx] = Math.min(1, warmGrid[idx] + w * gAmt);
-        if (bAmt > 0) coolGrid[idx] = Math.min(1, coolGrid[idx] + w * bAmt);
+        if (rAmt > 0) {
+          const vAo = w * rAmt;
+          if (vAo > aoGrid[idx]) aoGrid[idx] = vAo > 1 ? 1 : vAo;
+        }
+        if (gAmt > 0) {
+          const vWarm = warmGrid[idx] + w * gAmt;
+          warmGrid[idx] = vWarm > 1 ? 1 : vWarm;
+        }
+        if (bAmt > 0) {
+          const vCool = coolGrid[idx] + w * bAmt;
+          coolGrid[idx] = vCool > 1 ? 1 : vCool;
+        }
       }
     }
   };
@@ -3058,7 +3159,7 @@ function getSharedArchGeometries() {
       return core;
     })(),
     // Heavy Carved Stone-and-Riveted-Antique-Bronze Pelagian Counterweight Block (ZERO sci-fi Tron crosshair cubes!)
-    energyBox: new RoundedBoxGeometry(0.98, 0.76, 0.76, 2, 0.055),
+    energyBox: new RoundedBoxGeometry(0.98, 0.76, 0.76, 1, 0.055),
     energyCore: (() => {
       const parts = [];
       // Twin riveted antique-bronze structural straps wrapping the stone block
@@ -3101,12 +3202,279 @@ function getSharedArchGeometries() {
     ashlarBlock: new RoundedBoxGeometry(1, 1, 1, 1, 0.06),
     recessVoid: arcSlab(R - 0.48, R - 0.02, 0.34, 1.0, 0, 1, 1, 0),
     sparkCube: new THREE.BoxGeometry(0.045, 0.045, 0.045),
+
+    // Cached Colonnade Cornice, Summit Crown, Doorway Surrounds, Elevator Shafts & Wall-Strip Templates (ZERO per-spire re-extrusion!)
+    corniceBandSlab: (() => {
+      const g = arcSlab(R - 0.04, R + BRICK_PROUD + 0.095, COL_ANGLE * 0.92, 0.16, 0.022, 2, 1, 0.015, R - 0.01);
+      g.translate(0, 0.08, 0);
+      return g;
+    })(),
+    corniceArchHood: (() => {
+      const hood = new THREE.TorusGeometry(R * COL_ANGLE * 0.36, 0.038, 6, 12, Math.PI);
+      hood.translate(0, -0.34, R + BRICK_PROUD + 0.032);
+      return hood;
+    })(),
+    corniceMedallion: (() => {
+      const m = new THREE.CylinderGeometry(0.068, 0.078, 0.042, 8);
+      m.rotateX(Math.PI * 0.5);
+      m.translate(0, -0.28, R + BRICK_PROUD + 0.048);
+      return m;
+    })(),
+    crownRimOuter: new THREE.CylinderGeometry(R + 0.26, R + 0.04, 0.24, 40),
+    corePoolCircle: new THREE.CircleGeometry(R - 0.35, 32),
+    crownStone: (() => {
+      const parts = [];
+      const segA = TWO_PI / CROWN_RIBS;
+      for (let b = 0; b < CROWN_RIBS; b++) {
+        const ang = b * segA;
+        const basePillar = arcSlab(R - 0.14, R + 0.22, segA * 0.42, 0.68, 0.026, 2, 1, 0.02, R - 0.02);
+        basePillar.rotateY(ang);
+        basePillar.translate(0, 0.92, 0);
+        parts.push(basePillar);
+      }
+      return mergeGeometries(parts);
+    })(),
+    crownMetal: (() => {
+      const parts = [];
+      const segA = TWO_PI / CROWN_RIBS;
+      for (let b = 0; b < CROWN_RIBS; b++) {
+        const ang = b * segA;
+        const archArm = new THREE.BoxGeometry(0.16, 1.45, 0.22);
+        archArm.rotateX(-0.58);
+        archArm.translate(0, 1.42, R - 0.42);
+        archArm.rotateY(ang);
+        parts.push(archArm);
+      }
+      const summitRing = new THREE.TorusGeometry(R * 0.46, 0.095, 8, 28);
+      summitRing.rotateX(Math.PI * 0.5);
+      summitRing.translate(0, 1.95, 0);
+      parts.push(summitRing);
+      return mergeGeometries(parts);
+    })(),
+    summitVeil: new THREE.CylinderGeometry(R * 0.52, R * 0.88, 2.85, 28, 1, true),
+    summitOuterHalo: new THREE.TorusGeometry(R * 0.62, 0.042, 8, 36),
+    summitInnerHalo: new THREE.TorusGeometry(R * 0.36, 0.032, 8, 28),
+    foundationPlinth: new THREE.CylinderGeometry(R + 0.05, R + 0.56, 3.0, 32),
+
+    doorArchSurround: (() => {
+      const parts = [];
+      const archRad = DOOR_W * 0.5 + 0.08;
+      const legH = DOOR_H - archRad + 0.08;
+      for (const sx of [-1, 1]) {
+        const colPillar = new THREE.CylinderGeometry(0.105, 0.12, legH, 10);
+        colPillar.translate(sx * archRad, -DOOR_H * 0.5 + legH * 0.5, 0.08);
+        parts.push(colPillar);
+
+        const spandrel = new THREE.Shape();
+        const outerX = archRad + 0.08;
+        const topY = archRad + 0.09;
+        spandrel.moveTo(sx * (archRad * 0.52), topY);
+        spandrel.lineTo(sx * outerX, topY);
+        spandrel.lineTo(sx * outerX, archRad * 0.22);
+        spandrel.quadraticCurveTo(sx * (archRad * 0.96), archRad * 0.88, sx * (archRad * 0.52), topY);
+        const spGeo = new THREE.ExtrudeGeometry(spandrel, { depth: 0.14, bevelEnabled: false, curveSegments: 6 });
+        spGeo.translate(0, DOOR_H * 0.5 - archRad, -0.05);
+        parts.push(spGeo);
+      }
+      const archivolt = new THREE.TorusGeometry(archRad, 0.115, 8, 18, Math.PI);
+      archivolt.translate(0, DOOR_H * 0.5 - archRad, 0.085);
+      parts.push(archivolt);
+
+      const sill = new RoundedBoxGeometry(DOOR_W + 0.42, 0.09, 0.42, 1, 0.018);
+      sill.translate(0, -DOOR_H * 0.5 + 0.035, 0.09);
+      parts.push(sill);
+      return mergeGeometries(parts);
+    })(),
+    doorMetalSurround: (() => {
+      const parts = [];
+      const archRad = DOOR_W * 0.5 + 0.08;
+      const legH = DOOR_H - archRad + 0.08;
+      for (const sx of [-1, 1]) {
+        const capBlock = new RoundedBoxGeometry(0.27, 0.11, 0.34, 1, 0.018);
+        capBlock.translate(sx * archRad, -DOOR_H * 0.5 + legH + 0.02, 0.09);
+        parts.push(capBlock);
+      }
+      const innerBronzeTrim = new THREE.TorusGeometry(archRad - 0.065, 0.036, 6, 18, Math.PI);
+      innerBronzeTrim.translate(0, DOOR_H * 0.5 - archRad, 0.14);
+      parts.push(innerBronzeTrim);
+
+      const keystone = new RoundedBoxGeometry(0.24, 0.28, 0.36, 1, 0.024);
+      keystone.translate(0, DOOR_H * 0.5 + 0.06, 0.11);
+      parts.push(keystone);
+      return mergeGeometries(parts);
+    })(),
+
+    stripRailsUnit: (() => {
+      const rL = new THREE.BoxGeometry(0.062, 1.0, 0.088);
+      rL.translate(-0.30, 0, 0.01);
+      const rR = new THREE.BoxGeometry(0.062, 1.0, 0.088);
+      rR.translate(0.30, 0, 0.01);
+      return mergeGeometries([rL, rR]);
+    })(),
+    stripRungBar: (() => {
+      const g = new RoundedBoxGeometry(0.62, 0.068, 0.072, 1, 0.01);
+      g.translate(0, 0, 0.02);
+      return g;
+    })(),
+    stripRungInlayPair: (() => {
+      const inlayL = new THREE.BoxGeometry(0.20, 0.042, 0.036);
+      inlayL.rotateZ(0.24);
+      inlayL.translate(-0.10, 0.016, 0.048);
+      const inlayR = new THREE.BoxGeometry(0.20, 0.042, 0.036);
+      inlayR.rotateZ(-0.24);
+      inlayR.translate(0.10, 0.016, 0.048);
+      return mergeGeometries([inlayL, inlayR]);
+    })(),
+
+    turbineMount: new THREE.CylinderGeometry(0.48, 0.54, 0.18, 14),
+    turbineSpout: new THREE.TorusGeometry(0.42, 0.09, 8, 12, Math.PI * 0.6),
+    turbineAxle: new THREE.CylinderGeometry(0.07, 0.07, 0.5, 10),
+    turbineHub: new THREE.CylinderGeometry(0.12, 0.12, 0.28, 10),
+    turbineSprayArc: new THREE.TorusGeometry(0.95, 0.032, 6, 18, Math.PI * 0.85),
+    turbineWheelRim: (() => {
+      const rimParts = [
+        new THREE.TorusGeometry(0.86, 0.036, 6, 20),
+        new THREE.TorusGeometry(0.66, 0.028, 6, 18),
+      ];
+      for (let k = 0; k < 12; k++) {
+        const ang = (k / 12) * TWO_PI;
+        const paddle = new THREE.BoxGeometry(0.18, 0.035, 0.24);
+        paddle.rotateZ(ang + 0.45);
+        paddle.translate(Math.cos(ang) * 0.88, Math.sin(ang) * 0.88, 0);
+        rimParts.push(paddle);
+        if (k < 6) {
+          const spoke = new THREE.BoxGeometry(1.68, 0.055, 0.08);
+          spoke.rotateZ(ang);
+          rimParts.push(spoke);
+        }
+      }
+      return mergeGeometries(rimParts);
+    })(),
+
+    elevCabSteel: (() => {
+      const steelParts = [];
+      const chassis = new RoundedBoxGeometry(1.16, 0.17, 0.92, 1, 0.022);
+      chassis.translate(0, -0.085, 0);
+      steelParts.push(chassis);
+      for (const sx of [-1, 1]) {
+        const rPost = new THREE.CylinderGeometry(0.034, 0.034, 1.68, 8);
+        rPost.translate(sx * 0.54, 0.76, -0.36);
+        const shoe = new RoundedBoxGeometry(0.14, 0.56, 0.15, 1, 0.012);
+        shoe.translate(sx * 0.52, 0.14, -0.43);
+        steelParts.push(rPost, shoe);
+      }
+      return mergeGeometries(steelParts);
+    })(),
+    elevCabBrass: (() => {
+      const brassParts = [];
+      const trimRim = new RoundedBoxGeometry(1.2, 0.045, 0.96, 1, 0.012);
+      trimRim.translate(0, -0.025, 0);
+      brassParts.push(trimRim);
+      for (const sx of [-1, 1]) {
+        const px = sx * 0.54;
+        const fPost = new THREE.CylinderGeometry(0.028, 0.028, 0.57, 8);
+        fPost.translate(px, 0.285, 0.4);
+        const sRail = new THREE.CylinderGeometry(0.024, 0.024, 0.76, 8);
+        sRail.rotateX(Math.PI * 0.5);
+        sRail.translate(px, 0.53, 0.02);
+        brassParts.push(fPost, sRail);
+      }
+      const backRail = new THREE.CylinderGeometry(0.024, 0.024, 1.08, 8);
+      backRail.rotateZ(Math.PI * 0.5);
+      backRail.translate(0, 0.53, -0.36);
+      const yokeTop = new RoundedBoxGeometry(1.12, 0.09, 0.18, 1, 0.016);
+      yokeTop.translate(0, 1.66, -0.18);
+      brassParts.push(backRail, yokeTop);
+      return mergeGeometries(brassParts);
+    })(),
+    elevDeckGlow: new THREE.BoxGeometry(0.94, 0.014, 0.7),
+    elevGateBar: new THREE.CylinderGeometry(0.022, 0.022, 1.02, 8),
+    elevChevron: new THREE.ConeGeometry(0.055, 0.09, 4),
+    elevWinchHood: new RoundedBoxGeometry(1.3, 0.28, 0.98, 1, 0.025),
+    elevWinchDrum: new THREE.CylinderGeometry(0.16, 0.16, 0.88, 12),
+    elevSheave: new THREE.CylinderGeometry(0.22, 0.22, 0.06, 16),
+    elevCwtBlock: new RoundedBoxGeometry(0.46, 0.68, 0.14, 1, 0.015),
+    elevCwtCap: new THREE.BoxGeometry(0.48, 0.1, 0.16),
   };
 
   for (const g of Object.values(ARCH_GEOS)) {
     g.userData.shared = true;
   }
   return ARCH_GEOS;
+}
+
+const WALL_BLOCK_GEO_CACHE = new Map();
+let SHARED_ARCH_MATS = null;
+
+function getSharedArchMaterials() {
+  if (SHARED_ARCH_MATS) return SHARED_ARCH_MATS;
+  const T = getDetailTextures();
+  SHARED_ARCH_MATS = {
+    cableMat: new THREE.MeshStandardMaterial({ color: '#dbe4f0', metalness: 0.9, roughness: 0.18 }),
+    iceMat: new THREE.MeshStandardMaterial({
+      color: '#93d5fd',
+      map: T.frost,
+      emissive: '#0284c7',
+      emissiveIntensity: 0.24,
+      roughness: 0.08,
+      metalness: 0.16,
+      transparent: true,
+      opacity: 0.88,
+    }),
+    iceTopMat: new THREE.MeshStandardMaterial({ color: '#f0f9ff', map: T.frost, roughness: 0.08 }),
+    slideMatR: new THREE.MeshStandardMaterial({
+      map: T.slideR,
+      emissive: '#38bdf8',
+      emissiveIntensity: 0.22,
+      roughness: 0.08,
+      metalness: 0.2,
+    }),
+    slideMatL: new THREE.MeshStandardMaterial({
+      map: T.slideL,
+      emissive: '#38bdf8',
+      emissiveIntensity: 0.22,
+      roughness: 0.08,
+      metalness: 0.2,
+    }),
+    convMatR: new THREE.MeshStandardMaterial({ map: T.convR, roughness: 0.36, metalness: 0.35 }),
+    convMatL: new THREE.MeshStandardMaterial({ map: T.convL, roughness: 0.36, metalness: 0.35 }),
+    hazardMat: new THREE.MeshStandardMaterial({ map: T.hazard, roughness: 0.44 }),
+    phaseRuneMatCyan: new THREE.MeshStandardMaterial({
+      color: '#0e7490',
+      emissive: '#38bdf8',
+      emissiveMap: T.phaseRune,
+      emissiveIntensity: 1.35,
+      roughness: 0.24,
+      metalness: 0.35,
+    }),
+    phaseRuneMatRed: new THREE.MeshStandardMaterial({
+      color: '#881337',
+      emissive: '#fb7185',
+      emissiveMap: T.phaseRune,
+      emissiveIntensity: 1.35,
+      roughness: 0.24,
+      metalness: 0.35,
+    }),
+    phaseGhostMatCyan: new THREE.MeshBasicMaterial({
+      color: '#67e8f9',
+      transparent: true,
+      opacity: 0.24,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+    phaseGhostMatRed: new THREE.MeshBasicMaterial({
+      color: '#fda4af',
+      transparent: true,
+      opacity: 0.24,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  };
+  for (const m of Object.values(SHARED_ARCH_MATS)) {
+    m.userData = m.userData || {};
+    m.userData.shared = true;
+  }
+  return SHARED_ARCH_MATS;
 }
 
 // ============================================================================
@@ -3238,12 +3606,39 @@ function isInChannel(phi, y, channels, padA = 0.12) {
   return false;
 }
 
+let _wallCap = 4096;
+let _wallMatBuf = new Float32Array(_wallCap * 16);
+let _wallColBuf = new Float32Array(_wallCap * 3);
+let _wallSpanBuf = new Float32Array(_wallCap);
+let _wallYBuf = new Float32Array(_wallCap);
+let _wallPhiBuf = new Float32Array(_wallCap);
+
+function ensureWallScratchCap(nextIdx) {
+  if (nextIdx < _wallCap) return;
+  _wallCap = Math.max(_wallCap * 2, nextIdx + 1024);
+  const nextMat = new Float32Array(_wallCap * 16);
+  nextMat.set(_wallMatBuf);
+  _wallMatBuf = nextMat;
+  const nextCol = new Float32Array(_wallCap * 3);
+  nextCol.set(_wallColBuf);
+  _wallColBuf = nextCol;
+  const nextSpan = new Float32Array(_wallCap);
+  nextSpan.set(_wallSpanBuf);
+  _wallSpanBuf = nextSpan;
+  const nextY = new Float32Array(_wallCap);
+  nextY.set(_wallYBuf);
+  _wallYBuf = nextY;
+  const nextPhi = new Float32Array(_wallCap);
+  nextPhi.set(_wallPhiBuf);
+  _wallPhiBuf = nextPhi;
+}
+
 function materializeWallBands(
   group,
   bandedMeshes,
   baseGeo,
   blockMat,
-  entries,
+  wallCount,
   bandSpanY,
   useSpanAttr,
   castShadow = false,
@@ -3253,35 +3648,45 @@ function materializeWallBands(
   const secCount = Math.max(1, angularSectors | 0);
   const secWidth = TWO_PI / secCount;
   const buckets = new Map();
-  for (let i = 0; i < entries.length; i++) {
-    const e = entries[i];
-    const bIdx = Math.max(0, Math.floor(e.y / bandSpanY));
+  for (let i = 0; i < wallCount; i++) {
+    const bIdx = Math.max(0, Math.floor(_wallYBuf[i] / bandSpanY));
     const sIdx =
       secCount > 1
-        ? Math.min(secCount - 1, Math.floor((((e.phi ?? 0) % TWO_PI + TWO_PI) % TWO_PI) / secWidth))
+        ? Math.min(secCount - 1, Math.floor(_wallPhiBuf[i] / secWidth))
         : 0;
-    const key = `${bIdx}_${sIdx}`;
+    const key = (bIdx << 5) | sIdx;
     let bucket = buckets.get(key);
     if (!bucket) {
-      bucket = { bIdx, sIdx, items: [] };
+      bucket = { bIdx, sIdx, indices: [] };
       buckets.set(key, bucket);
     }
-    bucket.items.push(e);
+    bucket.indices.push(i);
   }
-  for (const { bIdx, sIdx, items } of buckets.values()) {
+  for (const { bIdx, sIdx, indices } of buckets.values()) {
+    const n = indices.length;
     const bandGeo = baseGeo.clone();
     if (useSpanAttr) {
-      const spanArr = new Float32Array(items.length);
-      for (let i = 0; i < items.length; i++) spanArr[i] = items[i].span;
+      const spanArr = new Float32Array(n);
+      for (let i = 0; i < n; i++) spanArr[i] = _wallSpanBuf[indices[i]];
       bandGeo.setAttribute('aSpan', new THREE.InstancedBufferAttribute(spanArr, 1));
     }
-    const inst = new THREE.InstancedMesh(bandGeo, blockMat, items.length);
-    for (let i = 0; i < items.length; i++) {
-      inst.setMatrixAt(i, items[i].m);
-      inst.setColorAt(i, items[i].c);
+    const inst = new THREE.InstancedMesh(bandGeo, blockMat, n);
+    const matDst = inst.instanceMatrix.array;
+    const colArr = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const srcIdx = indices[i];
+      const srcM = srcIdx << 4;
+      const dstM = i << 4;
+      for (let k = 0; k < 16; k++) matDst[dstM + k] = _wallMatBuf[srcM + k];
+      const srcC = srcIdx * 3;
+      const dstC = i * 3;
+      colArr[dstC] = _wallColBuf[srcC];
+      colArr[dstC + 1] = _wallColBuf[srcC + 1];
+      colArr[dstC + 2] = _wallColBuf[srcC + 2];
     }
+    inst.instanceColor = new THREE.InstancedBufferAttribute(colArr, 3);
     inst.instanceMatrix.needsUpdate = true;
-    if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+    inst.instanceColor.needsUpdate = true;
     inst.castShadow = castShadow;
     inst.receiveShadow = true;
     const minY = bIdx * bandSpanY - 0.5;
@@ -3296,7 +3701,7 @@ function materializeWallBands(
     group.add(inst);
     bandedMeshes.push(inst);
   }
-  baseGeo.dispose();
+  if (!baseGeo.userData?.shared) baseGeo.dispose();
 }
 
 function selectClearSpireAngles(count, offsetFrac, shafts, holes, totalH, avoidSpawnPhi = null) {
@@ -3401,13 +3806,26 @@ function buildTowerMasonryAndAccents(
 
   let blockGeo;
   let hexHalfA = 0;
+  const blockCacheKey = `${rbTheme}_${fh.toFixed(3)}`;
   if (isHex) {
     const hexR = blockA * rf * 0.54;
     hexHalfA = hexR / rf;
-    blockGeo = buildHexBasaltGeo(hexR, baseH - 0.016, rf, bev);
+    blockGeo = WALL_BLOCK_GEO_CACHE.get(blockCacheKey);
+    if (!blockGeo) {
+      blockGeo = buildHexBasaltGeo(hexR, baseH - 0.016, rf, bev);
+      blockGeo.userData = blockGeo.userData || {};
+      blockGeo.userData.shared = true;
+      WALL_BLOCK_GEO_CACHE.set(blockCacheKey, blockGeo);
+    }
   } else {
-    blockGeo = arcSlab(R - 0.06, r1, capA, blockHt, bev, 2, 1, 0, R - 0.015);
-    blockGeo.translate(0, blockHt, 0);
+    blockGeo = WALL_BLOCK_GEO_CACHE.get(blockCacheKey);
+    if (!blockGeo) {
+      blockGeo = arcSlab(R - 0.06, r1, capA, blockHt, bev, 2, 1, 0, R - 0.015);
+      blockGeo.translate(0, blockHt, 0);
+      blockGeo.userData = blockGeo.userData || {};
+      blockGeo.userData.shared = true;
+      WALL_BLOCK_GEO_CACHE.set(blockCacheKey, blockGeo);
+    }
   }
 
   const blockMat = createBlockMaterial({
@@ -3436,7 +3854,7 @@ function buildTowerMasonryAndAccents(
 
   const half = (capA * r1 + 2 * bev) * 0.5 / rf;
   const jointA = spec.joint / rf;
-  const wallEntries = [];
+  let wallCount = 0;
   let isBand = false;
 
   const placeBlock = (a0, a1, y0, hr) => {
@@ -3466,23 +3884,30 @@ function buildTowerMasonryAndAccents(
     _q.setFromEuler(_e);
     _pos.set(0, y0 + 0.01, 0);
     _scl.set(radialOut, sy, radialOut);
-    const m = new THREE.Matrix4().compose(_pos, _q, _scl);
+    _m4.compose(_pos, _q, _scl);
 
-    const c = new THREE.Color();
+    let srcCol;
+    let mul;
     if (isBand && bandCol) {
-      c.copy(bandCol).multiplyScalar(0.94 + rnd() * 0.14);
+      srcCol = bandCol;
+      mul = (0.94 + rnd() * 0.14) * (inConduit ? 0.76 : 1.0);
     } else {
-      c.copy(basePaletteCols[Math.floor(rnd() * basePaletteCols.length)]).multiplyScalar(0.92 + rnd() * 0.18);
+      srcCol = basePaletteCols[(rnd() * basePaletteCols.length) | 0];
+      mul = (0.92 + rnd() * 0.18) * (inConduit ? 0.76 : 1.0);
     }
-    if (inConduit) c.multiplyScalar(0.76);
 
-    wallEntries.push({
-      m,
-      c,
-      span: !isHex ? Math.max(0.12, sp / (half * 2)) : 1,
-      y: Math.max(0, y0 + hr * 0.5),
-      phi: ((midA % TWO_PI) + TWO_PI) % TWO_PI,
-    });
+    ensureWallScratchCap(wallCount);
+    const mOff = wallCount << 4;
+    const mEl = _m4.elements;
+    for (let k = 0; k < 16; k++) _wallMatBuf[mOff + k] = mEl[k];
+    const cOff = wallCount * 3;
+    _wallColBuf[cOff] = srcCol.r * mul;
+    _wallColBuf[cOff + 1] = srcCol.g * mul;
+    _wallColBuf[cOff + 2] = srcCol.b * mul;
+    _wallSpanBuf[wallCount] = !isHex ? Math.max(0.12, sp / (half * 2)) : 1;
+    _wallYBuf[wallCount] = Math.max(0, y0 + hr * 0.5);
+    _wallPhiBuf[wallCount] = ((midA % TWO_PI) + TWO_PI) % TWO_PI;
+    wallCount++;
 
     if (!inConduit && sp > blockA * 0.42 && y0 > -0.4 && y0 < totalH - 0.6) {
       const surfR = rf + (radialOut - 1) * R;
@@ -3587,7 +4012,7 @@ function buildTowerMasonryAndAccents(
     y0 += hr;
   }
 
-  materializeWallBands(group, bandedMeshes, blockGeo, blockMat, wallEntries, PROP_SPAN_Y, !isHex, false, true, 1);
+  materializeWallBands(group, bandedMeshes, blockGeo, blockMat, wallCount, PROP_SPAN_Y, !isHex, false, true, 1);
 
   // 3. Sweeping Vertical Architectural Buttress Ribs (Breaks Up Straight Cylinder Silhouette!)
   const buttressMat = createBlockMaterial({
@@ -3821,11 +4246,13 @@ function buildTowerMasonryAndAccents(
   }
   buildBandedInstancedFromList(group, bandedMeshes, G.conduitClamp, trimMetalMat, clampList, TINY_PROP_SPAN_Y);
 
-  // 5. Arched Colonnade / Aqueduct Blind-Arcade Cornice Bands Every 4 Floors
-  const corniceParts = [];
-  const corniceMetalParts = [];
+  // 5. Arched Colonnade / Aqueduct Blind-Arcade Cornice Bands Every 4 Floors (Instanced via cached `ARCH_GEOS`, ZERO re-extrusion!)
+  const corniceSlabBatch = [];
+  const corniceHoodBatch = [];
+  const corniceMetalBatch = [];
   for (let fy = 4 * fh; fy < totalH - 1.5; fy += 4 * fh) {
     const flIdx = Math.round(fy / fh);
+    const altTaper = -0.085 * Math.min(1, fy / Math.max(14, totalH));
     for (let col = 0; col < COLS; col++) {
       const aPhi = (col + 0.5) * COL_ANGLE;
       if (
@@ -3835,54 +4262,29 @@ function buildTowerMasonryAndAccents(
       ) {
         continue;
       }
-      const altTaper = -0.085 * Math.min(1, fy / Math.max(14, totalH));
-      const rOutBand = R + BRICK_PROUD + 0.095 + altTaper;
-      const bandSlab = arcSlab(
-        R - 0.04,
-        rOutBand,
-        COL_ANGLE * 0.92,
-        0.16,
-        0.022,
-        2,
-        1,
-        0.015,
-        R - 0.01
-      );
-      bandSlab.rotateY(aPhi);
-      bandSlab.translate(0, fy + 0.08, 0);
-      corniceParts.push(bandSlab);
+      const tx = Math.sin(aPhi) * altTaper;
+      const tz = Math.cos(aPhi) * altTaper;
+      pushInstance(corniceSlabBatch, tx, fy, tz, 0, aPhi, 0, 1, 1, 1);
 
       // Sculpted semicircular blind-arcade arch hood + hammered bronze rosette boss on open masonry bays
       if (!walkableSet.has(`${col}_${flIdx}`) && !walkableSet.has(`${col}_${flIdx - 1}`)) {
-        const archR = R * COL_ANGLE * 0.36;
-        const rFace = R + BRICK_PROUD + 0.032 + altTaper;
-        const hood = new THREE.TorusGeometry(archR, 0.038, 6, 12, Math.PI);
-        hood.translate(0, fy - 0.34, rFace);
-        hood.rotateY(aPhi);
-        corniceParts.push(hood);
-
-        const medallion = new THREE.CylinderGeometry(0.068, 0.078, 0.042, 8);
-        medallion.rotateX(Math.PI * 0.5);
-        medallion.translate(0, fy - 0.28, rFace + 0.016);
-        medallion.rotateY(aPhi);
-        corniceMetalParts.push(medallion);
+        pushInstance(corniceHoodBatch, tx, fy, tz, 0, aPhi, 0, 1, 1, 1);
+        pushInstance(corniceMetalBatch, tx, fy, tz, 0, aPhi, 0, 1, 1, 1);
       }
     }
   }
-  if (corniceParts.length) {
-    const corniceMesh = new THREE.Mesh(mergeGeometries(corniceParts), buttressMat);
-    corniceMesh.castShadow = false;
-    corniceMesh.receiveShadow = true;
-    corniceMesh.userData.keepInReflection = true;
-    group.add(corniceMesh);
-  }
-  if (corniceMetalParts.length) {
-    const corniceMetalMesh = new THREE.Mesh(mergeGeometries(corniceMetalParts), trimMetalMat);
-    corniceMetalMesh.castShadow = false;
-    corniceMetalMesh.receiveShadow = true;
-    corniceMetalMesh.userData.keepInReflection = true;
-    group.add(corniceMetalMesh);
-  }
+  buildBandedInstancedFromList(group, bandedMeshes, G.corniceBandSlab, buttressMat, corniceSlabBatch, PROP_SPAN_Y, {
+    castShadow: false,
+    keepInReflection: true,
+  });
+  buildBandedInstancedFromList(group, bandedMeshes, G.corniceArchHood, buttressMat, corniceHoodBatch, PROP_SPAN_Y, {
+    castShadow: false,
+    keepInReflection: true,
+  });
+  buildBandedInstancedFromList(group, bandedMeshes, G.corniceMedallion, trimMetalMat, corniceMetalBatch, TINY_PROP_SPAN_Y, {
+    castShadow: false,
+    keepInReflection: true,
+  });
 
   // 6. Spinning 3D Hydro-Turbines / Pelton Waterwheels (`hydro_turbine.glb`) on Clear Spire Bays!
   const turbineRotors = [];
@@ -3894,37 +4296,21 @@ function buildTowerMasonryAndAccents(
 
   const buildProceduralTurbinePair = () => {
     const housingGrp = new THREE.Group();
-    const mount = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.54, 0.18, 14), darkMetalMat);
+    const mount = new THREE.Mesh(G.turbineMount, darkMetalMat);
     mount.rotation.x = Math.PI * 0.5;
-    const spout = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.09, 8, 12, Math.PI * 0.6), trimMetalMat);
+    const spout = new THREE.Mesh(G.turbineSpout, trimMetalMat);
     spout.position.set(0.1, 0.82, 0.18);
-    const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.5, 10), trimMetalMat);
+    const axle = new THREE.Mesh(G.turbineAxle, trimMetalMat);
     axle.rotation.x = Math.PI * 0.5;
     axle.position.z = 0.24;
     housingGrp.add(mount, spout, axle);
 
     const wheelGrp = new THREE.Group();
     wheelGrp.position.z = 0.28;
-    const rimParts = [
-      new THREE.TorusGeometry(0.86, 0.036, 6, 20),
-      new THREE.TorusGeometry(0.66, 0.028, 6, 18),
-    ];
-    for (let k = 0; k < 12; k++) {
-      const ang = (k / 12) * TWO_PI;
-      const paddle = new THREE.BoxGeometry(0.18, 0.035, 0.24);
-      paddle.rotateZ(ang + 0.45);
-      paddle.translate(Math.cos(ang) * 0.88, Math.sin(ang) * 0.88, 0);
-      rimParts.push(paddle);
-      if (k < 6) {
-        const spoke = new THREE.BoxGeometry(1.68, 0.055, 0.08);
-        spoke.rotateZ(ang);
-        rimParts.push(spoke);
-      }
-    }
-    const wheelMesh = new THREE.Mesh(mergeGeometries(rimParts), trimMetalMat);
+    const wheelMesh = new THREE.Mesh(G.turbineWheelRim, trimMetalMat);
     wheelMesh.castShadow = true;
     const hubGlow = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.12, 0.12, 0.28, 10),
+      G.turbineHub,
       new THREE.MeshBasicMaterial({ color: spec.conduitGlow })
     );
     hubGlow.rotation.x = Math.PI * 0.5;
@@ -3989,7 +4375,7 @@ function buildTowerMasonryAndAccents(
 
     // Cascading water-arc ring around the Pelton buckets
     const sprayArc = new THREE.Mesh(
-      new THREE.TorusGeometry(0.95, 0.032, 6, 18, Math.PI * 0.85),
+      G.turbineSprayArc,
       new THREE.MeshBasicMaterial({
         color: spec.conduitGlow,
         transparent: true,
@@ -4048,7 +4434,7 @@ function buildTowerMasonryAndAccents(
   const crownMaxY = totalH + 3.2;
 
   // Molded summit cornice deck + open flooded Central Reactor Shaft Rim (`core_descent` entrance!)
-  const rimOuter = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.26, R + 0.04, 0.24, 40), crownMat);
+  const rimOuter = new THREE.Mesh(G.crownRimOuter, crownMat);
   rimOuter.position.y = totalH + 0.12;
   rimOuter.castShadow = true;
   rimOuter.receiveShadow = true;
@@ -4058,40 +4444,21 @@ function buildTowerMasonryAndAccents(
 
   // Glowing Flooded Reactor Core Pool inside the summit rim!
   const corePool = new THREE.Mesh(
-    new THREE.CircleGeometry(R - 0.35, 32),
+    G.corePoolCircle,
     createPortalMaterial(spec.conduitDeep, spec.conduitGlow, 1.0, false)
   );
   corePool.rotation.x = -Math.PI * 0.5;
   corePool.position.y = totalH + 0.25;
   group.add(corePool);
 
-  // Sculpted Flying Aqueduct Crown Ribs arching gracefully toward the summit Harmonic Ring
-  const crownParts = [];
-  const crownMetalParts = [];
-  const segA = TWO_PI / CROWN_RIBS;
-  for (let b = 0; b < CROWN_RIBS; b++) {
-    const ang = b * segA;
-    const basePillar = arcSlab(R - 0.14, R + 0.22, segA * 0.42, 0.68, 0.026, 2, 1, 0.02, R - 0.02);
-    basePillar.rotateY(ang);
-    basePillar.translate(0, totalH + 0.92, 0);
-    crownParts.push(basePillar);
-
-    const archArm = new THREE.BoxGeometry(0.16, 1.45, 0.22);
-    archArm.rotateX(-0.58);
-    archArm.translate(0, totalH + 1.42, R - 0.42);
-    archArm.rotateY(ang);
-    crownMetalParts.push(archArm);
-  }
-  const summitRing = new THREE.TorusGeometry(R * 0.46, 0.095, 8, 28);
-  summitRing.rotateX(Math.PI * 0.5);
-  summitRing.translate(0, totalH + 1.95, 0);
-  crownMetalParts.push(summitRing);
-
-  const crownStoneMesh = new THREE.Mesh(mergeGeometries(crownParts), crownMat);
+  // Sculpted Flying Aqueduct Crown Ribs arching gracefully toward the summit Harmonic Ring (cached unit geometries!)
+  const crownStoneMesh = new THREE.Mesh(G.crownStone, crownMat);
+  crownStoneMesh.position.y = totalH;
   crownStoneMesh.castShadow = true;
   crownStoneMesh.receiveShadow = true;
   crownStoneMesh.userData = { keepInReflection: true, bandMinY: crownMinY, bandMaxY: crownMaxY, bandMidY: totalH + 1.0 };
-  const crownMetalMesh = new THREE.Mesh(mergeGeometries(crownMetalParts), trimMetalMat);
+  const crownMetalMesh = new THREE.Mesh(G.crownMetal, trimMetalMat);
+  crownMetalMesh.position.y = totalH;
   crownMetalMesh.castShadow = true;
   crownMetalMesh.userData = { keepInReflection: true, bandMinY: crownMinY, bandMaxY: crownMaxY, bandMidY: totalH + 1.4 };
   group.add(crownStoneMesh, crownMetalMesh);
@@ -4117,10 +4484,7 @@ function buildTowerMasonryAndAccents(
   const summitAuraGroup = new THREE.Group();
   summitAuraGroup.position.y = totalH + 2.02;
   const summitAuraMat = createSummitAuraMaterial(spec.conduitGlow, spec.accentGlow);
-  const summitVeilMesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(R * 0.52, R * 0.88, 2.85, 28, 1, true),
-    summitAuraMat
-  );
+  const summitVeilMesh = new THREE.Mesh(G.summitVeil, summitAuraMat);
   summitVeilMesh.position.y = -0.32;
   const summitHaloMat = new THREE.MeshStandardMaterial({
     color: spec.conduitGlow,
@@ -4131,9 +4495,9 @@ function buildTowerMasonryAndAccents(
     transparent: true,
     opacity: 0.88,
   });
-  const summitOuterHalo = new THREE.Mesh(new THREE.TorusGeometry(R * 0.62, 0.042, 8, 36), summitHaloMat);
+  const summitOuterHalo = new THREE.Mesh(G.summitOuterHalo, summitHaloMat);
   summitOuterHalo.rotation.x = Math.PI * 0.5;
-  const summitInnerHalo = new THREE.Mesh(new THREE.TorusGeometry(R * 0.36, 0.032, 8, 28), summitHaloMat);
+  const summitInnerHalo = new THREE.Mesh(G.summitInnerHalo, summitHaloMat);
   summitInnerHalo.rotation.x = Math.PI * 0.42;
   summitInnerHalo.position.y = 0.28;
   summitAuraGroup.add(summitVeilMesh, summitOuterHalo, summitInnerHalo);
@@ -4157,7 +4521,7 @@ function buildTowerMasonryAndAccents(
     0.72
   );
   stoneMats.push(plinthMat);
-  const plinth = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.05, R + 0.56, 3.0, 32), plinthMat);
+  const plinth = new THREE.Mesh(G.foundationPlinth, plinthMat);
   plinth.position.y = -1.7;
   plinth.receiveShadow = true;
   plinth.userData = { keepInReflection: true, bandMinY: -3.4, bandMaxY: 0.3, bandMidY: -1.5 };
@@ -5189,17 +5553,18 @@ export function buildSwitchMesh(mode = 'pipeValve', glbAssets = null) {
     orb.visible = false;
     g.add(base, standPipe, wallPipe, sightCyl, wheel, orb);
   } else {
-    const bronzeMaps = getSurfaceMaps1024('antique_bronze', 1.2);
+    const bronzeMaps = getSurfaceMaps1024('antique_bronze', 1.35);
     const bronzePedMat = new THREE.MeshStandardMaterial({
       color: '#c49652',
       map: bronzeMaps.map,
       normalMap: bronzeMaps.normalMap,
       normalScale: new THREE.Vector2(0.85, 0.85),
-      roughnessMap: bronzeMaps.roughnessMap,
+      roughnessMap: bronzeMaps.ormMap,
       metalness: 0.78,
       roughness: 0.34,
       envMapIntensity: 1.2,
     });
+    subscribeMaterialToSurface(bronzeMaps, bronzePedMat);
     const ped = new THREE.Mesh(G.switchPedestal, bronzePedMat);
     ped.castShadow = true;
     ped.receiveShadow = true;
@@ -5391,7 +5756,16 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
 
   const walkableSet = new Set();
   for (const l of tower?.ledges || []) {
-    if (l.type !== 'box' && l.type !== 'pillar' && l.type !== 'laserGate') {
+    if (
+      l &&
+      !l.gone &&
+      l.type !== 'box' &&
+      l.type !== 'pillar' &&
+      l.type !== 'laserGate' &&
+      l.type !== 'siphonBarrier' &&
+      l.type !== 'barrier' &&
+      l.type !== 'floodgate'
+    ) {
       walkableSet.add(`${wrapTowerCol(l.col)}_${Math.round(Number(l.floor) || 0)}`);
     }
   }
@@ -5481,8 +5855,7 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
 
   const useExternalVfx = Boolean(glbAssets?.useOceanVfx);
   const ashlarInstances = [];
-  const doorArchParts = [];
-  const doorMetalParts = [];
+  const doorSurroundBatch = [];
   const portalBuckets = new Map();
 
   const ashlarMat = createBlockMaterial({
@@ -5549,48 +5922,8 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     pQuad.translate(0, 0, isPassageDoor ? -0.24 : -0.06);
     pBucket.parts.push(transformDoorGeo(pQuad, phi, doorCenterY));
 
-    // Sculpted Arched Sanctum Doorway Surround: Twin Colonnettes + Semicircular Stone Archivolt + Keystone + Threshold Sill!
-    const archRad = DOOR_W * 0.5 + 0.08;
-    const legH = DOOR_H - archRad + 0.08;
-    for (const sx of [-1, 1]) {
-      const colPillar = new THREE.CylinderGeometry(0.105, 0.12, legH, 10);
-      colPillar.translate(sx * archRad, -DOOR_H * 0.5 + legH * 0.5, 0.08);
-      doorArchParts.push(transformDoorGeo(colPillar, phi, doorCenterY));
-
-      const capBlock = new RoundedBoxGeometry(0.27, 0.11, 0.34, 1, 0.018);
-      capBlock.translate(sx * archRad, -DOOR_H * 0.5 + legH + 0.02, 0.09);
-      doorMetalParts.push(transformDoorGeo(capBlock, phi, doorCenterY));
-    }
-
-    const archivolt = new THREE.TorusGeometry(archRad, 0.115, 8, 18, Math.PI);
-    archivolt.translate(0, DOOR_H * 0.5 - archRad, 0.085);
-    doorArchParts.push(transformDoorGeo(archivolt, phi, doorCenterY));
-
-    // Carved stone spandrel tympanum corners behind the semicircular archivolt (seals black rectangular doorway corner gaps!)
-    for (const sx of [-1, 1]) {
-      const spandrel = new THREE.Shape();
-      const outerX = archRad + 0.08;
-      const topY = archRad + 0.09;
-      spandrel.moveTo(sx * (archRad * 0.52), topY);
-      spandrel.lineTo(sx * outerX, topY);
-      spandrel.lineTo(sx * outerX, archRad * 0.22);
-      spandrel.quadraticCurveTo(sx * (archRad * 0.96), archRad * 0.88, sx * (archRad * 0.52), topY);
-      const spGeo = new THREE.ExtrudeGeometry(spandrel, { depth: 0.14, bevelEnabled: false, curveSegments: 8 });
-      spGeo.translate(0, DOOR_H * 0.5 - archRad, -0.05);
-      doorArchParts.push(transformDoorGeo(spGeo, phi, doorCenterY));
-    }
-
-    const innerBronzeTrim = new THREE.TorusGeometry(archRad - 0.065, 0.036, 6, 18, Math.PI);
-    innerBronzeTrim.translate(0, DOOR_H * 0.5 - archRad, 0.14);
-    doorMetalParts.push(transformDoorGeo(innerBronzeTrim, phi, doorCenterY));
-
-    const keystone = new RoundedBoxGeometry(0.24, 0.28, 0.36, 1, 0.024);
-    keystone.translate(0, DOOR_H * 0.5 + 0.06, 0.11);
-    doorMetalParts.push(transformDoorGeo(keystone, phi, doorCenterY));
-
-    const sill = new RoundedBoxGeometry(DOOR_W + 0.42, 0.09, 0.42, 1, 0.018);
-    sill.translate(0, -DOOR_H * 0.5 + 0.035, 0.09);
-    doorArchParts.push(transformDoorGeo(sill, phi, doorCenterY));
+    // Sculpted Arched Sanctum Doorway Surround (instanced via cached `G.doorArchSurround` + `G.doorMetalSurround`!)
+    pushInstance(doorSurroundBatch, R * Math.sin(phi), doorCenterY, R * Math.cos(phi), 0, phi, 0, 1, 1, 1);
 
     if (isSparkArch) {
       sparkEmitters.push({ col: door.col, floor: door.floor, y: door.floor * fh, ang: phi });
@@ -5665,7 +5998,7 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
         exitRings.push(outerLock, innerLock);
       } else if (isExitDoor) {
         // Monumental Carved Pelagian Crown Portal Pediment, Rotating Astrolabe Halo & 3-Seal Forged Chains/Padlocks!
-        const bronzeMaps = getSurfaceMaps1024('antique_bronze', 1.4);
+        const bronzeMaps = getSurfaceMaps1024('antique_bronze', 1.35);
         const crownGoldMat = new THREE.MeshStandardMaterial({
           color: '#f7d372',
           map: bronzeMaps.map,
@@ -5815,84 +6148,35 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     portalMats.push(pMat);
     group.add(new THREE.Mesh(mergeGeometries(bucket.parts), pMat));
   }
-  if (doorArchParts.length) {
-    const archMesh = new THREE.Mesh(mergeGeometries(doorArchParts), ashlarMat);
-    archMesh.castShadow = false;
-    archMesh.receiveShadow = true;
-    group.add(archMesh);
-  }
-  if (doorMetalParts.length) {
-    const doorTrimMesh = new THREE.Mesh(mergeGeometries(doorMetalParts), trimMetalMat);
-    doorTrimMesh.castShadow = false;
-    group.add(doorTrimMesh);
+  if (doorSurroundBatch.length) {
+    const archInst = buildInstancedFromList(G.doorArchSurround, ashlarMat, doorSurroundBatch, {
+      castShadow: false,
+      receiveShadow: true,
+      keepInReflection: true,
+    });
+    if (archInst) group.add(archInst);
+    const doorTrimInst = buildInstancedFromList(G.doorMetalSurround, trimMetalMat, doorSurroundBatch, {
+      castShadow: false,
+      receiveShadow: true,
+      keepInReflection: false,
+    });
+    if (doorTrimInst) group.add(doorTrimInst);
   }
 
   // 4. REAL MECHANICAL ELEVATORS (`mech_elevator.glb` + Full-Height Bolted I-Beam Shafts!)
+  const SM = getSharedArchMaterials();
   const elevatorPods = [];
-  const cableMat = new THREE.MeshStandardMaterial({ color: '#dbe4f0', metalness: 0.9, roughness: 0.18 });
+  const cableMat = SM.cableMat;
   const shaftSteelParts = [];
   const shaftBrassParts = [];
   let cabLightAssigned = false;
 
   const buildProceduralElevatorCab = () => {
     const cab = new THREE.Group();
-    const steelParts = [];
-    const brassParts = [];
-
-    const chassis = new RoundedBoxGeometry(1.16, 0.17, 0.92, 1, 0.022);
-    chassis.translate(0, -0.085, 0);
-    steelParts.push(chassis);
-
-    const trimRim = new RoundedBoxGeometry(1.2, 0.045, 0.96, 1, 0.012);
-    trimRim.translate(0, -0.025, 0);
-    brassParts.push(trimRim);
-
-    // Waist-high brass rails + rear yoke columns + guide shoes
-    for (const sx of [-1, 1]) {
-      const px = sx * 0.54;
-      const fPost = new THREE.CylinderGeometry(0.028, 0.028, 0.57, 8);
-      fPost.translate(px, 0.285, 0.4);
-      const sRail = new THREE.CylinderGeometry(0.024, 0.024, 0.76, 8);
-      sRail.rotateX(Math.PI * 0.5);
-      sRail.translate(px, 0.53, 0.02);
-      brassParts.push(fPost, sRail);
-
-      const rPost = new THREE.CylinderGeometry(0.034, 0.034, 1.68, 8);
-      rPost.translate(px, 0.76, -0.36);
-      const shoe = new RoundedBoxGeometry(0.14, 0.56, 0.15, 1, 0.012);
-      shoe.translate(sx * 0.52, 0.14, -0.43);
-      steelParts.push(rPost, shoe);
-    }
-    const backRail = new THREE.CylinderGeometry(0.024, 0.024, 1.08, 8);
-    backRail.rotateZ(Math.PI * 0.5);
-    backRail.translate(0, 0.53, -0.36);
-    const yokeTop = new RoundedBoxGeometry(1.12, 0.09, 0.18, 1, 0.016);
-    yokeTop.translate(0, 1.66, -0.18);
-    brassParts.push(backRail, yokeTop);
-
-    const steelMesh = new THREE.Mesh(mergeGeometries(steelParts), darkMetalMat);
+    const steelMesh = new THREE.Mesh(G.elevCabSteel, darkMetalMat);
     steelMesh.castShadow = true;
-    const brassMesh = new THREE.Mesh(mergeGeometries(brassParts), trimMetalMat);
+    const brassMesh = new THREE.Mesh(G.elevCabBrass, trimMetalMat);
     brassMesh.castShadow = true;
-
-    const glassMat = new THREE.MeshStandardMaterial({
-      color: '#a5f3fc',
-      roughness: 0.06,
-      metalness: 0.1,
-      transparent: true,
-      opacity: 0.34,
-      depthWrite: false,
-    });
-    const glassParts = [];
-    for (const sx of [-0.54, 0.54]) {
-      const gp = new THREE.BoxGeometry(0.018, 0.42, 0.68);
-      gp.translate(sx, 0.27, 0.02);
-      glassParts.push(gp);
-    }
-    const backGp = new THREE.BoxGeometry(0.98, 0.42, 0.018);
-    backGp.translate(0, 0.27, -0.36);
-    glassParts.push(backGp);
-    const glassMesh = new THREE.Mesh(mergeGeometries(glassParts), glassMat);
 
     const deckGlowMat = new THREE.MeshStandardMaterial({
       color: '#67e8f9',
@@ -5900,21 +6184,21 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
       emissiveIntensity: 1.35,
       roughness: 0.16,
     });
-    const deckGlow = new THREE.Mesh(new THREE.BoxGeometry(0.94, 0.014, 0.7), deckGlowMat);
+    const deckGlow = new THREE.Mesh(G.elevDeckGlow, deckGlowMat);
     deckGlow.position.set(0, 0.002, 0.02);
 
     const gate = new THREE.Group();
     gate.position.set(-0.52, 0.49, 0.4);
-    const gateBar = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 1.02, 8), trimMetalMat);
+    const gateBar = new THREE.Mesh(G.elevGateBar, trimMetalMat);
     gateBar.rotation.z = Math.PI * 0.5;
     gateBar.position.x = 0.51;
     gate.add(gateBar);
 
     const upMat = new THREE.MeshStandardMaterial({ color: '#5efce8', emissive: '#10b981', emissiveIntensity: 1.5 });
     const dnMat = new THREE.MeshStandardMaterial({ color: '#fde047', emissive: '#f59e0b', emissiveIntensity: 1.5 });
-    const chevUp = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.09, 4), upMat);
+    const chevUp = new THREE.Mesh(G.elevChevron, upMat);
     chevUp.position.set(0.54, 1.13, -0.24);
-    const chevDn = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.09, 4), dnMat);
+    const chevDn = new THREE.Mesh(G.elevChevron, dnMat);
     chevDn.rotation.x = Math.PI;
     chevDn.position.set(0.54, 0.97, -0.24);
 
@@ -6037,16 +6321,16 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
         sheaveWheels.push(shClone);
       }
     } else {
-      const hood = new THREE.Mesh(new RoundedBoxGeometry(1.3, 0.28, 0.98, 1, 0.025), darkMetalMat);
+      const hood = new THREE.Mesh(G.elevWinchHood, darkMetalMat);
       hood.position.set(0, 0.22, -0.18);
       hood.castShadow = false;
-      const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.88, 12), trimMetalMat);
+      const drum = new THREE.Mesh(G.elevWinchDrum, trimMetalMat);
       drum.rotation.z = Math.PI * 0.5;
       drum.position.set(0, 0.26, -0.26);
       winchGroup.add(hood, drum);
 
       for (const sx of [-0.24, 0.24]) {
-        const sh = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.06, 16), trimMetalMat);
+        const sh = new THREE.Mesh(G.elevSheave, trimMetalMat);
         sh.rotation.z = Math.PI * 0.5;
         sh.position.set(sx, 0.14, -0.1);
         winchGroup.add(sh);
@@ -6071,8 +6355,8 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
       markSharedSubtree(cClone);
       cwtNode.add(cClone);
     } else {
-      const cBlock = new THREE.Mesh(new RoundedBoxGeometry(0.46, 0.68, 0.14, 1, 0.015), darkMetalMat);
-      const cCap = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.1, 0.16), trimMetalMat);
+      const cBlock = new THREE.Mesh(G.elevCwtBlock, darkMetalMat);
+      const cCap = new THREE.Mesh(G.elevCwtCap, trimMetalMat);
       cCap.position.y = 0.28;
       cwtNode.add(cBlock, cCap);
     }
@@ -6249,34 +6533,13 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
   });
   stoneMats.push(ledgeBodyMat, ledgeTopMat);
 
-  const iceMat = new THREE.MeshStandardMaterial({
-    color: '#93d5fd',
-    map: T.frost,
-    emissive: '#0284c7',
-    emissiveIntensity: 0.24,
-    roughness: 0.08,
-    metalness: 0.16,
-    transparent: true,
-    opacity: 0.88,
-  });
-  const iceTopMat = new THREE.MeshStandardMaterial({ color: '#f0f9ff', map: T.frost, roughness: 0.08 });
-  const slideMatR = new THREE.MeshStandardMaterial({
-    map: T.slideR,
-    emissive: '#38bdf8',
-    emissiveIntensity: 0.22,
-    roughness: 0.08,
-    metalness: 0.2,
-  });
-  const slideMatL = new THREE.MeshStandardMaterial({
-    map: T.slideL,
-    emissive: '#38bdf8',
-    emissiveIntensity: 0.22,
-    roughness: 0.08,
-    metalness: 0.2,
-  });
-  const convMatR = new THREE.MeshStandardMaterial({ map: T.convR, roughness: 0.36, metalness: 0.35 });
-  const convMatL = new THREE.MeshStandardMaterial({ map: T.convL, roughness: 0.36, metalness: 0.35 });
-  const hazardMat = new THREE.MeshStandardMaterial({ map: T.hazard, roughness: 0.44 });
+  const iceMat = SM.iceMat;
+  const iceTopMat = SM.iceTopMat;
+  const slideMatR = SM.slideMatR;
+  const slideMatL = SM.slideMatL;
+  const convMatR = SM.convMatR;
+  const convMatL = SM.convMatL;
+  const hazardMat = SM.hazardMat;
   // Wrap exterior stone bulkhead pillars & pushable Pelagian counterweight blocks in biome PBR stone + antique bronze!
   const pillarMat = ledgeBodyMat;
   const sharedBoxMat = ledgeBodyMat;
@@ -6335,71 +6598,83 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
   const phaseBracketBatch = [];
 
   // Shared rune inlay & dormant ghost materials for `phaseBlock` aqueduct ledges (zero extra shader compiles!)
-  const phaseRuneMatCyan = new THREE.MeshStandardMaterial({
-    color: '#0e7490',
-    emissive: '#38bdf8',
-    emissiveMap: T.phaseRune,
-    emissiveIntensity: 1.35,
-    roughness: 0.24,
-    metalness: 0.35,
-  });
-  const phaseRuneMatRed = new THREE.MeshStandardMaterial({
-    color: '#881337',
-    emissive: '#fb7185',
-    emissiveMap: T.phaseRune,
-    emissiveIntensity: 1.35,
-    roughness: 0.24,
-    metalness: 0.35,
-  });
-  const phaseGhostMatCyan = new THREE.MeshBasicMaterial({
-    color: '#67e8f9',
-    transparent: true,
-    opacity: 0.24,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-  });
-  const phaseGhostMatRed = new THREE.MeshBasicMaterial({
-    color: '#fda4af',
-    transparent: true,
-    opacity: 0.24,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-  });
+  const phaseRuneMatCyan = SM.phaseRuneMatCyan;
+  const phaseRuneMatRed = SM.phaseRuneMatRed;
+  const phaseGhostMatCyan = SM.phaseGhostMatCyan;
+  const phaseGhostMatRed = SM.phaseGhostMatRed;
   const hydroCurtainMats = new Set();
 
   const conveyorRollers = [];
   const ledgeMeshes = [];
+  const visualStairFlights = [];
   const ledgeWidth = ledgeR * COL_ANGLE;
 
-  // Map solid/stair walkable cells and blocking pillars/boxes to solve continuous 5-riser stair flights!
+  // Canonical 1:1 Staircase Solver matching `game.js` `isPhysicsStairFlight` & `_sampleStairSurface`!
+  const anyWalkableSet = new Set();
   const solidWalkableSet = new Set();
+  const solidLedgeMap = new Map();
   const blockerSet = new Set();
-  for (const l of tower?.ledges || []) {
-    const wc = wrapTowerCol(l.col);
-    const fl = Math.round(Number(l.floor) || 0);
-    if (l.type === 'box' || l.type === 'pillar') {
-      const topH = Math.max(1, Math.round(Number(l.h) || 1));
-      for (let k = 0; k < topH; k++) blockerSet.add(`${wc}_${fl + k}`);
-    } else if (l.type === 'solid' || l.type === 'stair' || l.type === 'stairR' || l.type === 'stairL') {
-      solidWalkableSet.add(`${wc}_${fl}`);
+  const elevShaftSet = new Set();
+
+  for (const el of tower?.elevators || []) {
+    const ec = wrapTowerCol(el.col);
+    const minFl = Math.round(Number(el.minFloor ?? 0));
+    const maxFl = Math.round(Number(el.maxFloor ?? 4));
+    for (let ef = minFl; ef <= maxFl; ef++) {
+      elevShaftSet.add(`${ec}_${ef}`);
     }
   }
 
-  const hasAscendingFlightR = (col, floor) => {
-    const wc = wrapTowerCol(col);
-    const rc = wrapTowerCol(wc + 1);
-    if (blockerSet.has(`${wc}_${floor + 1}`)) return false;
-    return solidWalkableSet.has(`${rc}_${floor + 1}`);
+  for (const l of tower?.ledges || []) {
+    if (!l || l.gone) continue;
+    const wc = wrapTowerCol(l.col);
+    const fl = Math.round(Number(l.floor) || 0);
+    if (l.type === 'box' || l.type === 'pillar' || l.type === 'laserGate') {
+      const topH = Math.max(1, Math.round(Number(l.h) || 1));
+      for (let k = 0; k < topH; k++) blockerSet.add(`${wc}_${fl + k}`);
+      continue;
+    }
+    if (l.type === 'siphonBarrier' || l.type === 'barrier' || l.type === 'floodgate') {
+      continue;
+    }
+    anyWalkableSet.add(`${wc}_${fl}`);
+    if (l.type === 'solid' || l.type === 'stair' || l.type === 'stairR' || l.type === 'stairL') {
+      solidWalkableSet.add(`${wc}_${fl}`);
+      const prev = solidLedgeMap.get(`${wc}_${fl}`);
+      if (!prev || l.type === 'stairR' || l.type === 'stairL' || (l.stairDir && !prev.stairDir)) {
+        solidLedgeMap.set(`${wc}_${fl}`, l);
+      }
+    }
+  }
+
+  const isVisualStairFlight = (ledge, wc, fl, dir) => {
+    if (!ledge || ledge.gone || (dir !== 1 && dir !== -1)) return false;
+    if (
+      ledge.type !== 'solid' &&
+      ledge.type !== 'stair' &&
+      ledge.type !== 'stairR' &&
+      ledge.type !== 'stairL'
+    ) {
+      return false;
+    }
+    if (!solidWalkableSet.has(`${wc}_${fl}`)) return false;
+
+    const explicitTypeMatch = ledge.type === (dir === 1 ? 'stairR' : 'stairL');
+    if (ledge.stairDir !== undefined) {
+      if (ledge.stairDir !== dir && !explicitTypeMatch) return false;
+    }
+
+    const nc = wrapTowerCol(wc + dir);
+    const nextFl = fl + 1;
+    if (!solidWalkableSet.has(`${nc}_${nextFl}`)) return false;
+    if (anyWalkableSet.has(`${nc}_${fl}`)) return false;
+    if (anyWalkableSet.has(`${wc}_${nextFl}`) || solidWalkableSet.has(`${wc}_${nextFl}`)) return false;
+    if (blockerSet.has(`${wc}_${nextFl}`) || blockerSet.has(`${nc}_${nextFl}`)) return false;
+    if (elevShaftSet.has(`${wc}_${nextFl}`) || elevShaftSet.has(`${nc}_${nextFl}`)) return false;
+    return true;
   };
 
-  const hasAscendingFlightL = (col, floor) => {
-    const wc = wrapTowerCol(col);
-    const lc = wrapTowerCol(wc - 1);
-    if (blockerSet.has(`${wc}_${floor + 1}`)) return false;
-    return solidWalkableSet.has(`${lc}_${floor + 1}`);
-  };
-
-  const makeStaticProxy = (phi, y, type, batchRefs) => {
+  const makeStaticProxy = (phi, y, type, batchRefs, extra = null) => {
     const proxy = new THREE.Object3D();
     proxy.position.set(ledgeR * Math.sin(phi), y, ledgeR * Math.cos(phi));
     proxy.rotation.y = phi;
@@ -6411,6 +6686,7 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
       isStaticInstanced: true,
       batchRefs,
       lastGone: false,
+      ...(extra || {}),
     };
     return proxy;
   };
@@ -6441,18 +6717,14 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
       const lc = wrapTowerCol(wc - 1);
       const rc = wrapTowerCol(wc + 1);
 
-      // Check ascending flights originating from this cell + incoming flights from fl - 1
-      const goUpR =
-        l.type === 'stairR' ||
-        (l.stairDir === 1 && !solidWalkableSet.has(`${rc}_${fl}`)) ||
-        hasAscendingFlightR(wc, fl);
-      const goUpL =
-        l.type === 'stairL' ||
-        (l.stairDir === -1 && !solidWalkableSet.has(`${lc}_${fl}`)) ||
-        hasAscendingFlightL(wc, fl);
+      // Canonical 1:1 visual stair flights originating from this cell + incoming flights from fl - 1
+      const goUpR = isVisualStairFlight(l, wc, fl, 1);
+      const goUpL = isVisualStairFlight(l, wc, fl, -1);
 
-      const fromDownL = solidWalkableSet.has(`${lc}_${fl - 1}`) && hasAscendingFlightR(lc, fl - 1);
-      const fromDownR = solidWalkableSet.has(`${rc}_${fl - 1}`) && hasAscendingFlightL(rc, fl - 1);
+      const lowLedgeL = solidLedgeMap.get(`${lc}_${fl - 1}`);
+      const lowLedgeR = solidLedgeMap.get(`${rc}_${fl - 1}`);
+      const fromDownL = Boolean(lowLedgeL && isVisualStairFlight(lowLedgeL, lc, fl - 1, 1));
+      const fromDownR = Boolean(lowLedgeR && isVisualStairFlight(lowLedgeR, rc, fl - 1, -1));
 
       const stairOnLeft = goUpL || fromDownL;
       const stairOnRight = goUpR || fromDownR;
@@ -6462,11 +6734,13 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
         const sIdx = pushInstance(flightRStoneBatch, ledgeR * Math.sin(phi), y, ledgeR * Math.cos(phi), 0, phi, 0, 1, 1, 1);
         const mIdx = pushInstance(flightRMetalBatch, ledgeR * Math.sin(phi), y, ledgeR * Math.cos(phi), 0, phi, 0, 1, 1, 1);
         batchRefs.push(flightRStoneBatch[sIdx], flightRMetalBatch[mIdx]);
+        visualStairFlights.push({ col: wc, floor: fl, dir: 1 });
       }
       if (goUpL) {
         const sIdx = pushInstance(flightLStoneBatch, ledgeR * Math.sin(phi), y, ledgeR * Math.cos(phi), 0, phi, 0, 1, 1, 1);
         const mIdx = pushInstance(flightLMetalBatch, ledgeR * Math.sin(phi), y, ledgeR * Math.cos(phi), 0, phi, 0, 1, 1, 1);
         batchRefs.push(flightLStoneBatch[sIdx], flightLMetalBatch[mIdx]);
+        visualStairFlights.push({ col: wc, floor: fl, dir: -1 });
       }
 
       // Compute exact non-overlapping Terrace Landing Deck width & angular shift so stairs & landings lock 1:1!
@@ -6510,8 +6784,8 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
       batchRefs.push(terraceStoneBatch[tsIdx], terraceMetalBatch[tmIdx]);
 
       // Add subtle low end-cap guard rail on multi-col terrace cliff ends (where flat neighbor is part of a terrace >= 2 cols)
-      const hasFlatL = walkableSet.has(`${lc}_${fl}`);
-      const hasFlatR = walkableSet.has(`${rc}_${fl}`);
+      const hasFlatL = anyWalkableSet.has(`${lc}_${fl}`);
+      const hasFlatR = anyWalkableSet.has(`${rc}_${fl}`);
       if (!stairOnLeft && !hasFlatL && hasFlatR) {
         const gPhi = phi - 0.46 * COL_ANGLE;
         const gIdx = pushInstance(endGuardBatch, ledgeR * Math.sin(gPhi), y, ledgeR * Math.cos(gPhi), 0, gPhi, 0, 1, 0.55, 1);
@@ -6535,7 +6809,17 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
         pushInstance(ledgeCoralBatch, cx, y - 0.16, cz, 0.12, deckPhi, 0.15, 0.68, 0.56, 0.68, '#cfc3aa');
       }
 
-      ledgeMeshes.push(makeStaticProxy(phi, y, l.type, batchRefs));
+      ledgeMeshes.push(
+        makeStaticProxy(phi, y, l.type, batchRefs, {
+          col: wc,
+          floor: fl,
+          goUpR,
+          goUpL,
+          fromDownL,
+          fromDownR,
+          deckScaleX,
+        })
+      );
       continue;
     }
 
@@ -6738,17 +7022,6 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     ledgeMeshes.push(node);
   }
 
-  // Basal Waterline Pier Staircase descending into the river/lake/sea near spawn!
-  {
-    const spawnCol = wrapTowerCol(tower?.spawn?.col ?? 0);
-    const pierCol = wrapTowerCol(spawnCol - 1);
-    const pierPhi = (pierCol + 0.5) * COL_ANGLE;
-    if (!walkableSet.has(`${pierCol}_0`)) {
-      pushInstance(flightRStoneBatch, ledgeR * Math.sin(pierPhi), -fh, ledgeR * Math.cos(pierPhi), 0, pierPhi, 0, 1, 1, 1);
-      pushInstance(flightRMetalBatch, ledgeR * Math.sin(pierPhi), -fh, ledgeR * Math.cos(pierPhi), 0, pierPhi, 0, 1, 1, 1);
-    }
-  }
-
   // Materialize Real Staircase & Terrace InstancedMeshes (`castShadow` on stone treads/flights only — trims skip shadow pass for 60fps!)
   const instTerraceStone = buildBandedInstancedFromList(
     group,
@@ -6858,12 +7131,13 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
         map: travMaps.map,
         normalMap: travMaps.normalMap,
         normalScale: new THREE.Vector2(0.75, 0.75),
-        roughnessMap: travMaps.roughnessMap,
+        roughnessMap: travMaps.ormMap,
         roughness: 0.84,
         metalness: 0.04,
       }),
       0.65
     );
+    subscribeMaterialToSurface(travMaps, lcMat);
     stoneMats.push(lcMat);
     buildBandedInstancedFromList(group, bandedMeshes, G.coralCluster, lcMat, ledgeCoralBatch, TINY_PROP_SPAN_Y);
   }
@@ -6893,28 +7167,20 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
       stripGrp.position.set(sr * Math.sin(sPhi), midY, sr * Math.cos(sPhi));
       stripGrp.rotation.y = sPhi;
 
-      const railParts = [];
-      for (const sx of [-0.30, 0.30]) {
-        const rail = new RoundedBoxGeometry(0.062, spanH, 0.088, 1, 0.012);
-        rail.translate(sx, 0, 0.01);
-        railParts.push(rail);
-      }
+      const railsScaled = G.stripRailsUnit.clone();
+      railsScaled.scale(1, spanH, 1);
+      const railParts = [railsScaled];
       const padParts = [];
       const rungCount = Math.max(3, Math.floor(spanH / 0.42));
       for (let r = 0; r < rungCount; r++) {
         const ry = -spanH * 0.5 + ((r + 0.5) / rungCount) * spanH;
-        // Carved antique-bronze rung housing spanning between the twin vertical rails
-        const rungBar = new RoundedBoxGeometry(0.62, 0.068, 0.072, 1, 0.01);
-        rungBar.translate(0, ry, 0.02);
+        const rungBar = G.stripRungBar.clone();
+        rungBar.translate(0, ry, 0);
         railParts.push(rungBar);
-        // Subtle recessed Pelagian hydro-grip crystal inlay centered on each bronze rung
-        const inlayL = new RoundedBoxGeometry(0.20, 0.042, 0.036, 1, 0.008);
-        inlayL.rotateZ(0.24);
-        inlayL.translate(-0.10, ry + 0.016, 0.048);
-        const inlayR = new RoundedBoxGeometry(0.20, 0.042, 0.036, 1, 0.008);
-        inlayR.rotateZ(-0.24);
-        inlayR.translate(0.10, ry + 0.016, 0.048);
-        padParts.push(inlayL, inlayR);
+
+        const inlayPair = G.stripRungInlayPair.clone();
+        inlayPair.translate(0, ry, 0);
+        padParts.push(inlayPair);
       }
 
       const railsMesh = new THREE.Mesh(mergeGeometries(railParts), trimMetalMat);
@@ -7221,6 +7487,8 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     sharedBoxMat,
     sharedBoxCoreMat,
     ledgeMeshes,
+    visualStairFlights,
+    visualStairCount: visualStairFlights.length,
     elevatorPods,
     conveyorRollers,
     wallStripNodes,
@@ -7964,23 +8232,105 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
 // 13. GPU MEMORY HYGIENE: `disposeTowerArchitecture(cachedTower)`
 // ============================================================================
 
+export function buildArchShaderWarmupGroup() {
+  const grp = new THREE.Group();
+  grp.name = 'arch_shader_warmup';
+  const G = getSharedArchGeometries();
+  const SM = getSharedArchMaterials();
+  const aoTex = getDefaultWallAoTex();
+  const white = new THREE.Color(0xffffff);
+  const idMat = new THREE.Matrix4();
+
+  const warmInstMats = [
+    createBlockMaterial({
+      color: '#5f6f85',
+      surface: 'canyon_sandstone',
+      tile: 0.58,
+      useMetalMap: true,
+      angular: false,
+      wallAoTex: aoTex,
+    }),
+    createBlockMaterial({
+      color: '#d87a4a',
+      surface: 'canyon_sandstone',
+      tile: 0.58,
+      useMetalMap: false,
+      angular: true,
+      wallAoTex: aoTex,
+    }),
+    SM.iceMat,
+    SM.iceTopMat,
+    SM.slideMatR,
+    SM.hazardMat,
+  ];
+
+  for (let i = 0; i < warmInstMats.length; i++) {
+    const inst = new THREE.InstancedMesh(G.sparkCube, warmInstMats[i], 1);
+    inst.setMatrixAt(0, idMat);
+    inst.setColorAt(0, white);
+    inst.frustumCulled = false;
+    grp.add(inst);
+  }
+
+  const warmMeshMats = [
+    SM.convMatR,
+    SM.phaseRuneMatCyan,
+    SM.phaseGhostMatCyan,
+    createHydroBarrierMaterial(true),
+    createHydroBarrierMaterial(false),
+  ];
+  for (let i = 0; i < warmMeshMats.length; i++) {
+    const m = new THREE.Mesh(G.sparkCube, warmMeshMats[i]);
+    m.frustumCulled = false;
+    grp.add(m);
+  }
+
+  return grp;
+}
+
 export function disposeTowerArchitecture(cachedTower) {
   if (!cachedTower || !cachedTower.group) return;
   if (cachedTower._onGlbReady) {
     INTERNAL_GLB_CACHE.listeners.delete(cachedTower._onGlbReady);
     cachedTower._onGlbReady = null;
   }
+  const fallbackAo = getDefaultWallAoTex();
+  const disposedTexSet = new Set();
   if (Array.isArray(cachedTower.ownedTextures)) {
     for (let i = 0; i < cachedTower.ownedTextures.length; i++) {
       const t = cachedTower.ownedTextures[i];
-      if (t && !t.userData?.shared) t.dispose();
+      if (t && !t.userData?.shared) {
+        disposedTexSet.add(t);
+        t.dispose();
+      }
     }
     cachedTower.ownedTextures.length = 0;
   }
+  if (disposedTexSet.size > 0) {
+    for (const bm of BLOCK_MAT_CACHE.values()) {
+      if (bm.userData?.wallAoUniform && disposedTexSet.has(bm.userData.wallAoUniform.value)) {
+        bm.userData.wallAoUniform.value = fallbackAo;
+      }
+    }
+  }
   cachedTower.wallAoTex = null;
+  const disposedMats = new Set();
   cachedTower.group.traverse((obj) => {
     if (obj.geometry && !obj.geometry.userData?.shared) {
       obj.geometry.dispose();
+    }
+    const rawMat = obj.material;
+    if (!rawMat) return;
+    const mats = Array.isArray(rawMat) ? rawMat : [rawMat];
+    for (let i = 0; i < mats.length; i++) {
+      const m = mats[i];
+      if (!m || m.userData?.shared || disposedMats.has(m)) continue;
+      disposedMats.add(m);
+      const subSet = m.userData?._surfaceSubEntry?.subscribers;
+      if (subSet && typeof subSet.delete === 'function') {
+        subSet.delete(m);
+      }
+      m.dispose();
     }
   });
 }

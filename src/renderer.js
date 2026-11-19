@@ -26,6 +26,7 @@ import { StormAtmosphere } from './stormSky.js';
 import { TowerFluidAndSparkVFX } from './oceanVfx.js';
 import {
   buildDetailedTowerGroup,
+  buildArchShaderWarmupGroup,
   updateTowerArchitecture,
   disposeTowerArchitecture,
   resolveRebootTheme as resolveArchTheme,
@@ -1200,6 +1201,12 @@ export class GameRenderer {
       // Step 2: Force every scene node visible & unculled and render ONE 16x16 frame with
       // `shadowMap.needsUpdate = false` (reusing the shadow map!) so ANGLE D3D11 compiles every
       // exact live shader permutation & uploads every GPU texture upfront at minimal raster cost.
+      if (!this._archWarmupGroup) {
+        this._archWarmupGroup = buildArchShaderWarmupGroup();
+      }
+      if (this._archWarmupGroup && !this._archWarmupGroup.parent) {
+        this.towerScene.add(this._archWarmupGroup);
+      }
       if (this.particleInst && prevPartCount === 0) {
         this.particleInst.count = 1;
       }
@@ -1218,6 +1225,9 @@ export class GameRenderer {
     } catch {
       // Ignore driver fallback
     } finally {
+      if (this._archWarmupGroup?.parent) {
+        this._archWarmupGroup.parent.remove(this._archWarmupGroup);
+      }
       for (let i = 0; i < saved.length; i += 3) {
         saved[i].visible = saved[i + 1];
         saved[i].frustumCulled = saved[i + 2];
@@ -2688,6 +2698,7 @@ export class GameRenderer {
   }
 
   _getOrBuildTowerGroup(tower) {
+    const MAX_TOWER_CACHE = 6;
     const rbTheme = resolveArchTheme(tower);
     const propVer = this._archPropsVersion;
     const clue = tower.clue;
@@ -2695,27 +2706,37 @@ export class GameRenderer {
       ? `${clue.kind}_${clue.col}_${clue.floor}_${clue.n || ''}_${(clue.pattern || clue.order || []).join('')}`
       : 'noclue';
     const basePrefix = `v3_${rbTheme}_`;
-    const towerSuffix = `_${tower.key || tower.id}_${clueSig}`;
+    const towerIdentity = `${tower.cacheKey || tower.key || tower.id}_${tower.floors || 0}_${tower.ledges?.length || 0}`;
+    const towerSuffix = `_${towerIdentity}_${clueSig}`;
     const cacheKey = `${basePrefix}p${propVer}${towerSuffix}`;
     if (this.towerCache.has(cacheKey)) {
-      return this.towerCache.get(cacheKey);
+      const hit = this.towerCache.get(cacheKey);
+      // Promote active spire to MRU slot so LRU eviction never drops recent spires
+      this.towerCache.delete(cacheKey);
+      this.towerCache.set(cacheKey, hit);
+      return hit;
     }
 
     for (const [k, old] of this.towerCache.entries()) {
       if (k !== cacheKey && k.startsWith(basePrefix) && k.endsWith(towerSuffix) && old.group !== this.currentTowerGroup) {
+        if (old.group?.parent) old.group.parent.remove(old.group);
         disposeTowerArchitecture(old);
         this.towerCache.delete(k);
       }
     }
 
-    if (this.towerCache.size > 10) {
+    while (this.towerCache.size >= MAX_TOWER_CACHE) {
+      let evicted = false;
       for (const [oldestKey, oldEntry] of this.towerCache.entries()) {
         if (oldEntry && oldEntry.group !== this.currentTowerGroup) {
+          if (oldEntry.group?.parent) oldEntry.group.parent.remove(oldEntry.group);
           disposeTowerArchitecture(oldEntry);
           this.towerCache.delete(oldestKey);
+          evicted = true;
           break;
         }
       }
+      if (!evicted) break;
     }
 
     const cached = buildDetailedTowerGroup(tower, 'reboot', {
