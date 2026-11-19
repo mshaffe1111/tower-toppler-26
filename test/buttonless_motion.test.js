@@ -295,6 +295,9 @@ describe('Round 4 Buttonless Glass, Motion-Sensor Wrist-Whip & Gesture Controls'
     expect(css).toContain('#app[data-control-mode="tilt"] #btn-whip');
     expect(css).toContain('display: none !important;');
     expect(css).toContain('pointer-events: none !important;');
+    expect(css).toContain('#app:has(#trophy-toast:not(.hidden)) .stage-banner');
+    expect(css).toContain('rgba(7, 19, 30, 0.84)');
+    expect(css).toContain('backdrop-filter: blur(6px)');
   });
 
   it('3. requestTiltPermission() requests both DeviceOrientationEvent and DeviceMotionEvent permissions gracefully', async () => {
