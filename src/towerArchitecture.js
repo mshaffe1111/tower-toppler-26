@@ -184,7 +184,9 @@ const INTERNAL_GLB_CACHE = {
 };
 
 function markSharedSubtree(rootObj) {
-  if (!rootObj) return rootObj;
+  if (!rootObj || rootObj.userData?._markedShared) return rootObj;
+  rootObj.userData = rootObj.userData || {};
+  rootObj.userData._markedShared = true;
   rootObj.traverse((o) => {
     if (o.geometry) {
       o.geometry.userData = o.geometry.userData || {};
@@ -289,24 +291,36 @@ function ensureInternalGlbLoad() {
   }
 }
 
+const GLB_GEO_MAP_CACHE = new WeakMap();
+const GLB_OBJ_MAP_CACHE = new WeakMap();
+
 function findNamedMeshGeo(root, nodeName) {
   if (!root) return null;
-  let found = null;
-  root.traverse((o) => {
-    if (!found && o.isMesh && (o.name === nodeName || o.parent?.name === nodeName)) {
-      found = o.geometry;
-    }
-  });
-  return found;
+  let map = GLB_GEO_MAP_CACHE.get(root);
+  if (!map) {
+    map = new Map();
+    root.traverse((o) => {
+      if (o.isMesh && o.geometry) {
+        if (o.name && !map.has(o.name)) map.set(o.name, o.geometry);
+        if (o.parent?.name && !map.has(o.parent.name)) map.set(o.parent.name, o.geometry);
+      }
+    });
+    GLB_GEO_MAP_CACHE.set(root, map);
+  }
+  return map.get(nodeName) || null;
 }
 
 function findNamedObject(root, nodeName) {
   if (!root) return null;
-  let found = null;
-  root.traverse((o) => {
-    if (!found && o.name === nodeName) found = o;
-  });
-  return found;
+  let map = GLB_OBJ_MAP_CACHE.get(root);
+  if (!map) {
+    map = new Map();
+    root.traverse((o) => {
+      if (o.name && !map.has(o.name)) map.set(o.name, o);
+    });
+    GLB_OBJ_MAP_CACHE.set(root, map);
+  }
+  return map.get(nodeName) || null;
 }
 
 // ============================================================================
@@ -711,10 +725,15 @@ const SURFACE_REF_TINT = {
 
 const _whiteColor = new THREE.Color('#ffffff');
 const BAKED_WEBP_CACHE = new Map();
+let _bakedWebpReadyVersion = 0;
 
 function cloneLoadedWebpTex(srcTex, tile, isSrgb) {
-  const t = srcTex.clone();
-  t.image = srcTex.image;
+  if (Math.abs(srcTex.repeat.x - tile) < 0.01 && Math.abs(srcTex.repeat.y - tile) < 0.01) {
+    return srcTex;
+  }
+  // Share `srcTex.source` WITHOUT reassigning `t.image` so Three.js reuses the exact same GPU WebGLTexture!
+  const t = new THREE.Texture();
+  t.source = srcTex.source;
   t.wrapS = THREE.RepeatWrapping;
   t.wrapT = THREE.RepeatWrapping;
   t.generateMipmaps = true;
@@ -723,7 +742,6 @@ function cloneLoadedWebpTex(srcTex, tile, isSrgb) {
   t.anisotropy = 8;
   t.colorSpace = isSrgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
   t.repeat.set(tile, tile);
-  t.needsUpdate = true;
   t.userData = { shared: true };
   return t;
 }
@@ -790,6 +808,7 @@ function ensureBakedWebpSurface(kind) {
   const record = { ready: false, albedo: null, normal: null, orm: null };
   BAKED_WEBP_CACHE.set(kind, record);
 
+  const defaultTile = kind === 'antique_bronze' ? 1.35 : 0.58;
   const loadOne = (suffix, isSrgb, slotKey) => {
     try {
       const url = new URL(`../assets/textures/arch_${kind}_${suffix}.webp`, import.meta.url).href;
@@ -803,10 +822,12 @@ function ensureBakedWebpSurface(kind) {
           tex.magFilter = THREE.LinearFilter;
           tex.anisotropy = 8;
           tex.colorSpace = isSrgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+          tex.repeat.set(defaultTile, defaultTile);
           tex.userData = { shared: true };
           record[slotKey] = tex;
           if (record.albedo && record.normal && record.orm && !record.ready) {
             record.ready = true;
+            _bakedWebpReadyVersion++;
             for (const entry of SURFACE_CACHE.values()) {
               if (entry.kind === kind) {
                 bindRawWebpToEntry(entry, record);
@@ -1080,7 +1101,8 @@ function getOrBuildRawSurfacePixels(kind) {
 
 export function getSurfaceMaps1024(rawKind = 'canyon_sandstone', tile = 0.55) {
   const kind = SURFACE_ALIAS[rawKind] || 'canyon_sandstone';
-  const cacheKey = `${kind}_${tile}`;
+  const qTile = tile > 0.95 ? 1.35 : 0.58;
+  const cacheKey = `${kind}_${qTile}`;
   if (SURFACE_CACHE.has(cacheKey)) return SURFACE_CACHE.get(cacheKey);
 
   const raw = getOrBuildRawSurfacePixels(kind);
@@ -1088,12 +1110,12 @@ export function getSurfaceMaps1024(rawKind = 'canyon_sandstone', tile = 0.55) {
 
   const entry = {
     kind,
-    tile,
+    tile: qTile,
     hasBakedWebp: false,
     subscribers: new Set(),
-    map: makeDataTex(raw.albData, N, true, tile),
-    normalMap: makeDataTex(raw.nrmData, N, false, tile),
-    ormMap: makeDataTex(raw.ormData, N, false, tile),
+    map: makeDataTex(raw.albData, N, true, qTile),
+    normalMap: makeDataTex(raw.nrmData, N, false, qTile),
+    ormMap: makeDataTex(raw.ormData, N, false, qTile),
   };
   SURFACE_CACHE.set(cacheKey, entry);
 
@@ -1102,6 +1124,54 @@ export function getSurfaceMaps1024(rawKind = 'canyon_sandstone', tile = 0.55) {
     bindRawWebpToEntry(entry, rawWebp);
   }
   return entry;
+}
+
+export function getBakedArchWebpVersion() {
+  return _bakedWebpReadyVersion;
+}
+
+export function getLoadedArchTextures() {
+  const out = [];
+  const seen = new Set();
+  const pushTex = (t) => {
+    if (t && (t.image || t.source?.data) && !seen.has(t)) {
+      seen.add(t);
+      out.push(t);
+    }
+  };
+  for (const entry of SURFACE_CACHE.values()) {
+    pushTex(entry.map);
+    pushTex(entry.normalMap);
+    pushTex(entry.ormMap);
+  }
+  for (const rec of BAKED_WEBP_CACHE.values()) {
+    pushTex(rec.albedo);
+    pushTex(rec.normal);
+    pushTex(rec.orm);
+  }
+  if (DETAIL_TEX) {
+    for (const dt of Object.values(DETAIL_TEX)) pushTex(dt);
+  }
+  return out;
+}
+
+export function prewarmArchSurfaces() {
+  getDetailTextures();
+  getSharedArchGeometries();
+  getSharedArchMaterials();
+  const kinds = [
+    'canyon_sandstone',
+    'alpine_granite',
+    'bayou_limestone',
+    'coral_travertine',
+    'storm_basalt',
+    'redwood_timber',
+    'antique_bronze',
+  ];
+  for (let i = 0; i < kinds.length; i++) {
+    const k = kinds[i];
+    getSurfaceMaps1024(k, k === 'antique_bronze' ? 1.35 : 0.58);
+  }
 }
 
 // ============================================================================
@@ -4751,7 +4821,7 @@ function collectTowerClueEntries(tower) {
         door.clue?.kind ||
         PUZZLE_TYPES[((Number(tower.id) || 1) - 1 + idx) % PUZZLE_TYPES.length] ||
         'lights';
-      let rawClue = door.clue || null;
+      let rawClue = door.clue || door._cachedResolvedClue || null;
       if (!rawClue && tower.clue && (tower.clue.doorId === door.id || (runeDoorList.length === 1 && tower.clue.kind === pType))) {
         rawClue = tower.clue;
       }
@@ -4764,6 +4834,7 @@ function collectTowerClueEntries(tower) {
         } catch {
           rawClue = { kind: pType };
         }
+        door._cachedResolvedClue = rawClue;
       }
       const clue = normalizeResolvedClue(rawClue, pType);
       const colOffset = resolveClueColOffset(tower, door);
@@ -4818,22 +4889,52 @@ function computeClueEntriesSignature(entries) {
   return s;
 }
 
+const CLUE_STELE_TEX_CACHE = new Map();
+
+function getClueCacheKey(clue) {
+  if (!clue) return 'empty';
+  const pat = clue.pattern
+    ? clue.pattern.join('')
+    : clue.colors
+    ? clue.colors.join(',')
+    : clue.path
+    ? clue.path.map((p) => `${p[0]}_${p[1]}`).join('-')
+    : clue.targets
+    ? `${clue.maxLevel || 3}:${clue.targets.join(',')}`
+    : '';
+  return `${clue.kind || 'lights'}_${clue.n || ''}_${pat}`;
+}
+
 function createClueSteleCanvasTex(clue, ownedTextures) {
-  const W = 512;
-  const H = 512;
+  const cKey = getClueCacheKey(clue);
+  const cachedTex = CLUE_STELE_TEX_CACHE.get(cKey);
+  if (cachedTex) return cachedTex;
+
+  const W = 256;
+  const H = 256;
   if (typeof document !== 'undefined') {
     const cv = document.createElement('canvas');
     cv.width = W;
     cv.height = H;
     const ctx = cv.getContext && cv.getContext('2d');
     if (ctx) {
-      drawClueSteleArtwork(ctx, W, H, clue);
+      ctx.save();
+      ctx.scale(0.5, 0.5);
+      drawClueSteleArtwork(ctx, 512, 512, clue);
+      ctx.restore();
       const tex = new THREE.CanvasTexture(cv);
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.wrapS = THREE.ClampToEdgeWrapping;
       tex.wrapT = THREE.ClampToEdgeWrapping;
       tex.anisotropy = 4;
-      if (Array.isArray(ownedTextures)) ownedTextures.push(tex);
+      tex.userData = { shared: true };
+      if (CLUE_STELE_TEX_CACHE.size >= 32) {
+        const oldest = CLUE_STELE_TEX_CACHE.keys().next().value;
+        const oldTex = CLUE_STELE_TEX_CACHE.get(oldest);
+        if (oldTex) oldTex.dispose();
+        CLUE_STELE_TEX_CACHE.delete(oldest);
+      }
+      CLUE_STELE_TEX_CACHE.set(cKey, tex);
       return tex;
     }
   }
@@ -5419,14 +5520,16 @@ function buildSingleClueStele(entry, fh, ownedTextures) {
   };
 }
 
-function buildAllTowerClueSteles(tower, fh, group, cullableNodes, ownedTextures) {
+function buildAllTowerClueSteles(tower, fh, group, cullableNodes, ownedTextures, precomputedEntries = null) {
   const container = new THREE.Group();
   group.add(container);
 
   let builtList = [];
   let activeSig = '';
+  let lastTowerRef = null;
+  let lastClueRef = undefined;
 
-  const rebuildFromTower = (liveTower) => {
+  const rebuildFromTower = (liveTower, entriesOverride = null) => {
     while (container.children.length > 0) {
       const child = container.children[0];
       container.remove(child);
@@ -5439,8 +5542,10 @@ function buildAllTowerClueSteles(tower, fh, group, cullableNodes, ownedTextures)
       if (cullableNodes[i].isClueStele) cullableNodes.splice(i, 1);
     }
 
-    const entries = collectTowerClueEntries(liveTower);
+    const entries = entriesOverride || collectTowerClueEntries(liveTower);
     activeSig = computeClueEntriesSignature(entries);
+    lastTowerRef = liveTower || null;
+    lastClueRef = liveTower?.clue;
     builtList = [];
     for (let i = 0; i < entries.length; i++) {
       const built = buildSingleClueStele(entries[i], fh, ownedTextures);
@@ -5455,14 +5560,20 @@ function buildAllTowerClueSteles(tower, fh, group, cullableNodes, ownedTextures)
     }
   };
 
-  rebuildFromTower(tower);
+  rebuildFromTower(tower, precomputedEntries);
 
   return {
     update: (t, state, liveTower) => {
-      if (liveTower && (liveTower.clue || liveTower.runeDoors || liveTower.doors)) {
+      if (
+        liveTower &&
+        (liveTower !== lastTowerRef || liveTower.clue !== lastClueRef) &&
+        (liveTower.clue || liveTower.runeDoors || liveTower.doors)
+      ) {
+        lastTowerRef = liveTower;
+        lastClueRef = liveTower.clue;
         const checkEntries = collectTowerClueEntries(liveTower);
         const nextSig = computeClueEntriesSignature(checkEntries);
-        if (nextSig !== activeSig) rebuildFromTower(liveTower);
+        if (nextSig !== activeSig) rebuildFromTower(liveTower, checkEntries);
       }
 
       const liveDoors = state?.doors || liveTower?.doors || [];
@@ -5490,6 +5601,12 @@ function buildAllTowerClueSteles(tower, fh, group, cullableNodes, ownedTextures)
 // 10. INTERACTIVE PIPE-VALVES (`pipe_valve.glb`), SWITCHES, WORKBENCH & CHEST
 // ============================================================================
 
+const SWITCH_ORB_GEO = (() => {
+  const g = new THREE.OctahedronGeometry(0.135, 0);
+  g.userData = { shared: true };
+  return g;
+})();
+
 export function buildSwitchMesh(mode = 'pipeValve', glbAssets = null) {
   const g = new THREE.Group();
   const G = getSharedArchGeometries();
@@ -5511,23 +5628,23 @@ export function buildSwitchMesh(mode = 'pipeValve', glbAssets = null) {
   });
 
   let wheel = null;
-  const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.135, 0), sightMat);
+  const orb = new THREE.Mesh(SWITCH_ORB_GEO, sightMat);
   orb.scale.set(0.84, 1.32, 0.84);
   orb.position.y = 0.45;
 
   if (isValve && valveGlb) {
+    markSharedSubtree(valveGlb);
     const cloned = valveGlb.clone(true);
-    markSharedSubtree(cloned);
     cloned.traverse((o) => {
+      if (o.name === 'valve_wheel' && !wheel) wheel = o;
       if (o.isMesh) {
-        o.castShadow = true;
+        o.castShadow = false;
         o.receiveShadow = true;
         if (o.name === 'valve_sight_core' || o.parent?.name === 'valve_sight_core') {
           o.material = sightMat;
         }
       }
     });
-    wheel = findNamedObject(cloned, 'valve_wheel');
     g.add(cloned);
     orb.visible = false;
     g.add(orb);
@@ -5718,7 +5835,9 @@ export function buildTreasureChestMesh() {
 // ============================================================================
 
 export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets = {}) {
-  ensureInternalGlbLoad();
+  if (!glbAssets?._skipInternalGlbLoad) {
+    ensureInternalGlbLoad();
+  }
 
   const fh = getTowerStepHeight(tower, false, glbAssets?.fh);
   const rbTheme = resolveRebootTheme(tower);
@@ -5840,7 +5959,7 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
   const darkMetalMat = bodyInfo.darkMetalMat;
 
   // 2. Exterior Sanctum Clue Steles
-  const builtClues = buildAllTowerClueSteles(tower, fh, group, cullableNodes, ownedTextures);
+  const builtClues = buildAllTowerClueSteles(tower, fh, group, cullableNodes, ownedTextures, initialClueEntries);
   const clueUpdater = builtClues.update;
 
   // 3. Grand 1.38u-Tall Illuminated Arched Sanctum Doorways
@@ -8258,6 +8377,23 @@ export function buildArchShaderWarmupGroup() {
       angular: true,
       wallAoTex: aoTex,
     }),
+    createBlockMaterial({
+      color: '#c88052',
+      surface: 'canyon_sandstone',
+      tile: 0.58,
+      useMetalMap: false,
+      angular: false,
+      wallAoTex: aoTex,
+    }),
+    createBlockMaterial({
+      color: '#c88052',
+      surface: 'canyon_sandstone',
+      tile: 0.58,
+      useMetalMap: false,
+      angular: false,
+      wallAoTex: null,
+    }),
+    createTrimMetalMaterial('canyon_river', BIOME_SPECS.canyon_river),
     SM.iceMat,
     SM.iceTopMat,
     SM.slideMatR,
@@ -8273,11 +8409,16 @@ export function buildArchShaderWarmupGroup() {
   }
 
   const warmMeshMats = [
+    createTrimMetalMaterial('canyon_river', BIOME_SPECS.canyon_river),
     SM.convMatR,
     SM.phaseRuneMatCyan,
     SM.phaseGhostMatCyan,
     createHydroBarrierMaterial(true),
     createHydroBarrierMaterial(false),
+    createPortalMaterial('#0a2e38', '#5efce8', 1.0, false),
+    createPortalMaterial('#0a2e38', '#5efce8', 1.0, true),
+    createCrownPortalAuraMaterial(),
+    createSealBarrierMaterial(),
   ];
   for (let i = 0; i < warmMeshMats.length; i++) {
     const m = new THREE.Mesh(G.sparkCube, warmMeshMats[i]);

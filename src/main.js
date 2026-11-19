@@ -10,7 +10,14 @@ import * as levelsMod from './levels.js';
 import * as uiArtMod from './uiArtwork.js';
 
 const { progression, SKIN_CATALOG = [], TROPHIES = [] } = progMod;
-const { createTowers, getDailySeed } = levelsMod;
+const {
+  createTowers,
+  createSanctumTowers,
+  createWardenGauntletTowers,
+  createDailyTower,
+  generateProceduralTower,
+  getDailySeed,
+} = levelsMod;
 
 const GameEngineClass =
   gameMod.ToweringWatersGame ||
@@ -3172,6 +3179,117 @@ function beginRunCommon() {
   pushNavGuard();
 }
 
+const prestagedModeRuns = {
+  flood_rush: { seed: (Date.now() >>> 0) || 1337, tower: null },
+  expedition: { seed: ((Date.now() + 7919) >>> 0) || 4242, tower: null },
+  dailyDate: new Date(),
+  dailyDateKey: '',
+  dailyTower: null,
+  sanctum0: null,
+  gauntlet0: null,
+  warmedPropVer: -1,
+  timerId: null,
+};
+
+function rotatePrestagedEndlessSeeds(whichMode = null) {
+  if (!whichMode || whichMode === 'flood_rush') {
+    prestagedModeRuns.flood_rush.seed = ((prestagedModeRuns.flood_rush.seed + 104729) >>> 0) || 1337;
+    prestagedModeRuns.flood_rush.tower = null;
+  }
+  if (!whichMode || whichMode === 'expedition') {
+    prestagedModeRuns.expedition.seed = ((prestagedModeRuns.expedition.seed + 1299709) >>> 0) || 4242;
+    prestagedModeRuns.expedition.tower = null;
+  }
+  prestagedModeRuns.warmedPropVer = -1;
+}
+
+function scheduleModeSpiresPrewarm() {
+  const targetVer = renderer?._archPropsVersion ?? 0;
+  if (prestagedModeRuns.warmedPropVer === targetVer) return;
+  if (prestagedModeRuns.timerId != null) {
+    clearTimeout(prestagedModeRuns.timerId);
+    prestagedModeRuns.timerId = null;
+  }
+
+  let step = 0;
+  const warmedGroups = [];
+  const runNextSlice = () => {
+    prestagedModeRuns.timerId = null;
+    if (game.mode !== 'title') return;
+    try {
+      if (step === 0) {
+        const s1 = getTowersSafe()[0];
+        const c = s1 ? renderer.prewarmTowerGroup?.(s1, false) : null;
+        if (c?.group) warmedGroups.push(c.group);
+      } else if (step === 1) {
+        if (!prestagedModeRuns.sanctum0 && typeof createSanctumTowers === 'function') {
+          prestagedModeRuns.sanctum0 = createSanctumTowers(15)?.[0] || null;
+        }
+        const c = prestagedModeRuns.sanctum0 ? renderer.prewarmTowerGroup?.(prestagedModeRuns.sanctum0, false) : null;
+        if (c?.group) warmedGroups.push(c.group);
+      } else if (step === 2) {
+        if (!prestagedModeRuns.gauntlet0 && typeof createWardenGauntletTowers === 'function') {
+          prestagedModeRuns.gauntlet0 = createWardenGauntletTowers()?.[0] || null;
+        }
+        const c = prestagedModeRuns.gauntlet0 ? renderer.prewarmTowerGroup?.(prestagedModeRuns.gauntlet0, false) : null;
+        if (c?.group) warmedGroups.push(c.group);
+      } else if (step === 3) {
+        const now = new Date();
+        const dk = typeof getDailySeed === 'function' ? getDailySeed(now).dateKey : '';
+        if (!prestagedModeRuns.dailyTower || prestagedModeRuns.dailyDateKey !== dk) {
+          prestagedModeRuns.dailyDate = now;
+          prestagedModeRuns.dailyDateKey = dk;
+          prestagedModeRuns.dailyTower = typeof createDailyTower === 'function' ? createDailyTower(now) : null;
+        }
+        const c = prestagedModeRuns.dailyTower ? renderer.prewarmTowerGroup?.(prestagedModeRuns.dailyTower, false) : null;
+        if (c?.group) warmedGroups.push(c.group);
+      } else if (step === 4) {
+        if (!prestagedModeRuns.flood_rush.tower && typeof generateProceduralTower === 'function') {
+          prestagedModeRuns.flood_rush.tower = generateProceduralTower({
+            seed: (prestagedModeRuns.flood_rush.seed + 101) >>> 0,
+            index: 1,
+            difficulty: 1.2,
+            modeHint: 'flood_rush',
+          });
+        }
+        const c = prestagedModeRuns.flood_rush.tower
+          ? renderer.prewarmTowerGroup?.(prestagedModeRuns.flood_rush.tower, false)
+          : null;
+        if (c?.group) warmedGroups.push(c.group);
+      } else if (step === 5) {
+        if (!prestagedModeRuns.expedition.tower && typeof generateProceduralTower === 'function') {
+          prestagedModeRuns.expedition.tower = generateProceduralTower({
+            seed: (prestagedModeRuns.expedition.seed + 509) >>> 0,
+            index: 1,
+            difficulty: 1.1,
+            modeHint: 'expedition',
+          });
+        }
+        const c = prestagedModeRuns.expedition.tower
+          ? renderer.prewarmTowerGroup?.(prestagedModeRuns.expedition.tower, false)
+          : null;
+        if (c?.group) warmedGroups.push(c.group);
+        renderer.compileTowerGroups?.(warmedGroups);
+        prestagedModeRuns.warmedPropVer = renderer?._archPropsVersion ?? 0;
+        resetFrameClock();
+        return;
+      }
+    } catch (_) {}
+
+    step++;
+    if (step <= 5) {
+      prestagedModeRuns.timerId = setTimeout(runNextSlice, 2);
+    }
+  };
+
+  prestagedModeRuns.timerId = setTimeout(runNextSlice, 2);
+}
+
+renderer.onArchGlbsReady = () => {
+  prestagedModeRuns.warmedPropVer = -1;
+  scheduleModeSpiresPrewarm();
+};
+
 function launchGameMode(modeId = 'campaign', extraOpts = {}) {
   const mode = String(modeId || 'campaign').toLowerCase();
   const s = progression.getSettings?.() || {};
@@ -3192,27 +3310,42 @@ function launchGameMode(modeId = 'campaign', extraOpts = {}) {
     beginRunCommon();
     lastLaunch = { mode, towerIdx, zenMode, miniGame: 'core_descent' };
 
+    const chosenSeed =
+      extraOpts.seed != null
+        ? extraOpts.seed
+        : mode === 'flood_rush'
+          ? prestagedModeRuns.flood_rush.seed
+          : mode === 'expedition'
+            ? prestagedModeRuns.expedition.seed
+            : Date.now();
+    const chosenDate =
+      extraOpts.date != null
+        ? extraOpts.date
+        : mode === 'daily_tide' && prestagedModeRuns.dailyDate
+          ? prestagedModeRuns.dailyDate
+          : new Date();
+
     if (typeof game.startGame === 'function') {
       game.startGame(mode, {
         startTowerIdx: towerIdx,
         zenMode: mode === 'campaign' ? zenMode : mode === 'sanctum_trials',
-        seed: Date.now(),
-        date: new Date(),
+        seed: chosenSeed,
+        date: chosenDate,
         ...extraOpts,
       });
     } else if (mode === 'daily_tide') {
-      game.startDailyChallenge?.(new Date());
+      game.startDailyChallenge?.(chosenDate);
     } else if (mode === 'sanctum_trials') {
-      game.startCasualEndlessMode?.({ seed: Date.now(), sanctumTrials: true });
+      game.startCasualEndlessMode?.({ seed: chosenSeed, sanctumTrials: true });
     } else if (mode === 'flood_rush' || mode === 'expedition') {
-      game.startEndlessMode?.({ seed: Date.now(), mode });
+      game.startEndlessMode?.({ seed: chosenSeed, mode });
     } else {
       game.startCampaign?.({ startTowerIdx: towerIdx, zenMode: mode === 'purist' ? false : zenMode, purist: mode === 'purist' });
     }
+    if (mode === 'flood_rush' || mode === 'expedition') {
+      rotatePrestagedEndlessSeeds(mode);
+    }
     syncTitleShowcaseState();
-    try {
-      game.render?.();
-    } catch (_) {}
     resetFrameClock();
   };
 
@@ -3270,6 +3403,7 @@ function returnToTitle() {
   loadTitlePreviewTower();
   overlayTitle?.classList.remove('hidden');
   syncTitleShowcaseState();
+  scheduleModeSpiresPrewarm();
 }
 
 // ================= INTERACTION ZONE & TAIL-WHIP TOUCH BRIDGE =================
@@ -3452,6 +3586,7 @@ const openModesOverlay = () => {
   overlayModes?.classList.remove('hidden');
   pushNavGuard();
   syncTitleShowcaseState();
+  scheduleModeSpiresPrewarm();
 };
 
 const openWorldsOverlay = () => {
@@ -3932,6 +4067,7 @@ function prewarmStartupAssets() {
     renderer.prewarm?.();
     renderer._ensurePuzzleRenderer?.();
     game.render();
+    scheduleModeSpiresPrewarm();
   } catch (_) {}
 
   // 3. Dismiss transition veil once images decode + at least 2 WebGL frames rendered (capped at 360ms)
