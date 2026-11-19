@@ -4015,12 +4015,7 @@ export class GameRenderer {
 
     // Pre-compile all exact live shaders ONCE after collectibles, enemies, oceanVfx & arch GLBs are attached,
     // and incrementally re-warm once when async Arch or Enemy GLBs finish loading -> ZERO mid-climb freezes!
-    if (this._lastUploadedWebpVer !== getBakedArchWebpVersion()) {
-      this._uploadAllReadyTextures();
-      if (this.towerCache.size > 0) {
-        this.compileTowerGroups([...this.towerCache.values()].map((c) => c?.group).filter(Boolean));
-      }
-    } else if (isTitleShowcase) {
+    if (this._lastUploadedWebpVer !== getBakedArchWebpVersion() || isTitleShowcase) {
       this._uploadAllReadyTextures();
     }
     const enemiesNowReady = Boolean(this.enemyVisuals?.isReady?.());
