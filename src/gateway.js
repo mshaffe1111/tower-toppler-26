@@ -2,136 +2,165 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 /**
- * TOWERING WATERS: GATEWAY'S DESCENT — AAA Skeletal Heroine & Skins (`src/gateway.js`)
- * ====================================================================================
- * Gateway — Sleek, athletic female alien hydro-lizard from oceanic starworld Pelagia:
- *   - ~1.185 world units standing height + ~0.985u counter-balancing S-curved lizard tail
- *   - True weight-painted `THREE.SkinnedMesh` + 39-bone `THREE.Skeleton` (`assets/models/gateway.glb`)
- *   - 1024x1024 Baked PBR Texture Atlas (Iridescent Scales Albedo, Tangent Normal, ORM, Biolume Emissive)
- *   - 18 Baked `THREE.AnimationMixer` Skeletal Clips (`0.10s–0.18s` smooth cross-fades)
- *   - Zero-allocation additive procedural bone polish: cylinder turn banking, 5-riser staircase
- *     foot-planting offsets, head/eye look-at, aquatic head-frill flare, run-and-cast upper-body
- *     layering, and 2nd-order spring-damped 7-bone dynamic tail S-wave physics!
+ * TOWERING WATERS: GATEWAY'S DESCENT — Gateway 2.0 Star Hero Rig & Skins (`src/gateway.js`)
+ * =========================================================================================
+ * Gateway 2.0 — Adorable, charismatic Pelagian sea-dragon/axolotl star adventurer:
+ *   - Golden 1:2.63 mascot proportions (`1.000m` bind crown height, `min_y === 0.000m`,
+ *     auto-normalized to exact `1.22m` world height when `group.scale` is default!)
+ *   - True weight-painted `THREE.SkinnedMesh` + 50-bone `THREE.Skeleton` (`assets/models/gateway.glb`)
+ *     preserving ALL 39 canonical bones + 11 new expressive appeal bones
+ *     (`LowerLidL/R`, `BrowL/R`, `MouthSmile`, `FrillBotL/R`, `ScarfL1/L2`, `ScarfR1/R2`)
+ *   - Silky Pixar-grade 1024x1024 WEBP PBR Atlas (Sea-Mint skin + Cream-Pearl belly + Coral-Sunset
+ *     & Gold Sea-Silk Explorer Scarf + 6 Volumetric Coral-Petal Ear-Frills + Huge Glossy Jewel Eyes)
+ *   - 22 Baked `THREE.AnimationMixer` Skeletal Clips (all 18 upgraded canonical clips +
+ *     `IdleCurious`, `EdgeTeeter`, `SpringSomersault`, `WetShake`)
+ *   - 6-Mood Live Facial Controller (`happy`, `curious`, `determined`, `joyful`, `surprised`, `hurt`),
+ *     organic automatic blinking (`2.5–4.5s`), live eye-look/pointer gaze tracking, 2nd-order
+ *     spring-damped secondary physics on 6 coral ear-frills, 4-bone flowing scarf & 7-bone tail,
+ *     Title Screen interactive wave/hop behaviors, and `< 0.05mm` grounded 2-bone Analytic Foot-IK!
  */
+
+export const DEFAULT_TARGET_HEIGHT = 1.22;
+export const GATEWAY_BIND_HEIGHT = 1.00;
+
+export const GATEWAY_MOODS = ['happy', 'curious', 'determined', 'joyful', 'surprised', 'hurt'];
+const MOOD_SET = new Set(GATEWAY_MOODS);
 
 export const GATEWAY_SKINS = [
   {
     id: 'sea_glass_guardian',
     name: 'Sea-Glass Guardian',
-    bodyColor: '#16b3ac',
-    bodyDeepColor: '#0b5258',
-    bellyColor: '#e6d8cf',
-    crestColor: '#4ef4e2',
-    vestColor: '#dcecf0',
-    harnessColor: '#dcecf0',
-    packColor: '#d9a44c',
-    eyeGlow: '#fbbf24',
-    accentColor: '#5efce8',
-    metallic: 0.08,
+    bodyColor: '#20d8c8',
+    bodyDeepColor: '#0d8a8e',
+    bellyColor: '#fff6eb',
+    crestColor: '#ff758f',
+    scarfColor: '#ff5d75',
+    scarfTrimColor: '#ffd166',
+    vestColor: '#9e5d3d',
+    harnessColor: '#9e5d3d',
+    packColor: '#f0b949',
+    eyeGlow: '#10b981',
+    accentColor: '#72fff0',
+    metallic: 0.06,
   },
   {
     id: 'coral_reef_empress',
     name: 'Coral Reef Empress',
-    bodyColor: '#d94865',
-    bodyDeepColor: '#761e35',
-    bellyColor: '#e8d7d0',
-    crestColor: '#22c7b8',
-    vestColor: '#e4d2d7',
-    harnessColor: '#e4d2d7',
-    packColor: '#dc9a68',
+    bodyColor: '#f05a7e',
+    bodyDeepColor: '#962344',
+    bellyColor: '#fff3ec',
+    crestColor: '#22d3ee',
+    scarfColor: '#14b8a6',
+    scarfTrimColor: '#fde047',
+    vestColor: '#b35c44',
+    harnessColor: '#b35c44',
+    packColor: '#f4be5e',
     eyeGlow: '#2dd4bf',
-    accentColor: '#5efce8',
-    metallic: 0.10,
+    accentColor: '#67e8f9',
+    metallic: 0.08,
   },
   {
     id: 'canyon_rapids_ranger',
     name: 'Canyon Rapids Ranger',
-    bodyColor: '#c4622d',
-    bodyDeepColor: '#692b13',
-    bellyColor: '#e3d3bc',
-    crestColor: '#1ea87a',
-    vestColor: '#dcd0bf',
-    harnessColor: '#dcd0bf',
-    packColor: '#c78830',
+    bodyColor: '#d97736',
+    bodyDeepColor: '#7c3412',
+    bellyColor: '#fdf2df',
+    crestColor: '#22c58b',
+    scarfColor: '#0f9d7a',
+    scarfTrimColor: '#fde047',
+    vestColor: '#7c4427',
+    harnessColor: '#7c4427',
+    packColor: '#e6a83a',
     eyeGlow: '#f59e0b',
     accentColor: '#5eead4',
-    metallic: 0.14,
+    metallic: 0.12,
   },
   {
     id: 'alpine_glacier_mystic',
     name: 'Alpine Glacier Mystic',
-    bodyColor: '#2d8fd4',
-    bodyDeepColor: '#154473',
-    bellyColor: '#d6e2ec',
-    crestColor: '#d978ad',
-    vestColor: '#d0dce8',
-    harnessColor: '#d0dce8',
-    packColor: '#d4947e',
+    bodyColor: '#38a7ec',
+    bodyDeepColor: '#16528a',
+    bellyColor: '#f0f7ff',
+    crestColor: '#f472b6',
+    scarfColor: '#ec4899',
+    scarfTrimColor: '#fbcfe8',
+    vestColor: '#64748b',
+    harnessColor: '#64748b',
+    packColor: '#e8a590',
     eyeGlow: '#67e8f9',
-    accentColor: '#7dd3fc',
-    metallic: 0.18,
+    accentColor: '#93c5fd',
+    metallic: 0.16,
   },
   {
     id: 'bayou_biolume',
     name: 'Bayou Biolume',
-    bodyColor: '#167d69',
-    bodyDeepColor: '#093b34',
-    bellyColor: '#ddd6bc',
-    crestColor: '#82c834',
-    vestColor: '#c4d1ca',
-    harnessColor: '#c4d1ca',
-    packColor: '#b87228',
+    bodyColor: '#1ea37c',
+    bodyDeepColor: '#0b4f41',
+    bellyColor: '#f5f0da',
+    crestColor: '#a3e635',
+    scarfColor: '#f59e0b',
+    scarfTrimColor: '#fef08a',
+    vestColor: '#6e4a2c',
+    harnessColor: '#6e4a2c',
+    packColor: '#d99030',
     eyeGlow: '#facc15',
-    accentColor: '#fbbf24',
-    metallic: 0.12,
+    accentColor: '#bef264',
+    metallic: 0.10,
   },
   {
     id: 'abyssal_leviathan',
     name: 'Abyssal Leviathan',
-    bodyColor: '#2a4194',
-    bodyDeepColor: '#141e4d',
-    bellyColor: '#bcc9db',
-    crestColor: '#8b5cf6',
-    vestColor: '#546682',
-    harnessColor: '#5a6c88',
-    packColor: '#7c8ce0',
+    bodyColor: '#3855b8',
+    bodyDeepColor: '#18245c',
+    bellyColor: '#dbe6f6',
+    crestColor: '#a855f7',
+    scarfColor: '#8b5cf6',
+    scarfTrimColor: '#38bdf8',
+    vestColor: '#3b486b',
+    harnessColor: '#3b486b',
+    packColor: '#94a3f8',
     eyeGlow: '#22d3ee',
     accentColor: '#22d3ee',
-    metallic: 0.24,
+    metallic: 0.22,
   },
   {
     id: 'solar_oasis',
     name: 'Solar Oasis',
-    bodyColor: '#d99124',
-    bodyDeepColor: '#78440e',
-    bellyColor: '#e6dcc2',
-    crestColor: '#1cc4b6',
-    vestColor: '#e2d7be',
-    harnessColor: '#e2d7be',
-    packColor: '#b8732a',
+    bodyColor: '#eb9f26',
+    bodyDeepColor: '#8f4d0c',
+    bellyColor: '#fef6e0',
+    crestColor: '#20d8c8',
+    scarfColor: '#0ea5e9',
+    scarfTrimColor: '#fef08a',
+    vestColor: '#8b542b',
+    harnessColor: '#8b542b',
+    packColor: '#e6ae3c',
     eyeGlow: '#10b981',
     accentColor: '#5efce8',
-    metallic: 0.28,
+    metallic: 0.24,
   },
   {
     id: 'sovereign_starlight',
     name: 'Sovereign Starlight',
-    bodyColor: '#6c8cc6',
-    bodyDeepColor: '#344278',
-    bellyColor: '#d6dae6',
-    crestColor: '#b478f2',
-    vestColor: '#d8d6e6',
-    harnessColor: '#d8d6e6',
-    packColor: '#e2b548',
+    bodyColor: '#7ca2e8',
+    bodyDeepColor: '#3e4d8f',
+    bellyColor: '#f4f3ff',
+    crestColor: '#c084fc',
+    scarfColor: '#e879f9',
+    scarfTrimColor: '#fde047',
+    vestColor: '#6b6796',
+    harnessColor: '#6b6796',
+    packColor: '#f5c84c',
     eyeGlow: '#e879f9',
     accentColor: '#5efce8',
-    metallic: 0.42,
+    metallic: 0.36,
     iridescentOpal: true,
   },
 ];
 
-// Compatibility alias for callers migrating to Gateway
+// Compatibility aliases
 export const POGO_SKINS = GATEWAY_SKINS;
+export const SKIN_CATALOG = GATEWAY_SKINS;
 
 const SKIN_MAP = new Map(GATEWAY_SKINS.map((s) => [s.id, s]));
 
@@ -154,14 +183,39 @@ export const GATEWAY_CLIP_NAMES = [
   'CoreDive',
   'Celebrate',
   'CutsceneHero',
+  'IdleCurious',
+  'EdgeTeeter',
+  'SpringSomersault',
+  'WetShake',
 ];
 
-const ONE_SHOT_CLIPS = new Set(['JumpCoil', 'Land', 'LedgeMantle', 'TailWhip', 'HydroCast']);
+const ONE_SHOT_CLIPS = new Set([
+  'JumpCoil',
+  'Land',
+  'LedgeMantle',
+  'TailWhip',
+  'HydroCast',
+  'SpringSomersault',
+  'WetShake',
+]);
 
 const CLIP_ALIASES = {
   idle: 'IdleBreathe',
   idlebreathe: 'IdleBreathe',
   breathe: 'IdleBreathe',
+  idlecurious: 'IdleCurious',
+  curious: 'IdleCurious',
+  wave: 'IdleCurious',
+  titlewave: 'IdleCurious',
+  titlemascot: 'IdleCurious',
+  edgeteeter: 'EdgeTeeter',
+  teeter: 'EdgeTeeter',
+  ledge_teeter: 'EdgeTeeter',
+  springsomersault: 'SpringSomersault',
+  somersault: 'SpringSomersault',
+  flip: 'SpringSomersault',
+  wetshake: 'WetShake',
+  shake: 'WetShake',
   walk: 'Walk',
   run: 'FluidRun',
   fluidrun: 'FluidRun',
@@ -179,6 +233,7 @@ const CLIP_ALIASES = {
   frill_glide: 'FrillGlide',
   fall: 'Fall',
   land: 'Land',
+  skidstop: 'Land',
   mantle: 'LedgeMantle',
   ledgemantle: 'LedgeMantle',
   climb: 'WallScamper',
@@ -187,6 +242,7 @@ const CLIP_ALIASES = {
   wall_scamper: 'WallScamper',
   whip: 'TailWhip',
   tailwhip: 'TailWhip',
+  tailwhipspin: 'TailWhip',
   tail_whip: 'TailWhip',
   cast: 'HydroCast',
   shoot: 'HydroCast',
@@ -205,53 +261,84 @@ const CLIP_ALIASES = {
   core_dive: 'CoreDive',
   core_descent: 'CoreDive',
   celebrate: 'Celebrate',
+  herocelebrate: 'Celebrate',
+  hero_celebrate: 'Celebrate',
   victory: 'Celebrate',
   cutscene: 'CutsceneHero',
   cutscenehero: 'CutsceneHero',
   hero: 'CutsceneHero',
 };
 
-// Exact 39-bone bind-pose specification matching `tools/build_gateway_3d.py` 1:1
+// Exact 50-bone bind-pose specification matching `scripts/generate_gateway_v2.py` 1:1
+// (All 39 canonical bones + 11 new expressive appeal bones at 1.000m mascot proportions!)
+export const GATEWAY_CANONICAL_BONES = [
+  'Root', 'Pelvis', 'Spine1', 'Spine2', 'Chest', 'Neck', 'Head',
+  'Jaw', 'EyeL', 'EyeR', 'EyelidL', 'EyelidR',
+  'FrillL1', 'FrillL2', 'FrillR1', 'FrillR2',
+  'ClavicleL', 'UpperArmL', 'ForearmL', 'HandL',
+  'ClavicleR', 'UpperArmR', 'ForearmR', 'HandR',
+  'ThighL', 'ShinL', 'AnkleL', 'FootL',
+  'ThighR', 'ShinR', 'AnkleR', 'FootR',
+  'Tail1', 'Tail2', 'Tail3', 'Tail4', 'Tail5', 'Tail6', 'Tail7',
+];
+
+export const GATEWAY_V2_APPEAL_BONES = [
+  'LowerLidL', 'LowerLidR', 'BrowL', 'BrowR', 'MouthSmile',
+  'FrillBotL', 'FrillBotR',
+  'ScarfL1', 'ScarfL2', 'ScarfR1', 'ScarfR2',
+];
+
 const STANDIN_BONE_SPECS = [
   ['Root', null, [0, 0, 0]],
-  ['Pelvis', 'Root', [0, 0.53, -0.012]],
-  ['Spine1', 'Pelvis', [0, 0.075, 0.004]],
-  ['Spine2', 'Spine1', [0, 0.09, 0.01]],
-  ['Chest', 'Spine2', [0, 0.09, 0.006]],
-  ['Neck', 'Chest', [0, 0.09, -0.002]],
-  ['Head', 'Neck', [0, 0.093, 0.014]],
-  ['Jaw', 'Head', [0, 0.017, 0.022]],
-  ['EyeL', 'Head', [0.053, 0.068, 0.064]],
-  ['EyeR', 'Head', [-0.053, 0.068, 0.064]],
-  ['EyelidL', 'Head', [0.053, 0.072, 0.064]],
-  ['EyelidR', 'Head', [-0.053, 0.072, 0.064]],
-  ['FrillL1', 'Head', [0.068, 0.067, -0.005]],
-  ['FrillL2', 'FrillL1', [0.077, 0.067, -0.093]],
-  ['FrillR1', 'Head', [-0.068, 0.067, -0.005]],
-  ['FrillR2', 'FrillR1', [-0.077, 0.067, -0.093]],
-  ['ClavicleL', 'Chest', [0.038, 0.063, -0.004]],
-  ['UpperArmL', 'ClavicleL', [0.068, 0.004, -0.008]],
-  ['ForearmL', 'UpperArmL', [0.062, -0.176, -0.008]],
-  ['HandL', 'ForearmL', [0.03, -0.164, 0.04]],
-  ['ClavicleR', 'Chest', [-0.038, 0.063, -0.004]],
-  ['UpperArmR', 'ClavicleR', [-0.068, 0.004, -0.008]],
-  ['ForearmR', 'UpperArmR', [-0.062, -0.176, -0.008]],
-  ['HandR', 'ForearmR', [-0.03, -0.164, 0.04]],
-  ['ThighL', 'Pelvis', [0.084, -0.005, 0.006]],
-  ['ShinL', 'ThighL', [0.02, -0.22, 0.054]],
-  ['AnkleL', 'ShinL', [-0.006, -0.173, -0.09]],
-  ['FootL', 'AnkleL', [0, -0.098, 0.078]],
-  ['ThighR', 'Pelvis', [-0.084, -0.005, 0.006]],
-  ['ShinR', 'ThighR', [-0.02, -0.22, 0.054]],
-  ['AnkleR', 'ShinR', [0.006, -0.173, -0.09]],
-  ['FootR', 'AnkleR', [0, -0.098, 0.078]],
-  ['Tail1', 'Pelvis', [0, -0.008, -0.05]],
-  ['Tail2', 'Tail1', [0, -0.04, -0.14]],
-  ['Tail3', 'Tail2', [0, -0.046, -0.146]],
-  ['Tail4', 'Tail3', [0, -0.034, -0.147]],
-  ['Tail5', 'Tail4', [0, -0.014, -0.147]],
-  ['Tail6', 'Tail5', [0, 0.014, -0.143]],
-  ['Tail7', 'Tail6', [0, 0.032, -0.137]],
+  ['Pelvis', 'Root', [0, 0.305, -0.008]],
+  ['Spine1', 'Pelvis', [0, 0.073, 0.004]],
+  ['Spine2', 'Spine1', [0, 0.070, 0.006]],
+  ['Chest', 'Spine2', [0, 0.067, 0.004]],
+  ['Neck', 'Chest', [0, 0.060, -0.002]],
+  ['Head', 'Neck', [0, 0.055, 0.008]],
+  ['Jaw', 'Head', [0, 0.055, 0.043]],
+  ['MouthSmile', 'Head', [0, 0.085, 0.123]],
+  ['EyeL', 'Head', [0.084, 0.176, 0.106]],
+  ['EyeR', 'Head', [-0.084, 0.176, 0.106]],
+  ['EyelidL', 'Head', [0.084, 0.176, 0.106]],
+  ['EyelidR', 'Head', [-0.084, 0.176, 0.106]],
+  ['LowerLidL', 'Head', [0.084, 0.176, 0.106]],
+  ['LowerLidR', 'Head', [-0.084, 0.176, 0.106]],
+  ['BrowL', 'Head', [0.084, 0.262, 0.146]],
+  ['BrowR', 'Head', [-0.084, 0.262, 0.146]],
+  ['FrillL1', 'Head', [0.145, 0.192, -0.020]],
+  ['FrillL2', 'FrillL1', [0.100, 0.083, -0.077]],
+  ['FrillBotL', 'Head', [0.148, 0.090, -0.010]],
+  ['FrillR1', 'Head', [-0.145, 0.192, -0.020]],
+  ['FrillR2', 'FrillR1', [-0.100, 0.083, -0.077]],
+  ['FrillBotR', 'Head', [-0.148, 0.090, -0.010]],
+  ['ScarfL1', 'Chest', [0.044, 0.053, -0.108]],
+  ['ScarfL2', 'ScarfL1', [0.044, -0.086, -0.166]],
+  ['ScarfR1', 'Chest', [-0.044, 0.053, -0.108]],
+  ['ScarfR2', 'ScarfR1', [-0.038, -0.073, -0.140]],
+  ['ClavicleL', 'Chest', [0.042, 0.011, -0.002]],
+  ['UpperArmL', 'ClavicleL', [0.083, -0.008, -0.002]],
+  ['ForearmL', 'UpperArmL', [0.059, -0.096, -0.016]],
+  ['HandL', 'ForearmL', [0.020, -0.084, 0.056]],
+  ['ClavicleR', 'Chest', [-0.042, 0.011, -0.002]],
+  ['UpperArmR', 'ClavicleR', [-0.083, -0.008, -0.002]],
+  ['ForearmR', 'UpperArmR', [-0.059, -0.096, -0.016]],
+  ['HandR', 'ForearmR', [-0.020, -0.084, 0.056]],
+  ['ThighL', 'Pelvis', [0.080, 0.000, 0.010]],
+  ['ShinL', 'ThighL', [0.010, -0.130, 0.038]],
+  ['AnkleL', 'ShinL', [-0.002, -0.107, -0.056]],
+  ['FootL', 'AnkleL', [0.000, -0.046, 0.046]],
+  ['ThighR', 'Pelvis', [-0.080, 0.000, 0.010]],
+  ['ShinR', 'ThighR', [-0.010, -0.130, 0.038]],
+  ['AnkleR', 'ShinR', [0.002, -0.107, -0.056]],
+  ['FootR', 'AnkleR', [0.000, -0.046, 0.046]],
+  ['Tail1', 'Pelvis', [0, -0.003, -0.064]],
+  ['Tail2', 'Tail1', [0, -0.032, -0.108]],
+  ['Tail3', 'Tail2', [0, -0.018, -0.112]],
+  ['Tail4', 'Tail3', [0, 0.006, -0.110]],
+  ['Tail5', 'Tail4', [0, 0.030, -0.108]],
+  ['Tail6', 'Tail5', [0, 0.050, -0.102]],
+  ['Tail7', 'Tail6', [0, 0.060, -0.094]],
 ];
 
 const BONE_ALIAS_PAIRS = [
@@ -264,17 +351,26 @@ const BONE_ALIAS_PAIRS = [
   ['neck', 'Neck'],
   ['head', 'Head'],
   ['jaw', 'Jaw'],
+  ['mouthSmile', 'MouthSmile'],
   ['eyeL', 'EyeL'],
   ['eyeR', 'EyeR'],
   ['eyelidL', 'EyelidL'],
   ['eyelidR', 'EyelidR'],
+  ['lowerLidL', 'LowerLidL'],
+  ['lowerLidR', 'LowerLidR'],
+  ['browL', 'BrowL'],
+  ['browR', 'BrowR'],
   ['frillL1', 'FrillL1'],
   ['frillL2', 'FrillL2'],
+  ['frillBotL', 'FrillBotL'],
   ['frillR1', 'FrillR1'],
   ['frillR2', 'FrillR2'],
+  ['frillBotR', 'FrillBotR'],
+  ['scarfL1', 'ScarfL1'],
+  ['scarfL2', 'ScarfL2'],
+  ['scarfR1', 'ScarfR1'],
+  ['scarfR2', 'ScarfR2'],
   ['crest', 'FrillL1'],
-  ['browL', 'EyelidL'],
-  ['browR', 'EyelidR'],
   ['clavicleL', 'ClavicleL'],
   ['clavicleR', 'ClavicleR'],
   ['shoulderL', 'ClavicleL'],
@@ -300,6 +396,57 @@ const BONE_ALIAS_PAIRS = [
   ['tail5', 'Tail5'],
   ['tail6', 'Tail6'],
   ['tail7', 'Tail7'],
+];
+
+// 6-Mood Live Facial Pose Parameters (EyelidL/R, LowerLidL/R, BrowL/R height & roll, Jaw, MouthSmile, Frill boost)
+const MOOD_TARGETS = {
+  happy: {
+    uLidL: -0.04, uLidR: -0.04,
+    lLidL: 0.04, lLidR: 0.04,
+    browYL: 0.005, browYR: 0.005,
+    browRollL: 0.07, browRollR: -0.07,
+    jaw: 0.00, smileY: 0.005, frill: 0.06,
+  },
+  curious: {
+    uLidL: -0.10, uLidR: -0.05,
+    lLidL: 0.00, lLidR: 0.00,
+    browYL: 0.016, browYR: -0.004,
+    browRollL: 0.16, browRollR: 0.08,
+    jaw: 0.00, smileY: 0.006, frill: 0.26,
+  },
+  determined: {
+    uLidL: 0.24, uLidR: 0.24,
+    lLidL: 0.22, lLidR: 0.22,
+    browYL: -0.010, browYR: -0.010,
+    browRollL: -0.26, browRollR: 0.26,
+    jaw: 0.00, smileY: 0.003, frill: 0.34,
+  },
+  joyful: {
+    uLidL: 0.22, uLidR: 0.22,
+    lLidL: 0.56, lLidR: 0.56,
+    browYL: 0.018, browYR: 0.018,
+    browRollL: 0.14, browRollR: -0.14,
+    jaw: 0.18, smileY: 0.010, frill: 0.56,
+  },
+  surprised: {
+    uLidL: -0.24, uLidR: -0.24,
+    lLidL: -0.10, lLidR: -0.10,
+    browYL: 0.024, browYR: 0.024,
+    browRollL: 0.20, browRollR: -0.20,
+    jaw: 0.16, smileY: -0.005, frill: 0.42,
+  },
+  hurt: {
+    uLidL: 0.68, uLidR: 0.68,
+    lLidL: 0.56, lLidR: 0.56,
+    browYL: -0.014, browYR: -0.014,
+    browRollL: -0.32, browRollR: 0.32,
+    jaw: 0.12, smileY: -0.008, frill: -0.36,
+  },
+};
+
+const FACIAL_BONE_NAMES = [
+  'EyeL', 'EyeR', 'EyelidL', 'EyelidR', 'LowerLidL', 'LowerLidR',
+  'BrowL', 'BrowR', 'Jaw', 'MouthSmile',
 ];
 
 let _sharedGatewayGlbPromise = null;
@@ -425,7 +572,6 @@ function getSharedPalmSplashTex() {
   g.addColorStop(1.0, 'rgba(94, 252, 232, 0.0)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 64, 64);
-  // Subtle 6-petal hydro-splash rays feathered well inside the disc
   ctx.save();
   ctx.translate(32, 32);
   for (let i = 0; i < 6; i++) {
@@ -451,9 +597,12 @@ function getSharedPalmSplashTex() {
 
 /**
  * Synthesizes and caches per-skin `albedo` & `emissive` CanvasTextures from the embedded
- * 1K `gateway.glb` atlas while preserving 100% of Voronoi scale crevices, sculpted belly scutes,
- * fin venation, radial iris fibers, corneal catchlights, and bioluminescent lateral-line spots
- * with zero chest blowout and zero crushed-black shadows!
+ * Gateway 2.0 1K WEBP atlas across all 5 UV regions:
+ *   - Q_SKIN  (UB <= 0.68, VB <= 0.72): Silky Pixar skin, cream belly, rosy cheeks, lash rim & brows
+ *   - Q_SCARF (UB >  0.68, VB <= 0.34): Woven sea-silk Explorer Scarf & sunlit gold wave embroidery
+ *   - Q_FRILL (UB >  0.68, 0.34 < VB <= 0.70): Translucent-look veined petal ear-frills & tail-fin
+ *   - Q_EYE   (UB >  0.68, VB >  0.70): Jewel iris (preserving dark pupil, warm sclera & catchlights!)
+ *   - Q_GEAR  (UB <= 0.68, VB >  0.72): Stitched explorer satchel, gold filigree & Sapphire Water Seed
  */
 function getOrBuildSkinAtlasMaps(skin, baseMaps) {
   if (!baseMaps || !baseMaps.albedo || !baseMaps.albedo.image) return null;
@@ -484,6 +633,8 @@ function getOrBuildSkinAtlasMaps(skin, baseMaps) {
     const cDeep = hexToRgb01(skin.bodyDeepColor || skin.bodyColor);
     const cBelly = hexToRgb01(skin.bellyColor);
     const cCrest = hexToRgb01(skin.crestColor);
+    const cScarf = hexToRgb01(skin.scarfColor || skin.crestColor);
+    const cScarfTrim = hexToRgb01(skin.scarfTrimColor || skin.packColor);
     const cHarness = hexToRgb01(skin.harnessColor);
     const cPack = hexToRgb01(skin.packColor);
     const cEye = hexToRgb01(skin.eyeGlow);
@@ -491,7 +642,6 @@ function getOrBuildSkinAtlasMaps(skin, baseMaps) {
     const isOpal = Boolean(skin.iridescentOpal);
 
     for (let py = 0; py < h; py++) {
-      // glTF PNG top row `py = 0` corresponds to `v_blender = 1.0`!
       const vb = 1.0 - py / Math.max(1, h - 1);
       for (let px = 0; px < w; px++) {
         const ub = px / Math.max(1, w - 1);
@@ -507,106 +657,133 @@ function getOrBuildSkinAtlasMaps(skin, baseMaps) {
         let outB = b0;
         let keepOrig = false;
 
-        if (ub <= 0.705 && vb <= 0.765) {
-          // Q_SKIN: preserve deep Voronoi scale crevices + sculpted ventral belly scutes!
-          const su = Math.max(0, Math.min(1, (ub - 0.02) / 0.66));
-          const frontDist = Math.abs(su - 0.5) * 2.0;
-          const sv = Math.max(0, Math.min(1, (vb - 0.02) / 0.72));
-          const uvBelly =
-            frontDist < 0.34 && sv > 0.09 && sv < 0.87
-              ? Math.max(0, Math.min(1, (0.34 - frontDist) / 0.18))
-              : 0;
-          // Blend UV mask with natural baked pale-belly detection for crisp scute transitions
-          const warmBellyHint = r0 > b0 * 0.92 && lum > 0.44 && sat < 0.28 ? 1 : 0;
-          const bellyMask = Math.max(0, Math.min(1, uvBelly * (0.72 + warmBellyHint * 0.28)));
+        if (ub <= 0.68 && vb <= 0.72) {
+          if (vb >= 0.65) {
+            if (ub >= 0.34) {
+              // Dedicated Q_LASH strip (`UB 0.34..0.68, VB 0.65..0.72`): preserve dark winged lash rim, tint lid skin!
+              if (lum < 0.24) {
+                keepOrig = true;
+              } else {
+                const lGain = 0.72 + 0.36 * lum;
+                outR = Math.min(1, cBody[0] * lGain);
+                outG = Math.min(1, cBody[1] * lGain);
+                outB = Math.min(1, cBody[2] * lGain);
+              }
+            } else {
+              // Dedicated Q_BROW strip (`UB 0.00..0.34, VB 0.65..0.72`): crisp brightened skin/accent tone!
+              const bGain = 0.68 + 0.42 * lum;
+              outR = Math.min(1, (cBody[0] * 0.65 + cAccent[0] * 0.35) * bGain);
+              outG = Math.min(1, (cBody[1] * 0.65 + cAccent[1] * 0.35) * bGain);
+              outB = Math.min(1, (cBody[2] * 0.65 + cAccent[2] * 0.35) * bGain);
+            }
+          } else {
+            const su = Math.max(0, Math.min(1, (ub - 0.02) / 0.64));
+            const sv = Math.max(0, Math.min(1, (vb - 0.02) / 0.61));
+            const frontDist = Math.abs(su - 0.5) * 2.0;
 
-          // Scale tonal curve: deep rich grout (`cDeep`) -> vibrant mid-scale (`cBody`) -> subtle iridescent crown
-          const normScale = Math.max(0, Math.min(1, (lum - 0.06) / 0.66));
-          const creviceT = Math.pow(normScale, 0.94);
-          let sr = cDeep[0] * (1 - creviceT) + cBody[0] * creviceT;
-          let sg = cDeep[1] * (1 - creviceT) + cBody[1] * creviceT;
-          let sb = cDeep[2] * (1 - creviceT) + cBody[2] * creviceT;
+            // Detect warm cream-pearl belly & rosy coral cheek blush so both stay plush & adorable!
+            const isBelly = r0 > 0.76 && g0 > 0.72 && b0 > 0.66 && sat < 0.16;
+            const isCheekBlush = sv > 0.72 && sv < 0.86 && r0 > g0 * 1.06 && r0 > 0.52;
+            const isSmileOrNostril = sv > 0.73 && sv < 0.84 && frontDist < 0.36 && lum < 0.34;
 
-          // Subtle iridescent opal shimmer across scales for Sovereign Starlight
-          if (isOpal) {
-            const wave = 0.5 + 0.5 * Math.sin(sv * 8.5 + su * 5.2);
-            const opalR = cAccent[0] * (1 - wave) + cCrest[0] * wave;
-            const opalG = cAccent[1] * (1 - wave) + cCrest[1] * wave;
-            const opalB = cAccent[2] * (1 - wave) + cCrest[2] * wave;
-            const sheen = 0.24 + 0.18 * creviceT;
-            sr = sr * (1 - sheen) + opalR * sheen;
-            sg = sg * (1 - sheen) + opalG * sheen;
-            sb = sb * (1 - sheen) + opalB * sheen;
-          } else if (creviceT > 0.65) {
-            // Subtle crest-tinted dorsal highlight on scale crowns
-            const hi = (creviceT - 0.65) * 0.32;
-            sr = sr * (1 - hi) + cCrest[0] * hi;
-            sg = sg * (1 - hi) + cCrest[1] * hi;
-            sb = sb * (1 - hi) + cCrest[2] * hi;
+            if (isSmileOrNostril) {
+              // Soft tinted smile & tiny nostrils harmonized to skin deep color
+              outR = cDeep[0] * 0.52;
+              outG = cDeep[1] * 0.52;
+              outB = cDeep[2] * 0.52;
+            } else if (isBelly) {
+              const bGain = 0.88 + 0.14 * lum;
+              outR = cBelly[0] * bGain;
+              outG = cBelly[1] * bGain;
+              outB = cBelly[2] * bGain;
+            } else {
+              const dorsalT = Math.max(0, Math.min(1, (frontDist - 0.44) / 0.52));
+              let sr = cBody[0] * (1 - dorsalT * 0.54) + cDeep[0] * (dorsalT * 0.54);
+              let sg = cBody[1] * (1 - dorsalT * 0.54) + cDeep[1] * (dorsalT * 0.54);
+              let sb = cBody[2] * (1 - dorsalT * 0.54) + cDeep[2] * (dorsalT * 0.54);
+
+              if (isOpal) {
+                const wave = 0.5 + 0.5 * Math.sin(sv * 8.5 + su * 5.2);
+                const opalR = cAccent[0] * (1 - wave) + cCrest[0] * wave;
+                const opalG = cAccent[1] * (1 - wave) + cCrest[1] * wave;
+                const opalB = cAccent[2] * (1 - wave) + cCrest[2] * wave;
+                sr = sr * 0.72 + opalR * 0.28;
+                sg = sg * 0.72 + opalG * 0.28;
+                sb = sb * 0.72 + opalB * 0.28;
+              }
+              // Gentle silky value retention (NEVER harsh dark cracks!)
+              const silkGain = 0.66 + 0.44 * Math.max(0.15, Math.min(1.0, lum / 0.72));
+              outR = sr * silkGain;
+              outG = sg * silkGain;
+              outB = sb * silkGain;
+              if (isCheekBlush) {
+                // Keep soft warm peach-pink cheek blush!
+                outR = outR * 0.62 + 0.98 * 0.38;
+                outG = outG * 0.62 + 0.56 * 0.38;
+                outB = outB * 0.62 + 0.64 * 0.38;
+              }
+            }
           }
-
-          // Preserve scale depth contrast (`0.38..1.04`, zero crushed black & zero blown-out white!)
-          const scaleGain = 0.38 + 0.66 * Math.pow(normScale, 0.88);
-          sr *= scaleGain;
-          sg *= scaleGain;
-          sb *= scaleGain;
-
-          // Sculpted belly scutes: normalize against baked belly lum so every scute ridge stays crisp!
-          const bellyNorm = Math.max(0, Math.min(1, lum / 0.88));
-          const bellyGain = 0.36 + 0.52 * Math.pow(bellyNorm, 1.18);
-          const br = cBelly[0] * bellyGain;
-          const bg = cBelly[1] * bellyGain;
-          const bb = cBelly[2] * bellyGain;
-
-          outR = sr * (1 - bellyMask) + br * bellyMask;
-          outG = sg * (1 - bellyMask) + bg * bellyMask;
-          outB = sb * (1 - bellyMask) + bb * bellyMask;
-        } else if (ub > 0.705 && vb <= 0.70) {
-          // Q_FRILL: smooth root-to-tip gradient preserving branching fin membrane veins!
-          const fu = Math.max(0, Math.min(1, (ub - 0.72) / 0.26));
-          const rootT = Math.max(0, Math.min(1, fu * 1.45));
-          const tipT = Math.max(0, Math.min(1, (fu - 0.42) / 0.58));
-          let fr = cBody[0] * (1 - rootT) + cCrest[0] * rootT;
-          let fg = cBody[1] * (1 - rootT) + cCrest[1] * rootT;
-          let fb = cBody[2] * (1 - rootT) + cCrest[2] * rootT;
-          fr = fr * (1 - tipT * 0.48) + cAccent[0] * (tipT * 0.48);
-          fg = fg * (1 - tipT * 0.48) + cAccent[1] * (tipT * 0.48);
-          fb = fb * (1 - tipT * 0.48) + cAccent[2] * (tipT * 0.48);
-          const veinGain = 0.34 + 0.68 * Math.pow(Math.max(0.02, lum), 0.90);
-          outR = fr * veinGain;
-          outG = fg * veinGain;
-          outB = fb * veinGain;
-        } else if (ub > 0.705 && vb > 0.70) {
-          // Q_EYE: preserve dark slit pupil (`lum < 0.08`) & sclera/catchlight (`lum > 0.82`), tint iris!
-          const ex = (ub - 0.85) / 0.125;
-          const ey = (vb - 0.85) / 0.125;
+        } else if (ub > 0.68 && vb <= 0.34) {
+          // Q_SCARF: Rich sea-silk Explorer Scarf + metallic gold wave embroidery!
+          const isGoldTrim = r0 > 0.78 && g0 > 0.64 && b0 < 0.56;
+          if (isGoldTrim) {
+            const gGain = 0.72 + 0.34 * lum;
+            outR = cScarfTrim[0] * gGain;
+            outG = cScarfTrim[1] * gGain;
+            outB = cScarfTrim[2] * gGain;
+          } else {
+            const sGain = 0.64 + 0.48 * Math.max(0.15, lum);
+            outR = cScarf[0] * sGain;
+            outG = cScarf[1] * sGain;
+            outB = cScarf[2] * sGain;
+          }
+        } else if (ub > 0.68 && vb <= 0.70) {
+          // Q_FRILL: Luminous sea-mint root -> translucent glowing petal tips!
+          const fu = Math.max(0, Math.min(1, (ub - 0.70) / 0.28));
+          const midT = Math.max(0, Math.min(1, fu * 1.4));
+          const tipT = Math.max(0, Math.min(1, (fu - 0.40) / 0.58));
+          let fr = cBody[0] * (1 - midT) + cAccent[0] * midT;
+          let fg = cBody[1] * (1 - midT) + cAccent[1] * midT;
+          let fb = cBody[2] * (1 - midT) + cAccent[2] * midT;
+          fr = fr * (1 - tipT * 0.65) + cCrest[0] * (tipT * 0.65);
+          fg = fg * (1 - tipT * 0.65) + cCrest[1] * (tipT * 0.65);
+          fb = fb * (1 - tipT * 0.65) + cCrest[2] * (tipT * 0.65);
+          const fGain = 0.62 + 0.48 * Math.max(0.15, lum);
+          outR = fr * fGain;
+          outG = fg * fGain;
+          outB = fb * fGain;
+        } else if (ub > 0.68 && vb > 0.70) {
+          // Q_EYE: Preserve friendly dark pupil, warm cream sclera & pure-white catchlights, tint jewel iris!
+          const ex = (ub - 0.84) / 0.135;
+          const ey = (vb - 0.85) / 0.135;
           const er = Math.hypot(ex, ey);
-          if (er > 0.70 || lum > 0.82 || lum < 0.08) {
+          if (er > 0.77 || lum > 0.84 || lum < 0.10) {
             keepOrig = true;
           } else {
-            const irisGain = 0.38 + 0.76 * Math.pow(Math.max(0.02, lum), 0.86);
+            const irisGain = 0.52 + 0.66 * Math.max(0.10, lum);
             outR = cEye[0] * irisGain;
             outG = cEye[1] * irisGain;
             outB = cEye[2] * irisGain;
           }
         } else {
-          // Q_GEAR: ceramic plates (0..0.36), metallic filigree (0.36..0.68), Water Seed crystal (0.68..1.0)
-          const gv = Math.max(0, Math.min(1, (vb - 0.78) / 0.20));
-          if (gv < 0.36) {
-            const cerGain = 0.36 + 0.58 * Math.pow(Math.max(0.02, lum), 0.96);
-            outR = cHarness[0] * cerGain;
-            outG = cHarness[1] * cerGain;
-            outB = cHarness[2] * cerGain;
+          // Q_GEAR: stitched leather satchel (0..0.35), gold filigree (0.35..0.68), Star-Sapphire gem (0.68..1.0)
+          const gv = Math.max(0, Math.min(1, (vb - 0.74) / 0.24));
+          if (gv < 0.35) {
+            const lGain = 0.58 + 0.52 * Math.max(0.10, lum);
+            outR = cHarness[0] * lGain;
+            outG = cHarness[1] * lGain;
+            outB = cHarness[2] * lGain;
           } else if (gv < 0.68) {
-            const metGain = 0.34 + 0.74 * Math.pow(Math.max(0.02, lum), 0.90);
-            outR = cPack[0] * metGain;
-            outG = cPack[1] * metGain;
-            outB = cPack[2] * metGain;
+            const mGain = 0.58 + 0.54 * Math.max(0.10, lum);
+            outR = cPack[0] * mGain;
+            outG = cPack[1] * mGain;
+            outB = cPack[2] * mGain;
           } else {
-            const gemGain = 0.42 + 0.68 * Math.pow(Math.max(0.02, lum), 0.86);
-            outR = cAccent[0] * gemGain;
-            outG = cAccent[1] * gemGain;
-            outB = cAccent[2] * gemGain;
+            const gGain = 0.60 + 0.56 * Math.max(0.10, lum);
+            outR = cAccent[0] * gGain;
+            outG = cAccent[1] * gGain;
+            outB = cAccent[2] * gGain;
           }
         }
 
@@ -640,7 +817,6 @@ function getOrBuildSkinAtlasMaps(skin, baseMaps) {
         for (let i = 0; i < dE.length; i += 4) {
           const elum = Math.max(dE[i], dE[i + 1], dE[i + 2]) / 255;
           if (elum > 0.01) {
-            // Preserve crisp corneal catchlights (`elum > 0.92` & neutral)
             const isWhite = dE[i] > 225 && dE[i + 1] > 225 && dE[i + 2] > 225;
             if (!isWhite) {
               dE[i] = Math.min(255, Math.round(cAccent[0] * elum * 235));
@@ -673,14 +849,25 @@ export class GatewayRig {
   }
 
   /**
-   * @param {string | { skinId?: string }} [skinId='sea_glass_guardian']
+   * @param {string | { skinId?: string, targetHeight?: number }} [skinId='sea_glass_guardian']
    */
   constructor(skinId = 'sea_glass_guardian') {
-    const initSkinId =
-      typeof skinId === 'object' && skinId !== null ? skinId.skinId || 'sea_glass_guardian' : skinId;
+    const opts = typeof skinId === 'object' && skinId !== null ? skinId : { skinId };
+    const initSkinId = opts.skinId || 'sea_glass_guardian';
 
     this.group = new THREE.Group();
     this.group.name = 'GatewayRig';
+
+    // Exact 1.22m World Height Auto-Normalization wrapper (`gateway.glb` bind crown = 1.000m!)
+    this.targetHeight =
+      Number.isFinite(opts.targetHeight) && opts.targetHeight > 0.1
+        ? Number(opts.targetHeight)
+        : DEFAULT_TARGET_HEIGHT;
+    this._bindCrownHeight = GATEWAY_BIND_HEIGHT;
+    this._normGroup = new THREE.Group();
+    this._normGroup.name = 'GatewayHeightNormRoot';
+    this._normGroup.scale.setScalar(this.targetHeight / this._bindCrownHeight);
+    this.group.add(this._normGroup);
 
     this._disposed = false;
     this._glbApplied = false;
@@ -725,11 +912,13 @@ export class GatewayRig {
     this._yaw = 0.42;
     this._prevYaw = 0.42;
     this._bankRoll = 0;
-    this._stairOffset = 0;
-    this._pelvisBindY = 0.53;
+    this._pelvisBindY = 0.305;
     this._headLookYaw = 0;
     this._headLookPitch = 0;
+    this._eyeLookYaw = 0;
+    this._eyeLookPitch = 0;
     this._frillFlare = 0;
+    this._frillVel = 0;
     this._castBlend = 0;
     this._pushBlend = 0;
     this._recoil = 0;
@@ -745,7 +934,40 @@ export class GatewayRig {
     this._prevVx = 0;
     this._legIkBind = null;
 
-    // 7-Bone 2nd-order spring-damped dynamic lizard tail state
+    // 6-Mood Live Facial Controller + Organic Blinking (`2.5–4.5s`) + Title Showcase State
+    this._moodOverride = null;
+    this.currentMood = 'happy';
+    this._faceBind = {};
+    this._faceState = {
+      uLidL: 0, uLidR: 0,
+      lLidL: 0.14, lLidR: 0.14,
+      browYL: 0.004, browYR: 0.004,
+      browRollL: 0.06, browRollR: -0.06,
+      jaw: 0, smileY: 0.004, frill: 0.06,
+    };
+    this._blinkTimer = 0;
+    this._nextBlinkInterval = 3.2;
+    this._blinkPhase = 0;
+    this._blinkCount = 0;
+    this._blinkActive = false;
+    this._doubleBlinkQueued = false;
+    this._idleCuriosityTimer = 0;
+    this._pointerGazeX = 0;
+    this._pointerGazeY = 0;
+    this._pointerGazeActive = false;
+    this._titleWaveTimer = 0;
+    this._titleHopTimer = 0;
+    this._titleHopDuration = 0.62;
+    this._wetShakeTimer = 0;
+    this._somersaultTimer = 0;
+
+    // 4-Bone 2nd-Order Spring-Damped Sea-Silk Scarf Physics
+    this._scarfPitchLag = 0;
+    this._scarfPitchVel = 0;
+    this._scarfYawLag = 0;
+    this._scarfYawVel = 0;
+
+    // 7-Bone 2nd-Order Spring-Damped Dynamic Tail Physics
     this._tailYawVel = 0;
     this._tailYawLag = 0;
     this._tailPitchVel = 0;
@@ -773,6 +995,83 @@ export class GatewayRig {
     });
   }
 
+  setTargetHeight(meters) {
+    if (!Number.isFinite(meters) || meters <= 0.1) return;
+    this.targetHeight = Number(meters);
+    this._syncHeightNormalization();
+  }
+
+  getWorldHeight() {
+    const groupScaleY = this.group?.scale?.y || 1;
+    const normScaleY = this._normGroup?.scale?.y || 1;
+    return this._bindCrownHeight * normScaleY * groupScaleY;
+  }
+
+  _syncHeightNormalization() {
+    if (!this._normGroup) return;
+    const norm = this.targetHeight / Math.max(0.2, this._bindCrownHeight);
+    this._normGroup.scale.setScalar(norm);
+  }
+
+  setMood(mood) {
+    if (mood === null || mood === undefined || mood === 'auto') {
+      this._moodOverride = null;
+      return;
+    }
+    const key = String(mood).toLowerCase();
+    const mapped = key === 'celebrate' ? 'joyful' : key;
+    if (MOOD_SET.has(mapped)) {
+      this._moodOverride = mapped;
+      this.currentMood = mapped;
+    }
+  }
+
+  getMood() {
+    return this.currentMood;
+  }
+
+  setPointerGaze(nx = 0, ny = 0, active = true) {
+    this._pointerGazeX = THREE.MathUtils.clamp(Number(nx) || 0, -1, 1);
+    this._pointerGazeY = THREE.MathUtils.clamp(Number(ny) || 0, -1, 1);
+    this._pointerGazeActive = Boolean(active);
+  }
+
+  triggerTitleWave(duration = 1.65) {
+    this._titleWaveTimer = Math.max(this._titleWaveTimer, Number(duration) || 1.65);
+    if (this.actions.IdleCurious) {
+      this._activeClipName = null;
+      this.playAction('IdleCurious', 0.12, 1.0);
+    }
+  }
+
+  triggerTitleHop(duration = 0.62) {
+    this._titleHopDuration = Math.max(0.35, Number(duration) || 0.62);
+    this._titleHopTimer = this._titleHopDuration;
+    this._frillVel += 4.2;
+    this._scarfPitchVel += 5.5;
+    this._tailPitchVel += 6.0;
+    if (this.actions.Celebrate) {
+      this._activeClipName = null;
+      this.playAction('Celebrate', 0.08, 1.35);
+    }
+  }
+
+  triggerWetShake(duration = 0.65) {
+    this._wetShakeTimer = Math.max(this._wetShakeTimer, Number(duration) || 0.65);
+    if (this.actions.WetShake) {
+      this._activeClipName = null;
+      this.playAction('WetShake', 0.08, 1.15);
+    }
+  }
+
+  triggerSpringSomersault(duration = 0.72) {
+    this._somersaultTimer = Math.max(this._somersaultTimer, Number(duration) || 0.72);
+    if (this.actions.SpringSomersault) {
+      this._activeClipName = null;
+      this.playAction('SpringSomersault', 0.06, 1.2);
+    }
+  }
+
   _trackGeo(geo) {
     this._ownedGeos.add(geo);
     return geo;
@@ -788,15 +1087,15 @@ export class GatewayRig {
       new THREE.MeshStandardMaterial({
         name: 'mat_gateway_live',
         color: '#ffffff',
-        roughness: 0.38,
-        metalness: 0.08,
+        roughness: 0.34,
+        metalness: 0.06,
         emissive: '#ffffff',
-        emissiveIntensity: 0.78,
+        emissiveIntensity: 0.85,
       })
     );
     this.accentMat = this._trackMat(
       new THREE.MeshStandardMaterial({
-        color: '#5efce8',
+        color: '#72fff0',
         emissive: '#38bdf8',
         emissiveIntensity: 1.05,
         roughness: 0.14,
@@ -827,7 +1126,6 @@ export class GatewayRig {
       })
     );
     this._moteDummy = new THREE.Object3D();
-    // Legacy compatibility map if external code inspects `rig.mats`
     this.mats = {
       skin: this.mainMat,
       accentGlow: this.accentMat,
@@ -836,13 +1134,13 @@ export class GatewayRig {
   }
 
   /**
-   * Builds a lightweight, real 39-bone `THREE.SkinnedMesh` + 18 procedural clips for instant
+   * Builds a lightweight, real 50-bone `THREE.SkinnedMesh` + 22 procedural clips for instant
    * Frame-0 rendering & headless Node tests before `gateway.glb` finishes loading.
    */
   _buildInstantSkinnedStandIn() {
     const standInGroup = new THREE.Group();
     standInGroup.name = 'GatewayStandInRoot';
-    this.group.add(standInGroup);
+    this._normGroup.add(standInGroup);
     this._standInGroup = standInGroup;
 
     const boneList = [];
@@ -861,25 +1159,24 @@ export class GatewayRig {
     standInGroup.add(boneByName.Root);
     standInGroup.updateMatrixWorld(true);
 
-    // Sculpted continuous tube-lofted stand-in SkinnedMesh along Spine + Tail (`y = 0..1.18u`, `z = -1.04..0.16u`)
+    // Compact 1.000m mascot stand-in SkinnedMesh along Tail -> Torso -> Head (`y = 0..1.00m`)
     const curvePts = [
-      new THREE.Vector3(0, 0.47, -1.04),
-      new THREE.Vector3(0, 0.39, -0.65),
-      new THREE.Vector3(0, 0.48, -0.22),
-      new THREE.Vector3(0, 0.54, -0.01),
-      new THREE.Vector3(0, 0.72, 0.01),
-      new THREE.Vector3(0, 0.92, 0.015),
-      new THREE.Vector3(0, 1.08, 0.05),
-      new THREE.Vector3(0, 1.18, 0.02),
+      new THREE.Vector3(0, 0.45, -0.78),
+      new THREE.Vector3(0, 0.28, -0.48),
+      new THREE.Vector3(0, 0.27, -0.18),
+      new THREE.Vector3(0, 0.31, -0.01),
+      new THREE.Vector3(0, 0.45, 0.005),
+      new THREE.Vector3(0, 0.58, 0.01),
+      new THREE.Vector3(0, 0.78, 0.04),
+      new THREE.Vector3(0, 0.96, 0.02),
     ];
     const bodyCurve = new THREE.CatmullRomCurve3(curvePts);
-    const geo = this._trackGeo(new THREE.TubeGeometry(bodyCurve, 32, 0.068, 12, false));
+    const geo = this._trackGeo(new THREE.TubeGeometry(bodyCurve, 32, 0.09, 12, false));
     const posAttr = geo.attributes.position;
     const vCount = posAttr.count;
     const skinIndices = new Uint16Array(vCount * 4);
     const skinWeights = new Float32Array(vCount * 4);
 
-    // Compute world bone positions for clean weight binding
     const boneWorldPts = boneList.map((b) => {
       const v = new THREE.Vector3();
       b.getWorldPosition(v);
@@ -889,11 +1186,15 @@ export class GatewayRig {
 
     for (let i = 0; i < vCount; i++) {
       tmpP.fromBufferAttribute(posAttr, i);
-      // Taper tail tip & waist organically
-      if (tmpP.z < -0.15) {
-        const tf = Math.max(0.15, 1.0 - (-tmpP.z - 0.15) / 0.95);
+      if (tmpP.z < -0.12) {
+        const tf = Math.max(0.18, 1.0 - (-tmpP.z - 0.12) / 0.74);
         tmpP.x *= tf;
-        tmpP.y = 0.43 + (tmpP.y - 0.43) * tf;
+        tmpP.y = 0.34 + (tmpP.y - 0.34) * tf;
+        posAttr.setXYZ(i, tmpP.x, tmpP.y, tmpP.z);
+      } else if (tmpP.y > 0.64) {
+        // Plump mascot head swell in stand-in
+        tmpP.x *= 1.65;
+        tmpP.z *= 1.35;
         posAttr.setXYZ(i, tmpP.x, tmpP.y, tmpP.z);
       }
       let b0 = 1;
@@ -936,8 +1237,23 @@ export class GatewayRig {
     this.skinnedMesh = sMesh;
     this.skeleton = skel;
     this._wireBoneAliasesAndAttachments(boneByName);
+    this._captureFacialBindPose();
     this._measureBindPoseLegIk(standInGroup);
     this._initFallbackClipsAndMixer(standInGroup);
+  }
+
+  _captureFacialBindPose() {
+    this._faceBind = {};
+    for (let i = 0; i < FACIAL_BONE_NAMES.length; i++) {
+      const fn = FACIAL_BONE_NAMES[i];
+      const bone = this.bones[fn];
+      if (bone) {
+        this._faceBind[fn] = {
+          pos: bone.position.clone(),
+          quat: bone.quaternion.clone(),
+        };
+      }
+    }
   }
 
   _initFallbackClipsAndMixer(mixerRoot) {
@@ -948,17 +1264,17 @@ export class GatewayRig {
     for (let i = 0; i < GATEWAY_CLIP_NAMES.length; i++) {
       const cname = GATEWAY_CLIP_NAMES[i];
       let track;
-      if (cname === 'IdleBreathe') {
+      if (cname === 'IdleBreathe' || cname === 'IdleCurious') {
         const y0 = this._pelvisBindY;
         track = new THREE.VectorKeyframeTrack(
           'Pelvis.position',
           [0, 0.5, 1.0],
-          [0, y0, -0.012, 0, y0 - 0.012, -0.012, 0, y0, -0.012]
+          [0, y0, -0.008, 0, y0 - 0.010, -0.008, 0, y0, -0.008]
         );
       } else {
         const q0 = new THREE.Quaternion();
         const q1 = new THREE.Quaternion().setFromEuler(
-          new THREE.Euler(cname === 'FluidRun' ? 0.18 : 0.03, 0, 0)
+          new THREE.Euler(cname === 'FluidRun' ? 0.18 : cname === 'SpringSomersault' ? Math.PI : 0.04, 0, 0)
         );
         track = new THREE.QuaternionKeyframeTrack(
           'Pelvis.quaternion',
@@ -990,8 +1306,10 @@ export class GatewayRig {
         this.bones[alias] = boneLookup[canonical];
       }
     }
+    // Graceful fallback aliases if an older 39-bone GLB is ever tested
+    if (!this.bones.browL && boneLookup.EyelidL) this.bones.browL = boneLookup.EyelidL;
+    if (!this.bones.browR && boneLookup.EyelidR) this.bones.browR = boneLookup.EyelidR;
 
-    // Attach Hydro-Caster Palm Emitter (`muzzle` + `muzzleLight`) & Sovereign Starlight Droplets!
     if (!this._hydroEmitterGroup) {
       this._hydroEmitterGroup = new THREE.Group();
       this._hydroEmitterGroup.name = 'GatewayHydroCasterEmitter';
@@ -1017,10 +1335,9 @@ export class GatewayRig {
       muzzleLight.position.set(0, 0.02, 0.12);
       this._muzzleLight = muzzleLight;
 
-      this._hydroEmitterGroup.position.set(0, -0.05, 0.045);
+      this._hydroEmitterGroup.position.set(0, -0.04, 0.045);
       this._hydroEmitterGroup.add(muzzle, muzzleLight);
 
-      // Compatibility dummy groups (`blaster`, `backpack`, `harness`) so legacy renderers never throw
       this._compatBlasterDummy = new THREE.Group();
       this._compatBackpackDummy = new THREE.Group();
       this._compatHarnessDummy = new THREE.Group();
@@ -1062,8 +1379,8 @@ export class GatewayRig {
   }
 
   /**
-   * Upgrades this `GatewayRig` instance to the full sculpted Blender `gateway.glb`
-   * `SkinnedMesh` + 39-bone `Armature` + 1K PBR Maps + 18 Baked NLA Skeletal Clips!
+   * Upgrades this `GatewayRig` instance to the sculpted Blender Gateway 2.0 `gateway.glb`
+   * `SkinnedMesh` + 50-bone `Armature` + 1K WEBP PBR Atlas + 22 Baked NLA Skeletal Clips!
    */
   _applyGatewayGlb(glbData) {
     const clonedScene = cloneSkinnedHierarchy(glbData.scene);
@@ -1091,20 +1408,19 @@ export class GatewayRig {
       return;
     }
 
-    // Cleanly retire Frame-0 stand-in
+    // Retire Frame-0 stand-in cleanly
     if (this._standInGroup) {
       this._standInGroup.visible = false;
-      this.group.remove(this._standInGroup);
+      this._normGroup.remove(this._standInGroup);
     }
     if (this.mixer) {
       this.mixer.stopAllAction();
     }
 
-    // Ensure `Root` wrapper rotates inside `this.group` identically to stand-in
     const rigMotionRoot = new THREE.Group();
     rigMotionRoot.name = 'GatewayMotionRoot';
     rigMotionRoot.add(clonedScene);
-    this.group.add(rigMotionRoot);
+    this._normGroup.add(rigMotionRoot);
     this._motionRoot = rigMotionRoot;
 
     this.skinnedMesh = foundSkinned;
@@ -1121,12 +1437,15 @@ export class GatewayRig {
     if (boneByName.Pelvis) {
       this._pelvisBindY = boneByName.Pelvis.position.y;
     }
+    // Auto-detect Gateway 2.0 (`1.000m` crown) vs legacy (`1.185m`) for exact `1.22m` world height!
+    this._bindCrownHeight = this._pelvisBindY > 0.44 ? 1.185 : GATEWAY_BIND_HEIGHT;
+    this._syncHeightNormalization();
+
     clonedScene.position.set(0, 0, 0);
 
-    // Measure exact bind-pose leg segment lengths & foot/ankle contact targets BEFORE mixer playback
+    this._captureFacialBindPose();
     this._measureBindPoseLegIk(rigMotionRoot);
 
-    // Bind all 18 baked Blender NLA clips into `THREE.AnimationMixer`
     this.mixer = new THREE.AnimationMixer(clonedScene);
     this.actions = {};
     this.animations = glbData.animations;
@@ -1142,8 +1461,13 @@ export class GatewayRig {
       }
       this.actions[clip.name] = act;
     }
+    // Helpful canonical alias on `this.actions` for callers referencing `HeroCelebrate`
+    if (this.actions.Celebrate && !this.actions.HeroCelebrate) {
+      this.actions.HeroCelebrate = this.actions.Celebrate;
+    }
 
-    const startClip = this._activeClipName && this.actions[this._activeClipName] ? this._activeClipName : 'IdleBreathe';
+    const startClip =
+      this._activeClipName && this.actions[this._activeClipName] ? this._activeClipName : 'IdleBreathe';
     this._activeClipName = startClip;
     if (this.actions[startClip]) {
       this.actions[startClip].reset().play();
@@ -1163,13 +1487,12 @@ export class GatewayRig {
   }
 
   setEraStyle(_era) {
-    // 100% AAA presentation (harmless compatibility method)
     this.currentEra = 'reboot';
   }
 
   _refreshMaterials() {
     const skin = this._activeSkin || GATEWAY_SKINS[0];
-    const metalBase = typeof skin.metallic === 'number' ? skin.metallic : 0.08;
+    const metalBase = typeof skin.metallic === 'number' ? skin.metallic : 0.06;
 
     this.accentMat.color.set(skin.accentColor);
     this.accentMat.emissive.set(skin.accentColor);
@@ -1182,20 +1505,20 @@ export class GatewayRig {
       this.mainMat.map = skinMaps ? skinMaps.albedo : this._baseGlbMaps.albedo;
       this.mainMat.color.set('#ffffff');
       this.mainMat.normalMap = this._baseGlbMaps.normal || null;
-      this.mainMat.normalScale.set(1.18, 1.18);
+      this.mainMat.normalScale.set(0.76, 0.76);
       this.mainMat.roughnessMap = this._baseGlbMaps.roughness || null;
       this.mainMat.metalnessMap = this._baseGlbMaps.metalness || null;
-      this.mainMat.roughness = this._baseGlbMaps.roughness ? 1.0 : 0.38;
+      this.mainMat.roughness = this._baseGlbMaps.roughness ? 1.0 : 0.34;
       this.mainMat.metalness = this._baseGlbMaps.metalness ? Math.max(0.85, metalBase) : metalBase;
       this.mainMat.emissiveMap = skinMaps ? skinMaps.emissive : this._baseGlbMaps.emissive || null;
       this.mainMat.emissive.set('#ffffff');
-      this.mainMat.emissiveIntensity = 0.78;
+      this.mainMat.emissiveIntensity = 0.85;
     } else {
       this.mainMat.map = null;
       this.mainMat.color.set(skin.bodyColor);
       this.mainMat.emissive.set(skin.accentColor);
-      this.mainMat.emissiveIntensity = 0.12;
-      this.mainMat.roughness = 0.38;
+      this.mainMat.emissiveIntensity = 0.14;
+      this.mainMat.roughness = 0.34;
       this.mainMat.metalness = metalBase;
     }
     this.mainMat.needsUpdate = true;
@@ -1206,7 +1529,7 @@ export class GatewayRig {
   }
 
   /**
-   * Cross-fades smoothly (`0.10s–0.18s`) to a named skeletal clip on `this.mixer`.
+   * Cross-fades smoothly to a named skeletal clip on `this.mixer`.
    */
   playAction(rawName, fadeDuration = 0.14, timeScale = 1.0) {
     if (!this.mixer || !rawName) return;
@@ -1355,8 +1678,8 @@ export class GatewayRig {
 
   /**
    * Zero-allocation Runtime Analytic 2-Bone Leg IK Solver (Law of Cosines).
-   * Pins both `AnkleL/R` and `FootL/R` flat on `y = 0.000m` (`0.00mm` drift) across `IdleBreathe`,
-   * `HydroCast`, and heavy `landComp` crouches!
+   * Pins both `AnkleL/R` and `FootL/R` flat on `y = 0.000m` (`< 0.05mm` drift!) across
+   * `IdleBreathe`, `IdleCurious`, `EdgeTeeter`, `WetShake`, `HydroCast`, and landing crouches!
    */
   _solveGroundedTwoBoneLegIk(motionRoot, ikWeight = 1.0) {
     if (!this._legIkBind || !motionRoot || ikWeight <= 0.001) return;
@@ -1411,7 +1734,6 @@ export class GatewayRig {
         this._vIkPlaneN.copy(leg.planeNormalBind);
       }
 
-      // Thigh exact orientation in `motionRoot` -> local to `Pelvis`
       this._vIkBinorm.crossVectors(this._vIkPlaneN, this._vIkThighDir);
       this._mIkBasis1.makeBasis(this._vIkPlaneN, this._vIkThighDir, this._vIkBinorm);
       this._mIkDelta.multiplyMatrices(this._mIkBasis1, leg.thighBasis0Inv);
@@ -1421,7 +1743,6 @@ export class GatewayRig {
       if (ikWeight >= 0.999) thigh.quaternion.copy(this._qIkLocalTmp);
       else thigh.quaternion.slerp(this._qIkLocalTmp, ikWeight);
 
-      // Shin exact orientation in `motionRoot` -> local to `Thigh`
       this._vIkBinorm.crossVectors(this._vIkPlaneN, this._vIkShinDir);
       this._mIkBasis1.makeBasis(this._vIkPlaneN, this._vIkShinDir, this._vIkBinorm);
       this._mIkDelta.multiplyMatrices(this._mIkBasis1, leg.shinBasis0Inv);
@@ -1431,7 +1752,6 @@ export class GatewayRig {
       if (ikWeight >= 0.999) shin.quaternion.copy(this._qIkLocalTmp);
       else shin.quaternion.slerp(this._qIkLocalTmp, ikWeight);
 
-      // Ankle & Foot locked flat to bind stone contact orientation
       this._qIkLocalTmp.copy(this._qIkShinRoot).invert().multiply(leg.ankleBindQuat);
       if (ikWeight >= 0.999) {
         ankle.quaternion.copy(this._qIkLocalTmp);
@@ -1446,7 +1766,87 @@ export class GatewayRig {
   }
 
   /**
-   * Updates `THREE.AnimationMixer` + zero-allocation procedural bone polish!
+   * Resolves the active facial mood (`happy`/`curious`/`determined`/`joyful`/`surprised`/`hurt`)
+   * from explicit overrides, gameplay state hints, or animation context.
+   */
+  _resolveTargetMood(ps, ctx) {
+    if (this._moodOverride && MOOD_SET.has(this._moodOverride)) {
+      return this._moodOverride;
+    }
+    if (typeof ps.mood === 'string') {
+      const m = ps.mood.toLowerCase() === 'celebrate' ? 'joyful' : ps.mood.toLowerCase();
+      if (MOOD_SET.has(m)) return m;
+    }
+    if (ctx.hurtTimer > 0.01) return 'hurt';
+    if (ctx.edgeTeeter > 0.15 || this._activeClipName === 'EdgeTeeter') return 'surprised';
+    if (
+      ctx.victory ||
+      ctx.springSomersault ||
+      this._titleHopTimer > 0.01 ||
+      this._titleWaveTimer > 0.15 ||
+      this._activeClipName === 'Celebrate' ||
+      this._activeClipName === 'SpringSomersault'
+    ) {
+      return 'joyful';
+    }
+    if (
+      ctx.whipTimer > 0.01 ||
+      this._whipHoldTimer > 0.01 ||
+      ctx.muzzleFlash > 0.01 ||
+      ctx.wallScamper ||
+      ctx.isCoreDive ||
+      ctx.pushingBox > 0.1 ||
+      ctx.speed > 2.55
+    ) {
+      return 'determined';
+    }
+    if (
+      this._activeClipName === 'IdleCurious' ||
+      (ctx.isTitleShowcase && this._pointerGazeActive) ||
+      (ctx.onGround && ctx.speed < 0.15 && Boolean(ps.lookTarget))
+    ) {
+      return 'curious';
+    }
+    return 'happy';
+  }
+
+  /**
+   * Updates organic natural blinking (`2.5–4.5s` irregular cadence + occasional cute double-blink!).
+   */
+  _updateOrganicBlink(dt) {
+    this._blinkTimer += dt;
+    if (!this._blinkActive) {
+      if (this._blinkTimer >= this._nextBlinkInterval) {
+        this._blinkActive = true;
+        this._blinkPhase = 0;
+        this._blinkTimer = 0;
+        this._blinkCount++;
+        // Deterministic organic interval in [2.5s .. 4.5s] (zero Math.random jitter in tests!)
+        const h = Math.abs(Math.sin(this._blinkCount * 12.9898 + 4.1414) * 43758.5453) % 1;
+        this._nextBlinkInterval = 2.5 + h * 2.0;
+        this._doubleBlinkQueued = this._blinkCount % 3 === 1;
+      }
+      return 0;
+    }
+
+    const blinkDur = 0.135;
+    this._blinkPhase += dt / blinkDur;
+    if (this._blinkPhase >= 1.0) {
+      if (this._doubleBlinkQueued) {
+        this._doubleBlinkQueued = false;
+        this._blinkPhase = -0.55; // Brief 75ms pause before 2nd cute blink!
+        return 0;
+      }
+      this._blinkActive = false;
+      this._blinkPhase = 0;
+      return 0;
+    }
+    if (this._blinkPhase < 0) return 0;
+    return Math.sin(this._blinkPhase * Math.PI);
+  }
+
+  /**
+   * Updates `THREE.AnimationMixer` + 6-Mood Facial Controller + Eye-Look + Spring Physics + Foot-IK!
    * Supports BOTH `update(dt, playerState, opts)` AND `update(playerState, dt, opts)`.
    */
   update(arg1, arg2, arg3) {
@@ -1488,13 +1888,53 @@ export class GatewayRig {
     const isCoreDive = Boolean(ps.coreDive || ps.diving);
     const isMantling = Boolean(ps.mantling || Number(ps.mantleTimer) > 0);
     const isCutscene = Boolean(ps.cutscene || ps.cutscenePose);
+    const isTitleShowcase = Boolean(ps.titleShowcase || ps.titleScreen);
+    const edgeTeeter = THREE.MathUtils.clamp(Number(ps.edgeTeeter) || 0, 0, 1);
+    const extWetShake = Math.max(0, Number(ps.wetShakeTimer) || 0);
+    const springSomersault = Boolean(ps.springSomersault || ps.somersault || this._somersaultTimer > 0.01);
     const speed = Math.abs(vx);
-    const speedNorm = THREE.MathUtils.clamp(speed / 3.3, 0, 1);
+    const speedNorm = THREE.MathUtils.clamp(speed / 3.55, 0, 1);
     const pushingBox = THREE.MathUtils.clamp(Number(ps.pushingBox) || 0, 0, 1);
     this._pushBlend = damp(this._pushBlend, onGround ? pushingBox : 0, 14, safeDt);
 
-    // STRICT FrillGlide Gate: ONLY play `FrillGlide` when `ps.isGliding === true`
-    // (or `glideRenderer.js` `gliding: true` / Sanctuary Wardrobe static glide preview — NEVER on tower jumps!)
+    // Handle Title Screen trigger hints from state object
+    if (ps.titleWave) this.triggerTitleWave(1.65);
+    if (ps.titleHop) this.triggerTitleHop(0.62);
+    if (ps.pointerGaze && typeof ps.pointerGaze === 'object') {
+      this._pointerGazeX = THREE.MathUtils.clamp(Number(ps.pointerGaze.x) || 0, -1, 1);
+      this._pointerGazeY = THREE.MathUtils.clamp(Number(ps.pointerGaze.y) || 0, -1, 1);
+      this._pointerGazeActive = ps.pointerGaze.active !== false;
+    }
+
+    if (this._titleWaveTimer > 0) this._titleWaveTimer = Math.max(0, this._titleWaveTimer - safeDt);
+    if (this._titleHopTimer > 0) this._titleHopTimer = Math.max(0, this._titleHopTimer - safeDt);
+    if (this._wetShakeTimer > 0) this._wetShakeTimer = Math.max(0, this._wetShakeTimer - safeDt);
+    if (this._somersaultTimer > 0) this._somersaultTimer = Math.max(0, this._somersaultTimer - safeDt);
+    const wetShakeActive = extWetShake > 0.01 || this._wetShakeTimer > 0.01;
+
+    // Track continuous quiet idle duration to auto-trigger adorable `IdleCurious` wave after 3.2s!
+    if (
+      onGround &&
+      speed < 0.08 &&
+      !onStairs &&
+      !wallScamper &&
+      !isSwimming &&
+      !isSurfing &&
+      !isCoreDive &&
+      !victory &&
+      !isCutscene &&
+      edgeTeeter < 0.1 &&
+      !wetShakeActive &&
+      whipTimer <= 0.01 &&
+      muzzleFlash <= 0.01 &&
+      hurtTimer <= 0.01
+    ) {
+      this._idleCuriosityTimer += safeDt;
+    } else {
+      this._idleCuriosityTimer = 0;
+    }
+
+    // STRICT FrillGlide Gate
     const isWardrobeGlidePreview =
       ps.anim === 'FrillGlide' && Number(ps.frillFlare) >= 0.99 && speed === 0 && vy === 0 && !onGround;
     const isGliding =
@@ -1502,7 +1942,6 @@ export class GatewayRig {
         ? Boolean(ps.isGliding)
         : Boolean(ps.gliding || ps.frillGlide || isWardrobeGlidePreview);
 
-    // Physical weight telemetry from 120Hz physics (`@physics_puzzles_lead`) + fallback inference
     const extLandSquash = THREE.MathUtils.clamp(
       Number(ps.landSquash ?? ps.landImpact) || 0,
       0,
@@ -1512,26 +1951,28 @@ export class GatewayRig {
     const hasExtStairBob = ps.stairStepBob !== undefined && ps.stairStepBob !== null;
     const extStairBob = Number(ps.stairStepBob) || 0;
 
-    // Detect heavy landing impact transitions (for impact crouch, knee bend, frill & tail whip!)
+    // Detect heavy landing impact transitions
     if (!this._wasOnGround && onGround && this._lastVy < -1.5) {
       const impactMag = THREE.MathUtils.clamp((-this._lastVy - 1.2) / 11.5, 0.28, 1.0);
       this._landTimer = 0.22 + impactMag * 0.10;
       this._landSquash = Math.max(this._landSquash, impactMag);
       this._landSquashVel = Math.max(this._landSquashVel, impactMag * 4.5);
-      // Heavy downward inertia whip impulse into 7-bone tail spring
       this._tailPitchVel -= impactMag * 12.5;
+      this._scarfPitchVel -= impactMag * 9.0;
+      this._frillVel -= impactMag * 6.5;
     }
     if (extLandSquash > this._landSquash) {
       const deltaImp = extLandSquash - this._landSquash;
       this._landSquash = extLandSquash;
       this._tailPitchVel -= deltaImp * 9.5;
+      this._scarfPitchVel -= deltaImp * 7.0;
     }
     this._wasOnGround = onGround;
     this._lastVy = vy;
     if (this._landTimer > 0) this._landTimer = Math.max(0, this._landTimer - safeDt);
     if (this._whipHoldTimer > 0) this._whipHoldTimer = Math.max(0, this._whipHoldTimer - safeDt);
 
-    // 2nd-order damped spring recovery on landing impact compression (`_landSquash`)
+    // 2nd-order damped spring recovery on landing compression
     const squashTarget = onGround ? extLandSquash * 0.85 : 0;
     const sqAccel = (squashTarget - this._landSquash) * 125.0 - this._landSquashVel * 14.5;
     this._landSquashVel += sqAccel * safeDt;
@@ -1542,7 +1983,7 @@ export class GatewayRig {
     );
     const landComp = Math.max(0, this._landSquash);
 
-    // Turn-around counter-steer skid detection (`skidTimer` OR high-speed reversal!)
+    // Turn-around counter-steer skid detection
     const autoSkid = onGround && !onStairs && speed > 1.25 && vx * dir < -0.35;
     const isSkidding = onGround && (extSkidTimer > 0.015 || autoSkid);
     if (isSkidding) {
@@ -1554,18 +1995,13 @@ export class GatewayRig {
     this._skidBlend = damp(this._skidBlend, targetSkid, isSkidding ? 22 : 12, safeDt);
     this._prevVx = vx;
 
-    // 1. Select & Cross-Fade Skeletal Animation Clip (`0.10s–0.18s`)
-    // Note: `renderer.js` passes `ps.anim` every frame from `hero.anim`. Only treat `opts?.clip || ps.clip`
-    // or showcase-only `ps.anim` (`Celebrate`, `CutsceneHero`, Wardrobe `StairClimb` at `speed === 0`)
-    // as hard overrides so calibrated `!onGround` (`AirRise`/`Fall`), touchdown `Land`, and distance-locked
-    // `Walk`/`FluidRun`/`StairClimb` stride speeds always govern live tower gameplay!
+    // 1. Select & Cross-Fade Among All 22 Skeletal Clips
     const hardClipOverride = opts?.clip || ps.clip || null;
     const animHint = typeof ps.anim === 'string' ? ps.anim : null;
     let wantClip = 'IdleBreathe';
     let fadeDur = 0.14;
     let timeScale = 1.0;
 
-    // Helper: exact distance-locked stride playback (`1 col = 1.323m`; `1.05m` walk, `1.52m` run, `1.27m` stair)
     const calcStrideTimeScale = (clipName, colSpeed) => {
       const worldMps = colSpeed * 1.323;
       const strideMeters = clipName === 'FluidRun' ? 1.52 : clipName === 'StairClimb' ? 1.27 : 1.05;
@@ -1577,8 +2013,8 @@ export class GatewayRig {
     if (hardClipOverride && typeof hardClipOverride === 'string') {
       const normOver = hardClipOverride.toLowerCase().replace(/[^a-z0-9]/g, '');
       if ((normOver === 'frillglide' || normOver === 'glide') && !isGliding) {
-        wantClip = vy >= 0.6 ? 'AirRise' : 'Fall';
-        fadeDur = vy >= 0.6 ? 0.10 : 0.14;
+        wantClip = vy >= -0.5 ? 'AirRise' : 'Fall';
+        fadeDur = vy >= -0.5 ? 0.07 : 0.13;
       } else {
         wantClip = hardClipOverride;
         fadeDur = 0.12;
@@ -1587,7 +2023,15 @@ export class GatewayRig {
           timeScale = speed > 0.05 ? calcStrideTimeScale(canon, speed) : 1.0;
         }
       }
-    } else if (victory || animHint === 'Celebrate') {
+    } else if (this._titleHopTimer > 0.01) {
+      wantClip = 'Celebrate';
+      fadeDur = 0.08;
+      timeScale = 1.35;
+    } else if (this._titleWaveTimer > 0.01) {
+      wantClip = 'IdleCurious';
+      fadeDur = 0.14;
+      timeScale = 1.0;
+    } else if (victory || animHint === 'Celebrate' || animHint === 'HeroCelebrate') {
       wantClip = 'Celebrate';
       fadeDur = 0.16;
     } else if (isCutscene || animHint === 'CutsceneHero') {
@@ -1618,13 +2062,26 @@ export class GatewayRig {
       wantClip = 'FrillGlide';
       fadeDur = 0.14;
     } else if (!onGround) {
-      if (vy >= 0.6) {
+      if (springSomersault || animHint === 'SpringSomersault') {
+        wantClip = 'SpringSomersault';
+        fadeDur = 0.06;
+        timeScale = 1.18;
+      } else if (vy >= -0.5) {
+        // Sync with calibrated apex hang (`bible_physics_touch.md` §4.4 #3: snappy 0.07s fade & hold through apex!)
         wantClip = 'AirRise';
-        fadeDur = 0.10;
+        fadeDur = 0.07;
       } else {
         wantClip = 'Fall';
-        fadeDur = 0.14;
+        fadeDur = 0.13;
       }
+    } else if (wetShakeActive || animHint === 'WetShake') {
+      wantClip = 'WetShake';
+      fadeDur = 0.08;
+      timeScale = 1.18;
+    } else if (edgeTeeter > 0.15 || animHint === 'EdgeTeeter') {
+      wantClip = 'EdgeTeeter';
+      fadeDur = 0.10;
+      timeScale = 1.12;
     } else if (this._landTimer > 0.02 && speed < 0.10) {
       wantClip = 'Land';
       fadeDur = 0.08;
@@ -1633,7 +2090,6 @@ export class GatewayRig {
       fadeDur = 0.09;
       timeScale = 1.25;
     } else if (animHint === 'StairClimb' && speed < 0.05) {
-      // Sanctuary Wardrobe `StairClimb` pill preview
       wantClip = 'StairClimb';
       fadeDur = 0.12;
       timeScale = 1.0;
@@ -1649,6 +2105,13 @@ export class GatewayRig {
       wantClip = 'Walk';
       fadeDur = 0.14;
       timeScale = calcStrideTimeScale('Walk', Math.max(speed, this._pushBlend * 0.85));
+    } else if (
+      animHint === 'IdleCurious' ||
+      (this._idleCuriosityTimer > 3.2 && this._idleCuriosityTimer % 7.5 < 2.2)
+    ) {
+      wantClip = 'IdleCurious';
+      fadeDur = 0.20;
+      timeScale = 0.92;
     }
 
     this.playAction(wantClip, fadeDur, timeScale);
@@ -1656,13 +2119,12 @@ export class GatewayRig {
       this.mixer.update(safeDt);
     }
 
-    // Keep shadow casting locked on for Gateway's SkinnedMesh (1 shadow draw call!)
     if (this.skinnedMesh) {
       this.skinnedMesh.castShadow = true;
       this.skinnedMesh.receiveShadow = true;
     }
 
-    // Grounded 2-bone Foot-IK eligibility (`maxFootDriftMm = 0.0mm` across IdleBreathe, HydroCast & Land crouch!)
+    // Grounded 2-bone Foot-IK eligibility (`< 0.05mm` drift across idle, curious wave, teeter, wet shake, cast & land!)
     const ikEligible =
       onGround &&
       !isSwimming &&
@@ -1672,15 +2134,20 @@ export class GatewayRig {
       !isGliding &&
       !isCoreDive &&
       !victory &&
+      this._titleHopTimer <= 0.01 &&
       this._activeClipName !== 'Celebrate' &&
       this._activeClipName !== 'StairClimb' &&
       speed < 0.10 &&
       whipTimer <= 0.01 &&
       this._whipHoldTimer <= 0.01 &&
       doorBlend <= 0.02;
-    const ikWeight = ikEligible ? (speed <= 0.02 ? 1.0 : THREE.MathUtils.clamp((0.10 - speed) / 0.08, 0, 1)) : 0.0;
+    const ikWeight = ikEligible
+      ? speed <= 0.02
+        ? 1.0
+        : THREE.MathUtils.clamp((0.10 - speed) / 0.08, 0, 1)
+      : 0.0;
 
-    // 2. Motion Root Heading Yaw, Distance-Locked Stride Phase, Door Entry & Squash/Stretch
+    // 2. Motion Root Heading Yaw, Stride Phase, Title Hop Arc & Squash/Stretch
     if ((onGround && speed >= 0.10) || doorBlend > 0.05) {
       const effColSpeed = Math.max(speed, doorBlend * 2.4);
       const strideM = wantClip === 'FluidRun' ? 1.52 : wantClip === 'StairClimb' ? 1.18 : 1.05;
@@ -1689,9 +2156,12 @@ export class GatewayRig {
 
     let targetYaw = dir * (0.42 + speedNorm * 0.74);
     if (wallScamper) {
-      targetYaw = Math.PI + dir * 0.12; // Face spire wall during gecko crystal climb!
+      targetYaw = Math.PI + dir * 0.12;
     } else if (isSwimming || isSurfing || isCoreDive) {
       targetYaw = ps.yawOverride != null ? Number(ps.yawOverride) : 0;
+    } else if (isTitleShowcase) {
+      // Face player warmly on Title Screen with subtle pointer lean!
+      targetYaw = THREE.MathUtils.clamp(this._pointerGazeX * 0.28, -0.32, 0.32);
     } else if (victory || isCutscene) {
       targetYaw = Math.sin(time * 2.2) * 0.24;
     } else if (doorBlend > 0.001) {
@@ -1710,32 +2180,43 @@ export class GatewayRig {
     let yawVel = (this._yaw - this._prevYaw) / safeDt;
     yawVel = THREE.MathUtils.clamp(yawVel, -14, 14);
 
-    const baseSx = THREE.MathUtils.clamp(Number(ps.squashX) || 1, 0.86, 1.16);
-    const baseSy = THREE.MathUtils.clamp(Number(ps.squashY) || 1, 0.84, 1.16);
+    // Interactive Title Hop joyful bounce arc + 360° celebratory spin!
+    let titleHopY = 0;
+    let titleHopSpin = 0;
+    let titleHopSx = 1;
+    let titleHopSy = 1;
+    if (this._titleHopTimer > 0.001) {
+      const uHop = 1 - this._titleHopTimer / this._titleHopDuration;
+      const arc = Math.sin(uHop * Math.PI);
+      titleHopY = arc * 0.26;
+      titleHopSpin = uHop * Math.PI * 2;
+      titleHopSy = 1 + arc * 0.12 - (uHop > 0.85 ? (1 - (1 - uHop) / 0.15) * 0.10 : 0);
+      titleHopSx = 1 / Math.sqrt(Math.max(0.8, titleHopSy));
+    }
+
+    const baseSx = THREE.MathUtils.clamp((Number(ps.squashX) || 1) * titleHopSx, 0.84, 1.18);
+    const baseSy = THREE.MathUtils.clamp((Number(ps.squashY) || 1) * titleHopSy, 0.82, 1.18);
 
     const motionRoot = this._motionRoot || this._standInGroup;
     if (motionRoot) {
-      motionRoot.rotation.set(0, this._yaw, 0);
-      // When grounded IK is active, keep `motionRoot.scale = (1,1,1)` and absorb vertical compression
-      // directly into `Pelvis.position.y` so planted feet NEVER slide laterally from root scale!
+      motionRoot.rotation.set(0, this._yaw + titleHopSpin, 0);
       const rawSx = THREE.MathUtils.clamp(baseSx * (1 + landComp * 0.085), 0.84, 1.22);
       const rawSy = THREE.MathUtils.clamp(baseSy * (1 - landComp * 0.095), 0.78, 1.20);
       const sx = THREE.MathUtils.lerp(rawSx, 1.0, ikWeight);
       const sy = THREE.MathUtils.lerp(rawSy, 1.0, ikWeight);
       motionRoot.scale.set(sx, sy, sx);
-      // EXACT y = 0.000 feet grounding — ZERO upward hover offset!
-      motionRoot.position.set(0, 0, -doorBlend * 0.34);
+      motionRoot.position.set(0, titleHopY, -doorBlend * 0.34);
     }
 
     // Invulnerability bioluminescent pulse shimmer
     if (invuln > 0) {
       const pulse = 0.5 + 0.5 * Math.sin(time * 30);
-      this.mainMat.emissiveIntensity = 0.78 + pulse * 0.85;
-    } else if (this.mainMat.emissiveIntensity > 0.82) {
-      this.mainMat.emissiveIntensity = 0.78;
+      this.mainMat.emissiveIntensity = 0.85 + pulse * 0.85;
+    } else if (this.mainMat.emissiveIntensity > 0.88) {
+      this.mainMat.emissiveIntensity = 0.85;
     }
 
-    // 3. Additive Spine Turn-Banking, Trajectory Jump Pitch, Box-Push Lean, Skid & Landing Compression
+    // 3. Additive Spine Banking, Jump Pitch, Box-Push Lean, Skid & Landing Compression
     const b = this.bones;
     const surfBank = Number(ps.surfBank) || 0;
     const skidLean = this._skidBlend * this._skidDir;
@@ -1747,12 +2228,12 @@ export class GatewayRig {
     this._bankRoll = damp(this._bankRoll, targetBank, 14, safeDt);
     const hurtPitch = hurtTimer > 0 ? -0.35 * Math.min(1, hurtTimer / 0.25) : 0;
     const airTrajectoryPitch =
-      !onGround && !isGliding && !isSwimming && !isSurfing && !wallScamper && !isMantling
-        ? vy >= 0.6
+      !onGround && !isGliding && !isSwimming && !isSurfing && !wallScamper && !isMantling && !springSomersault
+        ? vy >= -0.5
           ? THREE.MathUtils.clamp(-vy * 0.018, -0.22, 0.05)
-          : THREE.MathUtils.clamp((-vy - 0.6) * 0.022, 0, 0.24)
+          : THREE.MathUtils.clamp((-vy - 0.5) * 0.020, 0, 0.22)
         : 0;
-    const landTorsoPitch = landComp * 0.28;
+    const landTorsoPitch = landComp * 0.24;
     const skidTorsoPitch = this._skidBlend * 0.16;
     const pushTorsoPitch = this._pushBlend * 0.36;
     const totalTorsoPitch = hurtPitch + landTorsoPitch + skidTorsoPitch + airTrajectoryPitch + pushTorsoPitch;
@@ -1762,7 +2243,6 @@ export class GatewayRig {
     this._addBoneLocalEuler(b.Chest, totalTorsoPitch * 0.26, skidLean * 0.10, this._bankRoll * 0.28);
 
     if (this._pushBlend > 0.02) {
-      // Shoulder & palm brace against heavy Pelagian Siphon Crates (`ps.pushingBox > 0.02`)!
       const pb = this._pushBlend;
       this._addBoneLocalEuler(b.ClavicleL, 0.14 * pb, 0, 0);
       this._addBoneLocalEuler(b.ClavicleR, 0.14 * pb, 0, 0);
@@ -1775,8 +2255,7 @@ export class GatewayRig {
       this._addBoneLocalEuler(b.Head, -0.22 * pb, 0, 0);
     }
 
-    // 3b. Heavy Landing Compression (`landSquash`) + Skid Crouch Pelvis Drop & Deep Knee Bend!
-    // Feet stay pinned at exact `y = 0.000` while hips absorb weight and knees flex deeply.
+    // 3b. Landing Compression + Skid Crouch Pelvis Drop & Stair Step Hints
     const stairActive = onGround && onStairs && speed > 0.08 ? 1 : 0;
     const rawStairBob = stairActive
       ? hasExtStairBob
@@ -1786,12 +2265,11 @@ export class GatewayRig {
     this._stairBobSmooth = damp(this._stairBobSmooth, rawStairBob, 24, safeDt);
 
     if (b.Pelvis) {
-      const landPelvisDrop = -landComp * 0.14;
-      const skidPelvisDrop = -this._skidBlend * 0.055;
-      const pushPelvisDrop = -this._pushBlend * 0.045;
-      const ikSquashDrop = ikWeight * THREE.MathUtils.clamp((baseSy - 1) * 0.35, -0.09, 0.0);
-      // Subtle pelvis compression on riser push-off (never floats root off stone!)
-      const stairPelvisDelta = stairActive ? this._stairBobSmooth * 0.048 - 0.018 : 0;
+      const landPelvisDrop = -landComp * 0.085;
+      const skidPelvisDrop = -this._skidBlend * 0.042;
+      const pushPelvisDrop = -this._pushBlend * 0.032;
+      const ikSquashDrop = ikWeight * THREE.MathUtils.clamp((baseSy - 1) * 0.22, -0.06, 0.0);
+      const stairPelvisDelta = stairActive ? this._stairBobSmooth * 0.038 - 0.014 : 0;
       const pelvisDeltaY = landPelvisDrop + skidPelvisDrop + pushPelvisDrop + ikSquashDrop + stairPelvisDelta;
       if (this._glbApplied) {
         b.Pelvis.position.y += pelvisDeltaY;
@@ -1801,27 +2279,23 @@ export class GatewayRig {
         b.Pelvis.position.y += pelvisDeltaY;
       }
       if (stairActive) {
-        // Weight shift roll onto planted foot per 30cm stone riser!
         const weightShift = Math.sin(this._stridePhase) * 0.095;
         this._addBoneLocalEuler(b.Pelvis, 0.05 * (stairSlope >= 0 ? 1 : -0.6), 0, weightShift);
       }
     }
 
     if (landComp > 0.015) {
-      // Deep athletic knee & hip bend with flat dorsiflexed soles on stone!
-      this._addBoneLocalEuler(b.ThighL, -0.58 * landComp, 0, -0.08 * landComp);
-      this._addBoneLocalEuler(b.ThighR, -0.58 * landComp, 0, 0.08 * landComp);
-      this._addBoneLocalEuler(b.ShinL, 0.96 * landComp, 0, 0);
-      this._addBoneLocalEuler(b.ShinR, 0.96 * landComp, 0, 0);
-      this._addBoneLocalEuler(b.AnkleL, -0.38 * landComp, 0, 0);
-      this._addBoneLocalEuler(b.AnkleR, -0.38 * landComp, 0, 0);
-      // Arms spread slightly for landing balance
+      this._addBoneLocalEuler(b.ThighL, -0.52 * landComp, 0, -0.08 * landComp);
+      this._addBoneLocalEuler(b.ThighR, -0.52 * landComp, 0, 0.08 * landComp);
+      this._addBoneLocalEuler(b.ShinL, 0.88 * landComp, 0, 0);
+      this._addBoneLocalEuler(b.ShinR, 0.88 * landComp, 0, 0);
+      this._addBoneLocalEuler(b.AnkleL, -0.34 * landComp, 0, 0);
+      this._addBoneLocalEuler(b.AnkleR, -0.34 * landComp, 0, 0);
       this._addBoneLocalEuler(b.UpperArmL, 0.18 * landComp, 0, 0.28 * landComp);
       this._addBoneLocalEuler(b.UpperArmR, 0.18 * landComp, 0, -0.28 * landComp);
     }
 
     if (this._skidBlend > 0.02) {
-      // Turn-around braced leg plant (lead leg braces forward, rear leg bends behind!)
       const sb = this._skidBlend;
       const leadL = this._skidDir > 0;
       const leadThigh = leadL ? b.ThighL : b.ThighR;
@@ -1829,44 +2303,38 @@ export class GatewayRig {
       const leadAnkle = leadL ? b.AnkleL : b.AnkleR;
       const trailThigh = leadL ? b.ThighR : b.ThighL;
       const trailShin = leadL ? b.ShinR : b.ShinL;
-      this._addBoneLocalEuler(leadThigh, -0.44 * sb, 0, 0);
-      this._addBoneLocalEuler(leadShin, -0.16 * sb, 0, 0);
-      this._addBoneLocalEuler(leadAnkle, 0.28 * sb, 0, 0);
-      this._addBoneLocalEuler(trailThigh, 0.34 * sb, 0, 0);
-      this._addBoneLocalEuler(trailShin, 0.52 * sb, 0, 0);
-      // Athletic arm counter-sweep during skid
+      this._addBoneLocalEuler(leadThigh, -0.42 * sb, 0, 0);
+      this._addBoneLocalEuler(leadShin, -0.14 * sb, 0, 0);
+      this._addBoneLocalEuler(leadAnkle, 0.24 * sb, 0, 0);
+      this._addBoneLocalEuler(trailThigh, 0.32 * sb, 0, 0);
+      this._addBoneLocalEuler(trailShin, 0.48 * sb, 0, 0);
       this._addBoneLocalEuler(b.UpperArmL, -0.26 * sb * this._skidDir, 0, 0.24 * sb);
       this._addBoneLocalEuler(b.UpperArmR, 0.26 * sb * this._skidDir, 0, -0.24 * sb);
     }
 
-    // 4. Discrete 5-Riser Stair Stepping (`onStairs` / `stairStepBob` — 30cm stone treads!)
+    // 4. Discrete 5-Riser Stair Stepping
     if (stairActive > 0) {
       const ascending = stairSlope >= 0;
       const slopeSign = ascending ? 1 : -1;
-      // Combine continuous stride cycle with physics `stairStepBob` pulse for crisp riser lift!
       const bobBoost = hasExtStairBob ? Math.abs(this._stairBobSmooth) * 0.55 : 0.35;
       const lCycle = Math.sin(this._stridePhase);
       const lLift = Math.max(0, lCycle) * (0.45 + bobBoost);
       const rLift = Math.max(0, -lCycle) * (0.45 + bobBoost);
 
       if (ascending) {
-        // High unmistakable knee lift onto each 30cm stone riser + flat tread foot plant!
         this._addBoneLocalEuler(b.ThighL, -0.58 * lLift, 0, 0);
         this._addBoneLocalEuler(b.ShinL, 0.86 * lLift, 0, 0);
         this._addBoneLocalEuler(b.AnkleL, -0.24 * lLift + lCycle * 0.16, 0, 0);
         this._addBoneLocalEuler(b.FootL, -lCycle * 0.14, 0, 0);
-
         this._addBoneLocalEuler(b.ThighR, -0.58 * rLift, 0, 0);
         this._addBoneLocalEuler(b.ShinR, 0.86 * rLift, 0, 0);
         this._addBoneLocalEuler(b.AnkleR, -0.24 * rLift - lCycle * 0.16, 0, 0);
         this._addBoneLocalEuler(b.FootR, lCycle * 0.14, 0, 0);
       } else {
-        // Controlled downhill knee-cushioning bend on each 30cm step descent
         this._addBoneLocalEuler(b.ThighL, -0.24 * lLift, 0, 0);
         this._addBoneLocalEuler(b.ShinL, 0.52 * (0.35 + lLift), 0, 0);
         this._addBoneLocalEuler(b.AnkleL, lCycle * 0.16 * slopeSign, 0, 0);
         this._addBoneLocalEuler(b.FootL, -lCycle * 0.14 * slopeSign, 0, 0);
-
         this._addBoneLocalEuler(b.ThighR, -0.24 * rLift, 0, 0);
         this._addBoneLocalEuler(b.ShinR, 0.52 * (0.35 + rLift), 0, 0);
         this._addBoneLocalEuler(b.AnkleR, -lCycle * 0.16 * slopeSign, 0, 0);
@@ -1874,61 +2342,185 @@ export class GatewayRig {
       }
     }
 
-    // 5. Head & Soulful Eye Look-At + Natural Double-Blink Cycle
+    // 5. 6-Mood Live Facial Expression Controller + Organic Blinking + Live Eye-Look Tracking!
+    const targetMood = this._resolveTargetMood(ps, {
+      hurtTimer,
+      edgeTeeter,
+      victory,
+      springSomersault,
+      whipTimer,
+      muzzleFlash,
+      wallScamper,
+      isCoreDive,
+      pushingBox,
+      speed,
+      isTitleShowcase,
+      onGround,
+    });
+    this.currentMood = targetMood;
+    const mSpec = MOOD_TARGETS[targetMood] || MOOD_TARGETS.happy;
+    const fs = this._faceState;
+    const fLambda = 16;
+    fs.uLidL = damp(fs.uLidL, mSpec.uLidL, fLambda, safeDt);
+    fs.uLidR = damp(fs.uLidR, mSpec.uLidR, fLambda, safeDt);
+    fs.lLidL = damp(fs.lLidL, mSpec.lLidL, fLambda, safeDt);
+    fs.lLidR = damp(fs.lLidR, mSpec.lLidR, fLambda, safeDt);
+    fs.browYL = damp(fs.browYL, mSpec.browYL, fLambda, safeDt);
+    fs.browYR = damp(fs.browYR, mSpec.browYR, fLambda, safeDt);
+    fs.browRollL = damp(fs.browRollL, mSpec.browRollL, fLambda, safeDt);
+    fs.browRollR = damp(fs.browRollR, mSpec.browRollR, fLambda, safeDt);
+    fs.jaw = damp(fs.jaw, mSpec.jaw, fLambda, safeDt);
+    fs.smileY = damp(fs.smileY, mSpec.smileY, fLambda, safeDt);
+    fs.frill = damp(fs.frill, mSpec.frill, 12, safeDt);
+
+    // Live Eye-Look & Head Gaze Tracking (threats/collectibles/pointer/camera!)
     let wantHeadYaw = 0;
     let wantHeadPitch = 0;
-    if (ps.lookTarget && typeof ps.lookTarget === 'object') {
-      wantHeadYaw = THREE.MathUtils.clamp(Number(ps.lookTarget.dTheta || ps.lookTarget.yaw) || 0, -0.52, 0.52);
-      wantHeadPitch = THREE.MathUtils.clamp(Number(ps.lookTarget.dy || ps.lookTarget.pitch) || 0, -0.35, 0.35);
+    if (isTitleShowcase && this._pointerGazeActive) {
+      wantHeadYaw = THREE.MathUtils.clamp(this._pointerGazeX * 0.44, -0.48, 0.48);
+      wantHeadPitch = THREE.MathUtils.clamp(-this._pointerGazeY * 0.30, -0.32, 0.32);
+    } else if (ps.lookTarget && typeof ps.lookTarget === 'object') {
+      wantHeadYaw = THREE.MathUtils.clamp(
+        Number(ps.lookTarget.dTheta ?? ps.lookTarget.yaw ?? ps.lookTarget.x) || 0,
+        -0.55,
+        0.55
+      );
+      wantHeadPitch = THREE.MathUtils.clamp(
+        Number(ps.lookTarget.dy ?? ps.lookTarget.pitch ?? ps.lookTarget.y) || 0,
+        -0.36,
+        0.36
+      );
+    } else if (this._pointerGazeActive) {
+      wantHeadYaw = THREE.MathUtils.clamp(this._pointerGazeX * 0.38, -0.44, 0.44);
+      wantHeadPitch = THREE.MathUtils.clamp(-this._pointerGazeY * 0.26, -0.28, 0.28);
     } else if (onGround && speed < 0.2 && !victory) {
-      wantHeadYaw = Math.sin(time * 1.15) * 0.12;
-      wantHeadPitch = Math.cos(time * 1.65) * 0.04;
+      wantHeadYaw = Math.sin(time * 1.15) * 0.14;
+      wantHeadPitch = Math.cos(time * 1.65) * 0.05;
     }
+
     this._headLookYaw = damp(this._headLookYaw, wantHeadYaw, 10, safeDt);
     this._headLookPitch = damp(this._headLookPitch, wantHeadPitch, 10, safeDt);
-    this._addBoneLocalEuler(b.Neck, this._headLookPitch * 0.35, this._headLookYaw * 0.35, 0);
-    this._addBoneLocalEuler(b.Head, this._headLookPitch * 0.65, this._headLookYaw * 0.65, -this._bankRoll * 0.35);
-    this._addBoneLocalEuler(b.EyeL, this._headLookPitch * 0.25, this._headLookYaw * 0.30, 0);
-    this._addBoneLocalEuler(b.EyeR, this._headLookPitch * 0.25, this._headLookYaw * 0.30, 0);
+    // Eyes lead head faster (crisp Pixar eye-dart!)
+    this._eyeLookYaw = damp(this._eyeLookYaw, wantHeadYaw, 22, safeDt);
+    this._eyeLookPitch = damp(this._eyeLookPitch, wantHeadPitch, 22, safeDt);
 
-    const blinkMod = time % 4.4;
-    const isDouble = Math.floor(time / 4.4) % 3 === 1;
-    let blink = 0;
-    if (blinkMod < 0.12) blink = Math.sin((blinkMod / 0.12) * Math.PI);
-    else if (isDouble && blinkMod > 0.20 && blinkMod < 0.31) blink = Math.sin(((blinkMod - 0.20) / 0.11) * Math.PI);
-    if (hurtTimer > 0) blink = Math.max(blink, 0.65);
-    if (blink > 0.01) {
-      this._addBoneLocalEuler(b.EyelidL, blink * 0.72, 0, 0);
-      this._addBoneLocalEuler(b.EyelidR, blink * 0.72, 0, 0);
+    this._addBoneLocalEuler(b.Neck, this._headLookPitch * 0.28, this._headLookYaw * 0.28, 0);
+    this._addBoneLocalEuler(
+      b.Head,
+      this._headLookPitch * 0.56,
+      this._headLookYaw * 0.56,
+      -this._bankRoll * 0.32
+    );
+
+    // Reset facial bones cleanly to bind rest pose before applying crisp 6-mood expression + blink + eye-look!
+    const blinkVal = this._updateOrganicBlink(safeDt);
+    const applyBindReset = (name) => {
+      const bone = b[name];
+      const bind = this._faceBind[name];
+      if (!bone || !bind) return null;
+      bone.position.copy(bind.pos);
+      bone.quaternion.copy(bind.quat);
+      return bone;
+    };
+
+    const eyeL = applyBindReset('EyeL');
+    const eyeR = applyBindReset('EyeR');
+    const eyeYawClamped = THREE.MathUtils.clamp(this._eyeLookYaw * 0.45, -0.28, 0.28);
+    const eyePitchClamped = THREE.MathUtils.clamp(this._eyeLookPitch * 0.38, -0.22, 0.22);
+    this._addBoneLocalEuler(eyeL, eyePitchClamped, eyeYawClamped, 0);
+    this._addBoneLocalEuler(eyeR, eyePitchClamped, eyeYawClamped, 0);
+
+    const uLidL = applyBindReset('EyelidL');
+    const uLidR = applyBindReset('EyelidR');
+    const blinkClose = blinkVal * 0.92;
+    const effULidL = THREE.MathUtils.clamp(blinkVal > 0.001 ? Math.max(fs.uLidL, blinkClose) : fs.uLidL, -0.32, 0.96);
+    const effULidR = THREE.MathUtils.clamp(blinkVal > 0.001 ? Math.max(fs.uLidR, blinkClose) : fs.uLidR, -0.32, 0.96);
+    this._addBoneLocalEuler(uLidL, effULidL, 0, 0);
+    this._addBoneLocalEuler(uLidR, effULidR, 0, 0);
+
+    const lLidL = applyBindReset('LowerLidL');
+    const lLidR = applyBindReset('LowerLidR');
+    this._addBoneLocalEuler(lLidL, THREE.MathUtils.clamp(fs.lLidL, -0.18, 0.72), 0, 0);
+    this._addBoneLocalEuler(lLidR, THREE.MathUtils.clamp(fs.lLidR, -0.18, 0.72), 0, 0);
+
+    const browL = applyBindReset('BrowL');
+    const browR = applyBindReset('BrowR');
+    if (browL) {
+      browL.position.y += fs.browYL;
+      this._addBoneLocalEuler(browL, 0, fs.browRollL, 0);
+    }
+    if (browR) {
+      browR.position.y += fs.browYR;
+      this._addBoneLocalEuler(browR, 0, fs.browRollR, 0);
     }
 
-    // 6. Dynamic Aquatic Head-Frill Flare, Landing Whip & Aero-Flutter
+    const jaw = applyBindReset('Jaw');
+    if (jaw && Math.abs(fs.jaw) > 0.002) {
+      this._addBoneLocalEuler(jaw, fs.jaw, 0, 0);
+    }
+    const mouthSmile = applyBindReset('MouthSmile');
+    if (mouthSmile) {
+      mouthSmile.position.y += fs.smileY;
+    }
+
+    // 6. 2nd-Order Spring-Damped 6-Frill Coral Ear-Frill Physics (`FrillL1/L2/FrillBotL`, `FrillR1/R2/FrillBotR`)!
     const extFlare = Number(ps.frillFlare) || 0;
-    const targetFlare = Math.max(
+    const targetFrill = Math.max(
       extFlare,
       isGliding
-        ? 0.52
+        ? 0.58
         : !onGround
-          ? 0.12 + THREE.MathUtils.clamp(-vy * 0.016, 0, 0.16)
+          ? 0.14 + THREE.MathUtils.clamp(-vy * 0.018, 0, 0.20)
           : muzzleFlash > 0.01 || whipTimer > 0.01
-            ? 0.38
-            : this._skidBlend * 0.26
+            ? 0.42
+            : this._skidBlend * 0.28 + fs.frill * 0.55
     );
-    this._frillFlare = damp(this._frillFlare, targetFlare, 14, safeDt);
-    // Landing impact whips head-frills sharply downward with inertia then rebounds!
-    const frillLandDip = -landComp * 0.42;
-    const flutter =
-      (isGliding ? Math.sin(time * 24) * 0.065 : !onGround ? Math.sin(time * 18) * 0.025 : 0) +
-      this._frillFlare +
-      frillLandDip;
-    if (Math.abs(flutter) > 0.005) {
-      this._addBoneLocalEuler(b.FrillL1, flutter * 0.55, 0, 0);
-      this._addBoneLocalEuler(b.FrillL2, flutter * 0.78, 0, 0);
-      this._addBoneLocalEuler(b.FrillR1, flutter * 0.55, 0, 0);
-      this._addBoneLocalEuler(b.FrillR2, flutter * 0.78, 0, 0);
+    const frillAcc = (targetFrill - this._frillFlare) * 110.0 - this._frillVel * 11.5;
+    this._frillVel += frillAcc * safeDt;
+    this._frillFlare = THREE.MathUtils.clamp(this._frillFlare + this._frillVel * safeDt, -0.45, 0.85);
+    const frillAero =
+      (isGliding ? Math.sin(time * 24) * 0.065 : !onGround ? Math.sin(time * 18) * 0.030 : Math.sin(time * 3.8) * 0.022) +
+      this._frillFlare -
+      landComp * 0.36;
+    if (Math.abs(frillAero) > 0.004) {
+      this._addBoneLocalEuler(b.FrillL1, frillAero * 0.52, 0, 0);
+      this._addBoneLocalEuler(b.FrillL2, frillAero * 0.74, 0, 0);
+      this._addBoneLocalEuler(b.FrillBotL, frillAero * 0.44, 0, 0);
+      this._addBoneLocalEuler(b.FrillR1, frillAero * 0.52, 0, 0);
+      this._addBoneLocalEuler(b.FrillR2, frillAero * 0.74, 0, 0);
+      this._addBoneLocalEuler(b.FrillBotR, frillAero * 0.44, 0, 0);
     }
 
-    // 7. Upper-Body Run-And-Cast Additive Layer + Hydro-Caster Palm Flash
+    // 7. 2nd-Order Spring-Damped 4-Bone Flowing Sea-Silk Scarf Physics (`ScarfL1/L2`, `ScarfR1/R2`)!
+    const scarfSpringK = 78.0;
+    const scarfDamp = 8.4;
+    const scarfPitchTarget = THREE.MathUtils.clamp(
+      speedNorm * 0.44 - vy * 0.042 + (isGliding ? 0.50 : 0) - landComp * 0.32,
+      -0.65,
+      0.78
+    );
+    const scarfYawTarget = THREE.MathUtils.clamp(
+      yawVel * 0.048 + skidLean * 0.44 + (whipTimer > 0 ? 0.55 : 0),
+      -0.75,
+      0.75
+    );
+    this._scarfPitchVel += ((scarfPitchTarget - this._scarfPitchLag) * scarfSpringK - this._scarfPitchVel * scarfDamp) * safeDt;
+    this._scarfPitchLag = THREE.MathUtils.clamp(this._scarfPitchLag + this._scarfPitchVel * safeDt, -0.75, 0.85);
+    this._scarfYawVel += ((scarfYawTarget - this._scarfYawLag) * scarfSpringK - this._scarfYawVel * scarfDamp) * safeDt;
+    this._scarfYawLag = THREE.MathUtils.clamp(this._scarfYawLag + this._scarfYawVel * safeDt, -0.82, 0.82);
+
+    const breezeFreq = 4.6 + speedNorm * 6.5 + (isGliding ? 5.0 : 0);
+    const breezeAmp = 0.055 + speedNorm * 0.085 + (isGliding ? 0.08 : 0);
+    const flutterL1 = Math.sin(time * breezeFreq) * breezeAmp;
+    const flutterL2 = Math.sin(time * breezeFreq - 0.95) * breezeAmp * 1.45;
+    const flutterR1 = Math.sin(time * breezeFreq + 0.75) * breezeAmp;
+    const flutterR2 = Math.sin(time * breezeFreq - 0.25) * breezeAmp * 1.45;
+    this._addBoneLocalEuler(b.ScarfL1, this._scarfPitchLag * 0.55 + flutterL1, 0, this._scarfYawLag * 0.52 + flutterL1 * 0.6);
+    this._addBoneLocalEuler(b.ScarfL2, this._scarfPitchLag * 0.72 + flutterL2, 0, this._scarfYawLag * 0.76 + flutterL2 * 0.7);
+    this._addBoneLocalEuler(b.ScarfR1, this._scarfPitchLag * 0.52 + flutterR1, 0, this._scarfYawLag * 0.50 + flutterR1 * 0.6);
+    this._addBoneLocalEuler(b.ScarfR2, this._scarfPitchLag * 0.68 + flutterR2, 0, this._scarfYawLag * 0.72 + flutterR2 * 0.7);
+
+    // 8. Upper-Body Run-And-Cast Additive Layer + Hydro-Caster Palm Flash
     const castingNow = muzzleFlash > 0.002;
     this._castBlend = damp(this._castBlend, castingNow ? 1 : 0, castingNow ? 32 : 11, safeDt);
     this._recoil = castingNow ? Math.min(1, muzzleFlash / 0.12) : damp(this._recoil, 0, 18, safeDt);
@@ -1953,7 +2545,7 @@ export class GatewayRig {
       }
     }
 
-    // 8. 2nd-Order Spring-Damped 7-Bone Dynamic Lizard Tail Physics (`Tail1`..`Tail7`)!
+    // 9. 2nd-Order Spring-Damped 7-Bone Plush Tail Physics (`Tail1`..`Tail7`)!
     const tailSpringK = 92.0;
     const tailDamp = 9.2;
     const yawImpulse = THREE.MathUtils.clamp(yawVel * 0.042 + skidLean * 0.34, -0.62, 0.62);
@@ -1966,19 +2558,21 @@ export class GatewayRig {
     this._tailPitchLag = THREE.MathUtils.clamp(this._tailPitchLag + this._tailPitchVel * safeDt, -0.58, 0.52);
 
     const swimExtra = Number(ps.swimPhase) || 0;
+    const happyWagBoost = targetMood === 'joyful' ? 1.45 : isTitleShowcase ? 1.25 : 1.0;
     for (let ti = 1; ti <= 7; ti++) {
       const tBone = b[`Tail${ti}`];
       if (!tBone) continue;
       const chainGain = 0.16 + ti * 0.055;
       const sWave =
-        Math.sin(time * (4.2 + speedNorm * 4.5) - ti * 0.62 + swimExtra) *
-        (0.035 + speedNorm * 0.055);
+        Math.sin(time * (4.4 + speedNorm * 4.5) - ti * 0.62 + swimExtra) *
+        (0.038 + speedNorm * 0.055) *
+        happyWagBoost;
       const addRx = this._tailPitchLag * chainGain;
       const addRz = this._tailYawLag * chainGain + sWave;
       this._addBoneLocalEuler(tBone, addRx, 0, addRz);
     }
 
-    // 9. Sovereign Starlight Prestige Orbiting Aurora Water-Starlight Droplets (1 InstancedMesh draw call!)
+    // 10. Sovereign Starlight Prestige Orbiting Aurora Droplets
     if (this._starMotesGroup && this._starMotesGroup.visible && this._starMoteInst) {
       const dm = this._moteDummy;
       for (let i = 0; i < 6; i++) {
@@ -1997,7 +2591,7 @@ export class GatewayRig {
       this._starMoteInst.instanceMatrix.needsUpdate = true;
     }
 
-    // 10. Final Pass: Analytic 2-Bone Leg IK — locks `FootL` & `FootR` flat on `y = 0.000m` (`0.00mm` drift!)
+    // 11. Final Pass: Analytic 2-Bone Leg IK — locks `FootL` & `FootR` flat on `y = 0.000m` (`< 0.05mm` drift!)
     if (ikWeight > 0.001 && motionRoot) {
       this._solveGroundedTwoBoneLegIk(motionRoot, ikWeight);
     }
