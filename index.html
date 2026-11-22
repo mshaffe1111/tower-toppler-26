@@ -173,6 +173,9 @@
           <svg class="ico-svg" viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-relic"/></svg>
           <span id="peek-clue-lbl">PEEK CLUE</span>
         </button>
+        <button id="btn-reset-puzzle" class="btn-peek-clue puzzle-reset-btn hidden" type="button" title="Reset Sanctum Board">
+          <span id="reset-puzzle-lbl">RESET</span>
+        </button>
       </div>
 
       <!-- Cinematic Biome / Spire Toast Banner -->
@@ -299,7 +302,7 @@
             <circle cx="14" cy="14" r="11.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="4 3"/>
             <path d="M9 14h10M14 9v10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
           </svg>
-          <span id="hud-ctrl-hint-text" class="gesture-glyph">Slide &amp; Hold: Walk/Run • Quick Side-Slash or 2-Finger Tap: Tail-Whip • Flick Up: Jump • Tap: Hydro-Pulse</span>
+          <span id="hud-ctrl-hint-text" class="gesture-glyph">Slide &amp; Hold: Walk/Run • Quick Side-Slash or 2-Finger Tap: Tail-Whip • Flick Up: Jump • Tap: Hydro-Pulse • Door: ↑/E • Lift: ↑/↓ • Gecko Wall-Scamper: Jump → Wall</span>
         </div>
 
         <div id="joystick-zone" class="joystick-zone" data-role="joystick-base" role="group" aria-label="Floating Virtual Thumbstick">
@@ -339,7 +342,7 @@
             </div>
             <button id="btn-calibrate-tilt" class="tilt-cal-btn" type="button">CALIBRATE</button>
           </div>
-          <span id="tilt-ctrl-hint" class="tilt-ctrl-hint">Tilt: Walk/Run • Wrist-Flick or Swipe Sideways: Tail-Whip • Flick Up: Jump • Tap: Hydro-Pulse</span>
+          <span id="tilt-ctrl-hint" class="tilt-ctrl-hint">Tilt: Walk/Run • Wrist-Flick or Swipe Sideways: Tail-Whip • Flick Up: Jump • Tap: Hydro-Pulse • Door: ↑/E • Lift: ↑/↓ • Gecko Wall-Scamper: Jump → Wall</span>
         </div>
       </div>
 
@@ -467,7 +470,7 @@
                 <span>TILT</span>
               </button>
             </div>
-            <p id="title-ctrl-guide" class="ctrl-guide-copy">Floating Left Stick: Walk/Run • Right Radial Arc: Hold Jump, Hydro-Pulse &amp; Tail-Whip</p>
+            <p id="title-ctrl-guide" class="ctrl-guide-copy">Floating Left Stick: Walk/Run • Right Radial Arc: Hold Jump, Hydro-Pulse &amp; Tail-Whip • Door: ↑/E • Lift: ↑/↓ • Gecko Wall-Scamper: Jump → Wall</p>
           </div>
         </div>
       </div>
@@ -497,12 +500,12 @@
 
         <!-- Curved 5-Crest Hydro-Glass Navigation Dock -->
         <nav class="diegetic-dock-row" aria-label="Sanctuary Navigation">
-          <button id="btn-modes" class="dock-crest-btn" type="button" title="6 Distinct Game Modes Hub">
+          <button id="btn-modes" class="dock-crest-btn" type="button" title="8 Distinct Game Modes Hub">
             <span class="dock-crest-icon">
               <svg class="ico-svg" viewBox="0 0 24 24"><use href="#ico-modes"/></svg>
             </span>
-            <span class="dock-crest-lbl">6 MODES</span>
-            <span class="dock-crest-badge meta-badge">6</span>
+            <span class="dock-crest-lbl">8 MODES</span>
+            <span class="dock-crest-badge meta-badge">8</span>
           </button>
 
           <button id="btn-worlds" class="dock-crest-btn" type="button" title="Living World Watershed Map">
@@ -540,7 +543,7 @@
       </div>
     </div>
 
-    <!-- 2. 6 NON-REDUNDANT GAME MODES HUB (#overlay-modes) -->
+    <!-- 2. 8 NON-REDUNDANT GAME MODES HUB (#overlay-modes) -->
     <div id="overlay-modes" class="overlay hidden">
       <div class="modal-card modal-wide modes-hub-modal">
         <div class="modal-header-row modal-header-compact">
@@ -909,7 +912,7 @@
               <span>TILT</span>
             </button>
           </div>
-          <p id="pause-ctrl-guide" class="ctrl-guide-copy">Floating Left Stick: Walk/Run • Right Radial Arc: Hold Jump, Hydro-Pulse &amp; Tail-Whip</p>
+          <p id="pause-ctrl-guide" class="ctrl-guide-copy">Floating Left Stick: Walk/Run • Right Radial Arc: Hold Jump, Hydro-Pulse &amp; Tail-Whip • Door: ↑/E • Lift: ↑/↓ • Gecko Wall-Scamper: Jump → Wall</p>
 
           <span class="config-lbl" style="margin-top:4px;">3-CHANNEL AUDIO MIXER</span>
           <div class="audio-mixer-box">

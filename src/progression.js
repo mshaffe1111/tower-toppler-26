@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   zenMode: false,                   // Peaceful / Assist modifier
   muted: false,                     // Master audio mute
   musicEnabled: true,               // Music bus toggle
+  voiceEnabled: true,               // Gateway vocalizations & cutscene voice blips
   musicVolume: 0.85,                // 0.0 .. 1.0 (Music slider)
   ambienceVolume: 0.80,             // 0.0 .. 1.0 (Natural Water Ambience slider)
   sfxVolume: 0.85,                  // 0.0 .. 1.0 (Organic Foley & Chimes slider)
@@ -1711,6 +1712,7 @@ export class ProgressionManager {
       zenMode: Boolean(candidate.zenMode),
       muted: Boolean(candidate.muted),
       musicEnabled: candidate.musicEnabled !== undefined ? Boolean(candidate.musicEnabled) : true,
+      voiceEnabled: candidate.voiceEnabled !== undefined ? Boolean(candidate.voiceEnabled) : true,
       musicVolume: clampVol(candidate.musicVolume, DEFAULT_SETTINGS.musicVolume),
       ambienceVolume: clampVol(candidate.ambienceVolume, DEFAULT_SETTINGS.ambienceVolume),
       sfxVolume: clampVol(candidate.sfxVolume, DEFAULT_SETTINGS.sfxVolume),
@@ -1824,7 +1826,11 @@ export class ProgressionManager {
 
   recordScore(bucket, score) {
     const key = resolveBucket(bucket);
-    const clean = Math.max(0, Math.floor(Number(score) || 0));
+    const num = Number(score);
+    if (!Number.isFinite(num)) {
+      return this.state.highScores[key] || 0;
+    }
+    const clean = Math.max(0, Math.floor(num));
     if (clean >= 5000) {
       const t = this._unlockTrophyNoSave('classic_extra_life');
       if (t) this._pendingAutoTrophies.push(t);
@@ -1841,7 +1847,11 @@ export class ProgressionManager {
   }
 
   addGears(amount) {
-    const delta = Math.floor(Number(amount) || 0);
+    const num = Number(amount);
+    if (!Number.isFinite(num)) {
+      return this.state.gears;
+    }
+    const delta = Math.floor(num);
     if (delta > 0) {
       this.state.gears += delta;
       this.state.lifetimeGears = Math.max(this.state.gears, (this.state.lifetimeGears || 0) + delta);
@@ -1853,7 +1863,9 @@ export class ProgressionManager {
   }
 
   spendGears(amount) {
-    const cost = Math.max(0, Math.floor(Number(amount) || 0));
+    const num = Number(amount);
+    if (!Number.isFinite(num)) return false;
+    const cost = Math.max(0, Math.floor(num));
     if (this.state.gears < cost) return false;
     if (cost > 0) {
       this.state.gears -= cost;

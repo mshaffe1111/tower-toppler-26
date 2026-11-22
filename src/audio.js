@@ -457,7 +457,9 @@ export class SoundEngine {
     // Ultra-gentle warm breath pad fallback ONLY before initial .ogg finishes decoding
     this._fallbackPadTimer = null;
     this._activeFallbackVoice = null;
+    this._activeFallbackVoices = new Set();
     this._musicBufferReady = false;
+    this._suspendedByVisibility = false;
 
     // Continuous 60fps-safe updraft/dive wind bed (Frill-Glide) & mini-game ambience beds
     // (reef_swim underwater current, core_descent turbine whoosh, rapids_surf whitewater rush)
@@ -520,16 +522,31 @@ export class SoundEngine {
         if (document.visibilityState === 'hidden') {
           this._stopGlideWind();
           this._stopModeBed();
+          this._stopFallbackPad();
+          if (this.ctx.state === 'running' && typeof this.ctx.suspend === 'function') {
+            this._suspendedByVisibility = true;
+            this.ctx.suspend().catch(() => {});
+          }
           return;
         }
-        if (document.visibilityState === 'visible' && !this.muted) {
-          if (
-            (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted') &&
-            this._hasGestureActivation()
-          ) {
-            this.ctx.resume().catch(() => {});
+        if (document.visibilityState === 'visible') {
+          const wasVisSuspended = this._suspendedByVisibility;
+          this._suspendedByVisibility = false;
+          if (!this.muted) {
+            if (
+              (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted') &&
+              (wasVisSuspended || this._unlockedOnce || this._hasGestureActivation())
+            ) {
+              this.ctx
+                .resume()
+                .then(() => {
+                  this._syncPlayback();
+                })
+                .catch(() => {});
+            } else {
+              this._syncPlayback();
+            }
           }
-          this._syncPlayback();
         }
       });
     }
@@ -582,11 +599,11 @@ export class SoundEngine {
     this.antiFatigueLPF.Q.value = 0.62;
 
     this.limiter = ctx.createDynamicsCompressor();
-    this.limiter.threshold.value = -9.5;
-    this.limiter.knee.value = 12;
-    this.limiter.ratio.value = 6;
-    this.limiter.attack.value = 0.005;
-    this.limiter.release.value = 0.16;
+    this.limiter.threshold.value = -3;
+    this.limiter.knee.value = 2;
+    this.limiter.ratio.value = 18;
+    this.limiter.attack.value = 0.002;
+    this.limiter.release.value = 0.12;
 
     this.masterGain.connect(this.highpass);
     this.highpass.connect(this.warmthFilter);
@@ -911,6 +928,15 @@ export class SoundEngine {
       };
     }
 
+    if (this.gameMode === 'title' && this.theme === 'sanctum_menu') {
+      return {
+        harmonyKey: 'sanctum_menu',
+        musicFile: MUSIC_STEMS.sanctum_menu,
+        ambienceFile: AMBIENCE_STEMS.alpine_lake,
+        crossfadeSec: 1.8,
+      };
+    }
+
     if (
       this.bossActive ||
       this.gameMode === 'warden_gauntlet' ||
@@ -1072,7 +1098,9 @@ export class SoundEngine {
   }
 
   playMenuMusic() {
+    this.bossActive = false;
     this.miniGameMode = null;
+    this.gameMode = 'title';
     this.setTheme('sanctum_menu');
     this.setMusicActive(true);
   }
@@ -1342,12 +1370,15 @@ export class SoundEngine {
     }
 
     if (this.musicLPF) {
+      this.musicLPF.frequency.cancelScheduledValues?.(now);
       this.musicLPF.frequency.setTargetAtTime(targetMusicCutoff, now, 0.32);
     }
     if (this.musicHighShelf) {
+      this.musicHighShelf.gain.cancelScheduledValues?.(now);
       this.musicHighShelf.gain.setTargetAtTime(targetMusicShelfDb, now, 0.35);
     }
     if (this.musicReverbSend) {
+      this.musicReverbSend.gain.cancelScheduledValues?.(now);
       this.musicReverbSend.gain.setTargetAtTime(targetMusicRev, now, 0.35);
     }
     this._musicDeck.setPlaybackRate(targetRate, 0.45);
@@ -1355,6 +1386,7 @@ export class SoundEngine {
     // Smooth underwater low-pass contour for `reef_swim` vs crisp open-air ambience
     if (this.ambienceLPF) {
       const targetCutoff = this.miniGameMode === 'reef_swim' ? 680 : 18000;
+      this.ambienceLPF.frequency.cancelScheduledValues?.(now);
       this.ambienceLPF.frequency.setTargetAtTime(targetCutoff, now, 0.38);
     }
 
@@ -1554,8 +1586,10 @@ export class SoundEngine {
       }
       const voice = { oscs, lp, env };
       this._activeFallbackVoice = voice;
+      this._activeFallbackVoices.add(voice);
       if (oscs.length > 0) {
         oscs[0].onended = () => {
+          this._activeFallbackVoices.delete(voice);
           if (this._activeFallbackVoice === voice) {
             this._activeFallbackVoice = null;
           }
@@ -1579,16 +1613,24 @@ export class SoundEngine {
       clearInterval(this._fallbackPadTimer);
       this._fallbackPadTimer = null;
     }
-    const fv = this._activeFallbackVoice;
-    if (fv && this.ctx) {
-      this._activeFallbackVoice = null;
-      const now = this.ctx.currentTime;
+    this._activeFallbackVoice = null;
+    if (!this._activeFallbackVoices || this._activeFallbackVoices.size === 0) return;
+    const voices = Array.from(this._activeFallbackVoices);
+    this._activeFallbackVoices.clear();
+    const now = this.ctx ? this.ctx.currentTime : 0;
+    for (const fv of voices) {
       try {
-        fv.env.gain.cancelScheduledValues(now);
-        fv.env.gain.setValueAtTime(Math.max(0.0001, fv.env.gain.value), now);
-        fv.env.gain.linearRampToValueAtTime(0.0001, now + 0.25);
-        for (const o of fv.oscs) {
-          o.stop(now + 0.28);
+        if (this.ctx) {
+          fv.env.gain.cancelScheduledValues?.(now);
+          fv.env.gain.setValueAtTime(Math.max(0.0001, fv.env.gain.value), now);
+          fv.env.gain.linearRampToValueAtTime(0.0001, now + 0.25);
+          for (const o of fv.oscs) {
+            o.stop(now + 0.28);
+          }
+        } else {
+          for (const o of fv.oscs) o.disconnect();
+          fv.lp.disconnect();
+          fv.env.disconnect();
         }
       } catch {
         // Ignore already-stopped oscillators
@@ -1598,7 +1640,7 @@ export class SoundEngine {
 
   // --- Organic Acoustic Foley Synthesis Primitives (Strictly Warm & Non-Fatiguing) ---
 
-  _canPlay(key, minGap = 0.025) {
+  _peekCanPlay(key, minGap = 0.025) {
     if (this.muted || !this.sfxEnabled || this.sfxVolume <= 0.002 || !this.ctx || !this.sfxGain) {
       return false;
     }
@@ -1607,9 +1649,22 @@ export class SoundEngine {
     }
     if (this.ctx.state !== 'running') return false;
     const now = this.ctx.currentTime;
-    const prev = this._lastTriggerMap.get(key) ?? -1;
-    if (now - prev < minGap) return false;
-    this._lastTriggerMap.set(key, now);
+    const prev = this._lastTriggerMap.get(key) ?? -Infinity;
+    return now - prev >= minGap;
+  }
+
+  _canPlay(key, minGap = 0.025) {
+    if (!this._peekCanPlay(key, minGap)) return false;
+    this._lastTriggerMap.set(key, this.ctx.currentTime);
+    return true;
+  }
+
+  _claimGatewayVoice(cueKey, cueGap, globalGap = 0.24, force = false) {
+    if (!force && !this._peekCanPlay('gv_any', globalGap)) return false;
+    if (!this._peekCanPlay(cueKey, cueGap)) return false;
+    const now = this.ctx.currentTime;
+    this._lastTriggerMap.set('gv_any', now);
+    this._lastTriggerMap.set(cueKey, now);
     return true;
   }
 
@@ -1635,7 +1690,7 @@ export class SoundEngine {
    * gentle 6ms rounded mallet/tine attack, capped strictly below 3,800 Hz).
    */
   _kalimbaChime(freq, duration = 0.34, gainVal = 0.052, delay = 0, pan = 0, sendReverb = true) {
-    if (!this.ctx || !this.sfxGain) return;
+    if (!this.ctx || !this.sfxGain || this._activeSfxVoices >= 28) return;
     const now = this.ctx.currentTime + Math.max(0, delay);
     const f0 = clamp(freq, 85, 2600);
     const dur = Math.max(0.08, duration);
@@ -1700,7 +1755,7 @@ export class SoundEngine {
     freq,
     { duration = 1.32, gainVal = 0.068, delay = 0, pan = 0, sendReverb = true } = {}
   ) {
-    if (!this.ctx || !this.sfxGain) return;
+    if (!this.ctx || !this.sfxGain || this._activeSfxVoices >= 28) return;
     const now = this.ctx.currentTime + Math.max(0, delay);
     const f0 = clamp(freq, 220, 1760);
     const dur = Math.max(0.35, duration);
@@ -1790,7 +1845,7 @@ export class SoundEngine {
    * Physical Minnaert liquid water-droplet chime (upward spherical bubble resonance).
    */
   _waterDrop(freq, duration = 0.14, gainVal = 0.048, delay = 0, pan = 0, sendReverb = true) {
-    if (!this.ctx || !this.sfxGain) return;
+    if (!this.ctx || !this.sfxGain || this._activeSfxVoices >= 28) return;
     const now = this.ctx.currentTime + Math.max(0, delay);
     const f0 = clamp(freq, 180, 1950);
     const f1 = clamp(f0 * 1.32, 220, 2450);
@@ -1825,7 +1880,8 @@ export class SoundEngine {
   }
 
   /**
-   * Soft low-passed sine/triangle cushion tone (pure warm acoustic waves only).
+   * Soft low-passed tonal synth voice (supports sine, triangle, sawtooth & square waves
+   * filtered cleanly below the master anti-fatigue LPF).
    */
   _warmBodyTone(
     freqStart,
@@ -1838,15 +1894,15 @@ export class SoundEngine {
     sendReverb = false,
     pan = 0
   ) {
-    if (!this.ctx || !this.sfxGain) return;
+    if (!this.ctx || !this.sfxGain || this._activeSfxVoices >= 28) return;
     const now = this.ctx.currentTime + Math.max(0, delay);
     const dur = Math.max(0.025, duration);
-    const f0 = clamp(freqStart, 28, 3200);
-    const f1 = clamp(freqEnd, 28, 3200);
+    const f0 = clamp(freqStart, 28, 4800);
+    const f1 = clamp(freqEnd, 28, 4800);
     const peak = clamp(gainVal, 0.0002, 0.28);
 
     const osc = this.ctx.createOscillator();
-    osc.type = wave === 'triangle' ? 'triangle' : 'sine';
+    osc.type = ['sine', 'triangle', 'sawtooth', 'square'].includes(wave) ? wave : 'sine';
     osc.frequency.setValueAtTime(f0, now);
     if (Math.abs(f1 - f0) > 0.2) {
       osc.frequency.exponentialRampToValueAtTime(f1, now + dur);
@@ -1854,7 +1910,7 @@ export class SoundEngine {
 
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(clamp(cutoff, 90, 3800), now);
+    filter.frequency.setValueAtTime(clamp(cutoff, 90, 6000), now);
     filter.Q.value = 0.75;
 
     const gain = this.ctx.createGain();
@@ -1898,7 +1954,7 @@ export class SoundEngine {
     usePink = false
   ) {
     const buf = usePink ? this._pinkNoiseBuf : this._softAirBuf;
-    if (!this.ctx || !this.sfxGain || !buf) return;
+    if (!this.ctx || !this.sfxGain || !buf || this._activeSfxVoices >= 28) return;
 
     const now = this.ctx.currentTime + Math.max(0, delay);
     const dur = Math.min(Math.max(0.03, duration), buf.duration - 0.05);
@@ -1952,7 +2008,7 @@ export class SoundEngine {
   }
 
   _noiseBurst(dur = 0.05, gainVal = 0.03, filterType = 'bandpass', fStart = 1200, fEnd = 900, q = 2.0, delay = 0, pan = 0, sendReverb = false, usePink = true) {
-    if (!this.ctx || !this.sfxGain || this._activeSfxVoices > 28) return;
+    if (!this.ctx || !this.sfxGain || this._activeSfxVoices >= 28) return;
     const buf = usePink ? this._pinkNoiseBuf : this._softAirBuf;
     if (!buf) return;
     const now = this.ctx.currentTime + Math.max(0, delay);
@@ -2044,7 +2100,7 @@ export class SoundEngine {
     this._warmBodyTone(this._vary(160, 0.06), 74, 0.028, 0.042 * vel, 0, 'sine', 340, false, pan);
     this._noiseBurst(0.026, 0.034 * vel, 'bandpass', this._vary(1150, 0.06), 920, 3.2, 0.002, pan, false, true);
     this._noiseBurst(0.02, 0.012 * vel, 'highpass', this._vary(3600, 0.06), 3100, 1.0, 0.004, pan, false, false);
-    if (this._footstepVariations && this._footstepVariations.length > 0) {
+    if (this._footstepVariations && this._footstepVariations.length > 0 && this._activeSfxVoices < 28) {
       const buf = this._footstepVariations[this._footstepIdx % this._footstepVariations.length];
       const now = this.ctx.currentTime;
       const src = this.ctx.createBufferSource();
@@ -2861,7 +2917,7 @@ export class SoundEngine {
     pan = 0,
     breathy = false,
   }) {
-    if (!this.ctx || !this.sfxGain || !this.voiceEnabled || this._activeSfxVoices > 28) return;
+    if (!this.ctx || !this.sfxGain || !this.voiceEnabled || this._activeSfxVoices >= 28) return;
     const now = this.ctx.currentTime + Math.max(0, delay);
     const d = Math.max(0.035, dur);
 
@@ -2977,9 +3033,15 @@ export class SoundEngine {
     if (!this.voiceEnabled || !this.ctx || !this.sfxGain) return false;
     const raw = String(cue || 'jump').trim().toLowerCase().replace(/[\s_-]+/g, '');
     const gainScale = clamp(opts?.gainScale ?? 1.0, 0.2, 1.35);
+    const force = Boolean(opts?.force);
+    const globalGap = 0.24;
 
     if (raw === 'jump' || raw === 'hopshort') {
-      if (!this._canPlay('gv_jump', 0.13)) return false;
+      if (!force && !this._peekCanPlay('gv_any', globalGap)) return false;
+      if (!this._peekCanPlay('gv_jump', 0.55)) return false;
+      const chance = typeof opts?.chance === 'number' ? opts.chance : 0.45;
+      if (!force && Math.random() > chance) return false;
+      if (!this._claimGatewayVoice('gv_jump', 0.55, globalGap, force)) return false;
       this._playFormantSyllable({
         fStart: this._vary(784, 0.04),
         fEnd: this._vary(1046, 0.04),
@@ -2997,7 +3059,7 @@ export class SoundEngine {
     }
 
     if (raw === 'doublejump' || raw === 'airjump') {
-      if (!this._canPlay('gv_djump', 0.14)) return false;
+      if (!this._claimGatewayVoice('gv_djump', 0.24, globalGap, force)) return false;
       this._playFormantSyllable({
         fStart: this._vary(988, 0.04),
         fEnd: this._vary(1244, 0.04),
@@ -3027,7 +3089,11 @@ export class SoundEngine {
     }
 
     if (raw === 'whip' || raw === 'tailwhip' || raw === 'whipyip') {
-      if (!this._canPlay('gv_whip', 0.18)) return false;
+      if (!force && !this._peekCanPlay('gv_any', globalGap)) return false;
+      if (!this._peekCanPlay('gv_whip', 0.55)) return false;
+      const chance = typeof opts?.chance === 'number' ? opts.chance : 0.45;
+      if (!force && Math.random() > chance) return false;
+      if (!this._claimGatewayVoice('gv_whip', 0.55, globalGap, force)) return false;
       const overcharged = Boolean(opts?.overcharged);
       this._playFormantSyllable({
         fStart: this._vary(587, 0.04),
@@ -3047,7 +3113,7 @@ export class SoundEngine {
     }
 
     if (raw === 'teeter' || raw === 'edgeteeter' || raw === 'teetergasp' || raw === 'oops') {
-      if (!this._canPlay('gv_teeter', 0.9)) return false;
+      if (!this._claimGatewayVoice('gv_teeter', 0.9, globalGap, force)) return false;
       this._playFormantSyllable({
         fStart: this._vary(880, 0.04),
         fEnd: this._vary(740, 0.04),
@@ -3079,7 +3145,7 @@ export class SoundEngine {
     }
 
     if (raw === 'rescue' || raw === 'rescuetrill' || raw === 'critter') {
-      if (!this._canPlay('gv_rescue', 0.45)) return false;
+      if (!this._claimGatewayVoice('gv_rescue', 0.45, globalGap, force)) return false;
       const notes = [1046.5, 1318.5, 1568.0, 1318.5, 1760.0];
       notes.forEach((hz, idx) => {
         this._playFormantSyllable({
@@ -3116,7 +3182,7 @@ export class SoundEngine {
     }
 
     if (raw === 'wetshake' || raw === 'shake') {
-      if (!this._canPlay('gv_wetshake', 0.45)) return false;
+      if (!this._claimGatewayVoice('gv_wetshake', 0.45, globalGap, force)) return false;
       for (let i = 0; i < 4; i++) {
         const up = i % 2 === 0;
         this._playFormantSyllable({
@@ -3139,7 +3205,7 @@ export class SoundEngine {
     }
 
     if (raw === 'hurt' || raw === 'bump') {
-      if (!this._canPlay('gv_hurt', 0.32)) return false;
+      if (!this._claimGatewayVoice('gv_hurt', 0.32, globalGap, force)) return false;
       this._playFormantSyllable({
         fStart: this._vary(659, 0.04),
         fEnd: this._vary(440, 0.04),
@@ -3157,7 +3223,7 @@ export class SoundEngine {
     }
 
     if (raw === 'whee' || raw === 'bounce' || raw === 'spring') {
-      if (!this._canPlay('gv_whee', 0.35)) return false;
+      if (!this._claimGatewayVoice('gv_whee', 0.35, globalGap, force)) return false;
       this._playFormantSyllable({
         fStart: this._vary(698, 0.04),
         fEnd: this._vary(1480, 0.04),
@@ -3175,7 +3241,7 @@ export class SoundEngine {
     }
 
     if (raw === 'trick' || raw === 'wave' || raw === 'hop' || raw === 'titlehop') {
-      if (!this._canPlay('gv_trick', 0.24)) return false;
+      if (!this._claimGatewayVoice('gv_trick', 0.24, globalGap, force)) return false;
       this._playFormantSyllable({
         fStart: this._vary(880, 0.04),
         fEnd: this._vary(1046, 0.04),
@@ -3207,7 +3273,7 @@ export class SoundEngine {
     }
 
     if (raw === 'victory' || raw === 'celebrate') {
-      if (!this._canPlay('gv_victory', 0.45)) return false;
+      if (!this._claimGatewayVoice('gv_victory', 0.45, globalGap, force)) return false;
       const degs = [0, 2, 4, 7];
       degs.forEach((d, idx) => {
         const hz = clamp(this._scaleFreq(d, 1), 520, 1760);
