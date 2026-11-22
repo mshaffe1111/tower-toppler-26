@@ -24,12 +24,37 @@ const MAX_RAMPS = 12;
 const MAX_HAZARDS = 24;
 const MAX_SEEDS = 40;
 const MAX_BOLTS = 24;
-const MAX_SPRAY = 180;
-const MAX_GORGE_SEGS = 10;
-const GORGE_SPAN_Z = 100;
+const MAX_SPRAY = 220;
+const MAX_GORGE_SEGS = 12;
+const MAX_CANYON_ARCHES = 5;
+const MAX_SUNBEAMS = 8;
+const GORGE_SPAN_Z = 108;
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
+
+// Unified S-gorge canyon spline: 0 at Gateway (wz >= 0) so steering lanes match game.js 1:1,
+// curving dramatically ahead downriver through sculpted cliffs, arches, and waterfalls!
+function gorgeCurveX(wz, dist) {
+  const dAhead = wz < 0 ? -wz : 0;
+  if (dAhead <= 0.001) return 0;
+  const f = dAhead < 15.0 ? dAhead / 15.0 : 1.0;
+  const f2 = f * f * (3.0 - 2.0 * f);
+  return (Math.sin(dAhead * 0.048 + dist * 0.030) * 3.8 + Math.cos(dAhead * 0.025 - dist * 0.017) * 1.45) * f2;
+}
+
+function gorgeCurveYaw(wz, dist) {
+  const x0 = gorgeCurveX(wz, dist);
+  const x1 = gorgeCurveX(wz - 1.5, dist);
+  return Math.atan2(x1 - x0, -1.5) * 0.65;
+}
+
+function resolveItemWorldZ(itemZ, dist) {
+  // game.js decrements item.z each frame so z === 0 is right at Gateway and +z is ahead downriver.
+  // Also gracefully supports absolute world coordinates if an external caller passes z > 68.
+  const relZ = itemZ > 68 && dist > 60 ? itemZ - dist : itemZ;
+  return -relZ;
+}
 
 const BOOST_TIER_COLORS = [
   { rim: '#38bdf8', curtain: '#5efce8' }, // 1X
@@ -113,29 +138,41 @@ const SKIN_PALETTES = {
   default_amphibian: { scale: '#2dd4bf', belly: '#ccfbf1', frill: '#38bdf8', glow: '#5efce8' },
 };
 
-// --- ANIMATED GLSL MULTI-WAVE FRESNEL SPECULAR CANYON RAPIDS WATER SHADER ---
+// --- ANIMATED GLSL MULTI-WAVE FRESNEL SPECULAR CURVED S-GORGE CANYON RAPIDS WATER SHADER ---
 const RAPIDS_WATER_VERT = /* glsl */ `
   uniform float uTime;
   uniform float uDist;
   varying vec3 vWorldPos;
+  varying float vLocalX;
   varying float vWaveH;
   varying float vCamDist;
 
+  float gorgeCurveX(float wz, float dist) {
+    float dAhead = max(0.0, -wz);
+    float f = smoothstep(0.0, 15.0, dAhead);
+    return (sin(dAhead * 0.048 + dist * 0.030) * 3.8 + cos(dAhead * 0.025 - dist * 0.017) * 1.45) * f;
+  }
+
   void main() {
     vec3 pos = position;
-    vec4 worldPos = modelMatrix * vec4(pos, 1.0);
-    float zFlow = worldPos.z - uDist;
+    vec4 baseWorld = modelMatrix * vec4(pos, 1.0);
+    float localX = baseWorld.x;
+    float curveOffset = gorgeCurveX(baseWorld.z, uDist);
+    pos.x += curveOffset;
 
-    // 4 layered directional whitewater canyon swells
-    float w1 = sin(zFlow * 0.44 + worldPos.x * 0.42 + uTime * 2.2) * 0.11;
-    float w2 = cos(zFlow * 0.86 - worldPos.x * 0.68 + uTime * 3.4) * 0.065;
-    float w3 = sin(zFlow * 1.48 + worldPos.x * 1.15 - uTime * 4.2) * 0.035;
-    float w4 = cos((worldPos.x * 0.92 - zFlow * 0.58) + uTime * 2.7) * 0.03;
+    float zFlow = baseWorld.z - uDist;
+
+    // 4 layered directional whitewater canyon swells + rolling cross-chop
+    float w1 = sin(zFlow * 0.44 + localX * 0.42 + uTime * 2.2) * 0.12;
+    float w2 = cos(zFlow * 0.86 - localX * 0.68 + uTime * 3.4) * 0.07;
+    float w3 = sin(zFlow * 1.48 + localX * 1.15 - uTime * 4.2) * 0.04;
+    float w4 = cos((localX * 0.92 - zFlow * 0.58) + uTime * 2.7) * 0.032;
     float h = w1 + w2 + w3 + w4;
 
     pos.y += h;
-    worldPos = modelMatrix * vec4(pos, 1.0);
+    vec4 worldPos = modelMatrix * vec4(pos, 1.0);
     vWorldPos = worldPos.xyz;
+    vLocalX = localX;
     vWaveH = h;
     vec4 mvPos = viewMatrix * worldPos;
     vCamDist = -mvPos.z;
@@ -156,6 +193,7 @@ const RAPIDS_WATER_FRAG = /* glsl */ `
   uniform vec2 uHeroXZ;
 
   varying vec3 vWorldPos;
+  varying float vLocalX;
   varying float vWaveH;
   varying float vCamDist;
 
@@ -192,56 +230,57 @@ const RAPIDS_WATER_FRAG = /* glsl */ `
     float h = 0.0;
     h += sin(p.y * 0.85 + p.x * 0.52 + t * 2.4) * 0.24;
     h += cos(p.y * 1.62 - p.x * 1.18 + t * 3.5) * 0.14;
-    h += sin(p.y * 2.95 + p.x * 2.35 - t * 4.4) * 0.075;
-    h += (fbm(p * vec2(0.55, 0.26) + vec2(0.0, t * 0.45)) - 0.5) * 0.32;
+    h += sin(p.y * 2.95 + p.x * 2.35 - t * 4.4) * 0.08;
+    h += (fbm(p * vec2(0.55, 0.26) + vec2(0.0, t * 0.48)) - 0.5) * 0.35;
     return h;
   }
 
   void main() {
-    // River coordinate rushing toward camera (+Z relative to world scroll uDist)
-    vec2 rp = vec2(vWorldPos.x, vWorldPos.z - uDist * 0.92);
+    // River coordinate rushing toward camera (+Z relative to world scroll uDist) along S-curve centerline
+    vec2 rp = vec2(vLocalX, vWorldPos.z - uDist * 0.96);
     float eps = 0.14;
     float hc = waveHeight(rp, uTime);
     float hx = waveHeight(rp + vec2(eps, 0.0), uTime);
     float hz = waveHeight(rp + vec2(0.0, eps), uTime);
-    vec3 N = normalize(vec3((hc - hx) * 1.45, 1.0, (hc - hz) * 1.45));
+    vec3 N = normalize(vec3((hc - hx) * 1.55, 1.0, (hc - hz) * 1.55));
 
     vec3 V = normalize(cameraPosition - vWorldPos);
     vec3 L = normalize(uSunDir);
 
-    // Bank shallowness & depth gradient (vibrant emerald-turquoise sunlit channel)
-    float bankT = smoothstep(2.0, 7.6, abs(vWorldPos.x));
-    vec3 baseWater = mix(uDeepColor, uShallowColor, clamp(0.42 + bankT * 0.48 + vWaveH * 1.6, 0.0, 1.0));
+    // Bank shallowness & depth gradient following the curved S-gorge banks
+    float bankT = smoothstep(2.0, 7.8, abs(vLocalX));
+    vec3 baseWater = mix(uDeepColor, uShallowColor, clamp(0.46 + bankT * 0.46 + vWaveH * 1.8, 0.0, 1.0));
 
     // Subsurface turquoise sunlight transmission through wave crests
-    float sss = pow(clamp(dot(V, normalize(-L + N * 0.48)), 0.0, 1.0), 2.8) * (0.55 + max(0.0, vWaveH) * 3.4);
-    baseWater += vec3(0.09, 0.48, 0.46) * sss;
+    float sss = pow(clamp(dot(V, normalize(-L + N * 0.48)), 0.0, 1.0), 2.5) * (0.62 + max(0.0, vWaveH) * 3.8);
+    baseWater += vec3(0.10, 0.56, 0.52) * sss;
 
     // Schlick Fresnel sky & sunlit canyon reflection
     float ndotv = max(dot(N, V), 0.0);
-    float fresnel = 0.04 + 0.96 * pow(1.0 - ndotv, 4.4);
-    vec3 reflSky = mix(uSkyColor, uSunColor, 0.34 + 0.28 * clamp(N.x * 0.5 + 0.5, 0.0, 1.0));
-    vec3 col = mix(baseWater, reflSky, fresnel * 0.52);
+    float fresnel = 0.05 + 0.95 * pow(1.0 - ndotv, 4.0);
+    vec3 reflSky = mix(uSkyColor, uSunColor, 0.38 + 0.30 * clamp(N.x * 0.5 + 0.5, 0.0, 1.0));
+    vec3 col = mix(baseWater, reflSky, fresnel * 0.54);
 
     // Crisp sunlight specular sparkle + broad water sheen
     vec3 H = normalize(L + V);
-    float specSharp = pow(max(dot(N, H), 0.0), 96.0);
+    float specSharp = pow(max(dot(N, H), 0.0), 112.0);
     float specBroad = pow(max(dot(N, H), 0.0), 20.0);
-    col += uSunColor * (specSharp * 1.45 + specBroad * 0.22);
+    col += uSunColor * (specSharp * 1.85 + specBroad * 0.28);
 
-    // Domain-warped organic whitewater rushing current foam & canyon shoreline rapids (ZERO Voronoi grid!)
-    vec2 fUv = vec2(rp.x * 0.68, rp.y * 0.20);
-    float warp = fbm(fUv + vec2(0.0, uTime * 0.38));
-    float currentNoise = fbm(fUv * vec2(2.1, 1.3) + vec2(warp * 1.45, -uTime * 0.58));
-    float crestFoam = smoothstep(0.58, 0.80, currentNoise + vWaveH * 1.05);
-    float bankFoam = smoothstep(5.2, 8.1, abs(vWorldPos.x) + (currentNoise - 0.5) * 1.7);
+    // Domain-warped organic whitewater rushing current foam & curved canyon shoreline rapids
+    vec2 fUv = vec2(rp.x * 0.68, rp.y * 0.21);
+    float warp = fbm(fUv + vec2(0.0, uTime * 0.42));
+    float currentNoise = fbm(fUv * vec2(2.1, 1.35) + vec2(warp * 1.55, -uTime * 0.68));
+    float crestFoam = smoothstep(0.55, 0.78, currentNoise + vWaveH * 1.25);
+    float bankFoam = smoothstep(5.4, 8.2, abs(vLocalX) + (currentNoise - 0.5) * 1.85);
 
-    // Subtle aerated wake trail around Gateway's hydro-skimmer position
-    vec2 toHero = vWorldPos.xz - uHeroXZ;
-    float wakeBand = exp(-pow(abs(toHero.x) - max(0.0, toHero.y) * 0.30, 2.0) * 4.8) *
-                     smoothstep(-0.3, 0.4, toHero.y) * smoothstep(5.5, 0.8, toHero.y);
-    float totalFoam = clamp(crestFoam * 0.56 + bankFoam * 0.84 + wakeBand * currentNoise * 0.62, 0.0, 0.94);
-    vec3 foamCol = mix(vec3(0.88, 0.98, 1.0), uSunColor, 0.16);
+    // Dynamic V-shaped hydro wake + rooster-tail trench carved right behind Gateway
+    vec2 toHero = vec2(vLocalX - uHeroXZ.x, vWorldPos.z - uHeroXZ.y);
+    float wakeV = exp(-pow(abs(toHero.x) - max(0.0, toHero.y) * 0.34, 2.0) * 5.2) *
+                  smoothstep(-0.25, 0.35, toHero.y) * smoothstep(6.2, 0.6, toHero.y);
+    float wakeCore = exp(-toHero.x * toHero.x * 6.5) * smoothstep(0.0, 0.5, toHero.y) * smoothstep(4.2, 0.5, toHero.y);
+    float totalFoam = clamp(crestFoam * 0.62 + bankFoam * 0.88 + (wakeV * 0.82 + wakeCore * 0.55) * (0.62 + currentNoise * 0.55), 0.0, 0.96);
+    vec3 foamCol = mix(vec3(0.90, 0.99, 1.0), uSunColor, 0.14);
     col = mix(col, foamCol, totalFoam);
 
     // Exponential atmospheric fog seamlessly matching scene FogExp2
@@ -338,13 +377,15 @@ class AdaptiveSurfHero {
 
   update(dt, pose = {}) {
     const bank = pose.surfBank || 0;
+    const trickSpin = pose.trickSpin || 0;
+    const airGrab = pose.airGrab || 0;
     if (this.liveRig?.update) {
       try {
-        // Athletic crouched sideways-carving surfer stance (not standing stiffly upright!)
+        // Athletic dynamic 3/4 carving stance + expressive mid-air 360° trick-flip!
         this.liveRig.group.rotation.order = 'YXZ';
-        this.liveRig.group.rotation.y = Math.PI + 0.36 + bank * 0.28;
-        this.liveRig.group.rotation.x = -0.16 - Math.abs(bank) * 0.08;
-        this.liveRig.group.rotation.z = -bank * 0.18;
+        this.liveRig.group.rotation.y = Math.PI + 0.44 + bank * 0.34 + trickSpin;
+        this.liveRig.group.rotation.x = -0.14 - Math.abs(bank) * 0.08 + airGrab * 0.36;
+        this.liveRig.group.rotation.z = -bank * 0.22;
         this.liveRig.update(dt, pose);
         return;
       } catch {
@@ -352,9 +393,9 @@ class AdaptiveSurfHero {
       }
     }
     const t = pose.time || 0;
-    this.fallback.body.rotation.x = -0.22;
+    this.fallback.body.rotation.x = -0.22 + airGrab * 0.35;
     this.fallback.body.rotation.z = -bank * 0.35;
-    this.fallback.body.rotation.y = 0.34 + bank * 0.22;
+    this.fallback.body.rotation.y = 0.42 + bank * 0.26 + trickSpin;
     for (let i = 0; i < this.fallback.tailSegs.length; i++) {
       this.fallback.tailSegs[i].rotation.y = Math.sin(t * 9.5 - i * 0.65) * 0.28 - bank * 0.18;
       this.fallback.tailSegs[i].rotation.x = -0.06 + Math.cos(t * 7 - i * 0.5) * 0.05;
@@ -1103,26 +1144,220 @@ function buildPelagianRiverGateParts() {
 }
 
 /**
- * Faceted double-terminated Pelagian sapphire/amber boost crystal (kills crude yellow octahedron!).
+ * Crisp 0.42u faceted Pelagian sea-glass crystal mounted cleanly inside a Slalom Hydro-Ring
+ * (ZERO oversized 1.0u crystals clipping Gateway's head or the chase camera!).
  */
 function buildBoostCrystalGeo() {
   const parts = [];
-  const prism = new THREE.CylinderGeometry(0.16, 0.16, 0.44, 6);
+  const prism = new THREE.CylinderGeometry(0.11, 0.11, 0.22, 6);
   parts.push(prism);
-  const topTip = new THREE.ConeGeometry(0.16, 0.28, 6);
-  topTip.translate(0, 0.36, 0);
+  const topTip = new THREE.ConeGeometry(0.11, 0.15, 6);
+  topTip.translate(0, 0.185, 0);
   parts.push(topTip);
-  const botTip = new THREE.ConeGeometry(0.16, 0.28, 6);
+  const botTip = new THREE.ConeGeometry(0.11, 0.15, 6);
   botTip.rotateX(Math.PI);
-  botTip.translate(0, -0.36, 0);
+  botTip.translate(0, -0.185, 0);
   parts.push(botTip);
-  const orbitRing = new THREE.TorusGeometry(0.32, 0.028, 6, 18);
-  orbitRing.rotateX(Math.PI * 0.38);
-  orbitRing.rotateY(0.45);
-  parts.push(orbitRing);
   const merged = safeMergeGeos(parts);
   for (const g of parts) g.dispose();
   return merged;
+}
+
+/**
+ * Dramatic sculpted overhanging canyon stone & Pelagian bronze aqueduct arch spanning the S-gorge!
+ */
+function buildCanyonStoneArchParts() {
+  const stoneParts = [];
+  const bronzeParts = [];
+
+  // Towering sandstone abutments gripping both curved gorge walls
+  for (const sx of [-1, 1]) {
+    const col = new THREE.CylinderGeometry(1.65, 2.55, 11.4, 9, 4);
+    const pos = col.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      const z = pos.getZ(i);
+      const crag = 1.0 + 0.12 * Math.sin(y * 1.4 + sx * 2.1) + 0.08 * Math.cos(Math.atan2(z, x) * 3.0);
+      pos.setXYZ(i, x * crag, y, z * crag);
+    }
+    col.computeVertexNormals();
+    col.translate(sx * 8.4, 5.2, 0);
+    stoneParts.push(col);
+  }
+
+  // Sweeping overhanging natural rock & carved voussoir bridge vault (17u wide, 9.6u high clearance!)
+  const archSegs = 13;
+  const spanX = 8.4;
+  const springY = 5.4;
+  const riseY = 4.6;
+  for (let i = 0; i < archSegs; i++) {
+    const t = (i + 0.5) / archSegs;
+    const ang = t * Math.PI;
+    const ax = -Math.cos(ang) * spanX;
+    const ay = springY + Math.sin(ang) * riseY;
+    const isCenter = Math.abs(i - 6) <= 1;
+    const blk = new THREE.BoxGeometry(2.35, isCenter ? 1.85 : 1.55, isCenter ? 2.55 : 2.15);
+    const slope = Math.atan2(Math.cos(ang) * riseY, Math.sin(ang) * spanX);
+    blk.rotateZ(slope);
+    blk.translate(ax, ay, Math.sin(i * 1.7) * 0.16);
+    stoneParts.push(blk);
+  }
+
+  // Decorative ancient Pelagian bronze arch ribs & keystone sun-crest overhead
+  const innerArc = new THREE.TorusGeometry(7.7, 0.14, 7, 28, Math.PI);
+  innerArc.scale(1.0, 0.54, 1.0);
+  innerArc.translate(0, springY - 0.15, 0.92);
+  bronzeParts.push(innerArc);
+
+  const keystone = new THREE.OctahedronGeometry(0.68, 0);
+  keystone.scale(1.0, 1.25, 0.65);
+  keystone.translate(0, springY + riseY + 0.15, 0.98);
+  bronzeParts.push(keystone);
+
+  const stoneGeo = safeMergeGeos(stoneParts);
+  const bronzeGeo = safeMergeGeos(bronzeParts);
+  for (const g of stoneParts) g.dispose();
+  for (const g of bronzeParts) g.dispose();
+  return { stoneGeo, bronzeGeo };
+}
+
+/**
+ * Glowing smashable Pelagian Siphon Supply Buoy (bronze flotation frame + luminous hydro-core!).
+ */
+function buildSupplyBuoyParts() {
+  const frameParts = [];
+  const coreParts = [];
+
+  // Octagonal flotation collar + riveted bronze ribs + beacon spire
+  const collar = new THREE.TorusGeometry(0.56, 0.12, 8, 8);
+  collar.rotateX(Math.PI * 0.5);
+  collar.translate(0, 0.08, 0);
+  frameParts.push(collar);
+
+  const baseFloat = new THREE.CylinderGeometry(0.52, 0.42, 0.34, 8);
+  baseFloat.translate(0, -0.06, 0);
+  frameParts.push(baseFloat);
+
+  const cap = new THREE.CylinderGeometry(0.30, 0.46, 0.22, 8);
+  cap.translate(0, 0.68, 0);
+  frameParts.push(cap);
+
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * TAU;
+    const strut = new THREE.CylinderGeometry(0.045, 0.055, 0.64, 6);
+    strut.translate(Math.cos(a) * 0.42, 0.38, Math.sin(a) * 0.42);
+    frameParts.push(strut);
+  }
+
+  // Luminous glowing sea-glass hydro-power core pulsing inside the buoy cage!
+  const orb = new THREE.OctahedronGeometry(0.36, 1);
+  orb.translate(0, 0.38, 0);
+  coreParts.push(orb);
+
+  const beacon = new THREE.SphereGeometry(0.14, 10, 8);
+  beacon.translate(0, 0.92, 0);
+  coreParts.push(beacon);
+
+  const frameGeo = safeMergeGeos(frameParts);
+  const coreGeo = safeMergeGeos(coreParts);
+  for (const g of frameParts) g.dispose();
+  for (const g of coreParts) g.dispose();
+  return { frameGeo, coreGeo };
+}
+
+/**
+ * Sculpted curved 3D Rooster-Tail hydro spray plume arcing upward behind Gateway's carving edge!
+ */
+function buildRoosterTailPlumeGeo() {
+  const geo = new THREE.PlaneGeometry(0.68, 2.45, 5, 10);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i); // -1.225..+1.225
+    const t = clamp((y + 1.225) / 2.45, 0, 1); // 0 at board tail -> 1 trailing behind
+    const arcY = Math.sin(t * Math.PI * 0.88) * (0.62 + t * 0.28);
+    const arcZ = 0.68 + t * 2.55;
+    const spreadX = x * (0.45 + t * 1.15);
+    pos.setXYZ(i, spreadX, arcY, arcZ);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function createVolumetricSunbeamTex(size = 128) {
+  if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+    const d = new Uint8Array([255, 240, 195, 120]);
+    const t = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat);
+    t.needsUpdate = true;
+    return t;
+  }
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, size, size);
+  const hGrad = ctx.createLinearGradient(0, 0, size, 0);
+  hGrad.addColorStop(0.0, 'rgba(255, 243, 200, 0.0)');
+  hGrad.addColorStop(0.28, 'rgba(255, 243, 200, 0.42)');
+  hGrad.addColorStop(0.50, 'rgba(255, 250, 224, 0.90)');
+  hGrad.addColorStop(0.72, 'rgba(255, 243, 200, 0.42)');
+  hGrad.addColorStop(1.0, 'rgba(255, 243, 200, 0.0)');
+  ctx.fillStyle = hGrad;
+  ctx.fillRect(0, 0, size, size);
+  ctx.globalCompositeOperation = 'destination-in';
+  const vGrad = ctx.createLinearGradient(0, 0, 0, size);
+  vGrad.addColorStop(0.0, 'rgba(255,255,255,0.0)');
+  vGrad.addColorStop(0.20, 'rgba(255,255,255,0.88)');
+  vGrad.addColorStop(0.78, 'rgba(255,255,255,0.42)');
+  vGrad.addColorStop(1.0, 'rgba(255,255,255,0.0)');
+  ctx.fillStyle = vGrad;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/**
+ * Lightweight procedural sky-ground-sun PMREM CubeUV environment map fallback
+ * so PBR metals & sea-glass always gleam with crisp reflections even in standalone mode!
+ */
+function buildProceduralEnvMap(webgl, topHex = '#38bdf8', horHex = '#fde68a', gndHex = '#1e3a4c') {
+  if (!webgl || typeof THREE.PMREMGenerator !== 'function') return null;
+  try {
+    const pmrem = new THREE.PMREMGenerator(webgl);
+    const envScene = new THREE.Scene();
+    envScene.background = new THREE.Color(horHex);
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(20, 16, 12),
+      new THREE.MeshBasicMaterial({ color: topHex, side: THREE.BackSide })
+    );
+    envScene.add(dome);
+    const sunOrb = new THREE.Mesh(
+      new THREE.SphereGeometry(3.2, 12, 8),
+      new THREE.MeshBasicMaterial({ color: '#fff7d6' })
+    );
+    sunOrb.position.set(8, 12, 10);
+    envScene.add(sunOrb);
+    const gnd = new THREE.Mesh(
+      new THREE.PlaneGeometry(40, 40),
+      new THREE.MeshBasicMaterial({ color: gndHex, side: THREE.DoubleSide })
+    );
+    gnd.rotation.x = -Math.PI * 0.5;
+    gnd.position.y = -6;
+    envScene.add(gnd);
+    const rt = pmrem.fromScene(envScene, 0.04);
+    dome.geometry.dispose();
+    dome.material.dispose();
+    sunOrb.geometry.dispose();
+    sunOrb.material.dispose();
+    gnd.geometry.dispose();
+    gnd.material.dispose();
+    pmrem.dispose();
+    return { rt, texture: rt.texture };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -1394,6 +1629,11 @@ export class SkimmerRenderer {
     this._landCompress = 0;
     this._landSplashT = 0;
     this._landSplashX = 0;
+    this._trickPhase = 0;
+    this._trickActive = false;
+    this._camXSwing = 0;
+    this._ownEnvRt = null;
+    this.postfxActive = false;
 
     const rampTexs = createWaveRampTextures(256);
     this.rampAlbedoTex = rampTexs.albedoTex;
@@ -1411,6 +1651,7 @@ export class SkimmerRenderer {
     this.wakeRibbonTex = createSoftWakeRibbonTexture(128, 256);
     this.waterfallTex = createFeatheredWaterfallTexture();
     this.skyBackdropTex = createHorizonSkyTexture();
+    this.sunbeamTex = createVolumetricSunbeamTex(128);
 
     this._initScene();
     this._loadAssets();
@@ -1486,41 +1727,107 @@ export class SkimmerRenderer {
   _initScene() {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#2474b5');
-    this.scene.fog = new THREE.FogExp2('#c9b498', 0.0108);
+    this.scene.fog = new THREE.FogExp2('#d4bd9c', 0.0098);
     if (this.envMap) {
       this.scene.environment = this.envMap;
-      this.scene.environmentIntensity = 0.52;
+      this.scene.environmentIntensity = 0.85;
+    } else {
+      const env = buildProceduralEnvMap(this.webgl, '#38bdf8', '#f6d196', '#164e63');
+      if (env) {
+        this._ownEnvRt = env.rt;
+        this.envMap = env.texture;
+        this.scene.environment = env.texture;
+        this.scene.environmentIntensity = 0.85;
+      }
     }
 
-    this.camera = new THREE.PerspectiveCamera(56, this.width / Math.max(1, this.height), 0.2, 180);
+    this.camera = new THREE.PerspectiveCamera(54, this.width / Math.max(1, this.height), 0.2, 210);
 
-    // Unified Main-Game Lighting: warm golden directional key + cool azure hemisphere bounce + warm rim
-    this.hemiLight = new THREE.HemisphereLight('#7cc8f0', '#28455c', 1.38);
+    // Unified Main-Game Lighting: warm golden directional key w/ hero contact shadow + cool azure hemisphere bounce + warm rim
+    this.hemiLight = new THREE.HemisphereLight('#7cc8f0', '#28455c', 1.42);
     this.scene.add(this.hemiLight);
 
-    this.sunLight = new THREE.DirectionalLight('#fff1d6', 2.25);
-    this.sunLight.position.set(16, 26, 20);
+    this.sunLight = new THREE.DirectionalLight('#fff1d6', 2.45);
+    this.sunLight.position.set(14, 24, 16);
+    if (this.webgl?.shadowMap?.enabled) {
+      this.sunLight.castShadow = true;
+      this.sunLight.shadow.mapSize.set(1024, 1024);
+      this.sunLight.shadow.camera.near = 2;
+      this.sunLight.shadow.camera.far = 70;
+      this.sunLight.shadow.camera.left = -14;
+      this.sunLight.shadow.camera.right = 14;
+      this.sunLight.shadow.camera.top = 14;
+      this.sunLight.shadow.camera.bottom = -14;
+      this.sunLight.shadow.bias = -0.0006;
+      this.sunLight.shadow.normalBias = 0.024;
+    }
     this.scene.add(this.sunLight);
+    this.scene.add(this.sunLight.target);
 
-    this.rimLight = new THREE.DirectionalLight('#fcd39d', 0.95);
+    this.rimLight = new THREE.DirectionalLight('#fcd39d', 1.15);
     this.rimLight.position.set(-16, 14, 10);
     this.scene.add(this.rimLight);
 
-    this.wakeLight = new THREE.PointLight('#5efce8', 1.25, 8.0);
+    this.wakeLight = new THREE.PointLight('#5efce8', 1.45, 9.5);
     this.scene.add(this.wakeLight);
 
-    // Sunlit Canyon Gorge Studio-Painted Panorama (`assets/textures/mg_bg_rapids_surf.webp`)
+    // Curved Fog-Blended Horizon Sky Panorama + Soft Horizon Mist Skirt (ZERO hard seam!)
     this.skyBackdropMat = new THREE.MeshBasicMaterial({
       map: this.skyBackdropTex,
       fog: false,
       depthWrite: false,
+      side: THREE.BackSide,
     });
-    this.skyBackdrop = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.skyBackdropMat);
-    this.skyBackdrop.position.set(0, 14, -104);
+    const skyCylGeo = new THREE.CylinderGeometry(126, 126, 94, 32, 1, true, Math.PI * 0.55, Math.PI * 0.90);
+    this.skyBackdrop = new THREE.Mesh(skyCylGeo, this.skyBackdropMat);
+    this.skyBackdrop.position.set(0, 26, 0);
     this.scene.add(this.skyBackdrop);
 
-    // Real Animated GLSL Multi-Wave Fresnel Specular Whitewater Canyon River (ZERO Voronoi grid!)
-    const riverGeo = new THREE.PlaneGeometry(34, 134, 34, 56);
+    this.horizonMistMat = new THREE.MeshBasicMaterial({
+      map: this.mistTex,
+      color: '#e8d8be',
+      transparent: true,
+      opacity: 0.78,
+      depthWrite: false,
+      fog: false,
+    });
+    this.horizonMistBand = new THREE.Mesh(new THREE.PlaneGeometry(140, 24), this.horizonMistMat);
+    this.horizonMistBand.position.set(0, 4.5, -104);
+    this.scene.add(this.horizonMistBand);
+
+    // Majestic Distant Destination Pelagian Spire rising at the canyon vanishing point!
+    this.destSpireGroup = new THREE.Group();
+    const spireMat = new THREE.MeshStandardMaterial({
+      color: '#d8b48c',
+      roughness: 0.72,
+      metalness: 0.12,
+      fog: true,
+    });
+    const spireGlowMat = new THREE.MeshBasicMaterial({
+      color: '#5efce8',
+      transparent: true,
+      opacity: 0.72,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const spireBody = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 5.4, 36, 14), spireMat);
+    spireBody.position.y = 16;
+    const spireCrown = new THREE.Mesh(new THREE.ConeGeometry(4.1, 8.5, 10), spireMat);
+    spireCrown.position.y = 37.5;
+    const spireBeacon = new THREE.Mesh(new THREE.OctahedronGeometry(1.8, 0), spireGlowMat);
+    spireBeacon.position.y = 43.2;
+    const spireBand1 = new THREE.Mesh(new THREE.TorusGeometry(4.3, 0.35, 8, 24), spireGlowMat);
+    spireBand1.rotation.x = Math.PI * 0.5;
+    spireBand1.position.y = 15;
+    const spireBand2 = new THREE.Mesh(new THREE.TorusGeometry(3.7, 0.32, 8, 24), spireGlowMat);
+    spireBand2.rotation.x = Math.PI * 0.5;
+    spireBand2.position.y = 26;
+    this.destSpireGroup.add(spireBody, spireCrown, spireBeacon, spireBand1, spireBand2);
+    this.destSpireGroup.position.set(0, -1.5, -96);
+    this.scene.add(this.destSpireGroup);
+
+    // Real Animated GLSL Multi-Wave Fresnel Specular Curved S-Gorge Whitewater Canyon River (48x84 mesh!)
+    const riverGeo = new THREE.PlaneGeometry(36, 142, 48, 84);
     riverGeo.rotateX(-Math.PI * 0.5);
     this.riverGeo = riverGeo;
     this.riverMat = new THREE.ShaderMaterial({
@@ -1533,17 +1840,17 @@ export class SkimmerRenderer {
         uShallowColor: { value: new THREE.Color('#0e9aa4') },
         uSkyColor: { value: new THREE.Color('#f4d9a8') },
         uSunColor: { value: new THREE.Color('#fff1d6') },
-        uSunDir: { value: new THREE.Vector3(16, 26, 20).normalize() },
-        uFogColor: { value: new THREE.Color('#c9b498') },
-        uFogDensity: { value: 0.0108 },
+        uSunDir: { value: new THREE.Vector3(14, 24, 16).normalize() },
+        uFogColor: { value: new THREE.Color('#d4bd9c') },
+        uFogDensity: { value: 0.0098 },
         uHeroXZ: { value: new THREE.Vector2(0, 0) },
       },
     });
     this.riverMesh = new THREE.Mesh(riverGeo, this.riverMat);
-    this.riverMesh.position.set(0, 0, -42);
+    this.riverMesh.position.set(0, 0, -45);
     this.scene.add(this.riverMesh);
 
-    // Enclosing 3D Stratified Sedona Sandstone Gorge + 3D Sculpted Conifers & Mossy Shrubs + Waterfall Mist
+    // Enclosing 3D Stratified Sedona Sandstone Gorge + Sculpted Overhanging Stone Arches + Volumetric Sunbeams
     this.cliffMat = new THREE.MeshStandardMaterial({
       color: '#ffffff',
       map: this.sandstoneTex,
@@ -1568,7 +1875,7 @@ export class SkimmerRenderer {
       map: this.waterfallTex,
       color: '#f0fdfa',
       transparent: true,
-      opacity: 0.72,
+      opacity: 0.76,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
@@ -1576,7 +1883,16 @@ export class SkimmerRenderer {
       map: this.mistTex,
       color: '#e8fbff',
       transparent: true,
-      opacity: 0.24,
+      opacity: 0.28,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.sunbeamMat = new THREE.MeshBasicMaterial({
+      map: this.sunbeamTex,
+      color: '#fff2cc',
+      transparent: true,
+      opacity: 0.22,
+      blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
@@ -1585,8 +1901,10 @@ export class SkimmerRenderer {
     const shelfProtoGeo = buildStratifiedLedgeGeo(77);
     const coniferGeo = buildRedwoodBoughClusterGeo();
     const mossyRockGeo = buildCraggyMossyRockGeo();
-    const fallsGeo = new THREE.PlaneGeometry(2.05, 10.6);
-    const mistCurtainGeo = new THREE.PlaneGeometry(3.4, 3.0);
+    const fallsGeo = new THREE.PlaneGeometry(2.35, 11.4);
+    const mistCurtainGeo = new THREE.PlaneGeometry(3.8, 3.2);
+    const sunbeamGeo = new THREE.PlaneGeometry(5.4, 21.0);
+    const canyonArchParts = buildCanyonStoneArchParts();
 
     const sidePairs = MAX_GORGE_SEGS * 2;
     this.gorgeCliffInst = new THREE.InstancedMesh(cliffProtoGeo, this.cliffMat, sidePairs);
@@ -1595,6 +1913,8 @@ export class SkimmerRenderer {
     this.gorgeShrubInst = new THREE.InstancedMesh(mossyRockGeo, this.mossyRockMat, sidePairs * 2);
     this.gorgeFallsInst = new THREE.InstancedMesh(fallsGeo, this.waterfallMat, sidePairs);
     this.gorgeMistInst = new THREE.InstancedMesh(mistCurtainGeo, this.waterfallMistMat, sidePairs * 2);
+    this.canyonArchStoneInst = new THREE.InstancedMesh(canyonArchParts.stoneGeo, this.cliffMat, MAX_CANYON_ARCHES);
+    this.sunbeamInst = new THREE.InstancedMesh(sunbeamGeo, this.sunbeamMat, MAX_SUNBEAMS);
     for (const im of [
       this.gorgeCliffInst,
       this.gorgeShelfInst,
@@ -1602,6 +1922,8 @@ export class SkimmerRenderer {
       this.gorgeShrubInst,
       this.gorgeFallsInst,
       this.gorgeMistInst,
+      this.canyonArchStoneInst,
+      this.sunbeamInst,
     ]) {
       im.frustumCulled = false;
       this.scene.add(im);
@@ -1614,24 +1936,28 @@ export class SkimmerRenderer {
     this.boardWoodMat = new THREE.MeshStandardMaterial({
       color: '#f0e2d4',
       map: this.redwoodFallbackTex,
-      roughness: 0.36,
+      roughness: 0.34,
       metalness: 0.14,
     });
     this.boardBronzeMat = new THREE.MeshStandardMaterial({
       color: '#e5be7e',
-      roughness: 0.28,
-      metalness: 0.84,
+      roughness: 0.24,
+      metalness: 0.86,
     });
+    this.canyonArchBronzeInst = new THREE.InstancedMesh(canyonArchParts.bronzeGeo, this.boardBronzeMat, MAX_CANYON_ARCHES);
+    this.canyonArchBronzeInst.frustumCulled = false;
+    this.scene.add(this.canyonArchBronzeInst);
+
     this.boardRuneMat = new THREE.MeshStandardMaterial({
       color: '#7df9ff',
       map: this.hydroRuneTex,
       emissive: '#38bdf8',
       emissiveMap: this.hydroRuneTex,
-      emissiveIntensity: 1.25,
+      emissiveIntensity: 1.45,
       roughness: 0.18,
       metalness: 0.15,
       transparent: true,
-      opacity: 0.86,
+      opacity: 0.88,
       depthWrite: false,
     });
 
@@ -1639,42 +1965,76 @@ export class SkimmerRenderer {
     this.boardHullMesh = new THREE.Mesh(boardParts.hullGeo, this.boardWoodMat);
     this.boardBronzeMesh = new THREE.Mesh(boardParts.bronzeGeo, this.boardBronzeMat);
     this.boardRuneMesh = new THREE.Mesh(boardParts.runeGeo, this.boardRuneMat);
+    this.boardHullMesh.castShadow = true;
+    this.boardHullMesh.receiveShadow = true;
     this.hydroBoardGroup.add(this.boardHullMesh, this.boardBronzeMesh, this.boardRuneMesh);
     this.hydroBoardGroup.position.set(0, 0.05, 0.08);
     this.heroRoot.add(this.hydroBoardGroup);
 
-    // Soft Feathered Radial-Alpha Whitewater Wake Mist trailing behind swallowtail (1 merged draw call!)
+    // Soft Feathered Radial-Alpha Whitewater Wake Mist + Dramatic 3D Curved Rooster-Tail Spray Arc!
     this.hydroWakeGroup = new THREE.Group();
     const wakeRibbons = [];
     for (const sx of [-1, 1]) {
-      const wingGeo = new THREE.PlaneGeometry(0.86, 3.15, 4, 8);
+      const wingGeo = new THREE.PlaneGeometry(0.94, 3.45, 4, 8);
       wingGeo.rotateX(-Math.PI * 0.48);
-      wingGeo.rotateY(-sx * 0.28);
-      wingGeo.translate(sx * 0.56, 0.07, 1.85);
+      wingGeo.rotateY(-sx * 0.30);
+      wingGeo.translate(sx * 0.58, 0.07, 1.95);
       wakeRibbons.push(wingGeo);
     }
-    const centerPlumeGeo = new THREE.PlaneGeometry(0.88, 2.75, 4, 6);
+    const centerPlumeGeo = new THREE.PlaneGeometry(0.92, 2.95, 4, 6);
     centerPlumeGeo.rotateX(-Math.PI * 0.49);
-    centerPlumeGeo.translate(0, 0.05, 1.98);
+    centerPlumeGeo.translate(0, 0.05, 2.08);
     wakeRibbons.push(centerPlumeGeo);
 
     const mergedWakeGeo = safeMergeGeos(wakeRibbons);
     for (const w of wakeRibbons) w.dispose();
     this.wakeRibbonMat = new THREE.MeshBasicMaterial({
       map: this.wakeRibbonTex,
-      color: '#dffbff',
+      color: '#e4fcff',
       transparent: true,
-      opacity: 0.56,
+      opacity: 0.64,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
     this.wakeMistMesh = new THREE.Mesh(mergedWakeGeo, this.wakeRibbonMat);
     this.hydroWakeGroup.add(this.wakeMistMesh);
+
+    // Dynamic 3D Sculpted Rooster-Tail Plume arcing high behind Gateway's carving edge!
+    this.roosterTailMat = new THREE.MeshBasicMaterial({
+      map: this.wakeRibbonTex,
+      color: '#f0feff',
+      transparent: true,
+      opacity: 0.72,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.roosterTailMesh = new THREE.Mesh(buildRoosterTailPlumeGeo(), this.roosterTailMat);
+    this.hydroWakeGroup.add(this.roosterTailMesh);
     this.heroRoot.add(this.hydroWakeGroup);
 
+    // Sparkling Golden-Aqua Aerial Trick-Flip Halo Ring!
+    this.trickHaloMat = new THREE.MeshBasicMaterial({
+      color: '#fde047',
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.trickHaloMesh = new THREE.Mesh(new THREE.TorusGeometry(0.95, 0.055, 8, 28), this.trickHaloMat);
+    this.trickHaloMesh.position.set(0, 0.85, 0);
+    this.trickHaloMesh.visible = false;
+    this.heroRoot.add(this.trickHaloMesh);
+
     this.surfHero = new AdaptiveSurfHero(this.skinId);
-    this.surfHero.group.scale.setScalar(1.48);
+    this.surfHero.group.scale.setScalar(1.38);
     this.surfHero.group.position.set(0, 0.14, 0);
+    this.surfHero.group.traverse?.((o) => {
+      if (o.isMesh) {
+        o.castShadow = true;
+        o.receiveShadow = true;
+      }
+    });
     this.heroRoot.add(this.surfHero.group);
     this.scene.add(this.heroRoot);
 
@@ -1692,7 +2052,7 @@ export class SkimmerRenderer {
       map: this.mistTex,
       color: '#5efce8',
       transparent: true,
-      opacity: 0.26,
+      opacity: 0.30,
       side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
@@ -1713,12 +2073,12 @@ export class SkimmerRenderer {
       map: this.rampAlbedoTex,
       normalMap: this.rampNormalTex,
       normalScale: new THREE.Vector2(0.92, 0.92),
-      emissive: '#095f70',
-      emissiveIntensity: 0.22,
+      emissive: '#0c7c92',
+      emissiveIntensity: 0.28,
       roughness: 0.10,
       metalness: 0.16,
       transparent: true,
-      opacity: 0.90,
+      opacity: 0.92,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
@@ -1731,7 +2091,7 @@ export class SkimmerRenderer {
       map: this.mistTex,
       color: '#ecfeff',
       transparent: true,
-      opacity: 0.58,
+      opacity: 0.62,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
@@ -1739,14 +2099,14 @@ export class SkimmerRenderer {
     this.rampMistInst.frustumCulled = false;
     this.scene.add(this.rampMistInst);
 
-    // Feathered Whitewater Foam Collars hugging the waterline base of every Arch Pier, River Boulder & Ramp (1 draw call!)
+    // Feathered Whitewater Foam Collars hugging the waterline base of every Arch Pier, River Boulder & Ramp
     const pierFoamGeo = new THREE.PlaneGeometry(1.85, 2.55);
     pierFoamGeo.rotateX(-Math.PI * 0.5);
     this.pierFoamMat = new THREE.MeshBasicMaterial({
       map: this.mistTex,
       color: '#ecfeff',
       transparent: true,
-      opacity: 0.72,
+      opacity: 0.74,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
@@ -1754,7 +2114,7 @@ export class SkimmerRenderer {
     this.pierFoamInst.frustumCulled = false;
     this.scene.add(this.pierFoamInst);
 
-    // Hazards (Wet Stratified River Boulders, Carved Timber Crates, Siphon Surge Mines)
+    // Hazards (Wet Stratified River Boulders, Glowing Smashable Siphon Supply Buoys, Siphon Surge Mines)
     const boulderGeo = buildRockBoulderGeo(0.76, 33);
     this.boulderMat = new THREE.MeshStandardMaterial({
       color: '#f5ebe0',
@@ -1763,41 +2123,63 @@ export class SkimmerRenderer {
       metalness: 0.08,
     });
     this.boulderInst = new THREE.InstancedMesh(boulderGeo, this.boulderMat, MAX_HAZARDS);
+
+    const buoyParts = buildSupplyBuoyParts();
     this.crateMat = new THREE.MeshStandardMaterial({
-      color: '#dfb895',
-      map: this.redwoodFallbackTex,
-      roughness: 0.58,
-      metalness: 0.18,
+      color: '#d89b52',
+      emissive: '#451a03',
+      emissiveIntensity: 0.22,
+      roughness: 0.30,
+      metalness: 0.78,
     });
-    this.crateInst = new THREE.InstancedMesh(
-      new THREE.BoxGeometry(0.95, 0.85, 0.95),
-      this.crateMat,
-      MAX_HAZARDS
-    );
+    this.crateInst = new THREE.InstancedMesh(buoyParts.frameGeo, this.crateMat, MAX_HAZARDS);
+    this.crateCoreMat = new THREE.MeshStandardMaterial({
+      color: '#7df9ff',
+      emissive: '#22d3ee',
+      emissiveIntensity: 1.65,
+      roughness: 0.10,
+      metalness: 0.22,
+    });
+    this.crateCoreInst = new THREE.InstancedMesh(buoyParts.coreGeo, this.crateCoreMat, MAX_HAZARDS);
+
     this.mineGeo = buildSpikedSiphonMineGeo();
     this.mineMat = new THREE.MeshStandardMaterial({
-      color: '#5a4a3c',
-      emissive: '#9a3412',
-      emissiveIntensity: 0.24,
+      color: '#6b4d3e',
+      emissive: '#dc2626',
+      emissiveIntensity: 0.42,
       metalness: 0.84,
-      roughness: 0.34,
+      roughness: 0.30,
     });
     this.mineInst = new THREE.InstancedMesh(this.mineGeo, this.mineMat, MAX_HAZARDS);
-    for (const im of [this.boulderInst, this.crateInst, this.mineInst]) {
+    for (const im of [this.boulderInst, this.crateInst, this.crateCoreInst, this.mineInst]) {
       im.frustumCulled = false;
       this.scene.add(im);
     }
 
-    // Faceted Sapphire/Amber Pelagian Boost Crystals (`sk.gears`) & Hydro-Pulse Bolts
+    // Crisp 0.42u Faceted Crystals mounted cleanly inside glowing Slalom Hydro-Rings (`sk.gears`)!
     this.seedInst = new THREE.InstancedMesh(
       buildBoostCrystalGeo(),
       new THREE.MeshStandardMaterial({
         color: '#ffffff',
-        emissive: '#d97706',
-        emissiveIntensity: 0.72,
-        roughness: 0.14,
-        metalness: 0.62,
+        emissive: '#38bdf8',
+        emissiveIntensity: 1.15,
+        roughness: 0.12,
+        metalness: 0.55,
       }),
+      MAX_SEEDS
+    );
+    this.slalomRingMat = new THREE.MeshStandardMaterial({
+      color: '#e0faff',
+      emissive: '#22d3ee',
+      emissiveIntensity: 1.35,
+      roughness: 0.16,
+      metalness: 0.48,
+      transparent: true,
+      opacity: 0.88,
+    });
+    this.slalomRingInst = new THREE.InstancedMesh(
+      new THREE.TorusGeometry(0.96, 0.048, 8, 28),
+      this.slalomRingMat,
       MAX_SEEDS
     );
     this.boltInst = new THREE.InstancedMesh(
@@ -1805,7 +2187,7 @@ export class SkimmerRenderer {
       new THREE.MeshStandardMaterial({
         color: '#e0f2fe',
         emissive: '#38bdf8',
-        emissiveIntensity: 1.5,
+        emissiveIntensity: 1.8,
         roughness: 0.1,
       }),
       MAX_BOLTS
@@ -1816,26 +2198,28 @@ export class SkimmerRenderer {
         map: this.mistTex,
         color: '#ebfcff',
         transparent: true,
-        opacity: 0.68,
+        opacity: 0.72,
         side: THREE.DoubleSide,
         depthWrite: false,
       }),
       MAX_SPRAY
     );
-    for (const im of [this.seedInst, this.boltInst, this.sprayInst]) {
+    for (const im of [this.seedInst, this.slalomRingInst, this.boltInst, this.sprayInst]) {
       im.frustumCulled = false;
       this.scene.add(im);
     }
-    // Pre-allocate `instanceColor` on `seedInst` upfront so D3D11 never recompiles shaders on first crystal!
+    // Pre-allocate `instanceColor` upfront so D3D11 never recompiles shaders on first pickup!
     this._col.set('#ffffff');
     this._dummy.position.set(0, 0, 0);
     this._dummy.rotation.set(0, 0, 0);
     this._dummy.scale.setScalar(1);
     this._dummy.updateMatrix();
-    this.seedInst.setMatrixAt(0, this._dummy.matrix);
-    this.seedInst.setColorAt(0, this._col);
-    this.seedInst.instanceMatrix.needsUpdate = true;
-    if (this.seedInst.instanceColor) this.seedInst.instanceColor.needsUpdate = true;
+    for (const im of [this.seedInst, this.slalomRingInst]) {
+      im.setMatrixAt(0, this._dummy.matrix);
+      im.setColorAt(0, this._col);
+      im.instanceMatrix.needsUpdate = true;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    }
   }
 
   _loadAssets() {
@@ -1848,8 +2232,6 @@ export class SkimmerRenderer {
       t.wrapT = THREE.RepeatWrapping;
       this.boardWoodMat.map = t;
       this.boardWoodMat.needsUpdate = true;
-      this.crateMat.map = t;
-      this.crateMat.needsUpdate = true;
     });
     loadLocalWebpTex('assets/textures/mg_pbr_skimmer_wood_normal.webp', false, 1, 1, (t) => {
       if (this._disposed) return;
@@ -1858,16 +2240,15 @@ export class SkimmerRenderer {
       this.boardWoodMat.normalMap = t;
       this.boardWoodMat.normalScale.set(1.0, 1.0);
       this.boardWoodMat.needsUpdate = true;
-      this.crateMat.normalMap = t;
-      this.crateMat.normalScale.set(0.95, 0.95);
-      this.crateMat.needsUpdate = true;
     });
 
-    // Antique Bronze PBR maps for Board Rails/Fins, Pelagian River Gate Collars & Spiked Siphon Mines
+    // Antique Bronze PBR maps for Board Rails/Fins, Pelagian River Gate Collars, Supply Buoys & Spiked Siphon Mines
     loadLocalWebpTex('assets/textures/arch_antique_bronze_albedo.webp', true, 2, 1, (t) => {
       if (this._disposed) return;
       this.boardBronzeMat.map = t;
       this.boardBronzeMat.needsUpdate = true;
+      this.crateMat.map = t;
+      this.crateMat.needsUpdate = true;
       this.mineMat.map = t;
       this.mineMat.needsUpdate = true;
     });
@@ -1876,6 +2257,9 @@ export class SkimmerRenderer {
       this.boardBronzeMat.normalMap = t;
       this.boardBronzeMat.normalScale.set(1.0, 1.0);
       this.boardBronzeMat.needsUpdate = true;
+      this.crateMat.normalMap = t;
+      this.crateMat.normalScale.set(1.0, 1.0);
+      this.crateMat.needsUpdate = true;
       this.mineMat.normalMap = t;
       this.mineMat.normalScale.set(1.1, 1.1);
       this.mineMat.needsUpdate = true;
@@ -1885,6 +2269,9 @@ export class SkimmerRenderer {
       this.boardBronzeMat.roughnessMap = t;
       this.boardBronzeMat.metalnessMap = t;
       this.boardBronzeMat.needsUpdate = true;
+      this.crateMat.roughnessMap = t;
+      this.crateMat.metalnessMap = t;
+      this.crateMat.needsUpdate = true;
       this.mineMat.roughnessMap = t;
       this.mineMat.metalnessMap = t;
       this.mineMat.needsUpdate = true;
@@ -1948,7 +2335,7 @@ export class SkimmerRenderer {
     });
   }
 
-  render(state, _opts = {}) {
+  render(state, opts = {}) {
     if (this._disposed || !this.webgl || !state) return;
     const sk = state.rapidsSurf || state.rapids || state.skimmer;
     if (!sk) return;
@@ -1960,7 +2347,13 @@ export class SkimmerRenderer {
     const skin = state.gateway?.skinId || state.player?.skinId || state.skinId || this.skinId;
     if (skin && skin !== this.skinId) this.setSkin(skin);
 
-    const rawTheme = sk.biome || state.tower?.theme || 'canyon_river';
+    // Accept shared biome PMREM envMap from main GameRenderer when provided
+    if (opts?.envMap && this.scene.environment !== opts.envMap) {
+      this.scene.environment = opts.envMap;
+      this.scene.environmentIntensity = 0.88;
+    }
+
+    const rawTheme = opts?.biomeKey || opts?.biome || sk.biome || state.tower?.theme || 'canyon_river';
     const bKey = String(rawTheme).includes('coral')
       ? 'coral_sea'
       : String(rawTheme).includes('alpine') || String(rawTheme).includes('lake')
@@ -1978,12 +2371,22 @@ export class SkimmerRenderer {
     this.hemiLight.color.set(th.hemiSky);
     this.hemiLight.groundColor.set(th.hemiGnd);
     this.cliffMat.color.set(th.cliff);
+    if (this.horizonMistMat) this.horizonMistMat.color.set(th.fog);
+    if (this.sunbeamMat) this.sunbeamMat.color.set(th.sun);
 
     const dist = Number(sk.distance) || time * 18;
     const boostMult = Math.max(1, Number(sk.boostMult) || 1);
     const laneX = Number(sk.laneX) || 0;
     const rawY = Math.max(0, Number(sk.y) || 0);
     const onWater = Boolean(sk.onWater ?? rawY < 0.25);
+    const runProgress = clamp((Number(sk.timer) || 0) / Math.max(1, Number(sk.duration) || 18), 0, 1);
+
+    // Track directional hero shadow frustum tightly around Gateway
+    if (this.sunLight.castShadow) {
+      this.sunLight.position.set(laneX + 12, 22, 12);
+      this.sunLight.target.position.set(laneX, 0.5, -4);
+      this.sunLight.target.updateMatrixWorld();
+    }
 
     // Sample exact river wave height & longitudinal/lateral slopes matching RAPIDS_WATER_VERT
     const zFlow = -dist;
@@ -1992,27 +2395,43 @@ export class SkimmerRenderer {
     const w3Arg = zFlow * 1.48 + laneX * 1.15 - time * 4.2;
     const w4Arg = laneX * 0.92 - zFlow * 0.58 + time * 2.7;
     const waveH =
-      Math.sin(w1Arg) * 0.11 +
-      Math.cos(w2Arg) * 0.065 +
-      Math.sin(w3Arg) * 0.035 +
-      Math.cos(w4Arg) * 0.03;
+      Math.sin(w1Arg) * 0.12 +
+      Math.cos(w2Arg) * 0.07 +
+      Math.sin(w3Arg) * 0.04 +
+      Math.cos(w4Arg) * 0.032;
     const dhDz =
-      Math.cos(w1Arg) * 0.11 * 0.44 -
-      Math.sin(w2Arg) * 0.065 * 0.86 +
-      Math.cos(w3Arg) * 0.035 * 1.48 +
-      Math.sin(w4Arg) * 0.03 * 0.58;
+      Math.cos(w1Arg) * 0.12 * 0.44 -
+      Math.sin(w2Arg) * 0.07 * 0.86 +
+      Math.cos(w3Arg) * 0.04 * 1.48 +
+      Math.sin(w4Arg) * 0.032 * 0.58;
     const dhDx =
-      Math.cos(w1Arg) * 0.11 * 0.42 +
-      Math.sin(w2Arg) * 0.065 * 0.68 +
-      Math.cos(w3Arg) * 0.035 * 1.15 -
-      Math.sin(w4Arg) * 0.03 * 0.92;
+      Math.cos(w1Arg) * 0.12 * 0.42 +
+      Math.sin(w2Arg) * 0.07 * 0.68 +
+      Math.cos(w3Arg) * 0.04 * 1.15 -
+      Math.sin(w4Arg) * 0.032 * 0.92;
 
-    // Detect wave-jump touchdown -> trigger physical hull compression dip + landing splash burst!
+    // Detect wave-jump touchdown & trigger expressive mid-air 360° Trick-Flip off whitewater ramps!
+    if (this._prevOnWater && !onWater && (Number(sk.vy) || 0) > 7.5) {
+      this._trickActive = true;
+      this._trickPhase = 0;
+    }
     if (!this._prevOnWater && onWater) {
       const impact = clamp(0.48 + Math.abs(this._prevVy) * 0.09, 0.48, 1.0);
       this._landCompress = Math.max(this._landCompress, impact);
       this._landSplashT = 1.0;
       this._landSplashX = laneX;
+      this._trickActive = false;
+      this._trickPhase = 0;
+    }
+    if ((Number(sk.whipTimer) || 0) > 0.05 && !onWater && !this._trickActive) {
+      this._trickActive = true;
+      this._trickPhase = 0;
+    }
+    if (this._trickActive && !onWater) {
+      this._trickPhase = Math.min(1, this._trickPhase + dt * 1.65);
+    } else if (onWater) {
+      this._trickActive = false;
+      this._trickPhase = 0;
     }
     this._prevOnWater = onWater;
     this._prevVy = Number(sk.vy) || 0;
@@ -2033,7 +2452,7 @@ export class SkimmerRenderer {
       : clamp((sk.vy || 0) * 0.055, -0.32, 0.38);
     this._pitchSmooth += (wantPitch - this._pitchSmooth) * (1 - Math.exp(-10.5 * dt));
 
-    // Update GPU GLSL Fresnel Specular Water Shader uniforms (0 CPU vertex loops!)
+    // Update GPU GLSL Curved S-Gorge Fresnel Specular Water Shader uniforms
     const u = this.riverMat.uniforms;
     u.uTime.value = time;
     u.uDist.value = dist;
@@ -2044,9 +2463,9 @@ export class SkimmerRenderer {
     u.uFogColor.value.set(th.fog);
     u.uHeroXZ.value.set(laneX, 0);
 
-    this.waterfallTex.offset.set(0, -(time * 1.35) % 1);
+    this.waterfallTex.offset.set(0, -(time * 1.45) % 1);
 
-    // Loop Instanced Canyon Cliffs, Stratified Ledges, 3D Sculpted Conifers & Mossy Shrubs + Waterfall Mist
+    // Loop Curved S-Gorge Canyon Cliffs, Ledges, Conifers, Shrubs, Side-Waterfalls, Overhanging Arches & God-Rays
     const gorgeStep = GORGE_SPAN_Z / MAX_GORGE_SEGS;
     const dm = this._dummy;
     let cIdx = 0;
@@ -2058,32 +2477,35 @@ export class SkimmerRenderer {
     for (let i = 0; i < MAX_GORGE_SEGS; i++) {
       const wrappedZ = (((i * gorgeStep + dist) % GORGE_SPAN_Z) + GORGE_SPAN_Z) % GORGE_SPAN_Z;
       const segZ = 8 - wrappedZ;
+      const curveX = gorgeCurveX(segZ, dist);
+      const curveYaw = gorgeCurveYaw(segZ, dist);
+
       for (const side of [-1, 1]) {
-        // Stepped Stratified Sedona Sandstone Cliff
-        dm.position.set(side * (11.6 + (i % 2) * 0.85), 5.6, segZ);
-        dm.rotation.set(0, i * 0.65 + (side > 0 ? 1.2 : 0), 0);
-        dm.scale.set(1.15, 1.0 + (i % 3) * 0.18, 1.18);
+        // Stepped Stratified Sandstone Cliff Wall hugging the curved S-gorge
+        dm.position.set(curveX + side * (11.4 + (i % 2) * 0.9), 5.6, segZ);
+        dm.rotation.set(0, curveYaw + i * 0.65 + (side > 0 ? 1.2 : 0), 0);
+        dm.scale.set(1.18, 1.0 + (i % 3) * 0.20, 1.22);
         dm.updateMatrix();
         this.gorgeCliffInst.setMatrixAt(cIdx, dm.matrix);
 
         // Angular Stratified Riverbank Sandstone Ledge
-        const shelfX = side * (7.6 + (i % 2) * 0.42);
+        const shelfX = curveX + side * (7.5 + (i % 2) * 0.45);
         dm.position.set(shelfX, 0.32, segZ + 1.1);
-        dm.rotation.set(0, i * 0.55 + side * 0.4, 0);
-        dm.scale.set(1.05, 0.72, 1.22);
+        dm.rotation.set(0, curveYaw + i * 0.55 + side * 0.4, 0);
+        dm.scale.set(1.08, 0.74, 1.25);
         dm.updateMatrix();
         this.gorgeShelfInst.setMatrixAt(cIdx++, dm.matrix);
 
-        // Real 3D Sculpted Redwood Conifers crowning upper canyon cliff rims (ZERO 2D cardboard cards!)
+        // Real 3D Sculpted Conifers crowning upper curved gorge cliff rims
         for (let k = 0; k < 2; k++) {
-          dm.position.set(side * (9.2 + k * 1.35), 11.4 + ((i + k) % 3) * 0.85, segZ + (k - 0.5) * 2.4);
+          dm.position.set(curveX + side * (9.1 + k * 1.45), 11.4 + ((i + k) % 3) * 0.9, segZ + (k - 0.5) * 2.4);
           dm.rotation.set(0, i * 0.8 + k * 1.6, 0);
-          dm.scale.setScalar(0.88 + ((i + k) % 3) * 0.16);
+          dm.scale.setScalar(0.92 + ((i + k) % 3) * 0.16);
           dm.updateMatrix();
           this.gorgeTreeInst.setMatrixAt(tIdx++, dm.matrix);
         }
 
-        // Real 3D Sculpted Mossy Canyon Shrubs nestled on lower canyon ledges (replaces otter blob!)
+        // Real 3D Sculpted Mossy Canyon Rocks nestled on lower ledges
         for (let k = 0; k < 2; k++) {
           const rx = shelfX - side * (0.45 + k * 0.65);
           const rz = segZ + (k === 0 ? 0.4 : 2.5);
@@ -2094,22 +2516,22 @@ export class SkimmerRenderer {
           this.gorgeShrubInst.setMatrixAt(sIdx++, dm.matrix);
         }
 
-        // Cliffside Waterfall + Soft Drifting Alpha Waterfall Mist Curtains
-        if ((i + (side > 0 ? 1 : 0)) % 3 === 0) {
-          dm.position.set(side * 7.05, 5.2, segZ);
-          dm.rotation.set(0, -side * 0.22, 0);
+        // Sunlit Side-Waterfalls plunging down curved gorge cliffs + Mist Plumes
+        if ((i + (side > 0 ? 1 : 0)) % 2 === 0) {
+          dm.position.set(curveX + side * 6.95, 5.4, segZ);
+          dm.rotation.set(0, curveYaw - side * 0.24, 0);
           dm.scale.setScalar(1);
           dm.updateMatrix();
           this.gorgeFallsInst.setMatrixAt(fIdx++, dm.matrix);
 
           for (let m = 0; m < 2; m++) {
-            const driftPhase = (time * 0.65 + i * 0.31 + m * 0.5) % 1;
-            const my = 0.85 + driftPhase * 2.35;
-            const mx = side * (6.95 - driftPhase * 0.65);
-            const ms = 0.85 + Math.sin(driftPhase * Math.PI) * 0.48;
+            const driftPhase = (time * 0.68 + i * 0.31 + m * 0.5) % 1;
+            const my = 0.85 + driftPhase * 2.45;
+            const mx = curveX + side * (6.85 - driftPhase * 0.72);
+            const ms = 0.90 + Math.sin(driftPhase * Math.PI) * 0.52;
             dm.position.set(mx, my, segZ + (m - 0.5) * 1.25);
             dm.rotation.set(0, -side * 0.28, Math.sin(time * 0.9 + m) * 0.12);
-            dm.scale.set(ms * 1.15, ms * 0.92, 1);
+            dm.scale.set(ms * 1.2, ms * 0.95, 1);
             dm.updateMatrix();
             this.gorgeMistInst.setMatrixAt(mIdx++, dm.matrix);
           }
@@ -2129,22 +2551,84 @@ export class SkimmerRenderer {
     this.gorgeFallsInst.instanceMatrix.needsUpdate = true;
     this.gorgeMistInst.instanceMatrix.needsUpdate = true;
 
-    // Update Gateway carving in dynamic crouched surfer lean stance on her Hydro-Skimmer Board!
-    // Couple board roll & pitch visibly to lateral carving velocity + river wave slopes + landing dip!
+    // Dramatic Overhanging Sculpted Stone & Pelagian Bronze Canyon Arches spanning the S-gorge!
+    const archSpan = 104;
+    const archStep = archSpan / MAX_CANYON_ARCHES;
+    for (let i = 0; i < MAX_CANYON_ARCHES; i++) {
+      const wrappedZ = (((i * archStep + dist) % archSpan) + archSpan) % archSpan;
+      const az = 2 - wrappedZ;
+      const ax = gorgeCurveX(az, dist);
+      const ayaw = gorgeCurveYaw(az, dist);
+      dm.position.set(ax, 0.0, az);
+      dm.rotation.set(0, ayaw, 0);
+      dm.scale.set(1.0 + (i % 2) * 0.06, 0.96 + (i % 3) * 0.08, 1.0);
+      dm.updateMatrix();
+      this.canyonArchStoneInst.setMatrixAt(i, dm.matrix);
+      this.canyonArchBronzeInst.setMatrixAt(i, dm.matrix);
+    }
+    this.canyonArchStoneInst.count = MAX_CANYON_ARCHES;
+    this.canyonArchBronzeInst.count = MAX_CANYON_ARCHES;
+    this.canyonArchStoneInst.instanceMatrix.needsUpdate = true;
+    this.canyonArchBronzeInst.instanceMatrix.needsUpdate = true;
+
+    // Volumetric Slanted Sunlight God-Rays slicing diagonally through canyon mist!
+    const beamSpan = 92;
+    const beamStep = beamSpan / MAX_SUNBEAMS;
+    for (let i = 0; i < MAX_SUNBEAMS; i++) {
+      const wrappedZ = (((i * beamStep + dist * 0.85) % beamSpan) + beamSpan) % beamSpan;
+      const bz = -6 - wrappedZ;
+      const bx = gorgeCurveX(bz, dist) + (i % 2 === 0 ? -2.2 : 2.4);
+      dm.position.set(bx, 8.2, bz);
+      dm.rotation.set(0, 0.08, -0.34);
+      dm.scale.set(0.95 + (i % 3) * 0.25, 1.0, 1.0);
+      dm.updateMatrix();
+      this.sunbeamInst.setMatrixAt(i, dm.matrix);
+    }
+    this.sunbeamInst.count = MAX_SUNBEAMS;
+    this.sunbeamInst.instanceMatrix.needsUpdate = true;
+
+    // Distant Destination Spire growing subtly at the canyon vanishing point as run progresses!
+    if (this.destSpireGroup) {
+      const farCurveX = gorgeCurveX(-96, dist);
+      this.destSpireGroup.position.set(farCurveX, -1.8, -96);
+      this.destSpireGroup.scale.setScalar(0.76 + runProgress * 0.56);
+      this.destSpireGroup.rotation.y = time * 0.14;
+    }
+
+    // Update Gateway 2.0 carving in expressive 3/4 surf stance + 360° mid-air trick-flips!
+    const trickSpin = this._trickActive ? Math.sin(this._trickPhase * Math.PI * 0.5) * TAU : 0;
+    const airGrab = this._trickActive ? Math.sin(this._trickPhase * Math.PI) : 0;
     this.heroRoot.position.set(laneX, heroY, 0);
     const boardRoll = -bank * 0.46 + waveRoll;
     const boardYaw = -bank * 0.24;
     this.heroRoot.rotation.set(this._pitchSmooth, boardYaw, boardRoll);
     this.hydroBoardGroup.visible = true;
     this.hydroBoardGroup.position.set(0, 0.05 - this._landCompress * 0.04, 0.08);
-    this.boardRuneMat.emissiveIntensity = 1.15 + (boostMult - 1) * 0.35 + Math.sin(time * 6.0) * 0.18;
+    this.hydroBoardGroup.rotation.set(airGrab * 0.22, trickSpin * 0.5, 0);
+    this.boardRuneMat.emissiveIntensity = 1.25 + (boostMult - 1) * 0.40 + Math.sin(time * 6.0) * 0.20;
+
     const onWaterAlpha = clamp(1 - rawY * 2.2, 0, 1);
     this.hydroWakeGroup.visible = onWaterAlpha > 0.04;
-    this.wakeRibbonMat.opacity = (0.56 + Math.abs(bank) * 0.18 + this._landCompress * 0.22) * onWaterAlpha;
-    this.hydroWakeGroup.position.set(-bank * 0.20, 0, 0);
-    this.hydroWakeGroup.rotation.set(0, bank * 0.14, -boardRoll * 0.35);
-    this.hydroWakeGroup.scale.set(1 + Math.abs(bank) * 0.28 + this._landCompress * 0.25, 1, 1 + (boostMult - 1) * 0.18);
-    this.wakeLight.position.set(laneX, heroY + 0.85, 0.6);
+    this.wakeRibbonMat.opacity = (0.62 + Math.abs(bank) * 0.20 + this._landCompress * 0.22) * onWaterAlpha;
+    this.hydroWakeGroup.position.set(-bank * 0.22, 0, 0);
+    this.hydroWakeGroup.rotation.set(0, bank * 0.16, -boardRoll * 0.35);
+    this.hydroWakeGroup.scale.set(1 + Math.abs(bank) * 0.32 + this._landCompress * 0.25, 1, 1 + (boostMult - 1) * 0.20);
+    if (this.roosterTailMesh) {
+      this.roosterTailMat.opacity = (0.48 + Math.abs(bank) * 0.42 + (boostMult - 1) * 0.12) * onWaterAlpha;
+      this.roosterTailMesh.scale.set(
+        0.75 + Math.abs(bank) * 0.65,
+        0.75 + Math.abs(bank) * 0.95 + (boostMult - 1) * 0.18,
+        0.92 + (boostMult - 1) * 0.15
+      );
+      this.roosterTailMesh.rotation.y = -bank * 0.32;
+    }
+    if (this.trickHaloMesh) {
+      this.trickHaloMesh.visible = airGrab > 0.04;
+      this.trickHaloMat.opacity = airGrab * 0.85;
+      this.trickHaloMesh.scale.setScalar(0.85 + airGrab * 0.68);
+      this.trickHaloMesh.rotation.set(Math.PI * 0.42, trickSpin, time * 5.0);
+    }
+    this.wakeLight.position.set(laneX, heroY + 0.95, 0.75);
 
     this.surfHero.update(dt, {
       time,
@@ -2153,13 +2637,16 @@ export class SkimmerRenderer {
       onGround: onWater,
       surfing: onWater,
       rapidsSurf: onWater,
-      anim: !onWater ? 'AirRise' : 'RapidsSurf',
+      anim: this._trickActive ? 'SpringSomersault' : !onWater ? 'AirRise' : 'RapidsSurf',
+      mood: this._trickActive || boostMult >= 3 ? 'joyful' : 'determined',
       surfBank: bank,
+      trickSpin,
+      airGrab,
       landSquash: onWater ? clamp(0.54 + Math.abs(bank) * 0.28 + this._landCompress * 0.42, 0, 1.1) : 0.08,
-      frillFlare: 0.40 + (boostMult - 1) * 0.2 + Math.abs(bank) * 0.18,
+      frillFlare: 0.45 + (boostMult - 1) * 0.2 + Math.abs(bank) * 0.20 + airGrab * 0.35,
     });
 
-    // Carved Bronze-and-Sandstone Pelagian River Boost Gates + Waterline Pier Foam Collars
+    // Carved Bronze-and-Sandstone Pelagian River Boost Gates + Waterline Pier Foam Collars (1:1 synced!)
     const gates = sk.gates || [];
     const tierCol = BOOST_TIER_COLORS[Math.min(3, boostMult - 1)];
     this.gateCurtainMat.color.set(tierCol.curtain);
@@ -2169,18 +2656,18 @@ export class SkimmerRenderer {
     for (let i = 0; i < gates.length && gCnt < MAX_GATES; i++) {
       const gt = gates[i];
       if (gt.hit) continue;
-      const wz = -(gt.z - dist);
-      if (wz > 6 || wz < -95) continue;
-      const gx = gt.laneX || 0;
+      const wz = resolveItemWorldZ(gt.z, dist);
+      if (wz > 1.8 || wz < -92) continue;
+      const gx = (gt.laneX || 0) + gorgeCurveX(wz, dist);
+      const gyaw = gorgeCurveYaw(wz, dist);
       dm.position.set(gx, 0.0, wz);
-      dm.rotation.set(0, 0, 0);
+      dm.rotation.set(0, gyaw, 0);
       dm.scale.setScalar(1);
       dm.updateMatrix();
       this.gateStoneInst.setMatrixAt(gCnt, dm.matrix);
       this.gateBronzeInst.setMatrixAt(gCnt, dm.matrix);
       this.gateCurtainInst.setMatrixAt(gCnt++, dm.matrix);
 
-      // Feathered whitewater foam collars around both stone arch pier bases!
       for (const side of [-1.72, 1.72]) {
         if (pfCnt < pfMax) {
           const pulse = 0.94 + Math.sin(time * 4.5 + i + side) * 0.08;
@@ -2201,28 +2688,30 @@ export class SkimmerRenderer {
       this.gateCurtainInst.instanceMatrix.needsUpdate = true;
     }
 
-    // Sculpted Foaming River Wave-Crest Ramps + Crest Spray Mist + Trailing Whitewater Wake
+    // Sculpted Foaming River Wave-Crest Ramps + Crest Spray Mist
     const ramps = sk.ramps || [];
     let rCount = 0;
     for (let i = 0; i < ramps.length && rCount < MAX_RAMPS; i++) {
       const rp = ramps[i];
-      const wz = -(rp.z - dist);
-      if (wz > 6 || wz < -95) continue;
+      const wz = resolveItemWorldZ(rp.z, dist);
+      if (wz > 1.8 || wz < -92) continue;
+      const rx = (rp.laneX || 0) + gorgeCurveX(wz, dist);
+      const ryaw = gorgeCurveYaw(wz, dist);
       const surge = 1.0 + Math.sin(time * 4.2 + i) * 0.04;
-      dm.position.set(rp.laneX || 0, 0.03, wz);
-      dm.rotation.set(0, 0, 0);
+      dm.position.set(rx, 0.03, wz);
+      dm.rotation.set(0, ryaw, 0);
       dm.scale.set(1, surge, 1);
       dm.updateMatrix();
       this.rampInst.setMatrixAt(rCount, dm.matrix);
 
-      dm.position.set(rp.laneX || 0, 0.46 * surge + Math.sin(time * 5.5 + i) * 0.04, wz - 1.35);
-      dm.rotation.set(0, 0, Math.sin(time * 2.4 + i) * 0.06);
-      dm.scale.set(1.25 + Math.sin(time * 3.8 + i) * 0.1, 0.72, 1);
+      dm.position.set(rx, 0.48 * surge + Math.sin(time * 5.5 + i) * 0.04, wz - 1.35);
+      dm.rotation.set(0, ryaw, Math.sin(time * 2.4 + i) * 0.06);
+      dm.scale.set(1.28 + Math.sin(time * 3.8 + i) * 0.1, 0.74, 1);
       dm.updateMatrix();
       this.rampMistInst.setMatrixAt(rCount++, dm.matrix);
 
       if (pfCnt < pfMax) {
-        dm.position.set(rp.laneX || 0, 0.05, wz + 0.45);
+        dm.position.set(rx, 0.05, wz + 0.45);
         dm.rotation.set(0, 0, 0);
         dm.scale.set(1.85, 1, 1.65);
         dm.updateMatrix();
@@ -2236,28 +2725,31 @@ export class SkimmerRenderer {
       this.rampMistInst.instanceMatrix.needsUpdate = true;
     }
 
-    // Hazards (Boulders + Waterline Foam Collars, Carved Timber Crates, Siphon Surge Mines)
+    // Hazards (Boulders, Glowing Smashable Siphon Supply Buoys, Spiked Siphon Surge Mines)
     const hazards = sk.hazards || [];
     let bCnt = 0;
     let cCnt = 0;
     let mCnt = 0;
+    this.crateCoreMat.emissiveIntensity = 1.55 + Math.sin(time * 6.8) * 0.45;
     for (let i = 0; i < hazards.length; i++) {
       const hz = hazards[i];
-      const wz = -(hz.z - dist);
-      if (wz > 6 || wz < -95) continue;
-      dm.position.set(hz.laneX || 0, 0.35 + Math.sin(time * 3 + i) * 0.06, wz);
-      dm.rotation.set(0, time * 0.5 + i, 0);
+      const wz = resolveItemWorldZ(hz.z, dist);
+      if (wz > 1.6 || wz < -92) continue;
+      const hx = (hz.laneX || 0) + gorgeCurveX(wz, dist);
+      dm.position.set(hx, 0.32 + Math.sin(time * 3.4 + i) * 0.08, wz);
+      dm.rotation.set(Math.sin(time * 2.2 + i) * 0.08, time * 0.65 + i, Math.cos(time * 2.0 + i) * 0.08);
       dm.scale.setScalar(1);
       dm.updateMatrix();
       if (hz.type === 'mine' && mCnt < MAX_HAZARDS) {
         this.mineInst.setMatrixAt(mCnt++, dm.matrix);
       } else if (hz.type === 'crate' && cCnt < MAX_HAZARDS) {
-        this.crateInst.setMatrixAt(cCnt++, dm.matrix);
+        this.crateInst.setMatrixAt(cCnt, dm.matrix);
+        this.crateCoreInst.setMatrixAt(cCnt++, dm.matrix);
       } else if (bCnt < MAX_HAZARDS) {
         this.boulderInst.setMatrixAt(bCnt++, dm.matrix);
         if (pfCnt < pfMax) {
           const bp = 0.92 + Math.sin(time * 5.0 + i) * 0.08;
-          dm.position.set(hz.laneX || 0, 0.045, wz + 0.3);
+          dm.position.set(hx, 0.045, wz + 0.3);
           dm.rotation.set(0, 0, 0);
           dm.scale.set(1.18 * bp, 1, 1.32 * bp);
           dm.updateMatrix();
@@ -2267,44 +2759,67 @@ export class SkimmerRenderer {
     }
     this.boulderInst.count = bCnt;
     this.crateInst.count = cCnt;
+    this.crateCoreInst.count = cCnt;
     this.mineInst.count = mCnt;
     if (bCnt > 0) this.boulderInst.instanceMatrix.needsUpdate = true;
-    if (cCnt > 0) this.crateInst.instanceMatrix.needsUpdate = true;
+    if (cCnt > 0) {
+      this.crateInst.instanceMatrix.needsUpdate = true;
+      this.crateCoreInst.instanceMatrix.needsUpdate = true;
+    }
     if (mCnt > 0) this.mineInst.instanceMatrix.needsUpdate = true;
     if (this.pierFoamInst) {
       this.pierFoamInst.count = pfCnt;
       if (pfCnt > 0) this.pierFoamInst.instanceMatrix.needsUpdate = true;
     }
 
-    // Faceted Sapphire/Amber Boost Crystals (`sk.gears`) & Hydro-Pulse Bolts (`sk.bolts`)
+    // Crisp 0.42u Faceted Sea-Glass Crystals mounted cleanly inside Slalom Hydro-Rings (`sk.gears`)
+    // Strictly culled at `wz > -0.45` with smooth scale-out fade so NOTHING EVER clips Gateway's head or camera!
     const seeds = sk.gears || [];
     let sCnt = 0;
     for (let i = 0; i < seeds.length && sCnt < MAX_SEEDS; i++) {
       const g = seeds[i];
       if (g.collected) continue;
-      const wz = -(g.z - dist);
-      if (wz > 6 || wz < -95) continue;
-      dm.position.set(g.laneX || 0, (g.y ?? 0.55) + Math.sin(time * 4 + i) * 0.09, wz);
-      dm.rotation.set(0.18, time * 2.8 + i, 0.14);
-      dm.scale.setScalar(1.05);
+      const wz = resolveItemWorldZ(g.z, dist);
+      if (wz > -0.45 || wz < -92) continue;
+      const nearFade = wz > -1.25 ? clamp((-0.45 - wz) / 0.80, 0.05, 1.0) : 1.0;
+      const gx = (g.laneX || 0) + gorgeCurveX(wz, dist);
+      const gyaw = gorgeCurveYaw(wz, dist);
+      const gy = Math.max(0.98, (g.y ?? 0.55) + 0.55) + Math.sin(time * 4.2 + i) * 0.08;
+
+      // Outer Slalom Hydro-Ring framed cleanly around the surf lane
+      dm.position.set(gx, gy, wz);
+      dm.rotation.set(0, gyaw, time * 1.4 + i);
+      dm.scale.setScalar(nearFade);
       dm.updateMatrix();
-      this._col.set(i % 2 === 0 ? '#38bdf8' : '#fbbf24');
+      this._col.set(i % 2 === 0 ? '#5efce8' : '#fde047');
+      this.slalomRingInst.setColorAt(sCnt, this._col);
+      this.slalomRingInst.setMatrixAt(sCnt, dm.matrix);
+
+      // Compact 0.42u faceted gem sparkling at ring apex (never blocking Gateway's silhouette!)
+      dm.position.set(gx, gy + 0.52 * nearFade, wz);
+      dm.rotation.set(0.18, time * 3.1 + i, 0.14);
+      dm.scale.setScalar(0.92 * nearFade);
+      dm.updateMatrix();
       this.seedInst.setColorAt(sCnt, this._col);
       this.seedInst.setMatrixAt(sCnt++, dm.matrix);
     }
     this.seedInst.count = sCnt;
+    this.slalomRingInst.count = sCnt;
     if (sCnt > 0) {
       this.seedInst.instanceMatrix.needsUpdate = true;
+      this.slalomRingInst.instanceMatrix.needsUpdate = true;
       if (this.seedInst.instanceColor) this.seedInst.instanceColor.needsUpdate = true;
+      if (this.slalomRingInst.instanceColor) this.slalomRingInst.instanceColor.needsUpdate = true;
     }
 
     const bolts = sk.bolts || [];
     let bltCnt = 0;
     for (let i = 0; i < bolts.length && bltCnt < MAX_BOLTS; i++) {
       const b = bolts[i];
-      const wz = -(b.z - dist);
-      if (wz > 6 || wz < -95) continue;
-      dm.position.set(b.laneX || 0, 0.55, wz);
+      const wz = resolveItemWorldZ(b.z, dist);
+      if (wz > -0.35 || wz < -92) continue;
+      const bx = (b.laneX || 0) + gorgeCurveX(wz, dist);
+      dm.position.set(bx, (b.y ?? 0.55) + 0.25, wz);
       dm.rotation.set(time * 8, time * 10, 0);
       dm.scale.setScalar(1);
       dm.updateMatrix();
@@ -2313,28 +2828,26 @@ export class SkimmerRenderer {
     this.boltInst.count = bltCnt;
     if (bltCnt > 0) this.boltInst.instanceMatrix.needsUpdate = true;
 
-    // Asymmetric Whitewater Rooster-Tail Carving Wake Spray Plumes + Landing Compression Splash (1 InstancedMesh!)
+    // Asymmetric Whitewater Rooster-Tail Carving Wake Spray Droplets + Landing Splash Crown
     let spCnt = 0;
     const absBank = Math.abs(bank);
-    const carveRail = bank >= 0 ? 1 : -1; // inside-digging carving rail side (+X when banking right, -X when left)
-    const wakeQuota = this._landSplashT > 0.02 ? 124 : MAX_SPRAY;
+    const carveRail = bank >= 0 ? 1 : -1;
+    const wakeQuota = this._landSplashT > 0.02 ? 148 : MAX_SPRAY;
     for (let i = 0; i < wakeQuota && spCnt < MAX_SPRAY; i++) {
-      const age = (time * (2.5 + boostMult * 0.42 + absBank * 0.45) + i * 0.053) % 1;
-      // Bias 72% of rooster-tail puffs to the carving rail when leaning hard into a turn!
-      const isCarveRooster = absBank > 0.08 && (i % 4 !== 0);
+      const age = (time * (2.6 + boostMult * 0.45 + absBank * 0.5) + i * 0.047) % 1;
+      const isCarveRooster = absBank > 0.06 && (i % 4 !== 0);
       const side = isCarveRooster ? carveRail : i % 2 === 0 ? -1 : 1;
-      const carveBoost = isCarveRooster ? 1.0 + absBank * 1.15 : 1.0 - absBank * 0.35;
-      const spreadBase = 0.22 + age * (0.62 + absBank * 0.85 * carveBoost);
-      const arcSpread = (side * spreadBase - bank * 0.52 * age) * (0.76 + (i % 5) * 0.11);
-      // Tall rooster-tail vertical arc kicking off the carving rail
-      const roosterLift = isCarveRooster ? 0.42 + absBank * 0.78 : 0.36;
-      const sy = heroY + 0.08 + Math.sin(age * Math.PI) * roosterLift * (0.72 + (i % 3) * 0.18);
-      const sz = (isCarveRooster ? 0.55 : 1.02) + age * (4.4 + absBank * 1.2);
+      const carveBoost = isCarveRooster ? 1.0 + absBank * 1.25 : 1.0 - absBank * 0.35;
+      const spreadBase = 0.22 + age * (0.68 + absBank * 0.92 * carveBoost);
+      const arcSpread = (side * spreadBase - bank * 0.55 * age) * (0.76 + (i % 5) * 0.11);
+      const roosterLift = isCarveRooster ? 0.48 + absBank * 0.92 : 0.40;
+      const sy = heroY + 0.08 + Math.sin(age * Math.PI) * roosterLift * (0.74 + (i % 3) * 0.18);
+      const sz = (isCarveRooster ? 0.52 : 0.98) + age * (4.6 + absBank * 1.3);
       const puffScale =
         Math.sin(age * Math.PI) *
-        (0.58 + age * 0.92) *
-        (isCarveRooster ? 0.95 + absBank * 0.62 : 0.78) *
-        (rawY < 0.4 ? 1.08 : 0.24);
+        (0.56 + age * 0.96) *
+        (isCarveRooster ? 0.98 + absBank * 0.65 : 0.78) *
+        (rawY < 0.4 ? 1.12 : 0.22);
       dm.position.set(laneX + arcSpread, sy, sz);
       dm.rotation.set(0, 0, i * 0.7 + time * 1.6 * side);
       dm.scale.setScalar(Math.max(0.001, puffScale));
@@ -2342,17 +2855,16 @@ export class SkimmerRenderer {
       this.sprayInst.setMatrixAt(spCnt++, dm.matrix);
     }
 
-    // Radial Whitewater Landing Compression Splash Crown when touching down from a wave jump!
     if (this._landSplashT > 0.02) {
       const spProg = 1 - this._landSplashT;
       const splashN = MAX_SPRAY - spCnt;
       for (let i = 0; i < splashN; i++) {
         const ang = (i / Math.max(1, splashN)) * TAU + (i % 3) * 0.17;
-        const rad = 0.42 + spProg * (1.85 + (i % 4) * 0.35);
+        const rad = 0.42 + spProg * (2.05 + (i % 4) * 0.35);
         const sx = this._landSplashX + Math.cos(ang) * rad;
-        const sz = 0.25 + Math.sin(ang) * rad * 1.15 + spProg * 1.8;
-        const sy = 0.10 + Math.sin(spProg * Math.PI) * (0.85 + (i % 4) * 0.24);
-        const sc = Math.sin(spProg * Math.PI) * (0.85 + (i % 3) * 0.35);
+        const sz = 0.25 + Math.sin(ang) * rad * 1.15 + spProg * 1.85;
+        const sy = 0.10 + Math.sin(spProg * Math.PI) * (0.95 + (i % 4) * 0.26);
+        const sc = Math.sin(spProg * Math.PI) * (0.88 + (i % 3) * 0.38);
         dm.position.set(sx, sy, sz);
         dm.rotation.set(0, 0, ang + time * 2.2);
         dm.scale.setScalar(Math.max(0.001, sc));
@@ -2363,53 +2875,66 @@ export class SkimmerRenderer {
     this.sprayInst.count = spCnt;
     this.sprayInst.instanceMatrix.needsUpdate = true;
 
-    // Dynamic Heroic Chase Camera: 100% Portrait (412x915) & Desktop (1920x1080) Aspect-Safe!
+    // Dynamic Heroic 3/4 Surfing Chase Camera (shows Gateway's expressive side-profile & streaming scarf!)
     const aspect = this.width / Math.max(1, this.height);
     const portrait = aspect < 0.85;
-    const wantFov = (portrait ? 58 : 48) + (boostMult - 1) * 2.4;
+    const wantFov = (portrait ? 58 : 49) + (boostMult - 1) * 3.0 + (this._trickActive ? 4.0 : 0);
     if (Math.abs(this.camera.fov - wantFov) > 0.1) {
       this.camera.fov = lerp(this.camera.fov, wantFov, 0.12);
       this.camera.updateProjectionMatrix();
     }
-    this.surfHero.group.scale.setScalar(portrait ? 1.62 : 1.56);
+    this.surfHero.group.scale.setScalar(portrait ? 1.24 : 1.18);
 
     const sh = Number(state.shake) || 0;
     const sx = sh > 0.01 ? Math.sin(time * 69) * sh * 0.02 : 0;
     const sy = sh > 0.01 ? Math.cos(time * 57) * sh * 0.02 : 0;
-    const camZ = portrait ? 5.35 : 4.35;
-    const camY = (portrait ? 2.48 : 2.05) + heroY * 0.42;
-    const camX = laneX * (portrait ? 0.80 : 0.64);
+    const wantCamSwing = -bank * (portrait ? 0.52 : 0.72) + Math.sin(time * 0.55) * 0.12;
+    this._camXSwing += (wantCamSwing - this._camXSwing) * (1 - Math.exp(-5.5 * dt));
+    const camZ = portrait ? 5.45 : 4.65;
+    const camY = (portrait ? 2.45 : 2.08) + heroY * 0.44;
+    const camX = laneX * (portrait ? 0.78 : 0.64) + this._camXSwing;
     this.camera.position.set(camX + sx, camY + sy, camZ);
-    this.camera.lookAt(laneX * (portrait ? 0.90 : 0.86), 0.96 + heroY * 0.35, -4.8);
+    const lookCurve = gorgeCurveX(-14, dist) * 0.28;
+    this.camera.lookAt(laneX * (portrait ? 0.88 : 0.82) + lookCurve, 0.98 + heroY * 0.36, -6.5);
 
-    // Aspect-cover studio-painted Canyon Gorge panorama backdrop
-    const bgDist = camZ + 104;
-    const bgH = 2 * Math.tan((this.camera.fov * 0.5) * (Math.PI / 180)) * bgDist * 1.15;
-    const bgW = bgH * aspect * 1.15;
-    this.skyBackdrop.scale.set(bgW, bgH, 1);
-    this.skyBackdrop.position.set(camX, camY + bgH * 0.16, -104);
-    if (this.skyBackdropWebp) {
-      const imgAspect = 1376 / 768;
-      const quadAspect = bgW / Math.max(0.01, bgH);
-      if (quadAspect < imgAspect) {
-        const repX = clamp(quadAspect / imgAspect, 0.32, 1);
-        this.skyBackdropWebp.repeat.set(repX, 1);
-        this.skyBackdropWebp.offset.set((1 - repX) * 0.5, 0);
-      } else {
-        const repY = clamp(imgAspect / quadAspect, 0.52, 1);
-        this.skyBackdropWebp.repeat.set(1, repY);
-        this.skyBackdropWebp.offset.set(0, (1 - repY) * 0.42);
-      }
+    // Keep curved sky cylinder & soft horizon mist centered cleanly on camera
+    this.skyBackdrop.position.set(camX, camY + 18, camZ);
+    if (this.horizonMistBand) {
+      this.horizonMistBand.position.set(camX + gorgeCurveX(-98, dist) * 0.4, 4.2, -104);
     }
 
-    this.webgl.setRenderTarget(null);
-    this.webgl.render(this.scene, this.camera);
+    // Route cleanly through main GameRenderer's CinematicPostFX when provided, with ACES standalone fallback!
+    const postfx = opts?.postfx;
+    if (postfx && postfx.enabled && !postfx._disposed && typeof postfx.render === 'function') {
+      this.postfxActive = true;
+      postfx.render(this.scene, this.camera, {
+        biome: bKey,
+        exposure: 1.06,
+        bloomThreshold: 0.82,
+        bloomStrength: 0.30,
+        bloomRadius: 0.40,
+      });
+    } else {
+      this.postfxActive = false;
+      const prevTone = this.webgl.toneMapping;
+      const prevExp = this.webgl.toneMappingExposure;
+      try {
+        this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
+        this.webgl.toneMappingExposure = 1.06;
+        this.webgl.setRenderTarget(null);
+        this.webgl.render(this.scene, this.camera);
+      } finally {
+        this.webgl.toneMapping = prevTone;
+        this.webgl.toneMappingExposure = prevExp;
+      }
+    }
   }
 
   dispose() {
     if (this._disposed) return;
     this._disposed = true;
     this.surfHero?.dispose();
+    this._ownEnvRt?.dispose();
     this.rampAlbedoTex?.dispose();
     this.rampNormalTex?.dispose();
     this.sandstoneTex?.dispose();
@@ -2419,6 +2944,7 @@ export class SkimmerRenderer {
     this.wakeRibbonTex?.dispose();
     this.waterfallTex?.dispose();
     this.skyBackdropTex?.dispose();
+    this.sunbeamTex?.dispose();
   }
 }
 

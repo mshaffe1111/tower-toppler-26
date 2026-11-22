@@ -28,7 +28,10 @@ const HIT_PENALTY = 100;
 const MAX_MULT = 4;
 const NEAR_MISS_POINTS = 50;
 const COMBO_WINDOW = 2.5;
-const SONAR_COOLDOWN = 3.2;
+const SONAR_COOLDOWN = 2.6;
+const DASH_DURATION = 0.40;
+const DASH_COOLDOWN = 1.05;
+const STREAM_RING_POINTS = 140;
 const MAX_VFX = 48;
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -75,6 +78,8 @@ export class SubStage {
     this.ventBoostTimer = 0;
     this.currents = [];
     this.slipRings = [];
+    this.boostRings = []; // Shimmering Current Stream Boost Rings (+7-11% Flow!)
+    this.escorts = []; // Joyous rescued Turtles & Otters swimming alongside Gateway!
     this._slipCd = 0;
     this.rings = [];
     this.vfx = [];
@@ -82,6 +87,8 @@ export class SubStage {
     this._prevJump = false;
     this._prevFire = false;
     this._prevWhip = false;
+    this.flowCharge = 0;
+    this.ringChain = 0;
     this.tower = { active: false, x: 0, r: 100, targetX: 0, glow: '#38bdf8', name: '' };
     this._resetStats();
     if (
@@ -109,6 +116,8 @@ export class SubStage {
       stunMax: 1,
       invuln: 0,
       spin: 0,
+      dashTimer: 0,
+      dashCooldown: 0,
       whipTimer: 0,
       swimCycle: 0,
       fireCd: 0,
@@ -145,6 +154,10 @@ export class SubStage {
     this.mult = 1;
     this.nearMisses = 0;
     this.bestCombo = 0;
+    this.flowCharge = 0;
+    this.ringChain = 0;
+    this.ringsPassed = 0;
+    this.grottosFound = 0;
   }
 
   start({
@@ -201,6 +214,8 @@ export class SubStage {
     this.vents.length = 0;
     this.currents.length = 0;
     this.slipRings.length = 0;
+    this.boostRings.length = 0;
+    this.escorts.length = 0;
     this.hiddenCaches.length = 0;
     this.rings.length = 0;
     this.vfx.length = 0;
@@ -277,8 +292,16 @@ export class SubStage {
       }
     );
 
-    // Spawn initial trapped wildlife cage right into view inside safe portrait/desktop framing!
+    // Spawn initial trapped wildlife orb + welcoming Current Stream Boost Ring right into view!
     this._spawnCage(this.width * (portrait ? 0.72 : 0.78), this.height * 0.44);
+    this.boostRings.push({
+      x: this.width * (portrait ? 0.88 : 0.62),
+      y: this.height * 0.36,
+      r: 34 * this.s,
+      phase: 0.4,
+      passed: false,
+      passT: 0,
+    });
 
     this.hiddenCaches.push(
       { x: this.width * 0.72, y: this.seabedY - 46 * this.s },
@@ -287,9 +310,10 @@ export class SubStage {
     );
     this.warpCave = {
       x: this.width + 220 * this.s,
-      y: Math.max(this.top + 38 * this.s, this.height * 0.24),
-      r: 46 * this.s,
+      y: Math.max(this.top + 38 * this.s, this.height * 0.28),
+      r: 50 * this.s,
       active: true,
+      revealed: false,
       entered: false,
     };
 
@@ -299,6 +323,7 @@ export class SubStage {
       school: 0.85,
       big: 2.9 + Math.random() * 1.3,
       cage: 2.4,
+      ring: 1.5,
       jelly: allowHazards ? 2.4 : Infinity,
       mine: allowHazards ? (this.towerIndex >= 1 ? 3.4 + Math.random() * 1.5 : 4.4) : Infinity,
       clam: 2.6,
@@ -502,9 +527,9 @@ export class SubStage {
     const fireEdge = fireNow && !this._prevFire;
     this._prevFire = fireNow;
 
-    // Buttonless compatibility: BOTH `fire` (tap) and `whip` (wrist-flick / slash) trigger
-    // torpedo shots AND harmonic sonar ping when sonar is off cooldown!
+    // Jump or Whip triggers Gateway's agile Barrel-Roll Dash + Bio-Sonar Ring!
     const wantFire = Boolean(firePressed || fireEdge || whipEdge);
+    const wantDash = Boolean(jumpEdge || whipEdge);
     const wantSonar = Boolean(
       sonarPressed ||
         jumpEdge ||
@@ -512,6 +537,9 @@ export class SubStage {
         ((firePressed || fireEdge) && this.sonarCooldown <= 0)
     );
 
+    if (wantDash && this.sub.stun <= 0 && (this.sub.dashCooldown || 0) <= 0) {
+      this._triggerBarrelRollDash(fx, sound);
+    }
     if (whipEdge) {
       this.sub.whipTimer = 0.42;
       this._whipNearbyCages(fx, sound);
@@ -520,8 +548,10 @@ export class SubStage {
     this._updateSwimmer(dt, input, wantFire, wantSonar, fx, sound);
     this._spawn(dt);
     this._updateVentsAndGrotto(dt, fx, sound);
+    this._updateBoostRings(dt, fx, sound);
     this._updateBubbles(dt, fx, sound);
     this._updateCages(dt, fx, sound);
+    this._updateEscorts(dt, fx);
     this._updateFish(dt, fx, sound);
     this._updateJellies(dt, fx, sound);
     this._updateMines(dt, fx, sound);
@@ -569,10 +599,98 @@ export class SubStage {
     if (this.hits === 0) {
       this.perfect = true;
       this._score(fx, PERFECT_BONUS);
+      this._addFlow(fx, 15, 'CLEAN REEF SWIM');
       fx.popup?.(this.sub.x, this.sub.y - 78 * this.s, `PURE TIDE SWIM +${PERFECT_BONUS}`, '#fde047');
       sound?.secret?.();
     }
     fx.banner?.(`SPIRE ${this.towerIndex + 2}`, `ARRIVING: ${this.nextTowerName}`);
+  }
+
+  _addFlow(fx, amount, reason = '') {
+    if (!amount) return;
+    this.flowCharge = clamp((this.flowCharge || 0) + amount, 0, 100);
+    fx?.addFlowCharge?.(amount, reason);
+  }
+
+  _triggerBarrelRollDash(fx, sound) {
+    const swimmer = this.sub;
+    const s = this.s;
+    swimmer.dashTimer = DASH_DURATION;
+    swimmer.dashCooldown = DASH_COOLDOWN;
+    swimmer.invuln = Math.max(swimmer.invuln || 0, DASH_DURATION + 0.14);
+    swimmer.vx = Math.max(swimmer.vx, 220 * s) + 125 * s;
+    this.ventBoostTimer = Math.max(this.ventBoostTimer || 0, 0.36);
+    this._ring(swimmer.x, swimmer.y, swimmer.rx * 0.5, swimmer.rx * 2.6, '#5efce8', 0.38);
+    this._vfx('whoosh', swimmer.x, swimmer.y, { life: 0.42, size: swimmer.rx * 1.1, a: 1 });
+    fx.particles?.(swimmer.x, swimmer.y, '#67e8f9', 14, 150);
+    fx.haptic?.(14);
+    if (typeof sound?.gatewayTrickChirp === 'function') sound.gatewayTrickChirp();
+    else if (typeof sound?.tailWhip === 'function') sound.tailWhip();
+    else sound?.whoosh?.();
+  }
+
+  _updateBoostRings(dt, fx, sound) {
+    const s = this.s;
+    const swimmer = this.sub;
+    for (let i = this.boostRings.length - 1; i >= 0; i--) {
+      const br = this.boostRings[i];
+      br.phase += dt * 2.4;
+      br.x -= this.scrollSpeed * dt;
+      if (br.passed) {
+        br.passT += dt;
+        if (br.passT > 0.48 || br.x < -70 * s) removeAt(this.boostRings, i);
+        continue;
+      }
+      if (swimmer.stun <= 0 && Math.hypot(swimmer.x - br.x, swimmer.y - br.y) < br.r + swimmer.ry * 0.95) {
+        br.passed = true;
+        br.passT = 0;
+        this.ringsPassed++;
+        this.ringChain++;
+        this.ventBoostTimer = Math.max(this.ventBoostTimer || 0, 0.52);
+        const mult = this._comboHit();
+        const pts = STREAM_RING_POINTS * mult;
+        const flowGain = this.ringChain >= 3 ? 11 : 7;
+        this._score(fx, pts);
+        this._addFlow(fx, flowGain, 'CURRENT RING');
+        this._ring(br.x, br.y, br.r * 0.5, br.r * 2.8, '#5efce8', 0.52);
+        this._vfx('sparkle', br.x, br.y, { life: 0.55, size: br.r * 1.4, color: '#fde047' });
+        fx.particles?.(br.x, br.y, '#5efce8', 14, 130);
+        fx.popup?.(br.x, br.y - 24 * s, `FLOW +${flowGain}% • +${pts}`, '#5efce8');
+        fx.haptic?.(12);
+        (sound?.boostGate || sound?.ringChime || sound?.collect)?.call(sound, Math.min(4, this.ringChain));
+      } else if (br.x < swimmer.x - swimmer.rx * 2.2) {
+        if (!br._missed) {
+          br._missed = true;
+          this.ringChain = 0;
+        }
+      }
+      if (br.x < -70 * s) removeAt(this.boostRings, i);
+    }
+  }
+
+  _updateEscorts(dt, fx) {
+    const s = this.s;
+    const sw = this.sub;
+    for (let i = 0; i < this.escorts.length; i++) {
+      const e = this.escorts[i];
+      e.age += dt;
+      const side = i % 2 === 0 ? -1 : 1;
+      const rank = Math.floor(i / 2) + 1;
+      const targetX = sw.x - (52 + rank * 32) * s;
+      const targetY = clamp(
+        sw.y + side * (26 + rank * 16) * s + Math.sin(e.age * 3.8 + e.phase) * 10 * s,
+        this.top + 12 * s,
+        this.bottom - 12 * s
+      );
+      const k = 1 - Math.exp(-5.5 * dt);
+      e.x += (targetX - e.x) * k;
+      e.y += (targetY - e.y) * k;
+      e.sparkleCd -= dt;
+      if (e.sparkleCd <= 0) {
+        e.sparkleCd = 1.1 + (i % 3) * 0.25;
+        fx.particles?.(e.x, e.y, '#fde047', 3, 45);
+      }
+    }
   }
 
   _score(fx, pts) {
@@ -634,15 +752,31 @@ export class SubStage {
     const mult = this._comboHit();
     const pts = CAGE_RESCUE_POINTS * mult;
     this._score(fx, pts);
+    this._addFlow(fx, 18, 'CRITTER RESCUE');
+    fx.onCritterRescued?.({ species: cg.animal, x: cg.x, y: cg.y });
+
+    // Joyous freed companion joins Gateway's active reef escort formation!
+    if (this.escorts.length < 4) {
+      this.escorts.push({
+        animal: cg.animal,
+        x: cg.x,
+        y: cg.y,
+        age: 0,
+        phase: Math.random() * TAU,
+        sparkleCd: 0.5,
+      });
+    }
 
     const label = cg.animal === 'turtle' ? 'SEA TURTLE FREED!' : 'RIVER OTTER FREED!';
-    fx.popup?.(cg.x, cg.y - 26 * s, `${label} +${pts}`, '#5efce8');
-    fx.particles?.(cg.x, cg.y, '#5efce8', 18, 145);
-    fx.particles?.(cg.x, cg.y, '#fde047', 10, 110);
-    this._ring(cg.x, cg.y, cg.r * 0.6, cg.r * 3.8, '#5efce8', 0.65);
-    this._vfx('sparkle', cg.x, cg.y, { life: 0.75, size: cg.r * 2.2, color: '#5efce8' });
-    fx.shake?.(3.2);
-    (sound?.collectStar || sound?.secret || sound?.pickup)?.call(sound);
+    fx.popup?.(cg.x, cg.y - 26 * s, `${label} +18% FLOW`, '#5efce8');
+    fx.particles?.(cg.x, cg.y, '#5efce8', 20, 155);
+    fx.particles?.(cg.x, cg.y, '#fde047', 12, 120);
+    this._ring(cg.x, cg.y, cg.r * 0.6, cg.r * 4.2, '#5efce8', 0.68);
+    this._vfx('sparkle', cg.x, cg.y, { life: 0.78, size: cg.r * 2.4, color: '#5efce8' });
+    fx.shake?.(3.4);
+    fx.haptic?.(20);
+    if (typeof sound?.gatewayRescueTrill === 'function') sound.gatewayRescueTrill();
+    else (sound?.collectStar || sound?.secret || sound?.pickup)?.call(sound);
   }
 
   _whipNearbyCages(fx, sound) {
@@ -694,7 +828,22 @@ export class SubStage {
       }
     }
 
-    // Shatter Siphon Wildlife Cages within harmonic shockwave radius!
+    // Stun nearby electric jellyfish in Pelagian Bio-Sonar dome!
+    for (let i = 0; i < this.jellies.length; i++) {
+      const j = this.jellies[i];
+      if (j.state === 'alive' && Math.hypot(j.x - swimmer.x, j.y - swimmer.y) < maxDist) {
+        j.stunTimer = 2.6;
+        fx.particles?.(j.x, j.y, '#5efce8', 6, 80);
+      }
+    }
+
+    // Illuminate & unveil the Hidden Bioluminescent Crystal Grotto!
+    if (this.warpCave && this.warpCave.active && !this.warpCave.revealed) {
+      this.warpCave.revealed = true;
+      fx.popup?.(swimmer.x, swimmer.y - 68 * s, 'CRYSTAL GROTTO UNVEILED!', '#5efce8');
+    }
+
+    // Shatter Siphon Wildlife Containment Orbs within harmonic shockwave radius!
     for (let i = 0; i < this.cages.length; i++) {
       const cg = this.cages[i];
       if (cg.state === 'caged' && Math.hypot(cg.x - swimmer.x, cg.y - swimmer.y) < 235 * s) {
@@ -782,6 +931,14 @@ export class SubStage {
     if (swimmer.invuln > 0) swimmer.invuln -= dt;
     if (swimmer.fireCd > 0) swimmer.fireCd -= dt;
     if (swimmer.autoCd > 0) swimmer.autoCd -= dt;
+    if (swimmer.dashCooldown > 0) swimmer.dashCooldown = Math.max(0, swimmer.dashCooldown - dt);
+    if (swimmer.dashTimer > 0) {
+      swimmer.dashTimer = Math.max(0, swimmer.dashTimer - dt);
+      swimmer.spin += (TAU / DASH_DURATION) * dt;
+      if (swimmer.dashTimer <= 0) {
+        swimmer.spin = Math.round(swimmer.spin / TAU) * TAU;
+      }
+    }
 
     const portrait = W / Math.max(1, this.height) < 0.85;
 
@@ -1056,22 +1213,25 @@ export class SubStage {
     }
 
     const wc = this.warpCave;
-    if (wc && wc.active && !wc.entered && this.rideT >= (this.rideDuration || RIDE_TIME) * 0.52) {
-      wc.x -= this.scrollSpeed * 1.04 * dt;
-      if (Math.hypot(swimmer.x - wc.x, swimmer.y - wc.y) < wc.r) {
+    if (wc && wc.active && !wc.entered && this.rideT >= (this.rideDuration || RIDE_TIME) * 0.48) {
+      wc.x -= this.scrollSpeed * 1.02 * dt;
+      if (Math.hypot(swimmer.x - wc.x, swimmer.y - wc.y) < wc.r * 1.15) {
         wc.entered = true;
         wc.active = false;
+        wc.revealed = true;
         this.warpEntered = true;
+        this.grottosFound = (this.grottosFound || 0) + 1;
         this.gearsEarned += 5;
         fx.addGear?.(5);
         fx.onWarpCave?.();
         this._score(fx, GROTTO_POINTS);
+        this._addFlow(fx, 22, 'CRYSTAL GROTTO');
         this.sub.catches++;
-        this._ring(wc.x, wc.y, 12 * s, 115 * s, '#5efce8', 0.75);
-        this._ring(wc.x, wc.y, 8 * s, 85 * s, '#fde047', 0.58);
-        this._vfx('sparkle', wc.x, wc.y, { life: 0.8, size: 42 * s, color: '#5efce8' });
-        fx.particles?.(wc.x, wc.y, '#5efce8', 20, 145);
-        fx.popup?.(swimmer.x, swimmer.y - 78 * s, 'CORAL SANCTUARY! +5 SEEDS & AEGIS', '#5efce8');
+        this._ring(wc.x, wc.y, 12 * s, 125 * s, '#5efce8', 0.78);
+        this._ring(wc.x, wc.y, 8 * s, 92 * s, '#fde047', 0.62);
+        this._vfx('sparkle', wc.x, wc.y, { life: 0.85, size: 46 * s, color: '#5efce8' });
+        fx.particles?.(wc.x, wc.y, '#5efce8', 24, 155);
+        fx.popup?.(swimmer.x, swimmer.y - 78 * s, 'CRYSTAL GROTTO! +22% FLOW & +5 GEARS', '#5efce8');
         (sound?.collectStar || sound?.secret)?.call(sound);
       }
       if (wc.x < -90 * s) wc.active = false;
@@ -1124,6 +1284,18 @@ export class SubStage {
       n.cage = t + rand(4.2, 5.6);
       const cy = rand(minY + 28 * s, maxY - 18 * s);
       this._spawnCage(W + 52 * s, cy);
+    }
+    if (fishOpen && n.ring !== undefined && t >= n.ring) {
+      n.ring = t + rand(2.3, 3.2);
+      const ry = rand(minY + 24 * s, maxY - 16 * s);
+      this.boostRings.push({
+        x: W + 48 * s,
+        y: ry,
+        r: 34 * s,
+        phase: Math.random() * TAU,
+        passed: false,
+        passT: 0,
+      });
     }
     if (fishOpen && t >= n.big) {
       n.big = t + rand(3.6, 5.2) - h * 0.8;
@@ -1382,7 +1554,8 @@ export class SubStage {
         const mult = this._comboHit();
         const pts = MINE_SHATTER_POINTS * mult;
         this._score(fx, pts);
-        fx.popup?.(m.x, m.y - m.r, `SIPHON SHATTERED! +${pts}`, '#fbbf24');
+        this._addFlow(fx, 12, 'SIPHON MINE');
+        fx.popup?.(m.x, m.y - m.r, `SIPHON SHATTERED! +12% FLOW`, '#fbbf24');
         fx.particles?.(m.x, m.y, '#67e8f9', 14, 145);
         fx.particles?.(m.x, m.y, '#fb923c', 10, 120);
         this._ring(m.x, m.y, m.r * 0.7, m.r * 4.2, '#67e8f9', 0.55);
@@ -1455,6 +1628,7 @@ export class SubStage {
               this.gearsEarned += gAmt;
               fx.addGear?.(gAmt);
               this._score(fx, pts);
+              this._addFlow(fx, f.isSonarCache ? 14 : 8, 'GROTTO CRYSTAL');
               this.sub.catches++;
               this._vfx('pop', f.x, f.y, { life: 0.55, size: f.bubbleR, color: '#fde047' });
               this._vfx('collect', f.x, f.y, {
@@ -1503,6 +1677,7 @@ export class SubStage {
       ty: this.sub.y,
     });
     this._score(fx, pts);
+    this._addFlow(fx, f.type === 'gold' ? 14 : 5, 'REEF HARMONY');
     if (f.type === 'gold') {
       this.goldCaught++;
       fx.popup?.(f.x, f.y - 22 * this.s, `SUNLIT RAY! +${pts}`, '#fde047');
@@ -1547,6 +1722,7 @@ export class SubStage {
     if (whole) pts += SCHOOL_BONUS * mult;
     this.fishCaught += n;
     this._score(fx, pts);
+    this._addFlow(fx, whole ? 10 : 5, 'REEF SHOAL');
     sx /= n;
     sy /= n;
     const label = `${whole ? 'SHOAL ' : ''}+${pts}${mult > 1 ? ` x${mult}` : ''}`;
@@ -1639,14 +1815,27 @@ export class SubStage {
         if (j.deadT > 0.45) removeAt(this.jellies, i);
         continue;
       }
-      j.pulse += dt * j.pulseRate;
+      if (j.stunTimer > 0) j.stunTimer = Math.max(0, j.stunTimer - dt);
+      j.pulse += dt * j.pulseRate * (j.stunTimer > 0 ? 0.25 : 1.0);
       const thrust = Math.max(0, Math.sin(j.pulse)) ** 2;
       j.baseY -= thrust * 16 * s * dt;
       j.baseY += 7 * s * dt;
       j.baseY = clamp(j.baseY, this.top, this.seabedY - 60 * s);
       j.x += (-this.scrollSpeed * 0.92 - j.drift) * dt + Math.sin(j.age * 0.7 + j.phase) * 8 * s * dt;
       j.y = j.baseY + Math.sin(j.age * 0.9 + j.phase) * 14 * s;
-      if (vulnerable && this._touchesSub(j.x, j.y + j.r * 0.25, j.r * 0.8)) {
+      if (swimmer.dashTimer > 0 && this._touchesSub(j.x, j.y + j.r * 0.25, j.r * 1.1)) {
+        j.state = 'popped';
+        j.deadT = 0;
+        this.jelliesPopped++;
+        const mult = this._comboHit();
+        const pts = JELLY_POINTS * mult;
+        this._score(fx, pts);
+        this._addFlow(fx, 8, 'BARREL ROLL');
+        fx.popup?.(j.x, j.y - j.r, `BARREL SMASH! +${pts}`, '#5efce8');
+        fx.particles?.(j.x, j.y, '#f0abfc', 16, 130);
+        this._ring(j.x, j.y, j.r * 0.6, j.r * 3.4, '#5efce8', 0.48);
+        sound?.jellyZap?.();
+      } else if (vulnerable && (j.stunTimer || 0) <= 0 && this._touchesSub(j.x, j.y + j.r * 0.25, j.r * 0.8)) {
         j.nearDone = true;
         this._stun(j.x, j.y, fx, sound, 'jelly');
       } else {
@@ -1679,7 +1868,24 @@ export class SubStage {
       } else {
         m.y = m.baseY + Math.sin(m.phase * 0.9) * m.bob;
       }
-      if (vulnerable && (m.frozenTimer || 0) <= 0 && this._touchesSub(m.x, m.y, m.r * 1.05)) {
+      if (swimmer.dashTimer > 0 && this._touchesSub(m.x, m.y, m.r * 1.25)) {
+        this.minesDestroyed++;
+        this.gearsEarned++;
+        fx.addGear?.(1);
+        const mult = this._comboHit();
+        const pts = MINE_SHATTER_POINTS * mult;
+        this._score(fx, pts);
+        this._addFlow(fx, 14, 'BARREL ROLL SMASH');
+        fx.popup?.(m.x, m.y - m.r, `DASH SMASH! +14% FLOW`, '#fde047');
+        fx.particles?.(m.x, m.y, '#67e8f9', 16, 155);
+        fx.particles?.(m.x, m.y, '#fb923c', 12, 130);
+        this._ring(m.x, m.y, m.r * 0.7, m.r * 4.4, '#5efce8', 0.55);
+        fx.shake?.(4.5);
+        fx.haptic?.(18);
+        (sound?.hitEnemy || sound?.subHit || sound?.jellyZap)?.call(sound);
+        removeAt(this.mines, i);
+        continue;
+      } else if (vulnerable && (m.frozenTimer || 0) <= 0 && this._touchesSub(m.x, m.y, m.r * 1.05)) {
         m.nearDone = true;
         this._stun(m.x, m.y, fx, sound, 'mine');
       } else {
@@ -1705,7 +1911,8 @@ export class SubStage {
           c.hasPearl = false;
           this.pearls++;
           this._score(fx, PEARL_POINTS);
-          fx.popup?.(c.x, c.y - 34 * s, `TIDAL PEARL +${PEARL_POINTS}`, '#fbcfe8');
+          this._addFlow(fx, 10, 'TIDAL PEARL');
+          fx.popup?.(c.x, c.y - 34 * s, `TIDAL PEARL +10% FLOW`, '#fbcfe8');
           fx.particles?.(c.x, c.y - c.r * 0.4, '#fdf2f8', 16, 120);
           this._ring(c.x, c.y - c.r * 0.4, c.r * 0.4, c.r * 3, '#fbcfe8', 0.6);
           this._vfx('sparkle', c.x, c.y - c.r * 0.4, { life: 0.7, size: c.r * 2.4, color: '#fbcfe8' });

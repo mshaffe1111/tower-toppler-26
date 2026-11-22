@@ -7,7 +7,7 @@
 //        sunken canyon redwoods, and porous staghorn/brain coral gardens.
 //      - Frees trapped Sea Turtles (`assets/models/sea_turtle.glb` w/ flapping flippers) and River
 //        Otters (`assets/models/river_otter.glb` w/ undulating rudder tail) from Siphon Containment
-//        Cages (`assets/models/siphon_cage.glb`).
+//        Critter Rescue Orbs.
 //      - Instanced Reef Angelfish (`alien_fish_1.glb`), Spotted Eagle-Rays (`alien_fish_2.glb`),
 //        Siphon Surge Nodes (`sea_mine.glb`), Reef Grotto Sanctuary (`warp_cavern.glb`), Geyser Vents,
 //        Tidal Pearl Clams, and expanding 3D Harmonic Echo Shockwaves.
@@ -1058,9 +1058,52 @@ function buildCurvedHydrofoilBladeGeo() {
   return geo;
 }
 
-function buildUnderwaterEnvTexture(_webgl) {
-  // Zero-stall 60fps direct WebGL2 pipeline (eliminates PMREMGenerator 35-pass cubemap hitch!)
-  return null;
+function buildUnderwaterEnvTexture(webgl) {
+  if (!webgl || typeof THREE.PMREMGenerator !== 'function') return null;
+  try {
+    const pmrem = new THREE.PMREMGenerator(webgl);
+    const envScene = new THREE.Scene();
+    envScene.background = new THREE.Color('#0c5e7c');
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(20, 16, 12),
+      new THREE.MeshBasicMaterial({ color: '#1488a8', side: THREE.BackSide })
+    );
+    envScene.add(dome);
+    // Overhead sunlit Snell's-window sky disc + warm golden sun bounce
+    const snell = new THREE.Mesh(
+      new THREE.CircleGeometry(9.5, 20),
+      new THREE.MeshBasicMaterial({ color: '#e0fbfc', side: THREE.DoubleSide })
+    );
+    snell.rotation.x = Math.PI * 0.5;
+    snell.position.y = 12;
+    envScene.add(snell);
+    const sunOrb = new THREE.Mesh(
+      new THREE.SphereGeometry(3.0, 12, 8),
+      new THREE.MeshBasicMaterial({ color: '#fff3cc' })
+    );
+    sunOrb.position.set(5, 11, 6);
+    envScene.add(sunOrb);
+    const bed = new THREE.Mesh(
+      new THREE.PlaneGeometry(36, 36),
+      new THREE.MeshBasicMaterial({ color: '#164e63', side: THREE.DoubleSide })
+    );
+    bed.rotation.x = -Math.PI * 0.5;
+    bed.position.y = -8;
+    envScene.add(bed);
+    const rt = pmrem.fromScene(envScene, 0.04);
+    dome.geometry.dispose();
+    dome.material.dispose();
+    snell.geometry.dispose();
+    snell.material.dispose();
+    sunOrb.geometry.dispose();
+    sunOrb.material.dispose();
+    bed.geometry.dispose();
+    bed.material.dispose();
+    pmrem.dispose();
+    return { rt, texture: rt.texture };
+  } catch {
+    return null;
+  }
 }
 
 function createSoftDotTexture() {
@@ -1265,10 +1308,10 @@ export class SubRenderer {
     this.backdropTex = createDeepWaterBackdropTexture();
     this.reefStoneTex = createStratifiedReefStoneTexture(256);
     this.barkTex = createRedwoodBarkTexture(128);
-    this.envTex = buildUnderwaterEnvTexture(webgl);
-    this.subHullAlbedo = null;
-    this.subHullNormal = null;
-    this._subEnamelMat = null;
+    const envBuilt = opts.envMap ? null : buildUnderwaterEnvTexture(webgl);
+    this._ownEnvRt = envBuilt?.rt || null;
+    this.envTex = opts.envMap || envBuilt?.texture || null;
+    this.postfxActive = false;
     this._disposed = false;
     this._lastTime = 0;
 
@@ -1427,23 +1470,39 @@ export class SubRenderer {
     this.reefFill.position.set(-8, -3, 7);
     this.reefScene.add(this.reefFill);
 
-    // Studio-Painted Neural Deep Reef Panorama Backdrop (`assets/textures/mg_bg_reef_swim.webp`)
+    // Sunlit Reef Atmosphere & Soft Depth-Fogged Curved Abyssal Horizon (ZERO flat un-fogged 2D seam!)
     this.reefBackdropMat = new THREE.MeshBasicMaterial({
       map: this.backdropTex,
-      fog: false,
+      color: '#5ec7dc',
+      fog: true,
       depthWrite: false,
     });
     this.reefBackdrop = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.reefBackdropMat);
-    this.reefBackdrop.position.set(0, 0, -24);
+    this.reefBackdrop.position.set(0, 0, -28);
     this.reefScene.add(this.reefBackdrop);
 
-    // Soft Gaussian-feathered sunlit volumetric caustic god-ray shafts (1 instanced draw call — saves 13 draw calls!)
-    const rayGeo = new THREE.PlaneGeometry(3.8, 17);
+    // Overhead Shimmering Sunlit Snell's-Window Water Surface casting sunlit aqua radiance downward!
+    this.snellSurfaceMat = new THREE.MeshBasicMaterial({
+      map: this.causticTex,
+      color: '#b8f8ff',
+      transparent: true,
+      opacity: 0.56,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.snellSurfaceMesh = new THREE.Mesh(new THREE.PlaneGeometry(78, 22), this.snellSurfaceMat);
+    this.snellSurfaceMesh.rotation.x = Math.PI * 0.5;
+    this.snellSurfaceMesh.position.set(0, 4.2, -3.5);
+    this.reefScene.add(this.snellSurfaceMesh);
+
+    // Soft Gaussian-feathered sunlit volumetric caustic god-ray shafts (brighter & richer!)
+    const rayGeo = new THREE.PlaneGeometry(4.4, 18.5);
     this.rayMat = new THREE.MeshBasicMaterial({
       map: this.godRayTex,
-      color: '#ffffff',
+      color: '#d8fbff',
       transparent: true,
-      opacity: 0.28,
+      opacity: 0.38,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       side: THREE.DoubleSide,
@@ -1619,16 +1678,6 @@ export class SubRenderer {
       this.seabedMat.normalScale.set(1.15, 1.15);
       this.seabedMat.needsUpdate = true;
     });
-    loadSubWebp('assets/textures/mg_pbr_sub_hull_albedo.webp', true, 1, 1, (t) => {
-      if (this._disposed) return;
-      this.subHullAlbedo = t;
-      this._applySubHullPbr();
-    });
-    loadSubWebp('assets/textures/mg_pbr_sub_hull_normal.webp', false, 1, 1, (t) => {
-      if (this._disposed) return;
-      this.subHullNormal = t;
-      this._applySubHullPbr();
-    });
     loadSubWebp('assets/textures/biome_rock_limestone_albedo.webp', true, 2, 2, (t) => {
       if (this._disposed) return;
       this.limestoneAlbedo = t;
@@ -1655,62 +1704,56 @@ export class SubRenderer {
       this._applyCoralPbr();
     });
 
-    // Pelagian Sea-Glass Bio-Submersible (`assets/models/pelagian_sub.glb`) with Gateway visibly piloting inside!
+    // 100% SUBMARINE-FREE GATEWAY 2.0 FREE-SWIM RIG!
+    // Gateway swims freely through the sunlit coral reef with smooth dolphin-kick undulation,
+    // agile Barrel-Roll Dash Hydro-Vortex Cone, and expanding Pelagian Bio-Sonar rings!
     this.heroSwimAnchor = new THREE.Group();
-    this.subVesselGroup = new THREE.Group();
-    this.subFallback = new THREE.Group();
-    const fbSubHull = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.32, 1.15, 8, 16),
-      new THREE.MeshStandardMaterial({ color: '#137e8f', roughness: 0.34, metalness: 0.52 })
-    );
-    fbSubHull.rotation.z = Math.PI * 0.5;
-    fbSubHull.position.y = -0.14;
-    const fbSubDome = new THREE.Mesh(
-      new THREE.SphereGeometry(0.46, 16, 12, 0, TAU, 0, Math.PI * 0.55),
-      new THREE.MeshStandardMaterial({
-        color: '#d8f8ff',
-        emissive: '#38bdf8',
-        emissiveIntensity: 0.2,
-        roughness: 0.06,
-        transparent: true,
-        opacity: 0.32,
-      })
-    );
-    fbSubDome.position.set(0.10, 0.04, 0);
-    this.subFallback.add(fbSubHull, fbSubDome);
-    this.subVesselGroup.add(this.subFallback);
-
-    // Soft Feathered Multi-Layer Volumetric Headlamp Cone (fades smoothly to 0 at edges & far end — ZERO hard triangle!)
-    const beamGeo = new THREE.ConeGeometry(0.95, 4.0, 20, 1, true);
-    beamGeo.rotateZ(Math.PI * 0.5);
-    beamGeo.translate(3.08, -0.02, 0);
-    this.subSonarBeam = new THREE.Mesh(
-      beamGeo,
-      new THREE.MeshBasicMaterial({
-        map: this.beamGradTex,
-        color: '#a5f3fc',
-        transparent: true,
-        opacity: 0.28,
-        blending: THREE.AdditiveBlending,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      })
-    );
-    this.subVesselGroup.add(this.subSonarBeam);
-    this.subFinL = null;
-    this.subFinR = null;
-    this.subPropeller = null;
-
-    // Gateway seated visibly piloting inside the translucent sea-glass bubble canopy!
     this.reefHero = new GatewayRig(this.skinId);
     this.reefHeroInner = new THREE.Group();
     this.reefHeroInner.rotation.order = 'YXZ';
-    this.reefHeroInner.rotation.set(0.12, Math.PI * 0.5, 0);
-    this.reefHeroInner.scale.setScalar(0.76);
-    this.reefHeroInner.position.set(0.08, -0.22, 0);
+    // Horizontal free-swimming posture facing +X (`FreeSwim` already pitches Pelvis +1.08 rad toward +Z;
+    // +0.26 rad X tilt completes sleek horizontal dolphin-kick swim with tail & coral scarf streaming cleanly -X!)
+    this.reefHeroInner.rotation.set(0.26, Math.PI * 0.5, 0);
+    this.reefHeroInner.scale.setScalar(1.22);
+    this.reefHeroInner.position.set(0, -0.34, 0);
     this.reefHeroInner.add(this.reefHero.group);
-    this.subVesselGroup.add(this.reefHeroInner);
-    this.heroSwimAnchor.add(this.subVesselGroup);
+    this.heroSwimAnchor.add(this.reefHeroInner);
+
+    // Agile Barrel-Roll Dash Shimmering Aqua Vortex Cone wrapping Gateway during dash!
+    const dashConeGeo = new THREE.ConeGeometry(0.76, 2.35, 16, 1, true);
+    dashConeGeo.rotateZ(-Math.PI * 0.5);
+    dashConeGeo.translate(-0.15, 0, 0);
+    this.dashVortexMat = new THREE.MeshBasicMaterial({
+      map: this.beamGradTex,
+      color: '#5efce8',
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.dashVortexMesh = new THREE.Mesh(dashConeGeo, this.dashVortexMat);
+    this.dashVortexMesh.visible = false;
+    this.heroSwimAnchor.add(this.dashVortexMesh);
+
+    // Warm hero key-rim point light following Gateway 2.0 so her sea-mint scales & coral scarf ALWAYS gleam!
+    this.reefHeroLight = new THREE.PointLight('#d8fbff', 1.45, 7.5);
+    this.reefScene.add(this.reefHeroLight);
+
+    // Shimmering Underwater Current Stream Boost Rings (`stage.boostRings`)
+    this.boostRingInst = new THREE.InstancedMesh(
+      new THREE.TorusGeometry(0.88, 0.068, 10, 28),
+      new THREE.MeshStandardMaterial({
+        color: '#a5f3fc',
+        emissive: '#22d3ee',
+        emissiveIntensity: 1.45,
+        roughness: 0.14,
+        metalness: 0.42,
+      }),
+      12
+    );
+    this.boostRingInst.frustumCulled = false;
+    this.reefScene.add(this.boostRingInst);
 
     // Streaming bioluminescent hydro-slipstream & Harmonic Echo Sphere + 3D Sonar Shockwave Ring on Gateway
     this.echoSphere = new THREE.Mesh(
@@ -1784,7 +1827,7 @@ export class SubRenderer {
     this.cagePool = [];
     this.reefScene.add(this.fishGroup);
 
-    // Fallback fish silhouette until `pelagian_sub.glb` (`reef_angelfish` & `reef_wrasse`) finishes loading
+    // Sculpted tropical reef fish schools (angelfish & wrasse silhouettes)
     const fishBody = new THREE.SphereGeometry(0.18, 10, 8);
     fishBody.scale(1.65, 1.05, 0.42);
     const fishTail = new THREE.ConeGeometry(0.18, 0.28, 4);
@@ -1933,7 +1976,7 @@ export class SubRenderer {
     this.chainInst.frustumCulled = false;
     this.reefScene.add(this.chainInst);
 
-    // Wildlife Rescue Cages (`sea_turtle.glb` & `river_otter.glb` inside `siphon_cage.glb`)
+    // Luminous Crystal Glass Critter Rescue Orbs (`sea_turtle.glb` & `river_otter.glb`)
     for (let i = 0; i < MAX_CAGES; i++) {
       const slot = this._createCageSlot();
       slot.root.visible = false;
@@ -2054,6 +2097,16 @@ export class SubRenderer {
       this.popupPool.push({ sprite: sp, key: '' });
     }
 
+    // Joyous Rescued Critter Escort Pool (up to 4 companions swimming right alongside Gateway!)
+    this.escortPool = [];
+    for (let i = 0; i < 4; i++) {
+      const es = this._createCageSlot();
+      es.cageGroup.visible = false;
+      es.root.visible = false;
+      this.reefScene.add(es.root);
+      this.escortPool.push(es);
+    }
+
     // Pre-allocate `instanceColor` & matrix slot 0 upfront on all colored InstancedMeshes
     // so ANGLE D3D11 never triggers a mid-run shader recompile on first `setColorAt()`!
     this._col.set('#ffffff');
@@ -2065,6 +2118,7 @@ export class SubRenderer {
       this.rayInst,
       this.currentStreakInst,
       this.slipRingInst,
+      this.boostRingInst,
       this.fishInst1,
       this.fishInst2,
       this.ambFishInst,
@@ -2082,29 +2136,63 @@ export class SubRenderer {
   _createCageSlot() {
     const root = new THREE.Group();
     const cageGroup = new THREE.Group();
-    const fbCage = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.62, 0.62, 1.0, 6, 1, true),
-      new THREE.MeshStandardMaterial({ color: '#334155', metalness: 0.85, roughness: 0.3, wireframe: true })
+
+    // Luminous Crystal Glass Critter Rescue Orb (ZERO black wireframe birdcages or skinny poles!)
+    const glassOrb = new THREE.Mesh(
+      new THREE.SphereGeometry(0.68, 20, 14),
+      new THREE.MeshStandardMaterial({
+        color: '#e0fbff',
+        emissive: '#38bdf8',
+        emissiveIntensity: 0.35,
+        roughness: 0.06,
+        metalness: 0.12,
+        transparent: true,
+        opacity: 0.30,
+        depthWrite: false,
+      })
     );
-    const fbLock = new THREE.Mesh(
-      new THREE.TorusGeometry(0.65, 0.045, 6, 12),
-      new THREE.MeshStandardMaterial({ color: '#fb7185', emissive: '#f43f5e', emissiveIntensity: 1.5 })
+    const ringMat1 = new THREE.MeshStandardMaterial({
+      color: '#fbbf24',
+      emissive: '#f59e0b',
+      emissiveIntensity: 1.25,
+      metalness: 0.72,
+      roughness: 0.22,
+    });
+    const ringMat2 = new THREE.MeshStandardMaterial({
+      color: '#5efce8',
+      emissive: '#22d3ee',
+      emissiveIntensity: 1.35,
+      metalness: 0.55,
+      roughness: 0.20,
+    });
+    const energyRing1 = new THREE.Mesh(new THREE.TorusGeometry(0.72, 0.036, 8, 28), ringMat1);
+    energyRing1.rotation.x = Math.PI * 0.38;
+    const energyRing2 = new THREE.Mesh(new THREE.TorusGeometry(0.74, 0.030, 8, 28), ringMat2);
+    energyRing2.rotation.set(Math.PI * 0.62, Math.PI * 0.35, 0);
+    const lockGem = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.14, 0),
+      new THREE.MeshStandardMaterial({
+        color: '#fef08a',
+        emissive: '#f59e0b',
+        emissiveIntensity: 1.75,
+        roughness: 0.10,
+      })
     );
-    fbLock.rotation.x = Math.PI * 0.5;
-    cageGroup.add(fbCage, fbLock);
+    lockGem.position.set(0, 0.72, 0);
+    cageGroup.add(glassOrb, energyRing1, energyRing2, lockGem);
 
     const turtleGroup = new THREE.Group();
     const fbTurtle = new THREE.Mesh(
       new THREE.SphereGeometry(0.38, 12, 8),
-      new THREE.MeshStandardMaterial({ color: '#2a8a78', roughness: 0.38 })
+      new THREE.MeshStandardMaterial({ color: '#34d399', emissive: '#065f46', emissiveIntensity: 0.35, roughness: 0.34 })
     );
-    fbTurtle.scale.set(1.2, 0.45, 0.95);
+    fbTurtle.scale.set(1.2, 0.48, 0.95);
     turtleGroup.add(fbTurtle);
 
     const otterGroup = new THREE.Group();
     const fbOtter = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.15, 0.52, 6, 10),
-      new THREE.MeshStandardMaterial({ color: '#6b4226', roughness: 0.58 })
+      new THREE.CapsuleGeometry(0.16, 0.52, 6, 10),
+      new THREE.MeshStandardMaterial({ color: '#c4834c', emissive: '#451a03', emissiveIntensity: 0.25, roughness: 0.48 })
     );
     fbOtter.rotation.z = Math.PI * 0.5;
     otterGroup.add(fbOtter);
@@ -2113,6 +2201,8 @@ export class SubRenderer {
     return {
       root,
       cageGroup,
+      energyRing1,
+      energyRing2,
       turtleGroup,
       otterGroup,
       flipperL: null,
@@ -2127,31 +2217,33 @@ export class SubRenderer {
 
   _initCoreDescentScene() {
     this.coreScene = new THREE.Scene();
-    this.coreScene.background = new THREE.Color('#041120');
-    this.coreScene.fog = new THREE.FogExp2('#05172b', 0.036);
-    if (this.envTex) this.coreScene.environment = this.envTex;
+    this.coreScene.background = new THREE.Color('#0a2e4a');
+    this.coreScene.fog = new THREE.FogExp2('#0d3b5c', 0.023);
+    if (this.envTex) {
+      this.coreScene.environment = this.envTex;
+      this.coreScene.environmentIntensity = 0.92;
+    }
 
-    this.coreCam = new THREE.PerspectiveCamera(56, this.width / Math.max(1, this.height), 0.2, 140);
+    this.coreCam = new THREE.PerspectiveCamera(56, this.width / Math.max(1, this.height), 0.2, 145);
 
-    // Balanced moody deep-abyss sapphire lighting: crisp figure-ground contrast on Gateway's emerald scales
-    // & coral frills (ZERO blown-out white wash!) + warm golden metallic rim highlights on bronze turbines below!
-    const hemi = new THREE.HemisphereLight('#60a5fa', '#0d2b44', 0.85);
-    this.coreScene.add(hemi);
+    // Vivid 3-zone Pelagian Hydro-Reactor Lighting: radiant sunlit top intake + warm antique-bronze rim + glowing cyan core fill!
+    this.coreHemi = new THREE.HemisphereLight('#7dd3fc', '#164663', 1.38);
+    this.coreScene.add(this.coreHemi);
 
-    const shaftLight = new THREE.DirectionalLight('#fff1d6', 1.45);
-    shaftLight.position.set(6, 12, 8);
-    this.coreScene.add(shaftLight);
+    this.coreShaftLight = new THREE.DirectionalLight('#fff3d6', 2.15);
+    this.coreShaftLight.position.set(6, 14, 9);
+    this.coreScene.add(this.coreShaftLight);
 
-    const warmRim = new THREE.DirectionalLight('#fbbf24', 1.15);
-    warmRim.position.set(-7, -4, 6);
-    this.coreScene.add(warmRim);
+    this.coreWarmRim = new THREE.DirectionalLight('#fbbf24', 1.55);
+    this.coreWarmRim.position.set(-7, -4, 7);
+    this.coreScene.add(this.coreWarmRim);
 
-    this.coreHeroLight = new THREE.PointLight('#38bdf8', 0.85, 10);
+    this.coreHeroLight = new THREE.PointLight('#5efce8', 2.25, 16);
     this.coreScene.add(this.coreHeroLight);
 
     // Studio-Painted Underwater Reactor Chamber Abyss Backdrop (`assets/textures/mg_bg_core_reactor.webp`)
     this.coreAbyssMat = new THREE.MeshBasicMaterial({
-      color: '#7ab4c8',
+      color: '#a8e4f5',
       map: this.backdropTex,
       fog: false,
       depthWrite: false,
@@ -2161,70 +2253,70 @@ export class SubRenderer {
     this.coreAbyssBackdrop.position.set(0, -44, 0);
     this.coreScene.add(this.coreAbyssBackdrop);
 
-    // Looping 360° Dark Basalt & Riveted Antique-Bronze Flooded Reactor Shaft (`radius = 3.48`, instanced!)
+    // Looping 360° Illuminated Pelagian Basalt & Gleaming Antique-Bronze Flooded Reactor Shaft
     this.shaftRings = [];
     const glassWallGeo = new THREE.CylinderGeometry(3.48, 3.48, 5.8, 24, 1, true);
     this.coreWallMat = new THREE.MeshStandardMaterial({
-      color: '#124a5e',
+      color: '#25708a',
       map: this.causticTex,
-      emissive: '#042a3a',
+      emissive: '#0c4e68',
       emissiveMap: this.causticTex,
-      emissiveIntensity: 0.28,
-      roughness: 0.52,
-      metalness: 0.22,
+      emissiveIntensity: 0.62,
+      roughness: 0.44,
+      metalness: 0.24,
       side: THREE.BackSide,
     });
-    const bronzeRingGeo = new THREE.TorusGeometry(3.40, 0.19, 10, 32);
+    const bronzeRingGeo = new THREE.TorusGeometry(3.40, 0.20, 10, 32);
     bronzeRingGeo.rotateX(Math.PI * 0.5);
     this.coreBronzeMat = new THREE.MeshStandardMaterial({
-      color: '#9c6e38',
-      emissive: '#261404',
-      emissiveIntensity: 0.16,
-      roughness: 0.34,
+      color: '#cf974e',
+      emissive: '#3b2108',
+      emissiveIntensity: 0.26,
+      roughness: 0.26,
       metalness: 0.86,
     });
     this.coreCopperMat = new THREE.MeshStandardMaterial({
-      color: '#b05d30',
-      emissive: '#281004',
-      emissiveIntensity: 0.16,
-      roughness: 0.32,
+      color: '#d97a46',
+      emissive: '#3b1808',
+      emissiveIntensity: 0.26,
+      roughness: 0.26,
       metalness: 0.84,
     });
-    // Thin, recessed soft-glowing sea-glass conduit strip (blends organically into dark abyssal shaft)
-    const conduitGlowGeo = new THREE.TorusGeometry(3.32, 0.022, 8, 32);
+    // Thick, vividly glowing bioluminescent cyan Pelagian hydro-conduit rings & ribs (blooms richly under PostFX!)
+    const conduitGlowGeo = new THREE.TorusGeometry(3.30, 0.088, 10, 36);
     conduitGlowGeo.rotateX(Math.PI * 0.5);
-    const conduitGlowMat = new THREE.MeshStandardMaterial({
-      color: '#0d4a5e',
-      emissive: '#08738f',
-      emissiveIntensity: 0.34,
-      roughness: 0.28,
-      metalness: 0.35,
+    this.conduitGlowMat = new THREE.MeshStandardMaterial({
+      color: '#7df9ff',
+      emissive: '#22d3ee',
+      emissiveIntensity: 1.95,
+      roughness: 0.16,
+      metalness: 0.30,
     });
 
-    // Instanced Shaft Wall, Dark Riveted Bronze Bulkheads & Recessed Thin Plasma Strips (3 draw calls total!)
+    // Instanced Shaft Wall, Gleaming Bronze Bulkheads & Luminous Cyan Energy Conduits
     this.shaftWallInst = new THREE.InstancedMesh(glassWallGeo, this.coreWallMat, MAX_CORE_RINGS);
     this.shaftRingInst = new THREE.InstancedMesh(bronzeRingGeo, this.coreBronzeMat, MAX_CORE_RINGS);
-    this.shaftGlowInst = new THREE.InstancedMesh(conduitGlowGeo, conduitGlowMat, MAX_CORE_RINGS);
+    this.shaftGlowInst = new THREE.InstancedMesh(conduitGlowGeo, this.conduitGlowMat, MAX_CORE_RINGS);
     for (const im of [this.shaftWallInst, this.shaftRingInst, this.shaftGlowInst]) {
       im.frustumCulled = false;
       this.coreScene.add(im);
     }
 
-    // 8 continuous dark riveted bronze structural tunnel ribs + 4 thin recessed plasma strips (2 draw calls total!)
-    const ribGeo = new THREE.CylinderGeometry(0.14, 0.14, 145, 6);
+    // 8 continuous riveted bronze structural tunnel ribs + 4 bold bioluminescent conduit columns
+    const ribGeo = new THREE.CylinderGeometry(0.15, 0.15, 165, 6);
     const ribInst = new THREE.InstancedMesh(ribGeo, this.coreBronzeMat, 8);
-    const stripGeo = new THREE.BoxGeometry(0.026, 145, 0.036);
-    const stripInst = new THREE.InstancedMesh(stripGeo, conduitGlowMat, 4);
+    const stripGeo = new THREE.CylinderGeometry(0.068, 0.068, 165, 6);
+    const stripInst = new THREE.InstancedMesh(stripGeo, this.conduitGlowMat, 4);
     for (let r = 0; r < 8; r++) {
       const ang = (r / 8) * TAU;
-      this._dummy.position.set(Math.cos(ang) * 3.40, -45, Math.sin(ang) * 3.40);
+      this._dummy.position.set(Math.cos(ang) * 3.40, -68, Math.sin(ang) * 3.40);
       this._dummy.rotation.set(0, -ang, 0);
       this._dummy.scale.setScalar(1);
       this._dummy.updateMatrix();
       ribInst.setMatrixAt(r, this._dummy.matrix);
       if (r % 2 === 0) {
         const a2 = ang + 0.39;
-        this._dummy.position.set(Math.cos(a2) * 3.44, -45, Math.sin(a2) * 3.44);
+        this._dummy.position.set(Math.cos(a2) * 3.36, -68, Math.sin(a2) * 3.36);
         this._dummy.rotation.set(0, -a2, 0);
         this._dummy.updateMatrix();
         stripInst.setMatrixAt(r >> 1, this._dummy.matrix);
@@ -2244,7 +2336,7 @@ export class SubRenderer {
     loadSubWebp('assets/textures/arch_storm_basalt_albedo.webp', true, 4, 2, (t) => {
       if (this._disposed) return;
       this.coreWallMat.map = t;
-      this.coreWallMat.color.set('#225c72');
+      this.coreWallMat.color.set('#3886a3');
       this.coreWallMat.needsUpdate = true;
     });
     loadSubWebp('assets/textures/arch_storm_basalt_normal.webp', false, 4, 2, (t) => {
@@ -2265,19 +2357,18 @@ export class SubRenderer {
       this.coreBronzeMat.needsUpdate = true;
     });
 
-    // Gateway Headfirst Plunge Rig (`CoreDive` clip pitches Pelvis +1.38 rad toward +Z;
-    // +0.19 rad X tilt completes the 90 deg plunge straight down -Y with dorsal scales facing camera!)
+    // Gateway 2.0 Headfirst Torpedo Dive Rig + Corkscrew Hydro-Drill Cone + Shatter Shockwave Ring
     this.coreHeroAnchor = new THREE.Group();
     this.coreHero = new GatewayRig(this.skinId);
     this.coreHeroInner = new THREE.Group();
     this.coreHeroInner.rotation.set(0.19, 0, 0);
-    this.coreHeroInner.scale.setScalar(1.42);
-    this.coreHeroInner.position.set(0, 0.25, -0.35);
+    this.coreHeroInner.scale.setScalar(1.26);
+    this.coreHeroInner.position.set(0, 0.22, -0.30);
     this.coreHeroInner.add(this.coreHero.group);
     this.coreHeroAnchor.add(this.coreHeroInner);
 
     this.coreWhipRing = new THREE.Mesh(
-      new THREE.TorusGeometry(0.95, 0.07, 8, 28),
+      new THREE.TorusGeometry(0.98, 0.08, 10, 30),
       new THREE.MeshBasicMaterial({
         color: '#5efce8',
         transparent: true,
@@ -2288,7 +2379,39 @@ export class SubRenderer {
     );
     this.coreWhipRing.rotation.x = Math.PI * 0.5;
     this.coreHeroAnchor.add(this.coreWhipRing);
+
+    const drillConeGeo = new THREE.ConeGeometry(0.92, 2.55, 16, 1, true);
+    drillConeGeo.rotateX(Math.PI);
+    drillConeGeo.translate(0, -0.35, 0);
+    this.coreDrillCone = new THREE.Mesh(
+      drillConeGeo,
+      new THREE.MeshBasicMaterial({
+        map: this.beamGradTex,
+        color: '#67e8f9',
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      })
+    );
+    this.coreHeroAnchor.add(this.coreDrillCone);
     this.coreScene.add(this.coreHeroAnchor);
+
+    // Expanding Turquoise Harmonic Shockwave Ring lighting the shaft on Siphon Crystal shatter!
+    this.coreShatterWave = new THREE.Mesh(
+      new THREE.TorusGeometry(1.0, 0.11, 10, 36),
+      new THREE.MeshBasicMaterial({
+        color: '#5efce8',
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    this.coreShatterWave.rotation.x = Math.PI * 0.5;
+    this.coreShatterWave.visible = false;
+    this.coreScene.add(this.coreShatterWave);
 
     // Spinning Hydro-Turbine Rotors (`reactor_turbine`) — weathered antique-bronze + soft translucent sea-glass core!
     this.coreSeaGlassMat = new THREE.MeshStandardMaterial({
@@ -2437,23 +2560,6 @@ export class SubRenderer {
     this.coreScene.add(this.coreDivePulseInst);
   }
 
-  _applySubHullPbr() {
-    if (!this._subEnamelMat) return;
-    if (this.subHullAlbedo) {
-      this._subEnamelMat.map = this.subHullAlbedo;
-      this._subEnamelMat.color.set('#e8f6f8');
-    }
-    if (this.subHullNormal) {
-      this._subEnamelMat.normalMap = this.subHullNormal;
-      this._subEnamelMat.normalScale.set(1.25, 1.25);
-    }
-    this._subEnamelMat.emissive = new THREE.Color('#0c3b46');
-    this._subEnamelMat.emissiveIntensity = 0.30;
-    this._subEnamelMat.metalness = 0.38;
-    this._subEnamelMat.roughness = 0.34;
-    this._subEnamelMat.needsUpdate = true;
-  }
-
   _applyCoralPbr() {
     // Apply sunlit `biome_rock_limestone` PBR textures to reef outcrops & boulders while keeping
     // our porous calcareous coral PBR maps & subsurface rim warmth intact on the coral clusters!
@@ -2471,98 +2577,17 @@ export class SubRenderer {
   }
 
   async _loadGlbProps() {
-    const [mine, grotto, turtle, otter, cage, coreProps, pelagianSub] = await Promise.all([
+    // 100% SUBMARINE-FREE! Gateway swims freely without any vehicle hull or dark wireframe cage!
+    const [mine, grotto, turtle, otter, coreProps] = await Promise.all([
       loadCachedGlb('assets/models/sea_mine.glb'),
       loadCachedGlb('assets/models/warp_cavern.glb'),
       loadCachedGlb('assets/models/sea_turtle.glb'),
       loadCachedGlb('assets/models/river_otter.glb'),
-      loadCachedGlb('assets/models/siphon_cage.glb'),
       loadCachedGlb('assets/models/core_reactor_props.glb'),
-      loadCachedGlb('assets/models/pelagian_sub.glb'),
     ]);
     if (this._disposed) return;
 
-    if (pelagianSub) {
-      const subRoot = pelagianSub.getObjectByName('PelagianSubRoot');
-      if (subRoot) {
-        this.subFallback.visible = false;
-        const cl = subRoot.clone(true);
-        cl.traverse((o) => {
-          if (!o.isMesh || !o.material) return;
-          const mats = Array.isArray(o.material) ? o.material : [o.material];
-          const cloned = mats.map((m) => {
-            const cm = m.clone();
-            if (o.name === 'sub_canopy' && cm.name === 'mat_sub_canopy') {
-              cm.transparent = true;
-              cm.opacity = 0.28;
-              cm.depthWrite = false;
-            } else if (cm.name === 'mat_sub_enamel') {
-              this._subEnamelMat = cm;
-            }
-            return cm;
-          });
-          o.material = Array.isArray(o.material) ? cloned : cloned[0];
-        });
-        this._applySubHullPbr();
-        this.subFinL = cl.getObjectByName('sub_fin_L') || null;
-        this.subFinR = cl.getObjectByName('sub_fin_R') || null;
-        this.subPropeller = cl.getObjectByName('sub_propeller') || null;
-        this.subVesselGroup.add(cl);
-      }
-
-      // Extract REAL Blender 5.3 sculpted banded tropical reef fish (`reef_angelfish` & `reef_wrasse` — ZERO plastic ovals!)
-      const extractNamedMesh = (name) => {
-        const node = pelagianSub.getObjectByName(name);
-        if (!node) return null;
-        if (node.isMesh && node.geometry) return node;
-        let found = null;
-        node.traverse((o) => {
-          if (!found && o.isMesh && o.geometry) found = o;
-        });
-        return found;
-      };
-
-      const angelMesh = extractNamedMesh('reef_angelfish');
-      if (angelMesh) {
-        this.fishInst1.geometry.dispose();
-        this.fishInst1.geometry = angelMesh.geometry.clone();
-        if (angelMesh.material) {
-          const am = angelMesh.material.clone();
-          am.emissive = new THREE.Color('#2a1d06');
-          am.emissiveIntensity = 0.22;
-          this.fishInst1.material = am;
-          this.fishMat1 = am;
-        }
-      }
-
-      const wrasseMesh = extractNamedMesh('reef_wrasse');
-      if (wrasseMesh) {
-        this.fishInst2.geometry.dispose();
-        this.fishInst2.geometry = wrasseMesh.geometry.clone();
-        this.ambFishInst.geometry.dispose();
-        this.ambFishInst.geometry = wrasseMesh.geometry.clone();
-        if (wrasseMesh.material) {
-          const wm = wrasseMesh.material.clone();
-          wm.emissive = new THREE.Color('#1c1208');
-          wm.emissiveIntensity = 0.20;
-          this.fishInst2.material = wm;
-          this.ambFishInst.material = wm;
-          this.fishMat2 = wm;
-        }
-      }
-
-      // Keep our sculpted craggy PBR limestone boulders, ridged brain-coral domes & curved dark-edged kelp fronds!
-      this._applyCoralPbr();
-
-      // Extract graceful sculpted 3D Reef Manta Ray for upper mid-distance reef ambience
-      const mantaNode = pelagianSub.getObjectByName('reef_manta');
-      if (mantaNode) {
-        const mc = mantaNode.clone(true);
-        mc.position.set(0, 0, 0);
-        this.mantaGroup.add(mc);
-        this.mantaGroup.visible = true;
-      }
-    }
+    this._applyCoralPbr();
 
     if (mine) {
       for (const slot of this.minePool) {
@@ -2576,59 +2601,33 @@ export class SubRenderer {
     if (grotto) {
       this.grottoGroup.userData.grottoRim.visible = false;
       const cl = grotto.clone(true);
-      cl.scale.setScalar(1.15);
+      cl.scale.setScalar(1.22);
       this.grottoGroup.add(cl);
     }
 
-    // Bind Sea Turtle, River Otter & Siphon Cage GLBs into rescue pool
-    // Replace flat neon-pink cage ring with riveted antique-bronze lock band + small faceted glowing sapphire lock-gem!
-    const cageLockGemGeo = new THREE.OctahedronGeometry(0.11, 0);
-    cageLockGemGeo.scale(0.85, 1.25, 0.72);
-    const cageLockGemMat = new THREE.MeshStandardMaterial({
-      color: '#0ea5e9',
-      emissive: '#0284c7',
-      emissiveIntensity: 0.65,
-      roughness: 0.12,
-      metalness: 0.36,
-      flatShading: true,
-    });
-    for (const slot of this.cagePool) {
-      if (cage) {
-        slot.cageGroup.clear();
-        const cgClone = cage.clone(true);
-        cgClone.traverse((o) => {
-          if (!o.isMesh || !o.material) return;
-          const mats = Array.isArray(o.material) ? o.material : [o.material];
-          const replaced = mats.map((m) => {
-            const cm = m.clone();
-            const nm = String(cm.name || '').toLowerCase();
-            const isPinkRing =
-              nm.includes('lock') ||
-              nm.includes('crystal') ||
-              nm.includes('glow') ||
-              nm.includes('energy') ||
-              (cm.color && cm.color.r > 0.75 && cm.color.g < 0.65 && cm.color.b > 0.55) ||
-              (cm.emissive && cm.emissive.r > 0.5);
-            if (isPinkRing) {
-              cm.color.set('#a87938');
-              cm.emissive.set('#261504');
-              cm.emissiveIntensity = 0.16;
-              cm.metalness = 0.86;
-              cm.roughness = 0.28;
-            }
-            return cm;
-          });
-          o.material = Array.isArray(o.material) ? replaced : replaced[0];
+    // Bind brightly lit Sea Turtle & River Otter GLBs into BOTH luminous Crystal Rescue Orbs & Escort Pool!
+    const brightenCritter = (root, tintHex) => {
+      root.traverse((o) => {
+        if (!o.isMesh || !o.material) return;
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        const cloned = mats.map((m) => {
+          const cm = m.clone();
+          if (cm.emissive) {
+            cm.emissive.set(tintHex);
+            cm.emissiveIntensity = 0.24;
+          }
+          return cm;
         });
-        const lockGem = new THREE.Mesh(cageLockGemGeo, cageLockGemMat);
-        lockGem.position.set(0, 0.0, 0.56);
-        cgClone.add(lockGem);
-        slot.cageGroup.add(cgClone);
-      }
+        o.material = Array.isArray(o.material) ? cloned : cloned[0];
+      });
+    };
+    const allCritterSlots = [...this.cagePool, ...(this.escortPool || [])];
+    for (const slot of allCritterSlots) {
       if (turtle) {
         slot.turtleGroup.clear();
         const tClone = turtle.clone(true);
-        tClone.scale.setScalar(0.92);
+        tClone.scale.setScalar(1.12);
+        brightenCritter(tClone, '#134e4a');
         slot.flipperL = tClone.getObjectByName('flipper_L') || null;
         slot.flipperR = tClone.getObjectByName('flipper_R') || null;
         slot.turtleGroup.add(tClone);
@@ -2636,7 +2635,8 @@ export class SubRenderer {
       if (otter) {
         slot.otterGroup.clear();
         const oClone = otter.clone(true);
-        oClone.scale.setScalar(0.95);
+        oClone.scale.setScalar(1.12);
+        brightenCritter(oClone, '#451a03');
         slot.otterTail = oClone.getObjectByName('otter_tail') || null;
         slot.otterGroup.add(oClone);
       }
@@ -2735,8 +2735,12 @@ export class SubRenderer {
     if (opts.skinId && opts.skinId !== this.skinId) {
       this.setSkin(opts.skinId);
     }
+    if (opts?.envMap && this.reefScene.environment !== opts.envMap) {
+      this.reefScene.environment = opts.envMap;
+      this.reefScene.environmentIntensity = 0.88;
+    }
 
-    const rawBiome = stage.biome || stageOrSubOrState.tower?.theme || 'coral_sea';
+    const rawBiome = opts?.biomeKey || opts?.biome || stage.biome || stageOrSubOrState.tower?.theme || 'coral_sea';
     const bKey = String(rawBiome).includes('canyon') || String(rawBiome).includes('river')
       ? 'canyon_river'
       : String(rawBiome).includes('alpine') || String(rawBiome).includes('lake')
@@ -2750,8 +2754,8 @@ export class SubRenderer {
 
     this.reefScene.background.set(pal.bgTop);
     this.reefScene.fog.color.set(pal.fog);
-    this.reefSun.color.set('#fff1d6');
-    this.seabedMat.color.set('#c4dcd8');
+    this.reefSun.color.set('#fff3d6');
+    this.seabedMat.color.set('#d2ece6');
 
     const aspect = this.width / Math.max(1, this.height);
     const portrait = aspect < 0.85;
@@ -2793,6 +2797,10 @@ export class SubRenderer {
     const playHalfW = bedW.halfW;
     const playHalfH = bedW.halfH;
     this.seabedMesh.position.y = bedWorldY - 0.55;
+    if (this.snellSurfaceMesh) {
+      this.snellSurfaceMesh.position.y = surfWorldY + 0.55;
+      this.snellSurfaceMat.opacity = 0.50 + Math.sin(time * 2.1) * 0.08;
+    }
 
     const dm = this._dummy;
 
@@ -2930,51 +2938,88 @@ export class SubRenderer {
       this.mantaGroup.scale.set(1.05, 0.98 * mWing, 1.05);
     }
 
-    // Position & Animate Pelagian Sea-Glass Bio-Submersible with Gateway visibly piloting inside!
+    // 100% SUBMARINE-FREE GATEWAY 2.0 FREE-SWIM HERO POSE, DOLPHIN-KICK UNDULATION & BARREL-ROLL DASH!
     const rawSwX = sw.x ?? this.width * (portrait ? 0.38 : 0.28);
     const rawSwY = sw.y ?? this.height * 0.48;
     const heroRaw = this._screenToWorld(rawSwX, rawSwY, 0.4);
-    // Guarantee entire Pelagian Bio-Submersible + bow nose stays 100% inside the middle 75% horizontal safe-zone!
-    const safeHalfW = heroRaw.halfW * (portrait ? 0.46 : 0.72);
-    const safeHalfH = heroRaw.halfH * (portrait ? 0.50 : 0.62);
+    const safeHalfW = heroRaw.halfW * (portrait ? 0.54 : 0.74);
+    const safeHalfH = heroRaw.halfH * (portrait ? 0.52 : 0.64);
     const heroX = clamp(heroRaw.x, -safeHalfW, safeHalfW);
     const heroY = clamp(heroRaw.y, -safeHalfH, safeHalfH);
-    const vesselScale = portrait ? 1.12 : 1.44;
-    this.subVesselGroup.scale.setScalar(vesselScale);
+    const vesselScale = portrait ? 1.18 : 1.32;
+    this.reefHeroInner.scale.setScalar(vesselScale);
 
     const vx = sw.vx || 0;
     const vy = sw.vy || 0;
-    // Apply hydrodynamic pitch-into-dive/climb & roll-bank into maneuvers (subStage pitch is + nose-down; Three.js +Z is nose-up)
-    const rawPitch = sw.pitch != null ? -clamp(sw.pitch, -0.45, 0.45) : clamp(Math.atan2(-vy, 300), -0.45, 0.45);
+    const rawPitch = sw.pitch != null ? -clamp(sw.pitch, -0.45, 0.45) : clamp(Math.atan2(-vy, 280), -0.45, 0.45);
     const rawBank = sw.bank != null ? clamp(sw.bank, -0.52, 0.52) : clamp(-vy * 0.0014, -0.32, 0.32);
     const smoothK = 1 - Math.exp(-12 * dt);
     this._subPitchSmooth += (rawPitch - this._subPitchSmooth) * smoothK;
     this._subBankSmooth += (rawBank - this._subBankSmooth) * smoothK;
     const pitch = this._subPitchSmooth;
+    const dashActive = (sw.dashTimer || 0) > 0.01;
     const roll = this._subBankSmooth + (sw.spin || 0);
-    const swimPhase = sw.swimCycle ?? time * 8.2;
+    const swimPhase = sw.swimCycle ?? time * 8.4;
     const sonarP = stage.sonarPulse || 0;
+    const dolphinWave = Math.sin(swimPhase) * 0.10;
 
-    this.heroSwimAnchor.position.set(heroX, heroY, 0.4);
-    this.heroSwimAnchor.rotation.set(roll * 0.72, Math.sin(time * 2.4) * 0.05 - this._subBankSmooth * 0.14, pitch);
-    if (this.subFinL) this.subFinL.rotation.x = Math.sin(swimPhase * 0.75) * 0.24 + pitch * 0.55 - this._subBankSmooth * 0.35;
-    if (this.subFinR) this.subFinR.rotation.x = -Math.sin(swimPhase * 0.75) * 0.24 - pitch * 0.55 - this._subBankSmooth * 0.35;
-    if (this.subPropeller) this.subPropeller.rotation.x = time * (14 + (sw.prop || 1) * 10);
-    if (this.subSonarBeam) {
-      this.subSonarBeam.material.opacity = 0.22 + sonarP * 0.26 + Math.sin(time * 4.2) * 0.03;
-      this.subSonarBeam.scale.set(1 + sonarP * 0.25, 1 + sonarP * 0.3, 1 + sonarP * 0.3);
+    this.heroSwimAnchor.position.set(heroX, heroY + Math.sin(swimPhase) * 0.055, 0.45);
+    this.heroSwimAnchor.rotation.set(
+      roll,
+      Math.sin(swimPhase * 0.5) * 0.08 - this._subBankSmooth * 0.14,
+      pitch + dolphinWave
+    );
+    if (this.reefHeroLight) {
+      this.reefHeroLight.position.set(heroX + 0.5, heroY + 0.85, 2.2);
+      this.reefHeroLight.intensity = 1.45 + (dashActive ? 0.9 : 0) + sonarP * 0.75;
+    }
+
+    // Agile Barrel-Roll Dash Shimmering Aqua Vortex Cone wrapping Gateway!
+    if (this.dashVortexMesh) {
+      this.dashVortexMesh.visible = dashActive;
+      if (dashActive) {
+        const dp = clamp((sw.dashTimer || 0) / 0.4, 0, 1);
+        this.dashVortexMat.opacity = 0.25 + dp * 0.52;
+        this.dashVortexMesh.rotation.x = time * 26;
+        this.dashVortexMesh.scale.set(1.0 + (1 - dp) * 0.25, 0.95 + dp * 0.25, 0.95 + dp * 0.25);
+      }
     }
 
     this.reefHero.update(dt, {
       time,
-      vx: 0.4,
-      vy: 0,
+      vx: Math.max(1.8, Math.abs(vx) * 0.025 + 2.2),
+      vy: vy * 0.01,
       facing: 1,
-      onGround: true,
-      isSwimming: false,
-      anim: (sw.whipTimer || 0) > 0.02 ? 'Celebrate' : 'IdleBreathe',
-      frillFlare: 0.38 + sonarP * 0.45 + (stage.ventBoostTimer > 0 ? 0.35 : 0),
+      onGround: false,
+      isSwimming: true,
+      freeSwim: true,
+      swimPhase,
+      anim: dashActive ? 'TailWhip' : (sw.whipTimer || 0) > 0.02 ? 'HeroCelebrate' : 'FreeSwim',
+      mood: (sw.stun || 0) > 0 ? 'hurt' : dashActive || sonarP > 0.3 ? 'joyful' : 'happy',
+      frillFlare: 0.46 + sonarP * 0.50 + (dashActive ? 0.42 : 0) + (stage.ventBoostTimer > 0 ? 0.30 : 0),
     });
+
+    // Shimmering Underwater Current Stream Boost Rings (`stage.boostRings`)
+    const bRings = stage.boostRings || [];
+    let brCnt = 0;
+    for (let i = 0; i < bRings.length && brCnt < 12; i++) {
+      const br = bRings[i];
+      const wp = this._screenToWorld(br.x, br.y, 0.05);
+      const rad = Math.max(0.55, this._pxScale(br.r || 34, 0.05) * 0.92);
+      const pop = br.passed ? 1.0 + (br.passT || 0) * 1.15 : 1.0 + Math.sin(time * 3.6 + i) * 0.05;
+      dm.position.set(wp.x, wp.y, 0.05);
+      dm.rotation.set(Math.sin(time * 2.2 + i) * 0.14, Math.PI * 0.42, time * 1.4 + i);
+      dm.scale.setScalar(rad * pop);
+      dm.updateMatrix();
+      this._col.set(br.passed ? '#fde047' : i % 2 === 0 ? '#5efce8' : '#38bdf8');
+      this.boostRingInst.setColorAt(brCnt, this._col);
+      this.boostRingInst.setMatrixAt(brCnt++, dm.matrix);
+    }
+    this.boostRingInst.count = brCnt;
+    if (brCnt > 0) {
+      this.boostRingInst.instanceMatrix.needsUpdate = true;
+      if (this.boostRingInst.instanceColor) this.boostRingInst.instanceColor.needsUpdate = true;
+    }
 
     // Expanding 3D Harmonic Echo Sonar Sphere + Physical 3D Sonar Shockwave Ring
     if (sonarP > 0.01) {
@@ -3051,7 +3096,7 @@ export class SubRenderer {
       if (this.slipRingInst.instanceColor) this.slipRingInst.instanceColor.needsUpdate = true;
     }
 
-    // Update Rescued Sea Turtles & River Otters ONLY when real `stage.cages` gameplay rescues exist
+    // Update Luminous Crystal Glass Critter Rescue Orbs & Freed Companions (`stage.cages` + `stage.escorts`)
     const cages = stage.cages || [];
     let cageVis = 0;
     void playHalfW;
@@ -3061,33 +3106,58 @@ export class SubRenderer {
       const slot = this.cagePool[cageVis++];
       const wp = this._screenToWorld(cg.x, cg.y, 0);
       slot.root.visible = true;
-      slot.root.position.set(wp.x, clamp(wp.y, bedWorldY + 0.8, surfWorldY - 0.5), 0.1);
-      slot.root.scale.setScalar(portrait ? 0.82 : 1.0);
+      slot.root.position.set(wp.x, clamp(wp.y, bedWorldY + 0.85, surfWorldY - 0.55), 0.12);
+      slot.root.scale.setScalar(portrait ? 0.92 : 1.08);
       const isFreed = cg.state === 'freed';
       slot.cageGroup.visible = !isFreed;
-      slot.cageGroup.rotation.y = time * 0.85 + i;
+      slot.cageGroup.rotation.y = time * 1.15 + i;
+      if (slot.energyRing1) slot.energyRing1.rotation.z = time * 2.4 + i;
+      if (slot.energyRing2) slot.energyRing2.rotation.y = -time * 2.1 + i;
       const isTurtle = cg.animal !== 'otter';
       slot.turtleGroup.visible = isTurtle;
       slot.otterGroup.visible = !isTurtle;
-      const animDir = isFreed ? 0 : Math.PI;
-      slot.turtleGroup.rotation.set(0, animDir, isFreed ? Math.sin(time * 5 + i) * 0.14 : 0);
-      slot.otterGroup.rotation.set(0, animDir, isFreed ? Math.sin(time * 6.5 + i) * 0.18 : 0);
-      if (slot.flipperL) slot.flipperL.rotation.x = Math.sin(time * (isFreed ? 8.5 : 3.2) + i) * 0.45;
-      if (slot.flipperR) slot.flipperR.rotation.x = -Math.sin(time * (isFreed ? 8.5 : 3.2) + i) * 0.45;
-      if (slot.otterTail) slot.otterTail.rotation.y = Math.sin(time * (isFreed ? 10 : 4) + i) * 0.38;
+      const animDir = isFreed ? 0 : Math.PI * 0.85;
+      slot.turtleGroup.rotation.set(0, animDir, Math.sin(time * (isFreed ? 6.5 : 4.2) + i) * 0.16);
+      slot.otterGroup.rotation.set(0, animDir, Math.sin(time * (isFreed ? 7.5 : 4.6) + i) * 0.18);
+      if (slot.flipperL) slot.flipperL.rotation.x = Math.sin(time * (isFreed ? 9.5 : 5.2) + i) * 0.52;
+      if (slot.flipperR) slot.flipperR.rotation.x = -Math.sin(time * (isFreed ? 9.5 : 5.2) + i) * 0.52;
+      if (slot.otterTail) slot.otterTail.rotation.y = Math.sin(time * (isFreed ? 11 : 5.5) + i) * 0.42;
     }
     for (let i = cageVis; i < MAX_CAGES; i++) {
       this.cagePool[i].root.visible = false;
     }
 
-    // Update Gameplay Banded Tropical Reef Fish (`reef_angelfish` & `reef_wrasse`), Harmonic Seeds & Shells
+    // Joyous Rescued Critter Escorts swimming right alongside Gateway in V-formation!
+    const escorts = stage.escorts || [];
+    for (let i = 0; i < (this.escortPool?.length || 0); i++) {
+      const slot = this.escortPool[i];
+      if (i >= escorts.length) {
+        slot.root.visible = false;
+        continue;
+      }
+      const es = escorts[i];
+      const wp = this._screenToWorld(es.x, es.y, 0.28);
+      slot.root.visible = true;
+      slot.cageGroup.visible = false;
+      slot.root.position.set(wp.x, clamp(wp.y, bedWorldY + 0.6, surfWorldY - 0.4), 0.28);
+      slot.root.scale.setScalar(portrait ? 0.68 : 0.78);
+      const isTurtle = es.animal !== 'otter';
+      slot.turtleGroup.visible = isTurtle;
+      slot.otterGroup.visible = !isTurtle;
+      slot.turtleGroup.rotation.set(0, 0, Math.sin(time * 6.5 + i) * 0.14);
+      slot.otterGroup.rotation.set(0, 0, Math.sin(time * 7.2 + i) * 0.16);
+      if (slot.flipperL) slot.flipperL.rotation.x = Math.sin(time * 9.0 + i) * 0.48;
+      if (slot.flipperR) slot.flipperR.rotation.x = -Math.sin(time * 9.0 + i) * 0.48;
+      if (slot.otterTail) slot.otterTail.rotation.y = Math.sin(time * 10.5 + i) * 0.42;
+    }
+
+    // Update Gameplay Vibrant Tropical Reef Fish Schools (Yellow Tangs, Turquoise Chromis, Coral Anthias!), Seeds & Bubbles
     const fishList = stage.fish || [];
     let c1 = 0;
     let c2 = 0;
     let cShell = 0;
     let cSeed = 0;
-    // Gentle sunlit multiplier tints preserving the hand-painted royal-cobalt/golden/coral tropical stripes!
-    const fishTints = ['#ffffff', '#fff8dc', '#e6f7ff', '#ffedd5', '#f0fdfa'];
+    const fishTints = ['#fde047', '#38bdf8', '#fb7185', '#34d399', '#fbbf24'];
 
     for (let i = 0; i < fishList.length; i++) {
       const f = fishList[i];
@@ -3231,26 +3301,6 @@ export class SubRenderer {
         }
       }
     }
-    // Hang vertical dark iron anchor chains from active (non-freed) wildlife cages straight into the seabed!
-    for (let i = 0; i < cages.length && i < MAX_CAGES; i++) {
-      const cg = cages[i];
-      if (cg.state === 'freed') continue;
-      const slot = this.cagePool[i];
-      if (!slot.root.visible) continue;
-      const cx = slot.root.position.x;
-      const cy = slot.root.position.y;
-      const cz = slot.root.position.z;
-      const span = Math.max(0, cy - 0.55 - (bedWorldY - 0.75));
-      const links = Math.min(20, Math.ceil(span / 0.24));
-      for (let k = 0; k < links && chCount < MAX_CHAINS; k++) {
-        const ly = cy - 0.58 - k * 0.24;
-        dm.position.set(cx + Math.sin(time * 1.6 + k * 0.4) * 0.025, ly, cz);
-        dm.rotation.set(0, (k % 2) * 1.57, 0);
-        dm.scale.set(1.15, 1.0, 1.15);
-        dm.updateMatrix();
-        this.chainInst.setMatrixAt(chCount++, dm.matrix);
-      }
-    }
     this.chainInst.count = chCount;
     if (chCount > 0) this.chainInst.instanceMatrix.needsUpdate = true;
 
@@ -3327,19 +3377,19 @@ export class SubRenderer {
       if (this.ringInst.instanceColor) this.ringInst.instanceColor.needsUpdate = true;
     }
 
-    // Delicate Translucent Rising Glassy Micro-Bubbles from Stern Propeller + Stage Particles
+    // Delicate Translucent Rising Glassy Micro-Bubbles streaming directly off Gateway's tail-fin & paws + Stage Particles
     let ptCount = 0;
-    const propOriginX = heroX - 1.32 * vesselScale;
-    for (let i = 0; i < 34 && ptCount < MAX_PARTICLES; i++) {
-      const age = (time * 1.45 + i * 0.21) % 1;
-      const bx = propOriginX - age * 2.85 - Math.sin(i * 3.1) * 0.14;
-      const by = heroY - 0.04 + Math.sin(time * 5.2 + i * 1.9) * (0.08 + age * 0.22) + age * 0.88;
-      const bSize = (0.36 + (i % 5) * 0.14) * (1 - age * 0.55);
+    const propOriginX = heroX - 0.78 * vesselScale;
+    for (let i = 0; i < 36 && ptCount < MAX_PARTICLES; i++) {
+      const age = (time * 1.55 + i * 0.19) % 1;
+      const bx = propOriginX - age * 2.95 - Math.sin(i * 3.1) * 0.14;
+      const by = heroY - 0.02 + Math.sin(time * 5.6 + i * 1.9) * (0.09 + age * 0.24) + age * 0.92;
+      const bSize = (0.34 + (i % 5) * 0.14) * (1 - age * 0.55);
       dm.position.set(bx, by, 0.25 + (i % 3) * 0.06);
       dm.rotation.set(0, 0, 0);
       dm.scale.setScalar(bSize);
       dm.updateMatrix();
-      this._col.set(i % 2 === 0 ? '#e0f7ff' : '#bae6fd');
+      this._col.set(i % 2 === 0 ? '#e0f7ff' : '#99f6e4');
       this.particleInst.setColorAt(ptCount, this._col);
       this.particleInst.setMatrixAt(ptCount++, dm.matrix);
     }
@@ -3362,17 +3412,40 @@ export class SubRenderer {
 
     this._syncPopups(opts.popups || stageOrSubOrState.popups || [], heroX, heroY, vesselScale, surfWorldY, portrait);
 
-    // Camera subtle surge & shake (direct single-pass WebGL2 60fps!)
+    // Camera subtle surge, gentle bank-follow & shake
     const sh = Number(opts.shake ?? stageOrSubOrState.shake) || 0;
     const sx = sh > 0.01 ? Math.sin(time * 67) * sh * 0.02 : 0;
     const sy = sh > 0.01 ? Math.cos(time * 59) * sh * 0.02 : 0;
     this.reefCam.position.set(sx, sy, this._reefCamZ);
     this.reefCam.lookAt(sx, sy, 0);
 
-    const prevTarget = this.webgl.getRenderTarget();
-    this.webgl.setRenderTarget(null);
-    this.webgl.render(this.reefScene, this.reefCam);
-    this.webgl.setRenderTarget(prevTarget);
+    // Route through main GameRenderer's CinematicPostFX when provided, with ACES standalone fallback!
+    const postfx = opts?.postfx;
+    if (postfx && postfx.enabled && !postfx._disposed && typeof postfx.render === 'function') {
+      this.postfxActive = true;
+      postfx.render(this.reefScene, this.reefCam, {
+        biome: bKey,
+        exposure: 1.08,
+        bloomThreshold: 0.78,
+        bloomStrength: 0.36,
+        bloomRadius: 0.42,
+      });
+    } else {
+      this.postfxActive = false;
+      const prevTarget = this.webgl.getRenderTarget();
+      const prevTone = this.webgl.toneMapping;
+      const prevExp = this.webgl.toneMappingExposure;
+      try {
+        this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
+        this.webgl.toneMappingExposure = 1.08;
+        this.webgl.setRenderTarget(null);
+        this.webgl.render(this.reefScene, this.reefCam);
+      } finally {
+        this.webgl.toneMapping = prevTone;
+        this.webgl.toneMappingExposure = prevExp;
+        this.webgl.setRenderTarget(prevTarget);
+      }
+    }
   }
 
   // ============================================================================
@@ -3388,6 +3461,10 @@ export class SubRenderer {
 
     const skin = state.gateway?.skinId || state.player?.skinId || opts.skinId || this.skinId;
     if (skin && skin !== this.skinId) this.setSkin(skin);
+    if (opts?.envMap && this.coreScene.environment !== opts.envMap) {
+      this.coreScene.environment = opts.envMap;
+      this.coreScene.environmentIntensity = 0.92;
+    }
 
     const totalDepthMeters = Math.max(10, Number(cd.totalDepth) || 420);
     const progress = clamp(
@@ -3395,6 +3472,30 @@ export class SubRenderer {
       0,
       1
     );
+
+    // 3-Zone Architectural Depth-Zone Lighting Shift (0-35% Upper Intake -> 35-75% Crystal Conduit Gallery -> 75-100% Bedrock Lotus Sanctum!)
+    if (progress < 0.35) {
+      this.coreScene.background.set('#0a3250');
+      this.coreScene.fog.color.set('#0e4266');
+      if (this.conduitGlowMat) {
+        this.conduitGlowMat.emissive.set('#22d3ee');
+        this.conduitGlowMat.emissiveIntensity = 1.85 + Math.sin(time * 5.0) * 0.25;
+      }
+    } else if (progress < 0.75) {
+      this.coreScene.background.set('#0c385a');
+      this.coreScene.fog.color.set('#114a70');
+      if (this.conduitGlowMat) {
+        this.conduitGlowMat.emissive.set('#38bdf8');
+        this.conduitGlowMat.emissiveIntensity = 2.15 + Math.sin(time * 7.5) * 0.35;
+      }
+    } else {
+      this.coreScene.background.set('#0d4c66');
+      this.coreScene.fog.color.set('#146680');
+      if (this.conduitGlowMat) {
+        this.conduitGlowMat.emissive.set('#5efce8');
+        this.conduitGlowMat.emissiveIntensity = 2.45 + Math.sin(time * 9.0) * 0.40;
+      }
+    }
     const worldSpan = 165;
     const diveY = -progress * worldSpan;
 
@@ -3449,17 +3550,26 @@ export class SubRenderer {
       onGround: false,
       isSwimming: true,
       coreDive: true,
-      anim: seedPlanted ? 'Celebrate' : whipT > 0.01 ? 'TailWhip' : 'CoreDive',
+      anim: seedPlanted ? 'HeroCelebrate' : whipT > 0.01 ? 'TailWhip' : 'CoreDive',
+      mood: seedPlanted ? 'joyful' : whipT > 0.01 ? 'determined' : 'determined',
       swimPhase: time * 11.5,
-      frillFlare: 0.72,
+      frillFlare: 0.72 + (whipT > 0.01 ? 0.35 : 0),
     });
     this.coreHeroLight.position.set(hx, diveY + 1.2, hz);
+    this.coreHeroLight.intensity = 2.25 + (whipT > 0.01 ? 1.4 : 0) + (this._shardBurstT || 0) * 2.2;
 
     if (whipT > 0.01) {
-      this.coreWhipRing.material.opacity = clamp(whipT * 2.4, 0, 0.88);
-      this.coreWhipRing.scale.setScalar(1.0 + (1 - clamp(whipT * 2.5, 0, 1)) * 0.85);
+      const wp = clamp(whipT * 2.4, 0, 1);
+      this.coreWhipRing.material.opacity = wp * 0.90;
+      this.coreWhipRing.scale.setScalar(1.0 + (1 - wp) * 0.90);
+      if (this.coreDrillCone) {
+        this.coreDrillCone.visible = true;
+        this.coreDrillCone.material.opacity = wp * 0.62;
+        this.coreDrillCone.rotation.y = time * 24;
+      }
     } else {
       this.coreWhipRing.material.opacity = 0;
+      if (this.coreDrillCone) this.coreDrillCone.visible = false;
     }
 
     // Spinning Hydro-Turbine Obstacles (1:1 with `game.js` `cd.turbines`: `depth`, `rotAngle`, `rotSpeed`)
@@ -3566,32 +3676,30 @@ export class SubRenderer {
       this.seedAnchorGroup.rotation.y = time * 0.65;
       const beam = this.seedAnchorGroup.userData.eruptionBeam;
       if (seedPlanted) {
-        beam.material.opacity = 0.52 + Math.sin(time * 14) * 0.12;
-        this.coreScene.background.set('#083b54');
+        beam.material.opacity = 0.65 + Math.sin(time * 14) * 0.14;
+        this.coreScene.background.set('#0e5874');
       } else {
-        beam.material.opacity = 0.08;
-        this.coreScene.background.set('#041120');
+        beam.material.opacity = 0.16;
       }
     } else {
       this.seedAnchorGroup.visible = false;
     }
 
     // Subtle Hair-Thin Peripheral Air-Rush Streaks ONLY near outer shaft wall & strictly below Gateway!
-    // (ZERO thick beams or foreground camera-clipping planks!)
     for (let i = 0; i < MAX_CORE_STREAKS; i++) {
       const ang = i * 2.39996;
       const rad = 2.88 + (i % 5) * 0.095;
       const relY = -1.8 - ((((i * 0.48 + time * 19) % 26) + 26) % 26);
       dm.position.set(Math.cos(ang) * rad, diveY + relY, Math.sin(ang) * rad);
       dm.rotation.set(0, 0, 0);
-      dm.scale.set(0.68, 0.95 + (cd.boostTimer > 0 ? 0.35 : 0), 0.68);
+      dm.scale.set(0.75, 1.05 + (cd.boostTimer > 0 || whipT > 0.01 ? 0.55 : 0), 0.75);
       dm.updateMatrix();
       this.streakInst.setMatrixAt(i, dm.matrix);
     }
     this.streakInst.count = MAX_CORE_STREAKS;
     this.streakInst.instanceMatrix.needsUpdate = true;
 
-    // 14 Faceted 3D Rose-Quartz Crystal Shards flying radially OUTWARD away from Gateway (ZERO flat pink confetti!)
+    // 14 Faceted 3D Rose-Quartz Crystal Shards + Expanding Turquoise Harmonic Shatter Shockwave Ring!
     const curSmashed = Number(cd.crystalsSmashed ?? cd.coresSmashed) || 0;
     if (curSmashed > this._lastCoreSmashed) {
       this._shardBurstT = 1.0;
@@ -3603,18 +3711,24 @@ export class SubRenderer {
     if (this._shardBurstT > 0.01) {
       this._shardBurstT = Math.max(0, this._shardBurstT - dt * 1.45);
       const p = 1 - this._shardBurstT;
+      if (this.coreShatterWave) {
+        this.coreShatterWave.visible = true;
+        this.coreShatterWave.position.set(this._shardOrigin.x, this._shardOrigin.y, this._shardOrigin.z);
+        this.coreShatterWave.scale.setScalar(0.65 + p * 4.2);
+        this.coreShatterWave.material.opacity = this._shardBurstT * 0.92;
+      }
       const SHARD_CNT = 14;
       for (let i = 0; i < SHARD_CNT; i++) {
         const a1 = (i / SHARD_CNT) * TAU + 0.35;
         const a2 = ((i * 5) % 9) * 0.18 - 0.8;
-        const sp = 1.35 + p * (2.6 + (i % 4) * 0.45);
+        const sp = 1.35 + p * (2.8 + (i % 4) * 0.45);
         dm.position.set(
           this._shardOrigin.x + Math.cos(a1) * sp,
           this._shardOrigin.y + Math.sin(a2) * sp * 0.8 - p * 1.8,
           this._shardOrigin.z + Math.sin(a1) * sp
         );
         dm.rotation.set(time * 7 + i * 1.3, time * 9 - i, i * 0.8);
-        const sBase = this._shardBurstT * (0.65 + (i % 3) * 0.25);
+        const sBase = this._shardBurstT * (0.72 + (i % 3) * 0.28);
         dm.scale.set(sBase * 0.72, sBase * 1.45, sBase * 0.72);
         dm.updateMatrix();
         this.coreShardInst.setMatrixAt(i, dm.matrix);
@@ -3623,44 +3737,65 @@ export class SubRenderer {
       this.coreShardInst.instanceMatrix.needsUpdate = true;
     } else {
       this.coreShardInst.count = 0;
+      if (this.coreShatterWave) this.coreShatterWave.visible = false;
     }
 
     // Exhilarating 360° Chase Camera Above Gateway Looking Down the Flooded Reactor Shaft
     const aspect = this.width / Math.max(1, this.height);
     const portrait = aspect < 0.85;
-    const baseFov = portrait ? 56 : 54;
-    const boostFov = cd.boostTimer > 0 ? baseFov + 7 : baseFov;
+    const baseFov = portrait ? 56 : 55;
+    const boostFov = cd.boostTimer > 0 || whipT > 0.01 ? baseFov + 11 : baseFov;
     if (Math.abs(this.coreCam.fov - boostFov) > 0.1) {
-      this.coreCam.fov = lerp(this.coreCam.fov, boostFov, 0.15);
+      this.coreCam.fov = lerp(this.coreCam.fov, boostFov, 0.16);
       this.coreCam.updateProjectionMatrix();
     }
-    this.coreHeroInner.scale.setScalar(portrait ? 1.28 : 1.32);
+    this.coreHeroInner.scale.setScalar(portrait ? 1.18 : 1.24);
     const sh = Number(opts.shake ?? state.shake) || 0;
     const sx = sh > 0.01 ? Math.sin(time * 71) * sh * 0.025 : 0;
     const sz = sh > 0.01 ? Math.cos(time * 63) * sh * 0.025 : 0;
 
     if (seedPlanted) {
-      // Dramatic orbit pull-back as the Harmonic Water Seed erupts up the reactor shaft!
       const orbitA = time * 0.9;
       this.coreCam.position.set(Math.cos(orbitA) * 2.5, anchorY + 6.2, Math.sin(orbitA) * 2.5);
       this.coreCam.up.set(0, 1, 0);
       this.coreCam.lookAt(0, anchorY + 1.2, 0);
     } else if (portrait) {
-      // Portrait 412x915 safe-zone framing: keeps Gateway ~44% Y (100% below top HUD) with spinning turbines below!
       this.coreCam.position.set(hx * 0.44 + sx, diveY + 5.85, hz * 0.44 + 1.25 + sz);
       this.coreCam.up.set(0, 0, -1);
       this.coreCam.lookAt(hx * 0.76, diveY - 6.0, hz * 0.76 - 0.60);
     } else {
-      // Desktop 1920x1080 heroic overhead plunge camera: keeps Gateway ~47% Y (100% clear of top SIPHON CORE HUD)!
       this.coreCam.position.set(hx * 0.46 + sx, diveY + 5.55, hz * 0.46 + 1.05 + sz);
       this.coreCam.up.set(0, 0, -1);
       this.coreCam.lookAt(hx * 0.80, diveY - 6.0, hz * 0.80 - 0.85);
     }
 
-    const prevTarget = this.webgl.getRenderTarget();
-    this.webgl.setRenderTarget(null);
-    this.webgl.render(this.coreScene, this.coreCam);
-    this.webgl.setRenderTarget(prevTarget);
+    const postfx = opts?.postfx;
+    if (postfx && postfx.enabled && !postfx._disposed && typeof postfx.render === 'function') {
+      this.postfxActive = true;
+      postfx.render(this.coreScene, this.coreCam, {
+        biome: 'storm_ocean',
+        exposure: 1.14,
+        bloomThreshold: 0.66,
+        bloomStrength: 0.48,
+        bloomRadius: 0.46,
+        flash: this._shardBurstT * 0.35,
+      });
+    } else {
+      this.postfxActive = false;
+      const prevTarget = this.webgl.getRenderTarget();
+      const prevTone = this.webgl.toneMapping;
+      const prevExp = this.webgl.toneMappingExposure;
+      try {
+        this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
+        this.webgl.toneMappingExposure = 1.14;
+        this.webgl.setRenderTarget(null);
+        this.webgl.render(this.coreScene, this.coreCam);
+      } finally {
+        this.webgl.toneMapping = prevTone;
+        this.webgl.toneMappingExposure = prevExp;
+        this.webgl.setRenderTarget(prevTarget);
+      }
+    }
   }
 
   _syncPopups(popups, heroX = 0, heroY = 0, vesselScale = 1.2, surfWorldY = 3.2, portrait = false) {
@@ -3710,7 +3845,8 @@ export class SubRenderer {
     this.barkTex?.dispose();
     this.coralPorousAlbedo?.dispose();
     this.coralPorousNormal?.dispose();
-    this.envTex?.dispose();
+    this._ownEnvRt?.dispose();
+    if (!this._ownEnvRt) this.envTex?.dispose();
     for (const p of this.popupPool) {
       p.sprite.material.map?.dispose();
       p.sprite.material.dispose();
