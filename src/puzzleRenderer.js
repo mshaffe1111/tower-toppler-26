@@ -2827,6 +2827,10 @@ export class PuzzleRenderer {
           m.metalness = Math.min(0.80, m.metalness ?? 0.75);
           m.envMapIntensity = 0.74;
         }
+        if (mn.includes('Basalt')) {
+          m.metalness = Math.min(0.06, m.metalness ?? 0.05);
+          m.roughness = Math.max(0.66, m.roughness ?? 0.72);
+        }
         if (mn.includes('AquaSeal')) {
           m.emissiveIntensity = 1.15;
         }
