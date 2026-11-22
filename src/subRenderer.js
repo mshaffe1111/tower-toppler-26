@@ -1,31 +1,27 @@
-// TOWERING WATERS: GATEWAY'S DESCENT — REEF FREE-SWIM & REACTOR CORE DESCENT 3D RENDERER (`src/subRenderer.js`)
+// TOWERING WATERS: GATEWAY'S DESCENT — REEF FREE-SWIM 3D RENDERER (`src/subRenderer.js`)
 //
-// Zero-Submarine, 100% Gateway-Centric Underwater & Reactor Dive 3D Engine:
-//   1. `render(stageOrSubOrState, opts)` -> **`reef_swim` (Coral Reef & Lakebed Free-Swim):**
-//      - Gateway swims directly underwater (undulating marine-lizard spine, frills & 7-segment tail,
-//        ZERO metal submarines!) through sunlit turquoise caustic god-rays, swaying 3D kelp forests,
-//        sunken canyon redwoods, and porous staghorn/brain coral gardens.
-//      - Frees trapped Sea Turtles (`assets/models/sea_turtle.glb` w/ flapping flippers) and River
-//        Otters (`assets/models/river_otter.glb` w/ undulating rudder tail) from Siphon Containment
-//        Critter Rescue Orbs.
-//      - Instanced Reef Angelfish (`alien_fish_1.glb`), Spotted Eagle-Rays (`alien_fish_2.glb`),
-//        Siphon Surge Nodes (`sea_mine.glb`), Reef Grotto Sanctuary (`warp_cavern.glb`), Geyser Vents,
-//        Tidal Pearl Clams, and expanding 3D Harmonic Echo Shockwaves.
-//   2. `renderCoreDescent(state, opts)` -> **`core_descent` (360° Flooded Reactor Shaft Plunge):**
-//      - High-speed vertical 360° camera plunging down the Spire's flooded glass-and-bronze Central
-//        Reactor Shaft! Gateway dives headfirst (`CoreDive` pose with streaming bubble spirals),
-//        threading giant spinning 5-blade Hydro-Turbines (`core_reactor_props.glb`), shattering
-//        glowing Siphon Crystal Locks, and planting the Harmonic Water Seed into the Bedrock Lotus!
+// Blender-First Stylized Underwater Pelagian Reef Grotto (`assets/models/env_reef_grotto.glb`):
+//   - 100% SUBMARINE-FREE: Gateway 2.0 swims large & expressive in left-center foreground
+//     with sleek horizontal dolphin-kick undulation & streaming tail (ZERO scorpion curl!).
+//   - ZERO flat 2D aquarium poster (`mg_bg_reef_swim.webp` deleted!), ZERO horizontal cut seam,
+//     ZERO flat cardboard coral/kelp cutouts, ZERO wireframe hoops!
+//   - Seamless deep-turquoise underwater 3D depth-gradient sphere matching `THREE.FogExp2`,
+//     overhead animated GLSL sunlit Snell's-window water surface ceiling + 12 slanted golden-aqua
+//     volumetric god-rays, AND live world-space animated GLSL sunlit caustics projected across
+//     the 3D sandy seabed dunes & sunken Pelagian limestone ruins!
+//   - Crisp translucent iridescent Fresnel rescue bubbles around `sea_turtle.glb` & `river_otter.glb`,
+//     chunky 3D antique-bronze & aqua crystal `HydroRing_Reef` boost rings, real 3D sculpted coral
+//     gardens (`Coral_Staghorn`, `Coral_Table`, `Coral_BrainDome`, `Coral_Anemone`), swaying 3D
+//     `Kelp_Cluster` fronds, `SunkenAmphora`, `SunkenColumn_A/B`, and vaulted `GrottoArch_Vault`!
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { GatewayRig } from './gateway.js';
 
 const TAU = Math.PI * 2;
 const DEG = Math.PI / 180;
-const FOV = 48;
-const CAM_Z = 10.4;
+const FOV = 46;
+const CAM_Z = 9.6;
 
 const MAX_FISH = 72;
 const MAX_AMB = 24;
@@ -33,105 +29,201 @@ const MAX_BUBBLE_SHELLS = 72;
 const MAX_PULSES = 18;
 const MAX_JELLY = 16;
 const MAX_MINES = 16;
-const MAX_CHAINS = 160;
+const MAX_CHAINS = 140;
 const MAX_CLAMS = 8;
 const MAX_VENTS = 8;
 const MAX_CAGES = 8;
-const MAX_KELP = 64;
-const MAX_CORAL = 56;
-const MAX_RAYS = 14;
-const MAX_RINGS = 28;
-const MAX_PARTICLES = 320;
+const MAX_RAYS = 7;
+const MAX_RINGS = 24;
+const MAX_PARTICLES = 240;
 const MAX_POPUPS = 16;
-
-const MAX_CORE_RINGS = 18;
-const MAX_CORE_TURBINES = 10;
-const MAX_CORE_LOCKS = 8;
-const MAX_CORE_STREAKS = 140;
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
-const smooth01 = (t) => {
-  const x = clamp(t, 0, 1);
-  return x * x * (3 - 2 * x);
-};
-
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-const SKIN_PALETTES = {
-  sea_glass_guardian: { scale: '#2dd4bf', belly: '#ccfbf1', frill: '#38bdf8', glow: '#5efce8', eye: '#f59e0b' },
-  coral_reef_empress: { scale: '#fb7185', belly: '#ffe4e6', frill: '#2dd4bf', glow: '#f472b6', eye: '#fde047' },
-  canyon_rapids_ranger: { scale: '#0d9488', belly: '#fef3c7', frill: '#f59e0b', glow: '#38bdf8', eye: '#fbbf24' },
-  alpine_glacier_mystic: { scale: '#38bdf8', belly: '#f0f9ff', frill: '#a5f3fc', glow: '#7dd3fc', eye: '#fde047' },
-  bayou_biolume: { scale: '#10b981', belly: '#d1fae5', frill: '#eab308', glow: '#34d399', eye: '#fb923c' },
-  abyssal_leviathan: { scale: '#1d4ed8', belly: '#93c5fd', frill: '#c084fc', glow: '#67e8f9', eye: '#5efce8' },
-  solar_oasis: { scale: '#f59e0b', belly: '#fef9c3', frill: '#22d3ee', glow: '#fde047', eye: '#10b981' },
-  sovereign_starlight: { scale: '#eab308', belly: '#fefce8', frill: '#a855f7', glow: '#5efce8', eye: '#e879f9' },
-  default_amphibian: { scale: '#2dd4bf', belly: '#ccfbf1', frill: '#38bdf8', glow: '#5efce8', eye: '#f59e0b' },
-};
 
 const BIOME_UNDERWATER_PALETTES = {
+  coral_sea: {
+    zenith: '#52e4f0',
+    horizon: '#0a7496',
+    abyss: '#043652',
+    fog: '#0a7496',
+    sun: '#fff4d4',
+    ray: '#aef8ff',
+    caustic: '#7af4f8',
+  },
   canyon_river: {
-    bgTop: '#0f766e',
-    bgDeep: '#063f46',
-    fog: '#0b555c',
-    sun: '#fef08a',
-    ray: '#99f6e4',
-    sand: '#926344',
-    rock: '#7c3f2c',
-    kelp: '#15803d',
+    zenith: '#4cdcc8',
+    horizon: '#0c6870',
+    abyss: '#05333d',
+    fog: '#0c6870',
+    sun: '#fff0c8',
+    ray: '#a8f8e8',
+    caustic: '#88f4dc',
   },
   alpine_lake: {
-    bgTop: '#0284c7',
-    bgDeep: '#083b66',
-    fog: '#0a558c',
-    sun: '#e0f2fe',
-    ray: '#bae6fd',
-    sand: '#64748b',
-    rock: '#475569',
-    kelp: '#0d9488',
+    zenith: '#5cd4ff',
+    horizon: '#09649c',
+    abyss: '#052f58',
+    fog: '#09649c',
+    sun: '#f0f8ff',
+    ray: '#c0ebff',
+    caustic: '#90e4ff',
   },
   mist_bayou: {
-    bgTop: '#0d7a68',
-    bgDeep: '#063733',
-    fog: '#0a5249',
-    sun: '#fde68a',
-    ray: '#6ee7b7',
-    sand: '#57534e',
-    rock: '#3f4a3c',
-    kelp: '#16a34a',
-  },
-  coral_sea: {
-    bgTop: '#0694b8',
-    bgDeep: '#074e78',
-    fog: '#086c96',
-    sun: '#fffbeb',
-    ray: '#7dd3fc',
-    sand: '#d6c39c',
-    rock: '#4b6b7a',
-    kelp: '#14b8a6',
+    zenith: '#4cd4a8',
+    horizon: '#0b6058',
+    abyss: '#042d2d',
+    fog: '#0b6058',
+    sun: '#ffe8b8',
+    ray: '#90f4d4',
+    caustic: '#7cf0c4',
   },
   storm_ocean: {
-    bgTop: '#0369a1',
-    bgDeep: '#082f49',
-    fog: '#074973',
-    sun: '#bae6fd',
-    ray: '#5efce8',
-    sand: '#334155',
-    rock: '#1e293b',
-    kelp: '#0891b2',
+    zenith: '#3abce0',
+    horizon: '#074e78',
+    abyss: '#03233c',
+    fog: '#074e78',
+    sun: '#d4f2ff',
+    ray: '#82ebff',
+    caustic: '#64e6f8',
   },
 };
 
+// --- SEAMLESS 3D UNDERWATER DEPTH-GRADIENT SPHERE (ZERO HORIZONTAL SEAM, ZERO 2D POSTER!) ---
+const UNDERWATER_DOME_VERT = /* glsl */ `
+  varying vec3 vDir;
+  void main() {
+    vDir = normalize(position);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const UNDERWATER_DOME_FRAG = /* glsl */ `
+  uniform vec3 uZenithColor;
+  uniform vec3 uHorizonColor;
+  uniform vec3 uAbyssColor;
+  uniform vec3 uSunColor;
+  uniform float uTime;
+  varying vec3 vDir;
+
+  void main() {
+    vec3 d = normalize(vDir);
+    float y = d.y;
+    vec3 col = y >= 0.0
+      ? mix(uHorizonColor, uZenithColor, pow(clamp(y, 0.0, 1.0), 0.72))
+      : mix(uHorizonColor, uAbyssColor, pow(clamp(-y, 0.0, 1.0), 0.78));
+
+    // Soft overhead Snell's-window sunlit glow blooming into the upper water column
+    float zenithGlow = pow(max(0.0, y), 3.2);
+    float shimmer = 0.92 + 0.08 * sin(d.x * 14.0 + uTime * 1.4) * cos(d.z * 12.0 - uTime * 1.1);
+    col += uSunColor * zenithGlow * 0.36 * shimmer;
+
+    // Horizon seamlessly locks to uHorizonColor === scene.fog.color so distant arches dissolve cleanly!
+    float horLock = exp(-y * y * 18.0);
+    col = mix(col, uHorizonColor, horLock * 0.55);
+
+    gl_FragColor = vec4(col, 1.0);
+  }
+`;
+
+// --- ANIMATED OVERHEAD SHIMMERING SUNLIT WATER SURFACE CEILING (SNELL'S WINDOW SHADER!) ---
+const WATER_CEILING_VERT = /* glsl */ `
+  uniform float uTime;
+  varying vec3 vWorldPos;
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    vec3 p = position;
+    p.z += sin(p.x * 0.35 + uTime * 1.8) * 0.24 + cos(p.y * 0.42 - uTime * 1.4) * 0.18;
+    vec4 wp = modelMatrix * vec4(p, 1.0);
+    vWorldPos = wp.xyz;
+    gl_Position = projectionMatrix * viewMatrix * wp;
+  }
+`;
+
+const WATER_CEILING_FRAG = /* glsl */ `
+  uniform float uTime;
+  uniform float uScroll;
+  uniform vec3 uSunColor;
+  uniform vec3 uZenithColor;
+  varying vec3 vWorldPos;
+  varying vec2 vUv;
+
+  float causticPattern(vec2 p, float t) {
+    vec2 a = p * 0.55 + vec2(t * 0.28, -t * 0.19);
+    vec2 b = p * 0.72 + vec2(-t * 0.24, t * 0.31);
+    float w1 = sin(a.x + sin(a.y * 1.3 + t)) * cos(a.y + cos(a.x * 1.2 - t * 0.8));
+    float w2 = sin(b.x * 1.4 - b.y + t * 1.1) * cos(b.y * 1.3 + b.x - t * 0.9);
+    float c = abs(w1 + w2) * 0.5;
+    return pow(clamp(1.0 - c * 1.35, 0.0, 1.0), 2.4);
+  }
+
+  void main() {
+    vec2 uvCentered = vUv * 2.0 - 1.0;
+    // Soft radial & border fade to 0.0 alpha -> GUARANTEES ZERO hard edge or horizontal seam!
+    float edgeFade = smoothstep(1.0, 0.28, abs(uvCentered.x)) * smoothstep(1.0, 0.24, abs(uvCentered.y));
+    if (edgeFade <= 0.002) discard;
+
+    vec2 wp = vec2(vWorldPos.x + uScroll * 0.025, vWorldPos.z);
+    float rip = causticPattern(wp * 0.55, uTime);
+    float rip2 = causticPattern(wp * 0.95 + vec2(3.1, 1.7), -uTime * 0.85);
+    float glow = clamp(rip * 0.72 + rip2 * 0.55, 0.0, 1.0);
+
+    vec3 col = mix(uZenithColor, uSunColor, glow * 0.72);
+    float alpha = edgeFade * (0.20 + glow * 0.56);
+    gl_FragColor = vec4(col, alpha);
+  }
+`;
+
+// --- CRISP TRANSLUCENT IRIDESCENT FRESNEL RESCUE BUBBLE SHADER (ZERO WIREFRAME HOOPS!) ---
+const RESCUE_BUBBLE_VERT = /* glsl */ `
+  uniform float uTime;
+  varying vec3 vNormalW;
+  varying vec3 vViewDir;
+  void main() {
+    vec3 p = position;
+    float wob = sin(p.y * 5.0 + uTime * 3.8) * cos(p.x * 4.5 - uTime * 3.1) * 0.022;
+    p += normal * wob;
+    vec4 wp = modelMatrix * vec4(p, 1.0);
+    vNormalW = normalize(mat3(modelMatrix) * normal);
+    vViewDir = normalize(cameraPosition - wp.xyz);
+    gl_Position = projectionMatrix * viewMatrix * wp;
+  }
+`;
+
+const RESCUE_BUBBLE_FRAG = /* glsl */ `
+  uniform float uTime;
+  uniform vec3 uRimColorA;
+  uniform vec3 uRimColorB;
+  varying vec3 vNormalW;
+  varying vec3 vViewDir;
+
+  void main() {
+    vec3 N = normalize(vNormalW);
+    vec3 V = normalize(vViewDir);
+    float ndotv = abs(dot(N, V));
+    float fresnel = pow(1.0 - ndotv, 2.35);
+
+    // Subtle soap-bubble iridescence shifting between luminous aqua & warm sunlit gold-pearl
+    float irid = 0.5 + 0.5 * sin(ndotv * 7.5 + N.y * 3.2 + uTime * 2.2);
+    vec3 rimCol = mix(uRimColorA, uRimColorB, irid * 0.55);
+
+    // Dual crisp sunlit catchlights on upper-right & lower-left bubble skin
+    vec3 L1 = normalize(vec3(0.42, 0.78, 0.55));
+    vec3 H1 = normalize(L1 + V);
+    float spec1 = pow(max(dot(N, H1), 0.0), 64.0) * 1.45;
+    vec3 L2 = normalize(vec3(-0.55, -0.35, 0.65));
+    vec3 H2 = normalize(L2 + V);
+    float spec2 = pow(max(dot(N, H2), 0.0), 28.0) * 0.40;
+
+    vec3 col = rimCol * (0.45 + fresnel * 1.35) + vec3(1.0, 0.99, 0.95) * (spec1 + spec2);
+    // Crystal-clear center (alpha ~ 0.09) so the cute turtle/otter shines cleanly inside, crisp rim (alpha ~ 0.85)!
+    float alpha = clamp(0.08 + fresnel * 0.78 + spec1 * 0.65, 0.0, 0.94);
+    gl_FragColor = vec4(col, alpha);
+  }
+`;
+
+// --- SHARED GLB LOADER & WORLD-SPACE CAUSTICS MATERIAL INJECTION ---
 const _glbCache = new Map();
 function loadCachedGlb(url) {
   if (_glbCache.has(url)) return _glbCache.get(url);
@@ -145,7 +237,7 @@ function loadCachedGlb(url) {
       const loader = new GLTFLoader();
       loader.load(
         url,
-        (gltf) => resolve(gltf && gltf.scene ? gltf.scene : null),
+        (gltf) => resolve(gltf?.scene || null),
         undefined,
         () => resolve(null)
       );
@@ -157,241 +249,166 @@ function loadCachedGlb(url) {
   return p;
 }
 
-let _gatewayModPromise = null;
-function loadGatewayModule() {
-  if (_gatewayModPromise) return _gatewayModPromise;
-  _gatewayModPromise = import('./gateway.js').catch(() => null);
-  return _gatewayModPromise;
+function injectUnderwaterCaustics(mat, causticUniforms, strength = 0.62) {
+  if (!mat || mat.userData._causticsInjected) return mat;
+  mat.userData._causticsInjected = true;
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uCausticTime = causticUniforms.uTime;
+    shader.uniforms.uCausticScroll = causticUniforms.uScroll;
+    shader.uniforms.uCausticColor = causticUniforms.uColor;
+    shader.uniforms.uCausticStrength = { value: strength };
+
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+         varying vec3 vCausticWorldPos;
+         varying vec3 vCausticWorldNormal;`
+      )
+      .replace(
+        '#include <worldpos_vertex>',
+        `#include <worldpos_vertex>
+         vec4 cWp = vec4(transformed, 1.0);
+         #ifdef USE_INSTANCING
+           cWp = instanceMatrix * cWp;
+         #endif
+         cWp = modelMatrix * cWp;
+         vCausticWorldPos = cWp.xyz;
+         vec3 cWn = objectNormal;
+         #ifdef USE_INSTANCING
+           cWn = mat3(instanceMatrix) * cWn;
+         #endif
+         vCausticWorldNormal = normalize(mat3(modelMatrix) * cWn);`
+      );
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+         uniform float uCausticTime;
+         uniform float uCausticScroll;
+         uniform vec3 uCausticColor;
+         uniform float uCausticStrength;
+         varying vec3 vCausticWorldPos;
+         varying vec3 vCausticWorldNormal;
+
+         float reefCausticWeb(vec2 p, float t) {
+           vec2 a = p * 0.85 + vec2(t * 0.42, -t * 0.28);
+           vec2 b = p * 1.18 + vec2(-t * 0.34, t * 0.38);
+           float w1 = sin(a.x + cos(a.y * 1.15 + t * 0.9)) * cos(a.y - sin(a.x * 1.10 - t * 0.8));
+           float w2 = sin(b.x * 1.2 - b.y + t) * cos(b.y * 1.25 + b.x - t * 0.95);
+           float web = 1.0 - clamp(abs(w1 + w2) * 0.72, 0.0, 1.0);
+           return web * web * web;
+         }`
+      )
+      .replace(
+        '#include <dithering_fragment>',
+        `float upMask = smoothstep(0.08, 0.78, vCausticWorldNormal.y);
+         float distFade = exp(-max(0.0, -vCausticWorldPos.z - 2.0) * 0.055);
+         vec2 cp = vec2(vCausticWorldPos.x + uCausticScroll * 0.022, vCausticWorldPos.z) + vCausticWorldPos.y * vec2(0.18, 0.12);
+         float cVal = clamp(reefCausticWeb(cp, uCausticTime) * 1.22, 0.0, 1.20) * upMask * distFade * uCausticStrength;
+         gl_FragColor.rgb += uCausticColor * cVal;
+         #include <dithering_fragment>`
+      );
+  };
+  mat.customProgramCacheKey = () => `reef_caustics_${strength.toFixed(2)}`;
+  return mat;
 }
 
-/**
- * Adaptive Hero Rig wrapper:
- * Uses `GatewayRig` from `./gateway.js` immediately once available while providing a
- * sleek Frame-0 articulated Female Alien Hydro-Lizard fallback (with 7-segment undulating
- * tail, flaring aquatic head-frills, digitigrade limbs, and Harmonic Seed harness) so
- * zero frames ever appear empty or fall back to primitives.
- */
-class AdaptiveGatewaySwimmer {
-  constructor(skinId = 'sea_glass_guardian') {
-    this.skinId = skinId;
-    this.group = new THREE.Group();
-    this.liveRig = null;
-    this.fallback = this._buildSculptedLizardFallback(skinId);
-    this.group.add(this.fallback.root);
+function normalizeGlbMaterial(mat, causticUniforms = null, causticStrength = 0.0) {
+  if (!mat) return mat;
+  let out = mat;
+  if (mat.isMeshPhysicalMaterial) {
+    out = new THREE.MeshStandardMaterial({
+      name: mat.name || '',
+      color: mat.color ? mat.color.clone() : new THREE.Color('#ffffff'),
+      map: mat.map || null,
+      normalMap: mat.normalMap || null,
+      normalScale: mat.normalScale ? mat.normalScale.clone() : new THREE.Vector2(1, 1),
+      roughnessMap: mat.roughnessMap || null,
+      metalnessMap: mat.metalnessMap || null,
+      aoMap: mat.aoMap || mat.roughnessMap || null,
+      aoMapIntensity: 0.72,
+      emissive: mat.emissive ? mat.emissive.clone() : new THREE.Color('#000000'),
+      emissiveMap: mat.emissiveMap || null,
+      emissiveIntensity: Math.min(1.55, mat.emissiveIntensity ?? 1.0),
+      roughness: typeof mat.roughness === 'number' ? mat.roughness : 0.62,
+      metalness: typeof mat.metalness === 'number' ? mat.metalness : 0.04,
+      vertexColors: Boolean(mat.vertexColors),
+      side: mat.side,
+    });
+  } else {
+    out = mat.clone();
+    if (!out.aoMap && out.roughnessMap) {
+      out.aoMap = out.roughnessMap;
+      out.aoMapIntensity = 0.72;
+    }
+    if (typeof out.emissiveIntensity === 'number' && out.emissiveIntensity > 1.55) {
+      out.emissiveIntensity = 1.55;
+    }
+  }
+  if (causticUniforms && causticStrength > 0.001) {
+    injectUnderwaterCaustics(out, causticUniforms, causticStrength);
+  }
+  return out;
+}
 
-    loadGatewayModule().then((mod) => {
-      const RigClass = mod?.GatewayRig;
-      if (!RigClass || this._disposed) return;
-      try {
-        const rig = new RigClass(this.skinId);
-        if (rig && rig.group) {
-          this.liveRig = rig;
-          this.group.remove(this.fallback.root);
-          this.group.add(rig.group);
-        }
-      } catch {
-        // Keep sculpted hydro-lizard fallback if external rig throws
-      }
+class GlbInstancedAsset {
+  constructor(scene, nodeObj, maxCount, causticUniforms = null, causticStrength = 0.0) {
+    this.meshes = [];
+    this.maxCount = maxCount;
+    this._localMats = [];
+    this._tmpMat = new THREE.Matrix4();
+    if (!nodeObj) return;
+
+    nodeObj.updateMatrixWorld(true);
+    const invRoot = new THREE.Matrix4().copy(nodeObj.matrixWorld).invert();
+    nodeObj.traverse((child) => {
+      if (!child.isMesh || !child.geometry) return;
+      const geo = child.geometry;
+      const rawMat = Array.isArray(child.material) ? child.material[0] : child.material;
+      const isGlow = String(rawMat?.name || '').toLowerCase().includes('crystal') || (rawMat?.emissiveIntensity || 0) > 0.8;
+      const mat = normalizeGlbMaterial(rawMat, causticUniforms, isGlow ? 0.0 : causticStrength);
+      if (geo.attributes.color) mat.vertexColors = true;
+      const localM = new THREE.Matrix4().multiplyMatrices(invRoot, child.matrixWorld);
+      const im = new THREE.InstancedMesh(geo, mat, maxCount);
+      im.frustumCulled = false;
+      im.count = 0;
+      scene.add(im);
+      this.meshes.push(im);
+      this._localMats.push(localM);
     });
   }
 
-  _buildSculptedLizardFallback(skinId) {
-    const pal = SKIN_PALETTES[skinId] || SKIN_PALETTES.sea_glass_guardian;
-    const root = new THREE.Group();
-
-    const matScale = new THREE.MeshStandardMaterial({
-      color: pal.scale,
-      roughness: 0.32,
-      metalness: 0.14,
-    });
-    const matBelly = new THREE.MeshStandardMaterial({
-      color: pal.belly,
-      roughness: 0.44,
-      metalness: 0.05,
-    });
-    const matFrill = new THREE.MeshStandardMaterial({
-      color: pal.frill,
-      emissive: pal.glow,
-      emissiveIntensity: 0.55,
-      roughness: 0.22,
-      transparent: true,
-      opacity: 0.92,
-      side: THREE.DoubleSide,
-    });
-    const matGlow = new THREE.MeshStandardMaterial({
-      color: '#ffffff',
-      emissive: pal.glow,
-      emissiveIntensity: 1.45,
-      roughness: 0.1,
-    });
-    const matEye = new THREE.MeshStandardMaterial({
-      color: '#0f172a',
-      emissive: pal.eye,
-      emissiveIntensity: 0.65,
-      roughness: 0.08,
-    });
-
-    // Sleek feminine lizard torso + chest + neck + head facing +Z in local rig space
-    const spine = new THREE.Group();
-    spine.position.set(0, 0.54, 0);
-    root.add(spine);
-
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.125, 0.30, 8, 16), matScale);
-    torso.scale.set(0.92, 1.0, 0.82);
-    spine.add(torso);
-
-    const belly = new THREE.Mesh(new THREE.CapsuleGeometry(0.10, 0.26, 6, 12), matBelly);
-    belly.position.set(0, -0.01, 0.045);
-    spine.add(belly);
-
-    const seedCore = new THREE.Mesh(new THREE.OctahedronGeometry(0.065, 1), matGlow);
-    seedCore.position.set(0, 0.08, -0.105);
-    spine.add(seedCore);
-
-    const headPivot = new THREE.Group();
-    headPivot.position.set(0, 0.28, 0.03);
-    spine.add(headPivot);
-
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.125, 16, 14), matScale);
-    head.scale.set(0.88, 0.84, 1.24);
-    head.position.set(0, 0.04, 0.05);
-    headPivot.add(head);
-
-    for (const sx of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.034, 10, 10), matEye);
-      eye.position.set(sx * 0.072, 0.062, 0.125);
-      headPivot.add(eye);
-
-      const frill = new THREE.Mesh(new THREE.ConeGeometry(0.085, 0.28, 5), matFrill);
-      frill.scale.set(0.28, 1.0, 0.9);
-      frill.position.set(sx * 0.095, 0.08, -0.04);
-      frill.rotation.set(-0.95, sx * 0.42, -sx * 0.55);
-      headPivot.add(frill);
-      if (sx < 0) headPivot.userData.frillL = frill;
-      else headPivot.userData.frillR = frill;
+  setMatrixAt(index, worldMatrix) {
+    if (index < 0 || index >= this.maxCount) return;
+    for (let i = 0; i < this.meshes.length; i++) {
+      this._tmpMat.multiplyMatrices(worldMatrix, this._localMats[i]);
+      this.meshes[i].setMatrixAt(index, this._tmpMat);
     }
-
-    // 7-segment articulated lizard tail extending -Z / downward
-    const tailBones = [];
-    let parentNode = spine;
-    for (let i = 0; i < 7; i++) {
-      const segPivot = new THREE.Group();
-      segPivot.position.set(0, i === 0 ? -0.16 : 0, i === 0 ? -0.07 : -0.135);
-      const r = lerp(0.082, 0.014, i / 6);
-      const segMesh = new THREE.Mesh(new THREE.CapsuleGeometry(r, 0.11, 6, 10), i >= 5 ? matFrill : matScale);
-      segMesh.rotation.x = Math.PI * 0.5;
-      segMesh.position.z = -0.065;
-      segPivot.add(segMesh);
-      parentNode.add(segPivot);
-      parentNode = segPivot;
-      tailBones.push(segPivot);
-    }
-
-    // Sleek limbs
-    const limbs = {};
-    for (const [key, sx, sy, isArm] of [
-      ['armL', -0.145, 0.14, true],
-      ['armR', 0.145, 0.14, true],
-      ['legL', -0.115, -0.16, false],
-      ['legR', 0.115, -0.16, false],
-    ]) {
-      const piv = new THREE.Group();
-      piv.position.set(sx, sy, 0);
-      const m = new THREE.Mesh(
-        new THREE.CapsuleGeometry(isArm ? 0.036 : 0.048, isArm ? 0.22 : 0.28, 6, 10),
-        matScale
-      );
-      m.position.y = isArm ? -0.12 : -0.16;
-      piv.add(m);
-      spine.add(piv);
-      limbs[key] = piv;
-    }
-
-    return { root, spine, headPivot, tailBones, limbs, mats: { matScale, matBelly, matFrill, matGlow, matEye } };
   }
 
-  setSkin(skinId) {
-    this.skinId = skinId || 'sea_glass_guardian';
-    if (this.liveRig?.setSkin) {
-      this.liveRig.setSkin(this.skinId);
+  commit(count) {
+    const c = Math.min(this.maxCount, Math.max(0, count));
+    for (let i = 0; i < this.meshes.length; i++) {
+      this.meshes[i].count = c;
+      if (c > 0) this.meshes[i].instanceMatrix.needsUpdate = true;
     }
-    const pal = SKIN_PALETTES[this.skinId] || SKIN_PALETTES.sea_glass_guardian;
-    const m = this.fallback.mats;
-    m.matScale.color.set(pal.scale);
-    m.matBelly.color.set(pal.belly);
-    m.matFrill.color.set(pal.frill);
-    m.matFrill.emissive.set(pal.glow);
-    m.matGlow.emissive.set(pal.glow);
-    m.matEye.emissive.set(pal.eye);
-  }
-
-  update(dt, pose = {}) {
-    if (this.liveRig?.update) {
-      try {
-        this.liveRig.update(dt, pose);
-        return;
-      } catch {
-        // Fallback if signature differs
-      }
-    }
-    const t = pose.time || 0;
-    const swim = pose.swimPhase ?? t * 7.0;
-    const f = this.fallback;
-    f.spine.rotation.y = Math.sin(swim) * 0.22;
-    f.headPivot.rotation.y = -Math.sin(swim) * 0.14;
-    const flare = pose.frillFlare || 0.35;
-    if (f.headPivot.userData.frillL) {
-      f.headPivot.userData.frillL.rotation.z = 0.55 + flare * 0.45;
-      f.headPivot.userData.frillR.rotation.z = -0.55 - flare * 0.45;
-    }
-    for (let i = 0; i < f.tailBones.length; i++) {
-      const tb = f.tailBones[i];
-      tb.rotation.y = Math.sin(swim - i * 0.62) * (0.24 + i * 0.045);
-      tb.rotation.x = Math.cos(swim * 0.5 - i * 0.4) * 0.06;
-    }
-    f.limbs.armL.rotation.x = 0.95 + Math.sin(swim) * 0.18;
-    f.limbs.armR.rotation.x = 0.95 - Math.sin(swim) * 0.18;
-    f.limbs.legL.rotation.x = 0.72 + Math.sin(swim + 1.2) * 0.28;
-    f.limbs.legR.rotation.x = 0.72 - Math.sin(swim + 1.2) * 0.28;
   }
 
   dispose() {
-    this._disposed = true;
-    this.liveRig?.dispose?.();
-    this.fallback.root.traverse((o) => {
-      if (o.geometry) o.geometry.dispose();
-    });
-    for (const m of Object.values(this.fallback.mats)) m.dispose();
+    for (const im of this.meshes) {
+      im.parent?.remove(im);
+      im.material?.dispose?.();
+    }
+    this.meshes.length = 0;
   }
 }
 
-function mergeBufferGeos(geos) {
-  if (BufferGeometryUtils && typeof BufferGeometryUtils.mergeGeometries === 'function') {
-    const anyColor = geos.some((g) => Boolean(g.attributes.color));
-    const normalized = geos.map((g) => {
-      const ng = g.index ? g.toNonIndexed() : g;
-      if (!ng.attributes.normal) ng.computeVertexNormals();
-      const cnt = ng.attributes.position.count;
-      if (!ng.attributes.uv) {
-        ng.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(cnt * 2), 2));
-      }
-      if (anyColor && !ng.attributes.color) {
-        const cols = new Float32Array(cnt * 3);
-        cols.fill(1.0);
-        ng.setAttribute('color', new THREE.BufferAttribute(cols, 3));
-      }
-      return ng;
-    });
-    const merged = BufferGeometryUtils.mergeGeometries(normalized, false);
-    if (merged) return merged;
-  }
-  return geos[0];
-}
-
+// --- SOFT PROCEDURAL SPRITE TEXTURES ---
 function createGodRayTexture() {
   if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
-    const d = new Uint8Array([255, 255, 255, 255]);
-    const t = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat);
+    const t = new THREE.DataTexture(new Uint8Array([220, 252, 255, 160]), 1, 1, THREE.RGBAFormat);
     t.needsUpdate = true;
     return t;
   }
@@ -400,21 +417,20 @@ function createGodRayTexture() {
   c.height = 256;
   const ctx = c.getContext('2d');
   const img = ctx.createImageData(128, 256);
-  const data = img.data;
+  const d = img.data;
   for (let y = 0; y < 256; y++) {
     const v = y / 255;
-    // Soft fade in from top canopy and long Gaussian fade toward seabed
-    const vFade = Math.sin(Math.min(1, v * 3.2) * Math.PI * 0.5) * Math.pow(1 - v, 1.45);
+    const vFade = Math.sin(Math.min(1, v * 3.0) * Math.PI * 0.5) * Math.pow(1 - v, 1.38);
     for (let x = 0; x < 128; x++) {
       const u = (x / 127) * 2 - 1;
-      const streak = 0.72 + 0.28 * Math.cos(u * 9.5);
-      const hFade = Math.exp(-u * u * 4.2) * streak;
+      const streak = 0.72 + 0.28 * Math.cos(u * 8.5);
+      const hFade = Math.exp(-u * u * 3.8) * streak;
       const a = clamp(vFade * hFade, 0, 1);
-      const idx = (y * 128 + x) * 4;
-      data[idx] = 215;
-      data[idx + 1] = 250;
-      data[idx + 2] = 255;
-      data[idx + 3] = Math.round(a * 255);
+      const p = (y * 128 + x) * 4;
+      d[p] = 224;
+      d[p + 1] = 252;
+      d[p + 2] = 255;
+      d[p + 3] = Math.round(a * 255);
     }
   }
   ctx.putImageData(img, 0, 0);
@@ -423,62 +439,9 @@ function createGodRayTexture() {
   return tex;
 }
 
-function createDeepWaterBackdropTexture() {
+function createGlassyBubbleTex(size = 64) {
   if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
-    const d = new Uint8Array([12, 128, 162, 255]);
-    const t = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat);
-    t.needsUpdate = true;
-    return t;
-  }
-  const c = document.createElement('canvas');
-  c.width = 64;
-  c.height = 256;
-  const ctx = c.getContext('2d');
-  const g = ctx.createLinearGradient(0, 0, 0, 256);
-  g.addColorStop(0.0, '#38bdf8');
-  g.addColorStop(0.16, '#0ea5e9');
-  g.addColorStop(0.45, '#087f9c');
-  g.addColorStop(0.78, '#07526e');
-  g.addColorStop(1.0, '#05354c');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 64, 256);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-function hash2D(ix, iy) {
-  let h = (Math.imul(ix, 374761393) + Math.imul(iy, 668265263)) ^ 0x5bf03635;
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
-}
-
-function valueNoiseTile(u, v, period) {
-  const x = u * period;
-  const y = v * period;
-  const x0 = Math.floor(x);
-  const y0 = Math.floor(y);
-  const fx = x - x0;
-  const fy = y - y0;
-  const sx = fx * fx * (3 - 2 * fx);
-  const sy = fy * fy * (3 - 2 * fy);
-  const ix0 = ((x0 % period) + period) % period;
-  const ix1 = (ix0 + 1) % period;
-  const iy0 = ((y0 % period) + period) % period;
-  const iy1 = (iy0 + 1) % period;
-  const n00 = hash2D(ix0, iy0);
-  const n10 = hash2D(ix1, iy0);
-  const n01 = hash2D(ix0, iy1);
-  const n11 = hash2D(ix1, iy1);
-  return lerp(lerp(n00, n10, sx), lerp(n01, n11, sx), sy);
-}
-
-function createStratifiedReefStoneTexture(size = 256) {
-  if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
-    const d = new Uint8Array([92, 132, 148, 255]);
-    const t = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat);
-    t.wrapS = THREE.RepeatWrapping;
-    t.wrapT = THREE.RepeatWrapping;
+    const t = new THREE.DataTexture(new Uint8Array([220, 250, 255, 190]), 1, 1, THREE.RGBAFormat);
     t.needsUpdate = true;
     return t;
   }
@@ -486,790 +449,46 @@ function createStratifiedReefStoneTexture(size = 256) {
   c.width = size;
   c.height = size;
   const ctx = c.getContext('2d');
-  const img = ctx.createImageData(size, size);
-  const data = img.data;
-  for (let y = 0; y < size; y++) {
-    const v = y / size;
-    for (let x = 0; x < size; x++) {
-      const u = x / size;
-      // Domain-warped organic coralline limestone + porous reef pockets (zero grid lines!)
-      const warpU = u + (valueNoiseTile(u, v, 4) - 0.5) * 0.24;
-      const warpV = v + (valueNoiseTile(u + 0.37, v + 0.19, 4) - 0.5) * 0.22;
-      const fbm =
-        valueNoiseTile(warpU, warpV, 6) * 0.52 +
-        valueNoiseTile(warpU, warpV, 14) * 0.30 +
-        valueNoiseTile(u, v, 28) * 0.18;
-      const wave = 0.5 + 0.5 * Math.sin((warpV * 4.0 + fbm * 0.85) * TAU);
-      const algae = valueNoiseTile(u + 0.51, v + 0.23, 8);
-      let r = lerp(52, 128, fbm * 0.72 + wave * 0.28);
-      let g = lerp(84, 158, fbm * 0.68 + wave * 0.32);
-      let b = lerp(104, 174, fbm * 0.65 + wave * 0.35);
-      if (algae > 0.66) {
-        const k = (algae - 0.66) * 1.6;
-        r = lerp(r, 214, k * 0.45);
-        g = lerp(g, 118, k * 0.35);
-        b = lerp(b, 162, k * 0.40);
-      }
-      const p = (y * size + x) * 4;
-      data[p] = clamp(Math.round(r), 0, 255);
-      data[p + 1] = clamp(Math.round(g), 0, 255);
-      data[p + 2] = clamp(Math.round(b), 0, 255);
-      data[p + 3] = 255;
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-function createRedwoodBarkTexture(size = 128) {
-  if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
-    const d = new Uint8Array([108, 66, 42, 255]);
-    const t = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat);
-    t.wrapS = THREE.RepeatWrapping;
-    t.wrapT = THREE.RepeatWrapping;
-    t.needsUpdate = true;
-    return t;
-  }
-  const c = document.createElement('canvas');
-  c.width = size;
-  c.height = size;
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = '#5c3622';
-  ctx.fillRect(0, 0, size, size);
-  const rng = mulberry32(71821);
-  for (let x = 0; x < size; x += 3) {
-    const shade = 68 + (rng() - 0.5) * 34;
-    ctx.fillStyle = `rgb(${Math.round(shade * 1.18)}, ${Math.round(shade * 0.72)}, ${Math.round(shade * 0.46)})`;
-    ctx.fillRect(x, 0, 2, size);
-  }
-  for (let i = 0; i < 48; i++) {
-    ctx.fillStyle = 'rgba(20, 148, 112, 0.24)';
-    ctx.fillRect(rng() * size, rng() * size, 6 + rng() * 14, 4 + rng() * 8);
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-function createPorousCoralPbrTextures(size = 256) {
-  // Seamless procedural porous calcareous coral albedo + tangent-space normal map (fine organic polyps & ridges)
-  const heightField = new Float32Array(size * size);
-  const albedoData = new Uint8Array(size * size * 4);
-  for (let y = 0; y < size; y++) {
-    const v = y / size;
-    for (let x = 0; x < size; x++) {
-      const u = x / size;
-      const wU = u + (valueNoiseTile(u, v, 4) - 0.5) * 0.16;
-      const wV = v + (valueNoiseTile(u + 0.41, v + 0.27, 4) - 0.5) * 0.16;
-      const macro = valueNoiseTile(wU, wV, 8) * 0.48 + valueNoiseTile(wU, wV, 16) * 0.30;
-      const micro = valueNoiseTile(u, v, 32) * 0.22;
-      // Fine coral calyx dimples (multi-harmonic porous indentations)
-      const p1 = Math.sin((wU * 14 + wV * 6) * TAU) * Math.sin((wV * 14 - wU * 5) * TAU);
-      const p2 = Math.cos((u * 24 - v * 10) * TAU) * Math.cos((v * 22 + u * 9) * TAU);
-      const pore = clamp(0.5 + p1 * 0.28 + p2 * 0.18, 0, 1);
-      const h = clamp(macro * 0.55 + micro * 0.25 + pore * 0.32, 0, 1);
-      heightField[y * size + x] = h;
-
-      // Bright calcareous neutral-warm base so instanceColor tints cleanly without muddying!
-      const shade = lerp(0.76, 1.0, h);
-      const rim = pore > 0.72 ? (pore - 0.72) * 0.28 : 0;
-      const idx = (y * size + x) * 4;
-      albedoData[idx] = clamp(Math.round(shade * 246 + rim * 28), 0, 255);
-      albedoData[idx + 1] = clamp(Math.round(shade * 238 + rim * 22), 0, 255);
-      albedoData[idx + 2] = clamp(Math.round(shade * 234 + rim * 18), 0, 255);
-      albedoData[idx + 3] = 255;
-    }
-  }
-
-  const normalData = new Uint8Array(size * size * 4);
-  const strength = 3.2;
-  for (let y = 0; y < size; y++) {
-    const ym = (y - 1 + size) % size;
-    const yp = (y + 1) % size;
-    for (let x = 0; x < size; x++) {
-      const xm = (x - 1 + size) % size;
-      const xp = (x + 1) % size;
-      const dx = (heightField[y * size + xp] - heightField[y * size + xm]) * strength;
-      const dy = (heightField[yp * size + x] - heightField[ym * size + x]) * strength;
-      const inv = 1 / Math.hypot(-dx, -dy, 1.0);
-      const idx = (y * size + x) * 4;
-      normalData[idx] = clamp(Math.round((-dx * inv * 0.5 + 0.5) * 255), 0, 255);
-      normalData[idx + 1] = clamp(Math.round((-dy * inv * 0.5 + 0.5) * 255), 0, 255);
-      normalData[idx + 2] = clamp(Math.round((inv * 0.5 + 0.5) * 255), 0, 255);
-      normalData[idx + 3] = 255;
-    }
-  }
-
-  const albedo = new THREE.DataTexture(albedoData, size, size, THREE.RGBAFormat);
-  albedo.wrapS = THREE.RepeatWrapping;
-  albedo.wrapT = THREE.RepeatWrapping;
-  albedo.repeat.set(2.5, 2.5);
-  albedo.colorSpace = THREE.SRGBColorSpace;
-  albedo.needsUpdate = true;
-
-  const normal = new THREE.DataTexture(normalData, size, size, THREE.RGBAFormat);
-  normal.wrapS = THREE.RepeatWrapping;
-  normal.wrapT = THREE.RepeatWrapping;
-  normal.repeat.set(2.5, 2.5);
-  normal.needsUpdate = true;
-
-  return { albedo, normal };
-}
-
-function bakeCoralVertexColors(geo, minY, maxY, opts = {}) {
-  const pos = geo.attributes.position;
-  const cols = new Float32Array(pos.count * 3);
-  const span = Math.max(0.001, maxY - minY);
-  const baseR = opts.baseR ?? 0.52;
-  const baseG = opts.baseG ?? 0.48;
-  const baseB = opts.baseB ?? 0.55;
-  const tipR = opts.tipR ?? 1.24;
-  const tipG = opts.tipG ?? 1.18;
-  const tipB = opts.tipB ?? 1.12;
-  const radialBoost = opts.radialBoost ?? 0.16;
-  const maxR = Math.max(0.1, opts.maxR ?? 1.0);
-
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const y = pos.getY(i);
-    const z = pos.getZ(i);
-    const ty = smooth01((y - minY) / span);
-    const tr = clamp(Math.hypot(x, z) / maxR, 0, 1);
-    const rim = ty * 0.72 + tr * radialBoost;
-    const r = lerp(baseR, tipR, Math.pow(clamp(rim, 0, 1), 0.85));
-    const g = lerp(baseG, tipG, Math.pow(clamp(rim, 0, 1), 0.92));
-    const b = lerp(baseB, tipB, Math.pow(clamp(rim, 0, 1), 1.0));
-    cols[i * 3] = r;
-    cols[i * 3 + 1] = g;
-    cols[i * 3 + 2] = b;
-  }
-  geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
-  return geo;
-}
-
-function buildTaperedCurvedBranch(points, rBase, rTip, segs = 10, radSegs = 7, seed = 1) {
-  // Organically curved, smoothly tapering 3D coral branch with calcareous nodularity & rounded polyp-bud tip!
-  const curve = new THREE.CatmullRomCurve3(points);
-  const frames = curve.computeFrenetFrames(segs, false);
-  const rings = segs + 2;
-  const positions = [];
-  const uvs = [];
-  const indices = [];
-  const pt = new THREE.Vector3();
-  const v = new THREE.Vector3();
-
-  for (let s = 0; s <= segs + 1; s++) {
-    const isCap = s === segs + 1;
-    const t = isCap ? 1.0 : s / segs;
-    curve.getPointAt(t, pt);
-    const fi = Math.min(segs, s);
-    const N = frames.normals[fi];
-    const B = frames.binormals[fi];
-    const T = frames.tangents[fi];
-    const rad = isCap
-      ? rTip * 0.22
-      : lerp(rBase, rTip, Math.pow(t, 0.72)) * (1.0 + Math.pow(1 - t, 3.0) * 0.24);
-    if (isCap) {
-      pt.addScaledVector(T, rTip * 0.85);
-    }
-    for (let j = 0; j <= radSegs; j++) {
-      const a = (j / radSegs) * TAU;
-      const ca = Math.cos(a);
-      const sa = Math.sin(a);
-      const nodule = isCap
-        ? 1.0
-        : 1.0 + 0.11 * Math.sin(t * 15.0 + a * 3.0 + seed) + 0.06 * Math.cos(t * 24.0 - a * 2.0 + seed * 1.7);
-      const rr = rad * nodule;
-      v.copy(pt).addScaledVector(N, ca * rr).addScaledVector(B, sa * rr);
-      positions.push(v.x, v.y, v.z);
-      uvs.push((j / radSegs) * 1.4, t * 2.4);
-    }
-  }
-
-  const stride = radSegs + 1;
-  for (let s = 0; s < rings - 1; s++) {
-    for (let j = 0; j < radSegs; j++) {
-      const a = s * stride + j;
-      const b = a + stride;
-      const c = b + 1;
-      const d = a + 1;
-      indices.push(a, b, d, b, c, d);
-    }
-  }
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  geo.setIndex(indices);
-  geo.computeVertexNormals();
-  return geo;
-}
-
-function buildSculptedStaghornCoralGeo(seed = 3101) {
-  // Lush organically curved multi-forked Acropora / Staghorn branching coral cluster (ZERO Play-Doh straight sticks!)
-  const rng = mulberry32(seed);
-  const parts = [];
-
-  const holdfast = new THREE.SphereGeometry(0.32, 10, 7);
-  holdfast.scale(1.22, 0.56, 1.15);
-  holdfast.translate(0, 0.04, 0);
-  parts.push(holdfast);
-
-  const primaryCount = 7;
-  for (let i = 0; i < primaryCount; i++) {
-    const az = (i / primaryCount) * TAU + (rng() - 0.5) * 0.42;
-    const spread = 0.34 + rng() * 0.36;
-    const h = 0.62 + (i % 3) * 0.22 + rng() * 0.16;
-    const cx = Math.cos(az);
-    const cz = Math.sin(az);
-    const perpX = -cz;
-    const perpZ = cx;
-    const sway = (rng() - 0.5) * 0.26;
-
-    const p0 = new THREE.Vector3(cx * 0.10, -0.04, cz * 0.10);
-    const p1 = new THREE.Vector3(cx * (spread * 0.48) + perpX * sway * 0.4, h * 0.32, cz * (spread * 0.48) + perpZ * sway * 0.4);
-    const p2 = new THREE.Vector3(cx * (spread * 0.96) + perpX * sway, h * 0.72, cz * (spread * 0.96) + perpZ * sway);
-    const p3 = new THREE.Vector3(cx * (spread * 0.86) + perpX * sway * 0.7, h, cz * (spread * 0.86) + perpZ * sway * 0.7);
-
-    const rBase = 0.088 + (i % 2) * 0.018;
-    const rTip = 0.036 + (i % 3) * 0.006;
-    parts.push(buildTaperedCurvedBranch([p0, p1, p2, p3], rBase, rTip, 6, 5, seed + i * 19));
-
-    const forkSide = i % 2 === 0 ? 1 : -1;
-    const fStart = p1.clone().lerp(p2, 0.38);
-    const fMid = fStart
-      .clone()
-      .add(new THREE.Vector3(cx * 0.20 + perpX * forkSide * 0.20, h * 0.22, cz * 0.20 + perpZ * forkSide * 0.20));
-    const fTip = fMid
-      .clone()
-      .add(new THREE.Vector3(cx * 0.08 + perpX * forkSide * 0.10, h * 0.26, cz * 0.08 + perpZ * forkSide * 0.10));
-    parts.push(buildTaperedCurvedBranch([fStart, fMid, fTip], rBase * 0.64, rTip * 0.84, 5, 5, seed + i * 43 + 7));
-
-    if (i % 2 === 0) {
-      const bStart = p2.clone().lerp(p3, 0.15);
-      const bMid = bStart
-        .clone()
-        .add(new THREE.Vector3(-perpX * forkSide * 0.14 + cx * 0.09, h * 0.14, -perpZ * forkSide * 0.14 + cz * 0.09));
-      const bTip = bMid.clone().add(new THREE.Vector3(cx * 0.04, h * 0.17, cz * 0.04));
-      parts.push(buildTaperedCurvedBranch([bStart, bMid, bTip], rBase * 0.48, rTip * 0.74, 4, 5, seed + i * 67 + 13));
-    }
-  }
-
-  const merged = mergeBufferGeos(parts);
-  merged.computeVertexNormals();
-  return bakeCoralVertexColors(merged, -0.05, 1.15, {
-    baseR: 0.66,
-    baseG: 0.58,
-    baseB: 0.64,
-    tipR: 1.28,
-    tipG: 1.20,
-    tipB: 1.12,
-    radialBoost: 0.18,
-    maxR: 0.88,
-  });
-}
-
-function buildSculptedTableCoralGeo(seed = 6409) {
-  // Multi-tiered undulating scalloped Montipora plate coral rosette + clustered porous domes!
-  const rng = mulberry32(seed);
-  const parts = [];
-
-  const stem = new THREE.CylinderGeometry(0.18, 0.28, 0.44, 8);
-  stem.translate(0, 0.14, 0);
-  parts.push(stem);
-
-  const tiers = [
-    { ox: -0.14, oy: 0.28, oz: 0.12, rad: 0.66, thick: 0.12, phase: 0.4 },
-    { ox: 0.20, oy: 0.46, oz: -0.10, rad: 0.54, thick: 0.11, phase: 2.1 },
-    { ox: -0.04, oy: 0.62, oz: -0.02, rad: 0.36, thick: 0.10, phase: 4.0 },
-  ];
-  for (let t = 0; t < tiers.length; t++) {
-    const tr = tiers[t];
-    const plate = new THREE.CylinderGeometry(tr.rad, tr.rad * 0.46, tr.thick, 16, 1);
-    const pos = plate.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      let x = pos.getX(i);
-      let y = pos.getY(i);
-      let z = pos.getZ(i);
-      const r = Math.hypot(x, z);
-      const a = Math.atan2(z, x);
-      const rn = clamp(r / tr.rad, 0, 1);
-      const scallop = 1.0 + 0.14 * Math.sin(a * 6 + tr.phase) + 0.09 * Math.cos(a * 11 - tr.phase * 1.4);
-      const cup = rn * rn * 0.14 + Math.sin(a * 5 + tr.phase) * 0.045 * rn;
-      x *= scallop;
-      z *= scallop;
-      y += cup;
-      pos.setXYZ(i, x + tr.ox, y + tr.oy, z + tr.oz);
-    }
-    plate.computeVertexNormals();
-    parts.push(plate);
-  }
-
-  for (let d = 0; d < 2; d++) {
-    const dome = new THREE.SphereGeometry(0.24 - d * 0.04, 10, 7, 0, TAU, 0, Math.PI * 0.65);
-    const dp = dome.attributes.position;
-    for (let i = 0; i < dp.count; i++) {
-      const vx = dp.getX(i), vy = dp.getY(i), vz = dp.getZ(i);
-      const ang = Math.atan2(vz, vx);
-      const groove = 1.0 + 0.08 * Math.sin(ang * 8 + vy * 16 + d * 2);
-      dp.setXYZ(i, vx * groove * 1.12, vy * groove * 0.82, vz * groove * 1.12);
-    }
-    dome.translate(d === 0 ? 0.34 : -0.32, 0.04, d === 0 ? 0.24 : -0.18 + (rng() - 0.5) * 0.08);
-    dome.computeVertexNormals();
-    parts.push(dome);
-  }
-
-  const merged = mergeBufferGeos(parts);
-  merged.computeVertexNormals();
-  return bakeCoralVertexColors(merged, -0.04, 0.78, {
-    baseR: 0.74,
-    baseG: 0.66,
-    baseB: 0.70,
-    tipR: 1.26,
-    tipG: 1.20,
-    tipB: 1.14,
-    radialBoost: 0.28,
-    maxR: 0.78,
-  });
-}
-
-function buildSculptedSeaFanGeo(seed = 5207) {
-  // True 3D cupped, gracefully arching branching Gorgonian Sea-Fan (ZERO flat 2D sticker cards!)
-  const rng = mulberry32(seed);
-  const parts = [];
-
-  const root = new THREE.SphereGeometry(0.16, 8, 6);
-  root.scale(1.15, 0.65, 1.05);
-  root.translate(0, 0.02, 0);
-  parts.push(root);
-
-  const fanRibs = 9;
-  for (let i = 0; i < fanRibs; i++) {
-    const u = (i / (fanRibs - 1)) * 2 - 1;
-    const fanAng = u * 1.02 + (rng() - 0.5) * 0.08;
-    const len = (1.08 - u * u * 0.30) * (0.94 + rng() * 0.14);
-    const sx = Math.sin(fanAng);
-    const sy = Math.cos(fanAng * 0.82);
-    const zCup = 0.16 * (1 - u * u * 1.6) + Math.sin(u * 3.1 + seed) * 0.09;
-
-    const p0 = new THREE.Vector3(u * 0.05, -0.02, 0);
-    const p1 = new THREE.Vector3(sx * len * 0.34, sy * len * 0.36, zCup * 0.42);
-    const p2 = new THREE.Vector3(sx * len * 0.72, sy * len * 0.74, zCup * 0.95);
-    const p3 = new THREE.Vector3(sx * len * 0.96, sy * len * 1.02, zCup * 1.15 - 0.06);
-    parts.push(buildTaperedCurvedBranch([p0, p1, p2, p3], 0.044, 0.014, 5, 4, seed + i * 29));
-
-    for (const side of [-1, 1]) {
-      if ((i === 0 && side < 0) || (i === fanRibs - 1 && side > 0)) continue;
-      const tBranch = side > 0 ? 0.48 : 0.68;
-      const sPt = p1.clone().lerp(p2, tBranch);
-      const bAng = fanAng + side * 0.34;
-      const bLen = len * 0.36;
-      const mPt = sPt.clone().add(new THREE.Vector3(Math.sin(bAng) * bLen * 0.55, Math.cos(bAng * 0.8) * bLen * 0.55, zCup * 0.18));
-      const ePt = sPt.clone().add(new THREE.Vector3(Math.sin(bAng * 0.92) * bLen, Math.cos(bAng * 0.78) * bLen, zCup * 0.28));
-      parts.push(buildTaperedCurvedBranch([sPt, mPt, ePt], 0.024, 0.009, 4, 4, seed + i * 53 + side * 11));
-    }
-  }
-
-  const merged = mergeBufferGeos(parts);
-  merged.computeVertexNormals();
-  return bakeCoralVertexColors(merged, -0.02, 1.12, {
-    baseR: 0.66,
-    baseG: 0.58,
-    baseB: 0.72,
-    tipR: 1.30,
-    tipG: 1.22,
-    tipB: 1.20,
-    radialBoost: 0.22,
-    maxR: 0.95,
-  });
-}
-
-function buildSculptedKelpRibbonGeo(seed = 8123) {
-  // Graceful, slender, organically curving & ruffled 3D ocean kelp fronds (ZERO stiff grass sticks or chunky planks!)
-  const rng = mulberry32(seed);
-  const parts = [];
-  const bladeCount = 7;
-  const hSegs = 10;
-
-  for (let b = 0; b < bladeCount; b++) {
-    const az = (b / bladeCount) * TAU + (rng() - 0.5) * 0.48;
-    const height = 0.78 + (b % 3) * 0.28 + rng() * 0.18;
-    const maxW = 0.056 + (b % 2) * 0.018;
-    const lean = 0.34 + rng() * 0.28;
-    const curveDir = b % 2 === 0 ? 1 : -1;
-    const twistRate = (0.75 + rng() * 0.65) * curveDir;
-    const cx = Math.cos(az);
-    const cz = Math.sin(az);
-    const px = -cz;
-    const pz = cx;
-
-    const positions = [];
-    const uvs = [];
-    const colors = [];
-    const indices = [];
-
-    for (let s = 0; s <= hSegs; s++) {
-      const t = s / hSegs;
-      const widthEnv = Math.sin(Math.pow(t, 0.65) * Math.PI) * maxW + (1 - t) * 0.012;
-      // Flowing oceanic S-curve current arch with graceful curling tip
-      const sCurve = Math.sin(t * Math.PI * 1.65 + b * 1.1) * 0.22 * t;
-      const arcOut = Math.pow(t, 1.55) * lean;
-      const spineX = cx * (0.04 + arcOut) + px * sCurve;
-      const spineY = -0.06 + t * height - Math.pow(t, 3.0) * 0.14;
-      const spineZ = cz * (0.04 + arcOut) + pz * sCurve;
-
-      const tw = az + t * twistRate + Math.sin(t * 8.0 + b) * 0.22;
-      const wx = -Math.sin(tw);
-      const wz = Math.cos(tw);
-      const ruffle = Math.sin(t * 16.0 + b * 2.1) * 0.022 * Math.sin(t * Math.PI);
-
-      // Natural sunlit sea-kelp olive-teal -> warm emerald -> translucent golden-aqua tips
-      const cr = lerp(0.10, 0.52, Math.pow(t, 1.15));
-      const cg = lerp(0.36, 0.96, Math.pow(t, 0.80));
-      const cb = lerp(0.32, 0.78, Math.pow(t, 0.90));
-
-      for (let w = 0; w <= 2; w++) {
-        const u = w - 1;
-        const edgeRuffleY = u !== 0 ? ruffle * u : 0;
-        const edgeCupZ = u === 0 ? 0.012 * Math.sin(t * Math.PI) : 0;
-        positions.push(
-          spineX + wx * u * widthEnv + cx * edgeCupZ,
-          spineY + edgeRuffleY,
-          spineZ + wz * u * widthEnv + cz * edgeCupZ
-        );
-        uvs.push(w * 0.5, t * 2.0);
-        const edgeGlow = u !== 0 ? 1.10 : 0.94;
-        colors.push(cr * edgeGlow, cg * edgeGlow, cb * edgeGlow);
-      }
-    }
-
-    for (let s = 0; s < hSegs; s++) {
-      for (let w = 0; w < 2; w++) {
-        const a = s * 3 + w;
-        const c = a + 3;
-        indices.push(a, c, a + 1, c, c + 1, a + 1);
-      }
-    }
-
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-    g.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    g.setIndex(indices);
-    g.computeVertexNormals();
-    parts.push(g);
-  }
-
-  return mergeBufferGeos(parts);
-}
-
-function buildCraggyReefRidgeGeo(radius, height, seed) {
-  const rng = mulberry32(seed);
-  const parts = [];
-  // Sculpted stepped sunlit limestone seabed outcrop with natural reef ledges for cradling corals!
-  const main = new THREE.SphereGeometry(radius, 16, 11);
-  const pos = main.attributes.position;
-  for (let i = 0; i < pos.count; i++) {
-    let x = pos.getX(i);
-    let y = pos.getY(i);
-    let z = pos.getZ(i);
-    const n =
-      1.0 +
-      0.18 * Math.sin(x * 2.4 + seed) * Math.cos(z * 2.1 - seed) +
-      0.12 * Math.cos(y * 3.8 + x * 1.9) +
-      (rng() - 0.5) * 0.06;
-    x *= n * 1.38;
-    const terrace = y > 0 ? Math.pow(y / radius, 0.85) * height * 0.72 : y * (height / (radius * 2.0));
-    y = Math.max(-height * 0.36, terrace * n);
-    z *= n * 0.94;
-    pos.setXYZ(i, x, y, z);
-  }
-  main.computeVertexNormals();
-  parts.push(main);
-
-  const shelf = new THREE.SphereGeometry(radius * 0.68, 12, 9);
-  shelf.scale(1.42, 0.58, 0.96);
-  shelf.translate(radius * 0.76, -height * 0.08, 0.18);
-  parts.push(shelf);
-
-  const flank = new THREE.SphereGeometry(radius * 0.54, 12, 8);
-  flank.scale(1.18, 0.62, 1.05);
-  flank.translate(-radius * 0.66, -height * 0.12, -0.16);
-  parts.push(flank);
-  return mergeBufferGeos(parts);
-}
-
-function loadSubWebp(url, isSrgb = true, rx = 1, ry = 1, onReady = null) {
-  if (typeof window === 'undefined' || typeof document === 'undefined') return null;
-  try {
-    const loader = new THREE.TextureLoader();
-    return loader.load(
-      url,
-      (t) => {
-        t.wrapS = rx > 1 ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
-        t.wrapT = ry > 1 ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
-        if (rx > 1 || ry > 1) t.repeat.set(rx, ry);
-        t.colorSpace = isSrgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-        t.needsUpdate = true;
-        onReady?.(t);
-      },
-      undefined,
-      () => {}
-    );
-  } catch {
-    return null;
-  }
-}
-
-function buildCrossedSeaFanGeo(w = 1.85, h = 1.95) {
-  // Intersecting botanical alpha-cutout planes anchored cleanly at y = 0 (ZERO cylinder sticks!)
-  const p1 = new THREE.PlaneGeometry(w, h);
-  p1.translate(0, h * 0.48, 0);
-  p1.rotateY(0.32);
-  const p2 = new THREE.PlaneGeometry(w * 0.88, h * 0.92);
-  p2.translate(0, h * 0.45, 0);
-  p2.rotateY(-0.58);
-  return mergeBufferGeos([p1, p2]);
-}
-
-function buildCurvedHydrofoilBladeGeo() {
-  // Sculpted curved, tapered bronze-and-copper hydrofoil fallback blade (ZERO flat black rectangles!)
-  const shape = new THREE.Shape();
-  shape.moveTo(0.54, -0.14);
-  shape.quadraticCurveTo(1.25, -0.28, 2.28, -0.11);
-  shape.quadraticCurveTo(2.38, 0.0, 2.28, 0.14);
-  shape.quadraticCurveTo(1.32, 0.30, 0.54, 0.16);
-  shape.closePath();
-  const geo = new THREE.ExtrudeGeometry(shape, {
-    depth: 0.11,
-    bevelEnabled: true,
-    bevelThickness: 0.032,
-    bevelSize: 0.028,
-    bevelSegments: 2,
-    curveSegments: 8,
-  });
-  geo.translate(0, 0, -0.055);
-  return geo;
-}
-
-function buildUnderwaterEnvTexture(webgl) {
-  if (!webgl || typeof THREE.PMREMGenerator !== 'function') return null;
-  try {
-    const pmrem = new THREE.PMREMGenerator(webgl);
-    const envScene = new THREE.Scene();
-    envScene.background = new THREE.Color('#0c5e7c');
-    const dome = new THREE.Mesh(
-      new THREE.SphereGeometry(20, 16, 12),
-      new THREE.MeshBasicMaterial({ color: '#1488a8', side: THREE.BackSide })
-    );
-    envScene.add(dome);
-    // Overhead sunlit Snell's-window sky disc + warm golden sun bounce
-    const snell = new THREE.Mesh(
-      new THREE.CircleGeometry(9.5, 20),
-      new THREE.MeshBasicMaterial({ color: '#e0fbfc', side: THREE.DoubleSide })
-    );
-    snell.rotation.x = Math.PI * 0.5;
-    snell.position.y = 12;
-    envScene.add(snell);
-    const sunOrb = new THREE.Mesh(
-      new THREE.SphereGeometry(3.0, 12, 8),
-      new THREE.MeshBasicMaterial({ color: '#fff3cc' })
-    );
-    sunOrb.position.set(5, 11, 6);
-    envScene.add(sunOrb);
-    const bed = new THREE.Mesh(
-      new THREE.PlaneGeometry(36, 36),
-      new THREE.MeshBasicMaterial({ color: '#164e63', side: THREE.DoubleSide })
-    );
-    bed.rotation.x = -Math.PI * 0.5;
-    bed.position.y = -8;
-    envScene.add(bed);
-    const rt = pmrem.fromScene(envScene, 0.04);
-    dome.geometry.dispose();
-    dome.material.dispose();
-    snell.geometry.dispose();
-    snell.material.dispose();
-    sunOrb.geometry.dispose();
-    sunOrb.material.dispose();
-    bed.geometry.dispose();
-    bed.material.dispose();
-    pmrem.dispose();
-    return { rt, texture: rt.texture };
-  } catch {
-    return null;
-  }
-}
-
-function createSoftDotTexture() {
-  if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
-    const d = new Uint8Array([255, 255, 255, 255]);
-    const t = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat);
-    t.needsUpdate = true;
-    return t;
-  }
-  const c = document.createElement('canvas');
-  c.width = 64;
-  c.height = 64;
-  const ctx = c.getContext('2d');
-  const g = ctx.createRadialGradient(32, 32, 1, 32, 32, 31);
-  g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.35, 'rgba(205,252,255,0.82)');
-  g.addColorStop(0.7, 'rgba(94,252,232,0.22)');
-  g.addColorStop(1, 'rgba(94,252,232,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 64, 64);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-function createCausticFloorTexture(size = 256) {
-  if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
-    const d = new Uint8Array([180, 230, 245, 255]);
-    const t = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat);
-    t.wrapS = THREE.RepeatWrapping;
-    t.wrapT = THREE.RepeatWrapping;
-    t.needsUpdate = true;
-    return t;
-  }
-  const c = document.createElement('canvas');
-  c.width = size;
-  c.height = size;
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = '#a89f8d';
-  ctx.fillRect(0, 0, size, size);
-  const rng = mulberry32(99173);
-  for (let i = 0; i < 95; i++) {
-    const x = rng() * size;
-    const y = rng() * size;
-    const r = 12 + rng() * 34;
-    const g = ctx.createRadialGradient(x, y, 2, x, y, r);
-    g.addColorStop(0, 'rgba(186, 248, 255, 0.36)');
-    g.addColorStop(0.65, 'rgba(56, 189, 248, 0.14)');
-    g.addColorStop(1, 'rgba(14, 116, 144, 0)');
-    ctx.fillStyle = g;
-    for (const ox of [-size, 0, size]) {
-      for (const oy of [-size, 0, size]) {
-        ctx.beginPath();
-        ctx.arc(x + ox, y + oy, r, 0, TAU);
-        ctx.fill();
-      }
-    }
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-function createSoftBeamTexture() {
-  if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
-  const c = document.createElement('canvas');
-  c.width = 128;
-  c.height = 128;
-  const ctx = c.getContext('2d');
-  // Cone UV: v=1 at apex (sub nose), v=0 at far open mouth; fade smoothly along length & softly at edges
-  const grad = ctx.createLinearGradient(0, 0, 0, 128);
-  grad.addColorStop(0.0, 'rgba(130, 245, 240, 0.72)');
-  grad.addColorStop(0.22, 'rgba(94, 240, 232, 0.40)');
-  grad.addColorStop(0.62, 'rgba(56, 189, 248, 0.14)');
-  grad.addColorStop(1.0, 'rgba(14, 116, 144, 0.0)');
+  const cx = size * 0.5;
+  const r = size * 0.44;
+  const grad = ctx.createRadialGradient(cx, cx, r * 0.15, cx, cx, r);
+  grad.addColorStop(0.0, 'rgba(220, 252, 255, 0.10)');
+  grad.addColorStop(0.68, 'rgba(170, 245, 255, 0.26)');
+  grad.addColorStop(0.90, 'rgba(230, 254, 255, 0.88)');
+  grad.addColorStop(1.0, 'rgba(160, 240, 255, 0.0)');
   ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 128, 128);
+  ctx.beginPath();
+  ctx.arc(cx, cx, r, 0, TAU);
+  ctx.fill();
+  // Specular glint dot
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+  ctx.beginPath();
+  ctx.arc(cx - r * 0.34, cx - r * 0.34, r * 0.16, 0, TAU);
+  ctx.fill();
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
 
-function createKelpFrondTex(size = 128) {
-  if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
-  const c = document.createElement('canvas');
-  c.width = size;
-  c.height = size;
-  const ctx = c.getContext('2d');
-  ctx.clearRect(0, 0, size, size);
-  // 7 graceful curved sunlit sea-kelp / ribbon-grass blades fanning from bottom center (ZERO black trunk stump!)
-  const blades = [
-    { x0: 0.44, cx: 0.20, x1: 0.14, h: 0.72, w: 0.085, c0: '#0d5e52', c1: '#2dd4bf' },
-    { x0: 0.47, cx: 0.30, x1: 0.26, h: 0.88, w: 0.095, c0: '#0f6e5c', c1: '#34d399' },
-    { x0: 0.49, cx: 0.42, x1: 0.39, h: 0.96, w: 0.100, c0: '#127a66', c1: '#5eead4' },
-    { x0: 0.51, cx: 0.54, x1: 0.53, h: 0.94, w: 0.105, c0: '#0f6e5c', c1: '#34d399' },
-    { x0: 0.53, cx: 0.66, x1: 0.68, h: 0.86, w: 0.095, c0: '#127a66', c1: '#5eead4' },
-    { x0: 0.56, cx: 0.78, x1: 0.84, h: 0.74, w: 0.085, c0: '#0d5e52', c1: '#2dd4bf' },
-    { x0: 0.50, cx: 0.48, x1: 0.46, h: 0.64, w: 0.080, c0: '#0a5248', c1: '#2dd4bf' },
-  ];
-  for (const b of blades) {
-    const g = ctx.createLinearGradient(0, size, 0, size * (1 - b.h));
-    g.addColorStop(0.0, b.c0);
-    g.addColorStop(0.55, b.c1);
-    g.addColorStop(1.0, '#99f6e4');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.moveTo((b.x0 - b.w * 0.55) * size, size);
-    ctx.quadraticCurveTo((b.cx - b.w * 0.45) * size, size * (1 - b.h * 0.52), b.x1 * size, size * (1 - b.h));
-    ctx.quadraticCurveTo((b.cx + b.w * 0.45) * size, size * (1 - b.h * 0.52), (b.x0 + b.w * 0.55) * size, size);
-    ctx.closePath();
-    ctx.fill();
+function createSoftBeamTex(w = 128, h = 64) {
+  if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+    const t = new THREE.DataTexture(new Uint8Array([180, 248, 255, 140]), 1, 1, THREE.RGBAFormat);
+    t.needsUpdate = true;
+    return t;
   }
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-function createGlassyBubbleTexture() {
-  if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
   const c = document.createElement('canvas');
-  c.width = 64;
-  c.height = 64;
+  c.width = w;
+  c.height = h;
   const ctx = c.getContext('2d');
-  ctx.clearRect(0, 0, 64, 64);
-  // Translucent hollow glass bubble with delicate rim & upper-left specular glint
-  const g = ctx.createRadialGradient(32, 32, 8, 32, 32, 29);
-  g.addColorStop(0.0, 'rgba(186, 245, 255, 0.04)');
-  g.addColorStop(0.62, 'rgba(140, 238, 255, 0.14)');
-  g.addColorStop(0.84, 'rgba(224, 250, 255, 0.62)');
-  g.addColorStop(0.95, 'rgba(186, 245, 255, 0.25)');
-  g.addColorStop(1.0, 'rgba(186, 245, 255, 0.0)');
+  const g = ctx.createRadialGradient(w * 0.5, h * 0.5, 2, w * 0.5, h * 0.5, w * 0.48);
+  g.addColorStop(0.0, 'rgba(215, 252, 255, 0.85)');
+  g.addColorStop(0.55, 'rgba(120, 238, 255, 0.35)');
+  g.addColorStop(1.0, 'rgba(80, 220, 255, 0.0)');
   ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.arc(32, 32, 29, 0, TAU);
-  ctx.fill();
-  // Crisp tiny crescent specular catchlight
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-  ctx.beginPath();
-  ctx.ellipse(22, 21, 5.2, 3.0, -0.65, 0, TAU);
-  ctx.fill();
+  ctx.fillRect(0, 0, w, h);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
-}
-
-function buildFacetedCrystalShardGeo() {
-  // Elongated double-terminated hexagonal quartz crystal shard (true 3D faceted gem, zero flat squares!)
-  const topCone = new THREE.ConeGeometry(0.068, 0.19, 5);
-  topCone.translate(0, 0.095, 0);
-  const botCone = new THREE.ConeGeometry(0.068, 0.12, 5);
-  botCone.rotateX(Math.PI);
-  botCone.translate(0, -0.06, 0);
-  const geo = mergeBufferGeos([topCone, botCone]);
-  geo.computeVertexNormals();
-  return geo;
-}
-
-function reefSeabedHeight(wx, wz) {
-  return (
-    Math.sin(wx * 0.24) * 0.42 +
-    Math.cos(wz * 0.36 + wx * 0.14) * 0.34 +
-    Math.sin(wx * 0.58 - wz * 0.48) * 0.16 +
-    Math.max(0, (-wz - 4.0) * 0.14)
-  );
 }
 
 function createPopupSpriteTex(text, color) {
@@ -1282,13 +501,59 @@ function createPopupSpriteTex(text, color) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.lineWidth = 6;
-  ctx.strokeStyle = 'rgba(4, 18, 32, 0.92)';
+  ctx.strokeStyle = 'rgba(4, 24, 38, 0.92)';
   ctx.strokeText(text, 160, 32);
   ctx.fillStyle = color || '#fde047';
   ctx.fillText(text, 160, 32);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
+}
+
+function reefDuneHeightApprox(wx, wz) {
+  const ux = (wx / 24.0) * TAU;
+  return (
+    Math.sin(ux + wz * 0.22) * 0.42 +
+    Math.cos(ux * 2.0 - wz * 0.35) * 0.24 +
+    Math.max(0, (-wz - 2.0) * 0.12)
+  );
+}
+
+function buildUnderwaterEnvTexture(webgl) {
+  if (!webgl || typeof THREE.PMREMGenerator !== 'function') return null;
+  try {
+    const pmrem = new THREE.PMREMGenerator(webgl);
+    const s = new THREE.Scene();
+    s.background = new THREE.Color('#0c7a9c');
+    const top = new THREE.Mesh(
+      new THREE.PlaneGeometry(36, 36),
+      new THREE.MeshBasicMaterial({ color: '#7ef8ff', side: THREE.DoubleSide })
+    );
+    top.rotation.x = Math.PI * 0.5;
+    top.position.y = 10;
+    const bot = new THREE.Mesh(
+      new THREE.PlaneGeometry(36, 36),
+      new THREE.MeshBasicMaterial({ color: '#074056', side: THREE.DoubleSide })
+    );
+    bot.rotation.x = -Math.PI * 0.5;
+    bot.position.y = -8;
+    s.add(top, bot);
+    const rt = pmrem.fromScene(s, 0.04);
+    top.geometry.dispose();
+    top.material.dispose();
+    bot.geometry.dispose();
+    bot.material.dispose();
+    pmrem.dispose();
+    return { rt, texture: rt.texture };
+  } catch {
+    return null;
+  }
+}
+
+function buildFallbackFishGeo() {
+  const geo = new THREE.SphereGeometry(0.28, 10, 8);
+  geo.scale(1.45, 0.72, 0.42);
+  return geo;
 }
 
 export class SubRenderer {
@@ -1299,115 +564,58 @@ export class SubRenderer {
     this.skinId = opts.skinId || 'sea_glass_guardian';
     this.blasterFxId = opts.blasterFxId || 'standard_cryo';
     this.showHud = Boolean(opts.showHud);
-    this._ownDotTex = !opts.softDotTex;
-    this.softDotTex = opts.softDotTex || createSoftDotTexture();
-    this.causticTex = createCausticFloorTexture(256);
-    this.godRayTex = createGodRayTexture();
-    this.beamGradTex = createSoftBeamTexture();
-    this.bubbleRimTex = createGlassyBubbleTexture();
-    this.backdropTex = createDeepWaterBackdropTexture();
-    this.reefStoneTex = createStratifiedReefStoneTexture(256);
-    this.barkTex = createRedwoodBarkTexture(128);
+    this._disposed = false;
+    this._lastTime = 0;
+    this.postfxActive = false;
+
     const envBuilt = opts.envMap ? null : buildUnderwaterEnvTexture(webgl);
     this._ownEnvRt = envBuilt?.rt || null;
     this.envTex = opts.envMap || envBuilt?.texture || null;
-    this.postfxActive = false;
-    this._disposed = false;
-    this._lastTime = 0;
 
-    // Scratch zero-GC objects
+    this.godRayTex = createGodRayTexture();
+    this.bubbleTex = createGlassyBubbleTex(64);
+    this.beamTex = createSoftBeamTex(128, 64);
+
     this._dummy = new THREE.Object3D();
     this._col = new THREE.Color();
-    this._shake = { x: 0, y: 0 };
     this._wp = { x: 0, y: 0, halfW: 5, halfH: 4 };
     this._reefFov = FOV;
     this._reefCamZ = CAM_Z;
     this._subPitchSmooth = 0;
     this._subBankSmooth = 0;
 
+    // Shared GPU uniforms for live animated world-space sunlit caustics across seabed & ruins!
+    this._causticUniforms = {
+      uTime: { value: 0 },
+      uScroll: { value: 0 },
+      uColor: { value: new THREE.Color('#7af4f8') },
+    };
+
+    this._glbPools = {};
     this._initReefScene();
-    this._initCoreDescentScene();
-    this._readyPromise = this._loadGlbProps();
+    this._readyPromise = this._loadGlbAssets();
   }
 
   whenReady() {
     return this._readyPromise;
   }
 
-  setEra(_era) {
-    // Unified console AAA sunlit water pipeline
-  }
+  setEra(_era) {}
 
   setSkin(skinId) {
     if (!skinId || this.skinId === skinId) return;
     this.skinId = skinId;
-    this.reefHero?.setSkin(skinId);
-    this.coreHero?.setSkin(skinId);
+    this.reefHero?.setSkin?.(skinId);
   }
 
   setBlasterFx(fxId) {
     this.blasterFxId = fxId || 'standard_cryo';
   }
 
-  prewarm() {
-    if (this._disposed || !this.webgl) return;
-    const prevRt = this.webgl.getRenderTarget();
-    const prevTone = this.webgl.toneMapping;
-    const prevScissorTest = this.webgl.getScissorTest();
-    const prevViewport = new THREE.Vector4();
-    const prevScissor = new THREE.Vector4();
-    this.webgl.getViewport(prevViewport);
-    this.webgl.getScissor(prevScissor);
-
-    const warmScene = (scene, cam) => {
-      if (!scene || !cam) return;
-      const saved = [];
-      const savedCounts = [];
-      try {
-        scene.traverse((o) => {
-          saved.push(o, o.visible, o.frustumCulled);
-          o.visible = true;
-          o.frustumCulled = false;
-          if (o.isInstancedMesh && o.count === 0) {
-            savedCounts.push(o, o.count);
-            o.count = 1;
-          }
-        });
-        this.webgl.render(scene, cam);
-      } catch {
-        // Ignore driver fallback
-      } finally {
-        for (let i = 0; i < saved.length; i += 3) {
-          saved[i].visible = saved[i + 1];
-          saved[i].frustumCulled = saved[i + 2];
-        }
-        for (let i = 0; i < savedCounts.length; i += 2) {
-          savedCounts[i].count = savedCounts[i + 1];
-        }
-      }
-    };
-
-    try {
-      this.webgl.setRenderTarget(null);
-      this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
-      this.webgl.setScissorTest(true);
-      this.webgl.setScissor(0, 0, 16, 16);
-      this.webgl.setViewport(0, 0, 16, 16);
-      warmScene(this.reefScene, this.reefCam);
-      warmScene(this.coreScene, this.coreCam);
-    } finally {
-      this.webgl.toneMapping = prevTone;
-      this.webgl.setViewport(prevViewport);
-      this.webgl.setScissor(prevScissor);
-      this.webgl.setScissorTest(prevScissorTest);
-      this.webgl.setRenderTarget(prevRt);
-    }
-  }
-
   _updateReefCamMetrics() {
     const aspect = this.width / Math.max(1, this.height);
     const portrait = aspect < 0.85;
-    this._reefFov = portrait ? 50 : 46;
+    this._reefFov = portrait ? 50 : 45;
     this._reefCamZ = portrait ? 11.2 : 9.4;
     if (this.reefCam) {
       this.reefCam.aspect = aspect;
@@ -1419,12 +627,7 @@ export class SubRenderer {
   resize(width, height) {
     this.width = Math.max(1, width || 390);
     this.height = Math.max(1, height || 620);
-    const aspect = this.width / this.height;
     this._updateReefCamMetrics();
-    if (this.coreCam) {
-      this.coreCam.aspect = aspect;
-      this.coreCam.updateProjectionMatrix();
-    }
   }
 
   _screenToWorld(sx, sy, z = 0, out = this._wp) {
@@ -1444,101 +647,126 @@ export class SubRenderer {
     return (px / Math.max(1, this.height)) * (2 * halfH);
   }
 
-  // ============================================================================
-  // 1. REEF & LAKEBED FREE-SWIM SCENE (`reef_swim`)
-  // ============================================================================
+  prewarm() {
+    if (this._disposed || !this.webgl || !this.reefScene || !this.reefCam) return;
+    const saved = [];
+    const savedCounts = [];
+    const prevRt = this.webgl.getRenderTarget();
+    const prevTone = this.webgl.toneMapping;
+    const prevScissorTest = this.webgl.getScissorTest();
+    const prevViewport = new THREE.Vector4();
+    const prevScissor = new THREE.Vector4();
+    this.webgl.getViewport(prevViewport);
+    this.webgl.getScissor(prevScissor);
+    try {
+      this.reefScene.traverse((o) => {
+        saved.push(o, o.visible, o.frustumCulled);
+        o.visible = true;
+        o.frustumCulled = false;
+        if (o.isInstancedMesh && o.count === 0) {
+          savedCounts.push(o, o.count);
+          o.count = 1;
+        }
+      });
+      this.webgl.setRenderTarget(null);
+      this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
+      this.webgl.setScissorTest(true);
+      this.webgl.setScissor(0, 0, 16, 16);
+      this.webgl.setViewport(0, 0, 16, 16);
+      this.webgl.render(this.reefScene, this.reefCam);
+    } catch {
+      // Ignore driver fallback
+    } finally {
+      for (let i = 0; i < saved.length; i += 3) {
+        saved[i].visible = saved[i + 1];
+        saved[i].frustumCulled = saved[i + 2];
+      }
+      for (let i = 0; i < savedCounts.length; i += 2) {
+        savedCounts[i].count = savedCounts[i + 1];
+      }
+      this.webgl.toneMapping = prevTone;
+      this.webgl.setViewport(prevViewport);
+      this.webgl.setScissor(prevScissor);
+      this.webgl.setScissorTest(prevScissorTest);
+      this.webgl.setRenderTarget(prevRt);
+    }
+  }
 
   _initReefScene() {
     this.reefScene = new THREE.Scene();
-    this.reefScene.background = new THREE.Color('#095c7c');
-    this.reefScene.fog = new THREE.FogExp2('#0b5b7a', 0.024);
-    if (this.envTex) this.reefScene.environment = this.envTex;
+    // Alias `.scene` so main GameRenderer's `if (sr.scene && envMap)` binds PMREM cleanly!
+    this.scene = this.reefScene;
+    this.reefScene.background = new THREE.Color('#0a7496');
+    this.reefScene.fog = new THREE.FogExp2('#0a7496', 0.029);
+    if (this.envTex) {
+      this.reefScene.environment = this.envTex;
+      this.reefScene.environmentIntensity = 0.92;
+    }
 
-    this.reefCam = new THREE.PerspectiveCamera(FOV, this.width / Math.max(1, this.height), 0.2, 180);
+    this.reefCam = new THREE.PerspectiveCamera(FOV, this.width / Math.max(1, this.height), 0.2, 200);
     this._updateReefCamMetrics();
     this.reefCam.position.set(0, 0, this._reefCamZ);
 
-    // Unified main-game AAA lighting rig: golden sun key + cool azure hemisphere bounce + soft aquatic rim
-    this.reefHemi = new THREE.HemisphereLight('#7cc8f0', '#164558', 1.08);
+    // Rich Underwater Sunlit Lighting Rig (zero extra PointLight overhead for locked 60fps!)
+    this.reefHemi = new THREE.HemisphereLight('#94f0ff', '#14586e', 1.56);
     this.reefScene.add(this.reefHemi);
 
-    this.reefSun = new THREE.DirectionalLight('#fff1d6', 2.25);
-    this.reefSun.position.set(6, 16, 11);
+    this.reefSun = new THREE.DirectionalLight('#fff5d8', 2.60);
+    this.reefSun.position.set(6, 18, 10);
     this.reefScene.add(this.reefSun);
 
-    this.reefFill = new THREE.DirectionalLight('#2dd4bf', 0.68);
-    this.reefFill.position.set(-8, -3, 7);
-    this.reefScene.add(this.reefFill);
+    this.reefWarmFill = new THREE.DirectionalLight('#ffe0be', 1.15);
+    this.reefWarmFill.position.set(-8, 3, 14);
+    this.reefScene.add(this.reefWarmFill);
 
-    // Sunlit Reef Atmosphere & Soft Depth-Fogged Curved Abyssal Horizon (ZERO flat un-fogged 2D seam!)
-    this.reefBackdropMat = new THREE.MeshBasicMaterial({
-      map: this.backdropTex,
-      color: '#5ec7dc',
-      fog: true,
+    // Adaptive 60fps PostFX guard (matches `src/postfx.js` automatic bypass guarantee on iGPUs!)
+    this._frameMsEma = 14.0;
+    this._lastFrameTs = 0;
+    this._bypassPostFx = false;
+
+    // 1. Seamless 3D Underwater Depth-Gradient Sphere (ZERO 2D aquarium poster, ZERO horizontal cut seam!)
+    this.domeMat = new THREE.ShaderMaterial({
+      vertexShader: UNDERWATER_DOME_VERT,
+      fragmentShader: UNDERWATER_DOME_FRAG,
+      uniforms: {
+        uZenithColor: { value: new THREE.Color('#52e4f0') },
+        uHorizonColor: { value: new THREE.Color('#0a7496') },
+        uAbyssColor: { value: new THREE.Color('#043652') },
+        uSunColor: { value: new THREE.Color('#fff4d4') },
+        uTime: { value: 0 },
+      },
+      side: THREE.BackSide,
+      depthWrite: false,
+      fog: false,
+    });
+    this.underwaterDome = new THREE.Mesh(new THREE.SphereGeometry(140, 24, 16), this.domeMat);
+    this.underwaterDome.frustumCulled = false;
+    this.reefScene.add(this.underwaterDome);
+
+    // 2. Overhead Shimmering Sunlit Water-Surface Ceiling (GLSL Snell's Window with soft edge feather!)
+    this.waterCeilingMat = new THREE.ShaderMaterial({
+      vertexShader: WATER_CEILING_VERT,
+      fragmentShader: WATER_CEILING_FRAG,
+      uniforms: {
+        uTime: { value: 0 },
+        uScroll: { value: 0 },
+        uSunColor: { value: new THREE.Color('#fff6d6') },
+        uZenithColor: { value: new THREE.Color('#64f2ff') },
+      },
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
       depthWrite: false,
     });
-    this.reefBackdrop = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.reefBackdropMat);
-    this.reefBackdrop.position.set(0, 0, -28);
-    this.reefScene.add(this.reefBackdrop);
+    const ceilGeo = new THREE.PlaneGeometry(84, 34, 20, 8);
+    ceilGeo.rotateX(Math.PI * 0.5);
+    this.waterCeilingMesh = new THREE.Mesh(ceilGeo, this.waterCeilingMat);
+    this.waterCeilingMesh.position.set(0, 4.8, -8.0);
+    this.reefScene.add(this.waterCeilingMesh);
 
-function createFeatheredSnellTex(size = 256) {
-  if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
-    const d = new Uint8Array([140, 240, 255, 64]);
-    const t = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat);
-    t.needsUpdate = true;
-    return t;
-  }
-  const c = document.createElement('canvas');
-  c.width = size;
-  c.height = size;
-  const ctx = c.getContext('2d');
-  ctx.clearRect(0, 0, size, size);
-  // Soft rippled sunlit zenith radiance that smoothly feathers to alpha=0 on ALL 4 edges (ZERO hard horizon line!)
-  for (let i = 0; i < 28; i++) {
-    const x = ((i * 73 + 31) % 210) + 23;
-    const y = ((i * 53 + 29) % 140) + 55;
-    const rx = 28 + (i % 5) * 14;
-    const ry = 10 + (i % 4) * 6;
-    const g = ctx.createRadialGradient(x, y, 2, x, y, rx);
-    g.addColorStop(0.0, 'rgba(210, 252, 255, 0.36)');
-    g.addColorStop(0.55, 'rgba(94, 240, 255, 0.14)');
-    g.addColorStop(1.0, 'rgba(56, 189, 248, 0.0)');
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.scale(1, ry / rx);
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(0, 0, rx, 0, TAU);
-    ctx.fill();
-    ctx.restore();
-  }
-  // Smooth vertical & horizontal edge feather mask guaranteeing 0.00 alpha at every border
-  ctx.globalCompositeOperation = 'destination-in';
-  const vMask = ctx.createLinearGradient(0, 0, 0, size);
-  vMask.addColorStop(0.0, 'rgba(255,255,255,0.0)');
-  vMask.addColorStop(0.28, 'rgba(255,255,255,0.92)');
-  vMask.addColorStop(0.58, 'rgba(255,255,255,0.75)');
-  vMask.addColorStop(1.0, 'rgba(255,255,255,0.0)');
-  ctx.fillStyle = vMask;
-  ctx.fillRect(0, 0, size, size);
-
-  const hMask = ctx.createLinearGradient(0, 0, size, 0);
-  hMask.addColorStop(0.0, 'rgba(255,255,255,0.0)');
-  hMask.addColorStop(0.14, 'rgba(255,255,255,1.0)');
-  hMask.addColorStop(0.86, 'rgba(255,255,255,1.0)');
-  hMask.addColorStop(1.0, 'rgba(255,255,255,0.0)');
-  ctx.fillStyle = hMask;
-  ctx.fillRect(0, 0, size, size);
-
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-    // Overhead Shimmering Sunlit Snell's-Window Water Surface (edge-feathered -> ZERO horizontal backdrop seam!)
-    this.snellSurfaceTex = createFeatheredSnellTex(256);
-    this.snellSurfaceMat = new THREE.MeshBasicMaterial({
-      map: this.snellSurfaceTex,
+    // 3. Soft Slanted Volumetric Sunlit God-Ray Shafts (`MAX_RAYS`)
+    this.rayMat = new THREE.MeshBasicMaterial({
+      map: this.godRayTex,
       color: '#c8fbff',
       transparent: true,
       opacity: 0.36,
@@ -1546,240 +774,27 @@ function createFeatheredSnellTex(size = 256) {
       side: THREE.DoubleSide,
       depthWrite: false,
     });
-    this.snellSurfaceMesh = new THREE.Mesh(new THREE.PlaneGeometry(88, 26), this.snellSurfaceMat);
-    this.snellSurfaceMesh.rotation.x = Math.PI * 0.5;
-    this.snellSurfaceMesh.position.set(0, 5.2, -5.0);
-    this.reefScene.add(this.snellSurfaceMesh);
-
-    // Soft Gaussian-feathered sunlit volumetric caustic god-ray shafts (brighter & richer!)
-    const rayGeo = new THREE.PlaneGeometry(4.4, 18.5);
-    this.rayMat = new THREE.MeshBasicMaterial({
-      map: this.godRayTex,
-      color: '#d8fbff',
-      transparent: true,
-      opacity: 0.38,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
-    this.rayInst = new THREE.InstancedMesh(rayGeo, this.rayMat, MAX_RAYS);
+    this.rayInst = new THREE.InstancedMesh(new THREE.PlaneGeometry(6.2, 19.5), this.rayMat, MAX_RAYS);
     this.rayInst.frustumCulled = false;
     this.reefScene.add(this.rayInst);
 
-    // Undulating Sculpted Sandy-Reef Canyon Seabed (`mg_pbr_reef_seabed_{albedo,normal}.webp` — ZERO Voronoi grid!)
-    this.seabedMat = new THREE.MeshStandardMaterial({
-      color: '#cfe2e0',
-      map: this.causticTex,
-      roughness: 0.84,
-      metalness: 0.03,
-    });
-    const bedGeo = new THREE.PlaneGeometry(76, 26, 68, 22);
-    bedGeo.rotateX(-Math.PI * 0.5);
-    const bPos = bedGeo.attributes.position;
-    for (let i = 0; i < bPos.count; i++) {
-      const bx = bPos.getX(i);
-      const bz = bPos.getZ(i);
-      bPos.setY(i, reefSeabedHeight(bx, bz));
-    }
-    bedGeo.computeVertexNormals();
-    this.seabedMesh = new THREE.Mesh(bedGeo, this.seabedMat);
-    this.seabedMesh.position.set(0, -4.4, -3.5);
-    this.reefScene.add(this.seabedMesh);
-
-    // Large Sculpted Sunlit Limestone Reef Canyon Outcrops (1 instanced draw call — saves 7 draw calls!)
-    this.reefStoneTex.repeat.set(2, 2);
-    this.ridgeMat = new THREE.MeshStandardMaterial({
-      color: '#dcd8cc',
-      map: this.reefStoneTex,
-      emissive: '#0c3948',
-      emissiveIntensity: 0.14,
-      roughness: 0.80,
-      metalness: 0.04,
-    });
-    const ridgeGeo = buildCraggyReefRidgeGeo(1.65, 1.85, 1037);
-    this.ridgeInst = new THREE.InstancedMesh(ridgeGeo, this.ridgeMat, 8);
-    this.ridgeInst.frustumCulled = false;
-    const ridgeTints = ['#e6e0d2', '#d7ded8', '#e2d8c8', '#cfd9d8'];
-    for (let i = 0; i < 8; i++) {
-      this._col.set(ridgeTints[i % ridgeTints.length]);
-      this.ridgeInst.setColorAt(i, this._col);
-    }
-    this.reefScene.add(this.ridgeInst);
-
-    // Abzû-Tier Sunlit Multi-Hued 3D Coral Reef Ecosystem nestled naturally onto `biome_rock_limestone` outcrops
-    // alongside gently swaying 3D kelp ribbons (ZERO Play-Doh straight sticks, ZERO flat 2D white-fringed stickers!)
-    const porousCoralPbr = createPorousCoralPbrTextures(256);
-    this.coralPorousAlbedo = porousCoralPbr.albedo;
-    this.coralPorousNormal = porousCoralPbr.normal;
-
-    const coralBoulderGeo = buildCraggyReefRidgeGeo(0.78, 0.72, 7121);
-    const branchCoralGeo = buildSculptedStaghornCoralGeo(3101);
-    const tableCoralGeo = buildSculptedTableCoralGeo(6409);
-    const seaFanGeo = buildSculptedSeaFanGeo(5207);
-    const kelpRibbonGeo = buildSculptedKelpRibbonGeo(8123);
-
-    this.boulderMat = new THREE.MeshStandardMaterial({
-      color: '#e6e0d4',
-      map: this.reefStoneTex,
-      emissive: '#0e3b4a',
-      emissiveIntensity: 0.14,
-      roughness: 0.80,
-      metalness: 0.04,
-    });
-    this.branchCoralMat = new THREE.MeshStandardMaterial({
-      color: '#ffffff',
-      map: this.coralPorousAlbedo,
-      normalMap: this.coralPorousNormal,
-      normalScale: new THREE.Vector2(1.45, 1.45),
-      vertexColors: true,
-      emissive: '#52262c',
-      emissiveIntensity: 0.30,
-      roughness: 0.54,
-      metalness: 0.04,
-    });
-    this.tableCoralMat = new THREE.MeshStandardMaterial({
-      color: '#ffffff',
-      map: this.coralPorousAlbedo,
-      normalMap: this.coralPorousNormal,
-      normalScale: new THREE.Vector2(1.38, 1.38),
-      vertexColors: true,
-      emissive: '#542a26',
-      emissiveIntensity: 0.34,
-      roughness: 0.56,
-      metalness: 0.04,
-    });
-    this.seaFanMat = new THREE.MeshStandardMaterial({
-      color: '#ffffff',
-      map: this.coralPorousAlbedo,
-      normalMap: this.coralPorousNormal,
-      normalScale: new THREE.Vector2(1.25, 1.25),
-      vertexColors: true,
-      emissive: '#3a2854',
-      emissiveIntensity: 0.32,
-      roughness: 0.48,
-      metalness: 0.04,
-    });
-    this.kelpRibbonMat = new THREE.MeshStandardMaterial({
-      color: '#ffffff',
-      vertexColors: true,
-      emissive: '#0c443e',
-      emissiveIntensity: 0.20,
-      roughness: 0.46,
-      metalness: 0.04,
-      side: THREE.DoubleSide,
-    });
-
-    this.boulderInst = new THREE.InstancedMesh(coralBoulderGeo, this.boulderMat, 18);
-    this.branchCoralInst = new THREE.InstancedMesh(branchCoralGeo, this.branchCoralMat, 26);
-    this.tableCoralInst = new THREE.InstancedMesh(tableCoralGeo, this.tableCoralMat, 18);
-    this.seaFanInst = new THREE.InstancedMesh(seaFanGeo, this.seaFanMat, 18);
-    this.kelpInst = new THREE.InstancedMesh(kelpRibbonGeo, this.kelpRibbonMat, 22);
-
-    const boulderTints = ['#e8e2d5', '#dbe0da', '#e5dbc9', '#d2dcda', '#e0ddd2'];
-    // Vibrant sunlit Abzû coral reef palette: warm rose-coral, sunlit amber-ochre, seafoam-teal, violet sea-fan!
-    const branchTints = ['#e06d70', '#d98a4e', '#3ba89c', '#e87c82', '#8b6fc9', '#e59a5c', '#e06d70'];
-    const tableTints = ['#d98a4e', '#e06d70', '#3ba89c', '#8b6fc9', '#e49664', '#de767b'];
-    const fanTints = ['#8b6fc9', '#e06d70', '#d98a4e', '#9b7fd6', '#3ba89c', '#e57b82'];
-    const kelpTints = ['#7fd8c4', '#6ecfb6', '#8be0cb', '#62c4ac', '#74d1bc'];
-
-    for (let i = 0; i < 18; i++) {
-      this._col.set(boulderTints[i % boulderTints.length]);
-      this.boulderInst.setColorAt(i, this._col);
-    }
-    for (let i = 0; i < 26; i++) {
-      this._col.set(branchTints[i % branchTints.length]);
-      this.branchCoralInst.setColorAt(i, this._col);
-    }
-    for (let i = 0; i < 18; i++) {
-      this._col.set(tableTints[i % tableTints.length]);
-      this.tableCoralInst.setColorAt(i, this._col);
-    }
-    for (let i = 0; i < 18; i++) {
-      this._col.set(fanTints[i % fanTints.length]);
-      this.seaFanInst.setColorAt(i, this._col);
-    }
-    for (let i = 0; i < 22; i++) {
-      this._col.set(kelpTints[i % kelpTints.length]);
-      this.kelpInst.setColorAt(i, this._col);
-    }
-    for (const im of [this.boulderInst, this.branchCoralInst, this.tableCoralInst, this.seaFanInst, this.kelpInst]) {
-      im.frustumCulled = false;
-      this.reefScene.add(im);
-    }
-
-    // Graceful Mid-Distance Sculpted 3D Reef Manta Ray (replaces stiff close-up plastic foreground turtle!)
-    this.mantaGroup = new THREE.Group();
-    this.mantaGroup.visible = false;
-    this.reefScene.add(this.mantaGroup);
-
-    // Mount Studio-Painted Reef Backdrop & 1K Studio PBR Seabed / Sub-Hull / Limestone WebP Textures
-    this.limestoneAlbedo = null;
-    this.limestoneNormal = null;
-    loadSubWebp('assets/textures/mg_bg_reef_swim.webp', true, 1, 1, (t) => {
-      if (this._disposed) return;
-      this.reefBgWebp = t;
-      this.reefBackdropMat.map = t;
-      this.reefBackdropMat.needsUpdate = true;
-    });
-    loadSubWebp('assets/textures/mg_pbr_reef_seabed_albedo.webp', true, 5, 2.2, (t) => {
-      if (this._disposed) return;
-      this.coralSandWebp = t;
-      this.seabedMat.map = t;
-      this.seabedMat.needsUpdate = true;
-    });
-    loadSubWebp('assets/textures/mg_pbr_reef_seabed_normal.webp', false, 5, 2.2, (t) => {
-      if (this._disposed) return;
-      this.seabedMat.normalMap = t;
-      this.seabedMat.normalScale.set(1.15, 1.15);
-      this.seabedMat.needsUpdate = true;
-    });
-    loadSubWebp('assets/textures/biome_rock_limestone_albedo.webp', true, 2, 2, (t) => {
-      if (this._disposed) return;
-      this.limestoneAlbedo = t;
-      this.ridgeMat.map = t;
-      this.ridgeMat.needsUpdate = true;
-      if (this.ventMat) {
-        this.ventMat.map = t;
-        this.ventMat.color.set('#b8c4bc');
-        this.ventMat.needsUpdate = true;
-      }
-      this._applyCoralPbr();
-    });
-    loadSubWebp('assets/textures/biome_rock_limestone_normal.webp', false, 2, 2, (t) => {
-      if (this._disposed) return;
-      this.limestoneNormal = t;
-      this.ridgeMat.normalMap = t;
-      this.ridgeMat.normalScale.set(1.2, 1.2);
-      this.ridgeMat.needsUpdate = true;
-      if (this.ventMat) {
-        this.ventMat.normalMap = t;
-        this.ventMat.normalScale.set(1.2, 1.2);
-        this.ventMat.needsUpdate = true;
-      }
-      this._applyCoralPbr();
-    });
-
-    // 100% SUBMARINE-FREE GATEWAY 2.0 FREE-SWIM RIG!
-    // Gateway swims freely through the sunlit coral reef with smooth dolphin-kick undulation,
-    // agile Barrel-Roll Dash Hydro-Vortex Cone, and expanding Pelagian Bio-Sonar rings!
+    // 4. 100% SUBMARINE-FREE GATEWAY 2.0 FREE-SWIM HERO (large & expressive in left-center foreground!)
     this.heroSwimAnchor = new THREE.Group();
     this.reefHero = new GatewayRig(this.skinId);
     this.reefHeroInner = new THREE.Group();
     this.reefHeroInner.rotation.order = 'YXZ';
-    // Horizontal free-swimming posture facing +X (`FreeSwim` already pitches Pelvis +1.08 rad toward +Z;
-    // +0.26 rad X tilt completes sleek horizontal dolphin-kick swim with tail & coral scarf streaming cleanly -X!)
-    this.reefHeroInner.rotation.set(0.26, Math.PI * 0.5, 0);
-    this.reefHeroInner.scale.setScalar(1.22);
-    this.reefHeroInner.position.set(0, -0.34, 0);
+    // Horizontal free-swimming posture facing +X (`FreeSwim` pitches Pelvis +1.04 rad; +0.20 rad finishes sleek horizontal glide!)
+    this.reefHeroInner.rotation.set(0.20, Math.PI * 0.5, 0);
+    this.reefHeroInner.position.set(0, -0.30, 0);
     this.reefHeroInner.add(this.reefHero.group);
     this.heroSwimAnchor.add(this.reefHeroInner);
 
-    // Agile Barrel-Roll Dash Shimmering Aqua Vortex Cone wrapping Gateway during dash!
-    const dashConeGeo = new THREE.ConeGeometry(0.76, 2.35, 16, 1, true);
-    dashConeGeo.rotateZ(-Math.PI * 0.5);
-    dashConeGeo.translate(-0.15, 0, 0);
+    // Shimmering Aqua Vortex Cone for Agile Barrel-Roll Dash
+    const dashGeo = new THREE.ConeGeometry(0.76, 2.35, 16, 1, true);
+    dashGeo.rotateZ(-Math.PI * 0.5);
+    dashGeo.translate(-0.18, 0, 0);
     this.dashVortexMat = new THREE.MeshBasicMaterial({
-      map: this.beamGradTex,
+      map: this.beamTex,
       color: '#5efce8',
       transparent: true,
       opacity: 0,
@@ -1787,48 +802,16 @@ function createFeatheredSnellTex(size = 256) {
       side: THREE.DoubleSide,
       depthWrite: false,
     });
-    this.dashVortexMesh = new THREE.Mesh(dashConeGeo, this.dashVortexMat);
+    this.dashVortexMesh = new THREE.Mesh(dashGeo, this.dashVortexMat);
     this.dashVortexMesh.visible = false;
     this.heroSwimAnchor.add(this.dashVortexMesh);
+    this.reefScene.add(this.heroSwimAnchor);
 
-    // Warm hero key-rim point light following Gateway 2.0 so her sea-mint scales & coral scarf ALWAYS gleam!
-    this.reefHeroLight = new THREE.PointLight('#d8fbff', 1.45, 7.5);
-    this.reefScene.add(this.reefHeroLight);
-
-    // Shimmering Underwater Current Stream Boost Rings (`stage.boostRings`)
-    this.boostRingInst = new THREE.InstancedMesh(
-      new THREE.TorusGeometry(0.88, 0.068, 10, 28),
-      new THREE.MeshStandardMaterial({
-        color: '#a5f3fc',
-        emissive: '#22d3ee',
-        emissiveIntensity: 1.45,
-        roughness: 0.14,
-        metalness: 0.42,
-      }),
-      12
-    );
-    this.boostRingInst.frustumCulled = false;
-    this.reefScene.add(this.boostRingInst);
-
-    // Streaming bioluminescent hydro-slipstream & Harmonic Echo Sphere + 3D Sonar Shockwave Ring on Gateway
-    this.echoSphere = new THREE.Mesh(
-      new THREE.SphereGeometry(1.0, 24, 18),
-      new THREE.MeshBasicMaterial({
-        color: '#5efce8',
-        transparent: true,
-        opacity: 0,
-        wireframe: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      })
-    );
-    this.echoSphere.visible = false;
-    this.reefScene.add(this.echoSphere);
-
+    // Expanding 3D Harmonic Bio-Sonar Pulse Ring (ZERO ugly wireframe spheres!)
     this.sonarRingMesh = new THREE.Mesh(
-      new THREE.TorusGeometry(1.0, 0.055, 10, 44),
+      new THREE.TorusGeometry(1.0, 0.065, 10, 44),
       new THREE.MeshBasicMaterial({
-        color: '#5efce8',
+        color: '#67f3ff',
         transparent: true,
         opacity: 0,
         blending: THREE.AdditiveBlending,
@@ -1838,14 +821,14 @@ function createFeatheredSnellTex(size = 256) {
     this.sonarRingMesh.visible = false;
     this.reefScene.add(this.sonarRingMesh);
 
-    // Pooled Underwater Cross-Current Drift Streaks (1 instanced draw call)
+    // Cross-current drift streaks & slipstream speed halos
     this.currentStreakInst = new THREE.InstancedMesh(
-      new THREE.PlaneGeometry(0.95, 0.095),
+      new THREE.PlaneGeometry(1.05, 0.11),
       new THREE.MeshBasicMaterial({
-        map: this.beamGradTex,
+        map: this.beamTex,
         color: '#99f6e4',
         transparent: true,
-        opacity: 0.28,
+        opacity: 0.30,
         blending: THREE.AdditiveBlending,
         side: THREE.DoubleSide,
         depthWrite: false,
@@ -1853,149 +836,135 @@ function createFeatheredSnellTex(size = 256) {
       42
     );
     this.currentStreakInst.frustumCulled = false;
-    this.currentStreakInst.count = 0;
     this.reefScene.add(this.currentStreakInst);
 
-    // Pooled Slipstream Speed Rings trailing behind the Pelagian Sub (1 instanced draw call)
     this.slipRingInst = new THREE.InstancedMesh(
-      new THREE.TorusGeometry(0.46, 0.026, 6, 22),
+      new THREE.TorusGeometry(0.46, 0.032, 6, 22),
       new THREE.MeshBasicMaterial({
         color: '#a5f3fc',
         transparent: true,
-        opacity: 0.54,
+        opacity: 0.48,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       }),
       14
     );
     this.slipRingInst.frustumCulled = false;
-    this.slipRingInst.count = 0;
     this.reefScene.add(this.slipRingInst);
 
-    this.heroGlowLight = new THREE.PointLight('#fbbf24', 0.85, 6.5);
-    this.heroGlowLight.position.set(0.2, 0.2, 1.4);
-    this.heroSwimAnchor.add(this.heroGlowLight);
-    this.reefScene.add(this.heroSwimAnchor);
+    // 5. Crisp Translucent Iridescent Fresnel Rescue Bubbles (`stage.cages` + freed `escorts`)
+    this.rescueBubbleMat = new THREE.ShaderMaterial({
+      vertexShader: RESCUE_BUBBLE_VERT,
+      fragmentShader: RESCUE_BUBBLE_FRAG,
+      uniforms: {
+        uTime: { value: 0 },
+        uRimColorA: { value: new THREE.Color('#67f6ff') },
+        uRimColorB: { value: new THREE.Color('#ffe08a') },
+      },
+      transparent: true,
+      depthWrite: false,
+      side: THREE.FrontSide,
+    });
+    const bubbleSphereGeo = new THREE.SphereGeometry(0.92, 24, 18);
+    const fbTurtleGeo = new THREE.SphereGeometry(0.38, 12, 10);
+    const fbTurtleMat = new THREE.MeshStandardMaterial({ color: '#22c55e', roughness: 0.45 });
+    const fbOtterMat = new THREE.MeshStandardMaterial({ color: '#b47848', roughness: 0.52 });
 
-    // Dynamic Gameplay Pools (Real Blender Tropical Angelfish & Wrasse, Caged Rescue Critters, Mines, Jellies, Boulders)
-    this.fishGroup = new THREE.Group();
+    const makeCritterSlot = (withBubble) => {
+      const root = new THREE.Group();
+      const bubbleMesh = withBubble ? new THREE.Mesh(bubbleSphereGeo, this.rescueBubbleMat) : null;
+      if (bubbleMesh) {
+        bubbleMesh.renderOrder = 4;
+        root.add(bubbleMesh);
+      }
+      const turtleGroup = new THREE.Group();
+      const fbT = new THREE.Mesh(fbTurtleGeo, fbTurtleMat);
+      fbT.scale.set(1.2, 0.65, 0.9);
+      turtleGroup.add(fbT);
+      const otterGroup = new THREE.Group();
+      const fbO = new THREE.Mesh(fbTurtleGeo, fbOtterMat);
+      fbO.scale.set(1.3, 0.6, 0.7);
+      otterGroup.add(fbO);
+      otterGroup.visible = false;
+      root.add(turtleGroup, otterGroup);
+      root.visible = false;
+      this.reefScene.add(root);
+      return { root, bubbleMesh, turtleGroup, otterGroup, flipperL: null, flipperR: null, otterTail: null };
+    };
+
     this.cagePool = [];
-    this.reefScene.add(this.fishGroup);
+    for (let i = 0; i < MAX_CAGES; i++) this.cagePool.push(makeCritterSlot(true));
+    this.escortPool = [];
+    for (let i = 0; i < 6; i++) this.escortPool.push(makeCritterSlot(false));
 
-    // Sculpted tropical reef fish schools (angelfish & wrasse silhouettes)
-    const fishBody = new THREE.SphereGeometry(0.18, 10, 8);
-    fishBody.scale(1.65, 1.05, 0.42);
-    const fishTail = new THREE.ConeGeometry(0.18, 0.28, 4);
-    fishTail.rotateZ(-Math.PI * 0.5);
-    fishTail.translate(-0.36, 0, 0);
-    const fishFallbackGeo1 = mergeBufferGeos([fishBody, fishTail]);
-    this.fishMat1 = new THREE.MeshStandardMaterial({
-      color: '#ffffff',
-      roughness: 0.26,
-      metalness: 0.18,
-    });
-    this.fishMat2 = new THREE.MeshStandardMaterial({
-      color: '#ffffff',
-      roughness: 0.26,
-      metalness: 0.18,
-    });
-    this.fishInst1 = new THREE.InstancedMesh(fishFallbackGeo1, this.fishMat1, MAX_FISH);
-    this.fishInst2 = new THREE.InstancedMesh(fishFallbackGeo1.clone(), this.fishMat2, MAX_FISH);
-    this.ambFishInst = new THREE.InstancedMesh(fishFallbackGeo1.clone(), this.fishMat2, MAX_AMB);
-    for (const im of [this.fishInst1, this.fishInst2, this.ambFishInst]) {
-      im.frustumCulled = false;
-      this.reefScene.add(im);
-    }
+    // 6. Tropical Fish Schools, Bubbled Fish Shells, Water Seeds, Hydro-Pulses, Jellies, Mines, Clams, Vents
+    const fbFishGeo = buildFallbackFishGeo();
+    this.fishMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.34, metalness: 0.10 });
+    this.fishInst1 = new THREE.InstancedMesh(fbFishGeo, this.fishMat, MAX_FISH);
+    this.fishInst2 = new THREE.InstancedMesh(fbFishGeo, this.fishMat, MAX_FISH);
+    this.ambFishInst = new THREE.InstancedMesh(fbFishGeo, this.fishMat, MAX_AMB);
+    this.fishInst1.frustumCulled = false;
+    this.fishInst2.frustumCulled = false;
+    this.ambFishInst.frustumCulled = false;
+    this.reefScene.add(this.fishInst1, this.fishInst2, this.ambFishInst);
 
-    // Iridescent Bubble Shells around bubbled fish & Harmonic Seeds
     this.bubbleShellInst = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(1, 16, 12),
-      new THREE.MeshStandardMaterial({
-        color: '#a5f3fc',
-        emissive: '#38bdf8',
-        emissiveIntensity: 0.5,
-        roughness: 0.06,
-        transparent: true,
-        opacity: 0.42,
-      }),
+      new THREE.SphereGeometry(1.0, 14, 12),
+      this.rescueBubbleMat,
       MAX_BUBBLE_SHELLS
     );
     this.bubbleShellInst.frustumCulled = false;
+    this.bubbleShellInst.renderOrder = 3;
     this.reefScene.add(this.bubbleShellInst);
 
     this.seedGemInst = new THREE.InstancedMesh(
-      new THREE.OctahedronGeometry(0.26, 0),
-      new THREE.MeshStandardMaterial({
-        color: '#fde047',
-        emissive: '#f59e0b',
-        emissiveIntensity: 1.15,
-        roughness: 0.15,
-        metalness: 0.55,
-      }),
+      new THREE.OctahedronGeometry(0.28, 0),
+      new THREE.MeshStandardMaterial({ color: '#fef08a', emissive: '#fbbf24', emissiveIntensity: 1.35, roughness: 0.14 }),
       24
     );
     this.seedGemInst.frustumCulled = false;
     this.reefScene.add(this.seedGemInst);
 
-    // Gateway's Hydro-Pulse Shots
     this.pulseInst = new THREE.InstancedMesh(
       new THREE.IcosahedronGeometry(0.24, 1),
-      new THREE.MeshStandardMaterial({
-        color: '#e0f2fe',
-        emissive: '#22d3ee',
-        emissiveIntensity: 1.5,
-        roughness: 0.1,
-      }),
+      new THREE.MeshStandardMaterial({ color: '#e0fcff', emissive: '#22d3ee', emissiveIntensity: 1.65, roughness: 0.10 }),
       MAX_PULSES
     );
     this.pulseInst.frustumCulled = false;
     this.reefScene.add(this.pulseInst);
 
-    // Sculpted Translucent Ribbed Bioluminescent Medusa Jellyfish (Lathe umbrella bell + 6 trailing tentacles — ZERO opaque pink gumballs!)
-    const bellPts = [
-      new THREE.Vector2(0.001, 0.34),
-      new THREE.Vector2(0.14, 0.32),
-      new THREE.Vector2(0.28, 0.24),
-      new THREE.Vector2(0.36, 0.10),
+    // Sculpted Fluted Translucent Bioluminescent Jellyfish Bell + Graceful Oral Tentacle Skirt
+    const jellyProfile = [
+      new THREE.Vector2(0.0, 0.36),
+      new THREE.Vector2(0.20, 0.34),
+      new THREE.Vector2(0.36, 0.24),
+      new THREE.Vector2(0.42, 0.08),
       new THREE.Vector2(0.38, -0.02),
-      new THREE.Vector2(0.31, -0.06),
-      new THREE.Vector2(0.20, 0.02),
+      new THREE.Vector2(0.26, 0.04),
+      new THREE.Vector2(0.18, -0.14),
+      new THREE.Vector2(0.14, -0.34),
+      new THREE.Vector2(0.06, -0.44),
+      new THREE.Vector2(0.0, -0.32),
     ];
-    const bellGeo = new THREE.LatheGeometry(bellPts, 18);
-    const jbPos = bellGeo.attributes.position;
-    for (let i = 0; i < jbPos.count; i++) {
-      const vx = jbPos.getX(i), vy = jbPos.getY(i), vz = jbPos.getZ(i);
-      const ang = Math.atan2(vz, vx);
-      const rib = 1.0 + 0.09 * Math.sin(ang * 9);
-      jbPos.setXYZ(i, vx * rib, vy, vz * rib);
+    const jellyGeo = new THREE.LatheGeometry(jellyProfile, 16);
+    const jPos = jellyGeo.attributes.position;
+    for (let i = 0; i < jPos.count; i++) {
+      const x = jPos.getX(i), y = jPos.getY(i), z = jPos.getZ(i);
+      const ang = Math.atan2(z, x);
+      const rad = Math.hypot(x, z);
+      const flute = y < 0.16 && rad > 0.08 ? 1.0 + Math.sin(ang * 8.0) * (y < -0.05 ? 0.24 : 0.09) : 1.0;
+      jPos.setXYZ(i, x * flute, y, z * flute);
     }
-    bellGeo.computeVertexNormals();
-    const jellyParts = [bellGeo];
-    for (let t = 0; t < 6; t++) {
-      const ta = (t / 6) * TAU;
-      const tr = 0.14 + (t % 2) * 0.08;
-      const tent = new THREE.CylinderGeometry(0.018, 0.004, 0.58 + (t % 3) * 0.14, 5, 4);
-      const tp = tent.attributes.position;
-      for (let k = 0; k < tp.count; k++) {
-        const ty = tp.getY(k);
-        tp.setX(k, tp.getX(k) + Math.sin(ty * 9 + t) * 0.045);
-        tp.setZ(k, tp.getZ(k) + Math.cos(ty * 8 + t) * 0.045);
-      }
-      tent.translate(Math.cos(ta) * tr, -0.30, Math.sin(ta) * tr);
-      tent.computeVertexNormals();
-      jellyParts.push(tent);
-    }
-    const jellyGeo = mergeBufferGeos(jellyParts);
+    jellyGeo.computeVertexNormals();
     this.jellyInst = new THREE.InstancedMesh(
       jellyGeo,
       new THREE.MeshStandardMaterial({
-        color: '#67e8f9',
-        emissive: '#4f46e5',
-        emissiveIntensity: 0.65,
-        roughness: 0.08,
-        metalness: 0.12,
+        color: '#fbcfe8',
+        emissive: '#d946ef',
+        emissiveIntensity: 0.72,
+        roughness: 0.14,
         transparent: true,
-        opacity: 0.54,
+        opacity: 0.56,
         side: THREE.DoubleSide,
         depthWrite: false,
       }),
@@ -2004,145 +973,129 @@ function createFeatheredSnellTex(size = 256) {
     this.jellyInst.frustumCulled = false;
     this.reefScene.add(this.jellyInst);
 
-    // Siphon Surge Mines + Anchor Chains
+    // Mines & Anchor Chains
+    const fbMineGeo = new THREE.DodecahedronGeometry(0.46, 0);
+    const fbMineMat = new THREE.MeshStandardMaterial({ color: '#5c4036', emissive: '#b91c1c', emissiveIntensity: 0.35, roughness: 0.38, metalness: 0.78 });
     this.minePool = [];
-    this.mineFallbackGeo = new THREE.IcosahedronGeometry(0.42, 1);
-    this.mineFallbackMat = new THREE.MeshStandardMaterial({
-      color: '#334155',
-      emissive: '#f97316',
-      emissiveIntensity: 0.35,
-      metalness: 0.8,
-      roughness: 0.35,
-    });
     for (let i = 0; i < MAX_MINES; i++) {
       const g = new THREE.Group();
-      const fb = new THREE.Mesh(this.mineFallbackGeo, this.mineFallbackMat);
+      const fb = new THREE.Mesh(fbMineGeo, fbMineMat);
       g.add(fb);
       g.visible = false;
       this.reefScene.add(g);
-      this.minePool.push({ group: g, fallback: fb, glbLoaded: false });
+      this.minePool.push({ group: g, fallback: fb });
     }
-
     this.chainInst = new THREE.InstancedMesh(
-      new THREE.CylinderGeometry(0.035, 0.035, 0.26, 6),
-      new THREE.MeshStandardMaterial({ color: '#475569', metalness: 0.8, roughness: 0.4 }),
+      new THREE.TorusGeometry(0.08, 0.025, 5, 10),
+      new THREE.MeshStandardMaterial({ color: '#645448', roughness: 0.55, metalness: 0.75 }),
       MAX_CHAINS
     );
     this.chainInst.frustumCulled = false;
     this.reefScene.add(this.chainInst);
 
-    // Luminous Crystal Glass Critter Rescue Orbs (`sea_turtle.glb` & `river_otter.glb`)
-    for (let i = 0; i < MAX_CAGES; i++) {
-      const slot = this._createCageSlot();
-      slot.root.visible = false;
-      this.reefScene.add(slot.root);
-      this.cagePool.push(slot);
-    }
-
-    // Tidal Pearl Clams & Geyser Bubble Vents
-    this.clamGroup = new THREE.Group();
+    // Sculpted Fluted Giant Pearl Clams (double-sided ribbed valves cleanly joined at hinge!)
     this.clamSlots = [];
-    const shellMat = new THREE.MeshStandardMaterial({ color: '#fbcfe8', roughness: 0.42, metalness: 0.15 });
-    const pearlMat = new THREE.MeshStandardMaterial({
-      color: '#ffffff',
-      emissive: '#f9a8d4',
-      emissiveIntensity: 0.9,
-      roughness: 0.08,
+    const shellGeo = new THREE.SphereGeometry(0.46, 16, 10, 0, TAU, 0, Math.PI * 0.44);
+    const sPos = shellGeo.attributes.position;
+    for (let i = 0; i < sPos.count; i++) {
+      const x = sPos.getX(i), y = sPos.getY(i), z = sPos.getZ(i);
+      const ang = Math.atan2(z, x);
+      const rib = 1.0 + Math.sin(ang * 9.0) * 0.08;
+      sPos.setXYZ(i, x * 1.15 * rib, y * 0.68, z * rib);
+    }
+    shellGeo.computeVertexNormals();
+    const shellMat = new THREE.MeshStandardMaterial({
+      color: '#f2d9c6',
+      emissive: '#382436',
+      emissiveIntensity: 0.16,
+      roughness: 0.42,
+      metalness: 0.08,
+      side: THREE.DoubleSide,
     });
+    const pearlMat = new THREE.MeshStandardMaterial({ color: '#fffbeb', emissive: '#fde047', emissiveIntensity: 1.30, roughness: 0.08 });
     for (let i = 0; i < MAX_CLAMS; i++) {
       const root = new THREE.Group();
-      const bot = new THREE.Mesh(new THREE.SphereGeometry(0.36, 12, 8, 0, TAU, Math.PI * 0.5, Math.PI * 0.5), shellMat);
+      const bot = new THREE.Mesh(shellGeo, shellMat);
+      bot.rotation.x = Math.PI;
+      bot.position.y = 0.02;
       const topPiv = new THREE.Group();
-      topPiv.position.set(0, 0.02, -0.25);
-      const top = new THREE.Mesh(new THREE.SphereGeometry(0.36, 12, 8, 0, TAU, 0, Math.PI * 0.5), shellMat);
-      top.position.set(0, 0, 0.25);
+      topPiv.position.set(0, 0.02, -0.32);
+      const top = new THREE.Mesh(shellGeo, shellMat);
+      top.position.set(0, 0, 0.32);
       topPiv.add(top);
-      const pearl = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 10), pearlMat);
-      pearl.position.y = 0.08;
+      const pearl = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 10), pearlMat);
+      pearl.position.set(0, 0.08, 0.04);
       root.add(bot, topPiv, pearl);
       root.visible = false;
-      this.clamGroup.add(root);
+      this.reefScene.add(root);
       this.clamSlots.push({ root, topPiv, pearl });
     }
-    this.reefScene.add(this.clamGroup);
 
-    this.ventMat = new THREE.MeshStandardMaterial({
-      color: '#a8b8b2',
-      map: this.reefStoneTex,
-      emissive: '#0c4a6e',
-      emissiveIntensity: 0.14,
-      roughness: 0.84,
-      metalness: 0.04,
-    });
-    // Sculpted organic multi-lobe limestone coral boulder cluster (ZERO 6-sided grey pyramid cones!)
-    const ventGeo = buildCraggyReefRidgeGeo(0.72, 0.54, 4219);
-    this.ventInst = new THREE.InstancedMesh(ventGeo, this.ventMat, MAX_VENTS);
+    // Sculpted Organic Limestone Hydrothermal Geyser Chimney (ZERO flat cylinder primitive!)
+    const ventProfile = [
+      new THREE.Vector2(0.88, -0.58),
+      new THREE.Vector2(0.82, -0.25),
+      new THREE.Vector2(0.68, 0.08),
+      new THREE.Vector2(0.56, 0.38),
+      new THREE.Vector2(0.46, 0.54),
+      new THREE.Vector2(0.30, 0.44),
+      new THREE.Vector2(0.24, 0.18),
+    ];
+    const ventGeo = new THREE.LatheGeometry(ventProfile, 14);
+    const vPos = ventGeo.attributes.position;
+    for (let i = 0; i < vPos.count; i++) {
+      const x = vPos.getX(i), y = vPos.getY(i), z = vPos.getZ(i);
+      const ang = Math.atan2(z, x);
+      const crag = 1.0 + Math.sin(ang * 5.0 + y * 3.8) * 0.12 + Math.cos(ang * 3.0 - y * 5.2) * 0.08;
+      vPos.setXYZ(i, x * crag, y, z * crag);
+    }
+    ventGeo.computeVertexNormals();
+    this.ventInst = new THREE.InstancedMesh(
+      ventGeo,
+      new THREE.MeshStandardMaterial({ color: '#2b5254', emissive: '#0d9488', emissiveIntensity: 0.18, roughness: 0.86 }),
+      MAX_VENTS
+    );
     this.ventInst.frustumCulled = false;
     this.reefScene.add(this.ventInst);
 
-    // Coral Sanctuary Grotto Arch (`warp_cavern.glb`) & Next Spire Column
+    // Coral Sanctuary Grotto Portal (`warpCave`) & Arrival Spire
     this.grottoGroup = new THREE.Group();
-    const grottoPortal = new THREE.Mesh(
-      new THREE.CircleGeometry(0.95, 24),
-      new THREE.MeshBasicMaterial({
-        color: '#5efce8',
-        transparent: true,
-        opacity: 0.58,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      })
-    );
     const grottoRim = new THREE.Mesh(
-      new THREE.TorusGeometry(1.02, 0.18, 10, 24),
-      new THREE.MeshStandardMaterial({ color: '#64748b', roughness: 0.65 })
+      new THREE.TorusGeometry(1.35, 0.24, 10, 24),
+      new THREE.MeshStandardMaterial({ color: '#d6a45c', roughness: 0.35, metalness: 0.78 })
     );
-    this.grottoGroup.add(grottoPortal, grottoRim);
-    this.grottoGroup.userData = { grottoPortal, grottoRim };
+    const grottoPortal = new THREE.Mesh(
+      new THREE.CircleGeometry(1.22, 24),
+      new THREE.MeshBasicMaterial({ color: '#5efce8', transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false })
+    );
+    this.grottoGroup.add(grottoRim, grottoPortal);
+    this.grottoGroup.userData = { grottoRim, grottoPortal };
     this.grottoGroup.visible = false;
     this.reefScene.add(this.grottoGroup);
 
     this.arrivalSpire = new THREE.Group();
-    const spireCol = new THREE.Mesh(
-      new THREE.CylinderGeometry(2.4, 2.7, 22, 20),
-      new THREE.MeshStandardMaterial({ color: '#475569', roughness: 0.52, metalness: 0.22 })
+    const arrCol = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.8, 2.3, 14, 16),
+      new THREE.MeshStandardMaterial({ color: '#c4b89c', roughness: 0.70, metalness: 0.10 })
     );
-    const spireVein = new THREE.Mesh(
-      new THREE.CylinderGeometry(2.44, 2.74, 22, 12, 1, true),
-      new THREE.MeshBasicMaterial({ color: '#38bdf8', wireframe: true, transparent: true, opacity: 0.35 })
-    );
-    this.arrivalSpire.add(spireCol, spireVein);
+    this.arrivalSpire.add(arrCol);
     this.arrivalSpire.visible = false;
     this.reefScene.add(this.arrivalSpire);
 
-    // Shockwave Rings, Underwater Bubbles/Sparkles & Score Popups
+    // Shockwave Rings, Rising Glassy Micro-Bubbles & Popups
     this.ringInst = new THREE.InstancedMesh(
-      new THREE.TorusGeometry(1, 0.045, 8, 28),
-      new THREE.MeshBasicMaterial({
-        color: '#ffffff',
-        transparent: true,
-        opacity: 0.72,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      }),
+      new THREE.TorusGeometry(1.0, 0.055, 8, 28),
+      new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.72, blending: THREE.AdditiveBlending, depthWrite: false }),
       MAX_RINGS
     );
-    this.ringInst.frustumCulled = false;
-    this.reefScene.add(this.ringInst);
-
     this.particleInst = new THREE.InstancedMesh(
-      new THREE.PlaneGeometry(0.18, 0.18),
-      new THREE.MeshBasicMaterial({
-        map: this.bubbleRimTex,
-        color: '#dff8ff',
-        transparent: true,
-        opacity: 0.48,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      }),
+      new THREE.PlaneGeometry(0.32, 0.32),
+      new THREE.MeshBasicMaterial({ map: this.bubbleTex, color: '#ffffff', transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }),
       MAX_PARTICLES
     );
+    this.ringInst.frustumCulled = false;
     this.particleInst.frustumCulled = false;
-    this.reefScene.add(this.particleInst);
+    this.reefScene.add(this.ringInst, this.particleInst);
 
     this.popupPool = [];
     for (let i = 0; i < MAX_POPUPS; i++) {
@@ -2152,35 +1105,22 @@ function createFeatheredSnellTex(size = 256) {
       this.popupPool.push({ sprite: sp, key: '' });
     }
 
-    // Joyous Rescued Critter Escort Pool (up to 4 companions swimming right alongside Gateway!)
-    this.escortPool = [];
-    for (let i = 0; i < 4; i++) {
-      const es = this._createCageSlot();
-      es.cageGroup.visible = false;
-      es.root.visible = false;
-      this.reefScene.add(es.root);
-      this.escortPool.push(es);
-    }
-
-    // Pre-allocate `instanceColor` & matrix slot 0 upfront on all colored InstancedMeshes
-    // so ANGLE D3D11 never triggers a mid-run shader recompile on first `setColorAt()`!
-    this._col.set('#ffffff');
+    // Pre-allocate `instanceColor` upfront on colored InstancedMeshes to avoid D3D11 stalls!
     this._dummy.position.set(0, 0, 0);
     this._dummy.rotation.set(0, 0, 0);
     this._dummy.scale.setScalar(1);
     this._dummy.updateMatrix();
+    this._col.set('#ffffff');
     for (const im of [
       this.rayInst,
       this.currentStreakInst,
       this.slipRingInst,
-      this.boostRingInst,
       this.fishInst1,
       this.fishInst2,
       this.ambFishInst,
       this.ringInst,
       this.particleInst,
     ]) {
-      if (!im) continue;
       im.setMatrixAt(0, this._dummy.matrix);
       im.setColorAt(0, this._col);
       im.instanceMatrix.needsUpdate = true;
@@ -2188,479 +1128,87 @@ function createFeatheredSnellTex(size = 256) {
     }
   }
 
-  _createCageSlot() {
-    const root = new THREE.Group();
-    const cageGroup = new THREE.Group();
-
-    // Luminous Crystal Glass Critter Rescue Orb (ZERO black wireframe birdcages or skinny poles!)
-    const glassOrb = new THREE.Mesh(
-      new THREE.SphereGeometry(0.68, 20, 14),
-      new THREE.MeshStandardMaterial({
-        color: '#e0fbff',
-        emissive: '#38bdf8',
-        emissiveIntensity: 0.35,
-        roughness: 0.06,
-        metalness: 0.12,
-        transparent: true,
-        opacity: 0.30,
-        depthWrite: false,
-      })
-    );
-    const ringMat1 = new THREE.MeshStandardMaterial({
-      color: '#fbbf24',
-      emissive: '#f59e0b',
-      emissiveIntensity: 1.25,
-      metalness: 0.72,
-      roughness: 0.22,
-    });
-    const ringMat2 = new THREE.MeshStandardMaterial({
-      color: '#5efce8',
-      emissive: '#22d3ee',
-      emissiveIntensity: 1.35,
-      metalness: 0.55,
-      roughness: 0.20,
-    });
-    const energyRing1 = new THREE.Mesh(new THREE.TorusGeometry(0.72, 0.036, 8, 28), ringMat1);
-    energyRing1.rotation.x = Math.PI * 0.38;
-    const energyRing2 = new THREE.Mesh(new THREE.TorusGeometry(0.74, 0.030, 8, 28), ringMat2);
-    energyRing2.rotation.set(Math.PI * 0.62, Math.PI * 0.35, 0);
-    const lockGem = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.14, 0),
-      new THREE.MeshStandardMaterial({
-        color: '#fef08a',
-        emissive: '#f59e0b',
-        emissiveIntensity: 1.75,
-        roughness: 0.10,
-      })
-    );
-    lockGem.position.set(0, 0.72, 0);
-    cageGroup.add(glassOrb, energyRing1, energyRing2, lockGem);
-
-    const turtleGroup = new THREE.Group();
-    const fbTurtle = new THREE.Mesh(
-      new THREE.SphereGeometry(0.38, 12, 8),
-      new THREE.MeshStandardMaterial({ color: '#34d399', emissive: '#065f46', emissiveIntensity: 0.35, roughness: 0.34 })
-    );
-    fbTurtle.scale.set(1.2, 0.48, 0.95);
-    turtleGroup.add(fbTurtle);
-
-    const otterGroup = new THREE.Group();
-    const fbOtter = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.16, 0.52, 6, 10),
-      new THREE.MeshStandardMaterial({ color: '#c4834c', emissive: '#451a03', emissiveIntensity: 0.25, roughness: 0.48 })
-    );
-    fbOtter.rotation.z = Math.PI * 0.5;
-    otterGroup.add(fbOtter);
-
-    root.add(cageGroup, turtleGroup, otterGroup);
-    return {
-      root,
-      cageGroup,
-      energyRing1,
-      energyRing2,
-      turtleGroup,
-      otterGroup,
-      flipperL: null,
-      flipperR: null,
-      otterTail: null,
-    };
-  }
-
-  // ============================================================================
-  // 2. REACTOR CORE DESCENT 3D SCENE (`core_descent`)
-  // ============================================================================
-
-  _initCoreDescentScene() {
-    this.coreScene = new THREE.Scene();
-    this.coreScene.background = new THREE.Color('#0a2e4a');
-    this.coreScene.fog = new THREE.FogExp2('#0d3b5c', 0.023);
-    if (this.envTex) {
-      this.coreScene.environment = this.envTex;
-      this.coreScene.environmentIntensity = 0.92;
-    }
-
-    this.coreCam = new THREE.PerspectiveCamera(56, this.width / Math.max(1, this.height), 0.2, 145);
-
-    // Vivid 3-zone Pelagian Hydro-Reactor Lighting: radiant sunlit top intake + warm antique-bronze rim + glowing cyan core fill!
-    this.coreHemi = new THREE.HemisphereLight('#7dd3fc', '#164663', 1.38);
-    this.coreScene.add(this.coreHemi);
-
-    this.coreShaftLight = new THREE.DirectionalLight('#fff3d6', 2.15);
-    this.coreShaftLight.position.set(6, 14, 9);
-    this.coreScene.add(this.coreShaftLight);
-
-    this.coreWarmRim = new THREE.DirectionalLight('#fbbf24', 1.55);
-    this.coreWarmRim.position.set(-7, -4, 7);
-    this.coreScene.add(this.coreWarmRim);
-
-    this.coreHeroLight = new THREE.PointLight('#5efce8', 2.25, 16);
-    this.coreScene.add(this.coreHeroLight);
-
-    // Studio-Painted Underwater Reactor Chamber Abyss Backdrop (`assets/textures/mg_bg_core_reactor.webp`)
-    this.coreAbyssMat = new THREE.MeshBasicMaterial({
-      color: '#a8e4f5',
-      map: this.backdropTex,
-      fog: false,
-      depthWrite: false,
-    });
-    this.coreAbyssBackdrop = new THREE.Mesh(new THREE.PlaneGeometry(24, 15), this.coreAbyssMat);
-    this.coreAbyssBackdrop.rotation.x = -Math.PI * 0.5;
-    this.coreAbyssBackdrop.position.set(0, -44, 0);
-    this.coreScene.add(this.coreAbyssBackdrop);
-
-    // Looping 360° Illuminated Pelagian Basalt & Gleaming Antique-Bronze Flooded Reactor Shaft
-    this.shaftRings = [];
-    const glassWallGeo = new THREE.CylinderGeometry(3.48, 3.48, 5.8, 24, 1, true);
-    this.coreWallMat = new THREE.MeshStandardMaterial({
-      color: '#25708a',
-      map: this.causticTex,
-      emissive: '#0c4e68',
-      emissiveMap: this.causticTex,
-      emissiveIntensity: 0.62,
-      roughness: 0.44,
-      metalness: 0.24,
-      side: THREE.BackSide,
-    });
-    const bronzeRingGeo = new THREE.TorusGeometry(3.40, 0.20, 10, 32);
-    bronzeRingGeo.rotateX(Math.PI * 0.5);
-    this.coreBronzeMat = new THREE.MeshStandardMaterial({
-      color: '#cf974e',
-      emissive: '#3b2108',
-      emissiveIntensity: 0.26,
-      roughness: 0.26,
-      metalness: 0.86,
-    });
-    this.coreCopperMat = new THREE.MeshStandardMaterial({
-      color: '#d97a46',
-      emissive: '#3b1808',
-      emissiveIntensity: 0.26,
-      roughness: 0.26,
-      metalness: 0.84,
-    });
-    // Thick, vividly glowing bioluminescent cyan Pelagian hydro-conduit rings & ribs (blooms richly under PostFX!)
-    const conduitGlowGeo = new THREE.TorusGeometry(3.30, 0.088, 10, 36);
-    conduitGlowGeo.rotateX(Math.PI * 0.5);
-    this.conduitGlowMat = new THREE.MeshStandardMaterial({
-      color: '#7df9ff',
-      emissive: '#22d3ee',
-      emissiveIntensity: 1.95,
-      roughness: 0.16,
-      metalness: 0.30,
-    });
-
-    // Instanced Shaft Wall, Gleaming Bronze Bulkheads & Luminous Cyan Energy Conduits
-    this.shaftWallInst = new THREE.InstancedMesh(glassWallGeo, this.coreWallMat, MAX_CORE_RINGS);
-    this.shaftRingInst = new THREE.InstancedMesh(bronzeRingGeo, this.coreBronzeMat, MAX_CORE_RINGS);
-    this.shaftGlowInst = new THREE.InstancedMesh(conduitGlowGeo, this.conduitGlowMat, MAX_CORE_RINGS);
-    for (const im of [this.shaftWallInst, this.shaftRingInst, this.shaftGlowInst]) {
-      im.frustumCulled = false;
-      this.coreScene.add(im);
-    }
-
-    // 8 continuous riveted bronze structural tunnel ribs + 4 bold bioluminescent conduit columns
-    const ribGeo = new THREE.CylinderGeometry(0.15, 0.15, 165, 6);
-    const ribInst = new THREE.InstancedMesh(ribGeo, this.coreBronzeMat, 8);
-    const stripGeo = new THREE.CylinderGeometry(0.068, 0.068, 165, 6);
-    const stripInst = new THREE.InstancedMesh(stripGeo, this.conduitGlowMat, 4);
-    for (let r = 0; r < 8; r++) {
-      const ang = (r / 8) * TAU;
-      this._dummy.position.set(Math.cos(ang) * 3.40, -68, Math.sin(ang) * 3.40);
-      this._dummy.rotation.set(0, -ang, 0);
-      this._dummy.scale.setScalar(1);
-      this._dummy.updateMatrix();
-      ribInst.setMatrixAt(r, this._dummy.matrix);
-      if (r % 2 === 0) {
-        const a2 = ang + 0.39;
-        this._dummy.position.set(Math.cos(a2) * 3.36, -68, Math.sin(a2) * 3.36);
-        this._dummy.rotation.set(0, -a2, 0);
-        this._dummy.updateMatrix();
-        stripInst.setMatrixAt(r >> 1, this._dummy.matrix);
-      }
-    }
-    ribInst.instanceMatrix.needsUpdate = true;
-    stripInst.instanceMatrix.needsUpdate = true;
-    this.coreScene.add(ribInst, stripInst);
-
-    // Load studio reactor backdrop + sculpted stone & bronze PBR maps for the shaft
-    loadSubWebp('assets/textures/mg_bg_core_reactor.webp', true, 1, 1, (t) => {
-      if (this._disposed) return;
-      this.coreBgWebp = t;
-      this.coreAbyssMat.map = t;
-      this.coreAbyssMat.needsUpdate = true;
-    });
-    loadSubWebp('assets/textures/arch_storm_basalt_albedo.webp', true, 4, 2, (t) => {
-      if (this._disposed) return;
-      this.coreWallMat.map = t;
-      this.coreWallMat.color.set('#3886a3');
-      this.coreWallMat.needsUpdate = true;
-    });
-    loadSubWebp('assets/textures/arch_storm_basalt_normal.webp', false, 4, 2, (t) => {
-      if (this._disposed) return;
-      this.coreWallMat.normalMap = t;
-      this.coreWallMat.normalScale.set(1.35, 1.35);
-      this.coreWallMat.needsUpdate = true;
-    });
-    loadSubWebp('assets/textures/arch_antique_bronze_albedo.webp', true, 3, 1, (t) => {
-      if (this._disposed) return;
-      this.coreBronzeMat.map = t;
-      this.coreBronzeMat.needsUpdate = true;
-    });
-    loadSubWebp('assets/textures/arch_antique_bronze_normal.webp', false, 3, 1, (t) => {
-      if (this._disposed) return;
-      this.coreBronzeMat.normalMap = t;
-      this.coreBronzeMat.normalScale.set(1.25, 1.25);
-      this.coreBronzeMat.needsUpdate = true;
-    });
-
-    // Gateway 2.0 Headfirst Torpedo Dive Rig + Corkscrew Hydro-Drill Cone + Shatter Shockwave Ring
-    this.coreHeroAnchor = new THREE.Group();
-    this.coreHero = new GatewayRig(this.skinId);
-    this.coreHeroInner = new THREE.Group();
-    this.coreHeroInner.rotation.set(0.19, 0, 0);
-    this.coreHeroInner.scale.setScalar(1.26);
-    this.coreHeroInner.position.set(0, 0.22, -0.30);
-    this.coreHeroInner.add(this.coreHero.group);
-    this.coreHeroAnchor.add(this.coreHeroInner);
-
-    this.coreWhipRing = new THREE.Mesh(
-      new THREE.TorusGeometry(0.98, 0.08, 10, 30),
-      new THREE.MeshBasicMaterial({
-        color: '#5efce8',
-        transparent: true,
-        opacity: 0,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      })
-    );
-    this.coreWhipRing.rotation.x = Math.PI * 0.5;
-    this.coreHeroAnchor.add(this.coreWhipRing);
-
-    const drillConeGeo = new THREE.ConeGeometry(0.92, 2.55, 16, 1, true);
-    drillConeGeo.rotateX(Math.PI);
-    drillConeGeo.translate(0, -0.35, 0);
-    this.coreDrillCone = new THREE.Mesh(
-      drillConeGeo,
-      new THREE.MeshBasicMaterial({
-        map: this.beamGradTex,
-        color: '#67e8f9',
-        transparent: true,
-        opacity: 0,
-        blending: THREE.AdditiveBlending,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      })
-    );
-    this.coreHeroAnchor.add(this.coreDrillCone);
-    this.coreScene.add(this.coreHeroAnchor);
-
-    // Expanding Turquoise Harmonic Shockwave Ring lighting the shaft on Siphon Crystal shatter!
-    this.coreShatterWave = new THREE.Mesh(
-      new THREE.TorusGeometry(1.0, 0.11, 10, 36),
-      new THREE.MeshBasicMaterial({
-        color: '#5efce8',
-        transparent: true,
-        opacity: 0,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      })
-    );
-    this.coreShatterWave.rotation.x = Math.PI * 0.5;
-    this.coreShatterWave.visible = false;
-    this.coreScene.add(this.coreShatterWave);
-
-    // Spinning Hydro-Turbine Rotors (`reactor_turbine`) — weathered antique-bronze + soft translucent sea-glass core!
-    this.coreSeaGlassMat = new THREE.MeshStandardMaterial({
-      color: '#156c7a',
-      emissive: '#0a4d5c',
-      emissiveIntensity: 0.32,
-      roughness: 0.22,
-      metalness: 0.22,
-      transparent: true,
-      opacity: 0.44,
-    });
-    this.turbineSlots = [];
-    const curvedBladeGeo = buildCurvedHydrofoilBladeGeo();
-    const fbHubGeo = new THREE.CylinderGeometry(0.46, 0.62, 0.44, 16);
-    fbHubGeo.rotateX(Math.PI * 0.5);
-    const fbStatorGeo = new THREE.TorusGeometry(0.64, 0.07, 8, 20);
-    const fbCoreGeo = new THREE.CylinderGeometry(0.28, 0.28, 0.48, 14);
-    fbCoreGeo.rotateX(Math.PI * 0.5);
-    const fbShroudGeo = new THREE.TorusGeometry(2.44, 0.14, 8, 28);
-    for (let i = 0; i < MAX_CORE_TURBINES; i++) {
-      const g = new THREE.Group();
-      const fb = new THREE.Group();
-      fb.add(new THREE.Mesh(fbHubGeo, this.coreBronzeMat));
-      fb.add(new THREE.Mesh(fbStatorGeo, this.coreBronzeMat));
-      fb.add(new THREE.Mesh(fbCoreGeo, this.coreSeaGlassMat));
-      fb.add(new THREE.Mesh(fbShroudGeo, this.coreBronzeMat));
-      for (let b = 0; b < 5; b++) {
-        const ba = (b / 5) * TAU;
-        const blade = new THREE.Mesh(curvedBladeGeo, b % 2 === 0 ? this.coreBronzeMat : this.coreCopperMat);
-        blade.rotation.set(0.30 * Math.cos(ba), 0.30 * Math.sin(ba), ba);
-        fb.add(blade);
-      }
-      fb.rotation.x = Math.PI * 0.5;
-      g.add(fb);
-      g.visible = false;
-      this.coreScene.add(g);
-      this.turbineSlots.push({ group: g, fallback: fb });
-    }
-
-    // Siphon Crystal Core Locks (`siphon_crystal_lock`)
-    this.lockSlots = [];
-    const lockCrystalMat = new THREE.MeshStandardMaterial({
-      color: '#fb7185',
-      emissive: '#f43f5e',
-      emissiveIntensity: 1.65,
-      roughness: 0.12,
-    });
-    for (let i = 0; i < MAX_CORE_LOCKS; i++) {
-      const g = new THREE.Group();
-      const fb = new THREE.Mesh(new THREE.OctahedronGeometry(0.58, 0), lockCrystalMat);
-      g.add(fb);
-      g.visible = false;
-      this.coreScene.add(g);
-      this.lockSlots.push({ group: g, fallback: fb });
-    }
-
-    // Bedrock Harmonic Seed Lotus Anchor (`harmonic_seed_anchor`) + Purification Eruption Beam
-    this.seedAnchorGroup = new THREE.Group();
-    const fbLotus = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.5, 1.9, 0.45, 16),
-      new THREE.MeshStandardMaterial({ color: '#e6f7f5', roughness: 0.22, metalness: 0.3 })
-    );
-    const eruptionBeam = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.85, 1.65, 45, 20, 1, true),
-      new THREE.MeshBasicMaterial({
-        color: '#5efce8',
-        transparent: true,
-        opacity: 0,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      })
-    );
-    eruptionBeam.position.y = 22.5;
-    this.seedAnchorGroup.add(fbLotus, eruptionBeam);
-    this.seedAnchorGroup.userData = { fbLotus, eruptionBeam };
-    this.seedAnchorGroup.visible = false;
-    this.coreScene.add(this.seedAnchorGroup);
-
-    // Hair-thin low-opacity peripheral air-rush streaks (STRICTLY near outer shaft wall — ZERO thick center beams/planks!)
-    this.streakInst = new THREE.InstancedMesh(
-      new THREE.CylinderGeometry(0.005, 0.013, 1.55, 5),
-      new THREE.MeshBasicMaterial({
-        color: '#38bdf8',
-        transparent: true,
-        opacity: 0.18,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      }),
-      MAX_CORE_STREAKS
-    );
-    this.streakInst.frustumCulled = false;
-    this.coreScene.add(this.streakInst);
-
-    // Faceted 3D double-ended rose-quartz crystal shards (14 pieces max flying outward — ZERO flat solid-pink confetti!)
-    this.coreShardInst = new THREE.InstancedMesh(
-      buildFacetedCrystalShardGeo(),
-      new THREE.MeshStandardMaterial({
-        color: '#e11d48',
-        emissive: '#881337',
-        emissiveIntensity: 0.45,
-        roughness: 0.08,
-        metalness: 0.35,
-        flatShading: true,
-        transparent: true,
-        opacity: 0.88,
-      }),
-      16
-    );
-    this.coreShardInst.frustumCulled = false;
-    this.coreShardInst.count = 0;
-    this.coreScene.add(this.coreShardInst);
-    this._lastCoreSmashed = 0;
-    this._shardBurstT = 0;
-    this._shardOrigin = { x: 0, y: 0, z: 0 };
-
-    // Soft translucent sea-glass hydro-boost rings (replaces stark white emissive ring at tunnel center!)
-    this.coreBoostRingInst = new THREE.InstancedMesh(
-      new THREE.TorusGeometry(0.62, 0.055, 8, 24),
-      new THREE.MeshStandardMaterial({
-        color: '#228b99',
-        emissive: '#0d6e7d',
-        emissiveIntensity: 0.34,
-        roughness: 0.26,
-        metalness: 0.42,
-        transparent: true,
-        opacity: 0.42,
-        depthWrite: false,
-      }),
-      16
-    );
-    this.coreBoostRingInst.frustumCulled = false;
-    this.coreScene.add(this.coreBoostRingInst);
-
-    this.coreDivePulseInst = new THREE.InstancedMesh(
-      new THREE.IcosahedronGeometry(0.24, 1),
-      new THREE.MeshStandardMaterial({
-        color: '#ffffff',
-        emissive: '#38bdf8',
-        emissiveIntensity: 1.75,
-        roughness: 0.08,
-      }),
-      16
-    );
-    this.coreDivePulseInst.frustumCulled = false;
-    this.coreScene.add(this.coreDivePulseInst);
-  }
-
-  _applyCoralPbr() {
-    // Apply sunlit `biome_rock_limestone` PBR textures to reef outcrops & boulders while keeping
-    // our porous calcareous coral PBR maps & subsurface rim warmth intact on the coral clusters!
-    for (const m of [this.boulderMat, this.ridgeMat]) {
-      if (!m) continue;
-      if (this.limestoneAlbedo) m.map = this.limestoneAlbedo;
-      if (this.limestoneNormal) {
-        m.normalMap = this.limestoneNormal;
-        m.normalScale.set(1.25, 1.25);
-      }
-      m.roughness = 0.80;
-      m.metalness = 0.04;
-      m.needsUpdate = true;
-    }
-  }
-
-  async _loadGlbProps() {
-    // 100% SUBMARINE-FREE! Gateway swims freely without any vehicle hull or dark wireframe cage!
-    const [mine, grotto, turtle, otter, coreProps] = await Promise.all([
+  async _loadGlbAssets() {
+    // Zero legacy `warp_cavern.glb` reference: Crystal Grotto portal uses sculpted `GrottoArch_Vault` from `env_reef_grotto.glb`!
+    const [kit, mine, turtle, otter, fish1, fish2] = await Promise.all([
+      loadCachedGlb('assets/models/env_reef_grotto.glb'),
       loadCachedGlb('assets/models/sea_mine.glb'),
-      loadCachedGlb('assets/models/warp_cavern.glb'),
       loadCachedGlb('assets/models/sea_turtle.glb'),
       loadCachedGlb('assets/models/river_otter.glb'),
-      loadCachedGlb('assets/models/core_reactor_props.glb'),
+      loadCachedGlb('assets/models/alien_fish_1.glb'),
+      loadCachedGlb('assets/models/alien_fish_2.glb'),
     ]);
     if (this._disposed) return;
 
-    this._applyCoralPbr();
+    if (kit) {
+      const getNode = (n) => kit.getObjectByName(n) || null;
+      const cu = this._causticUniforms;
+      // Seabed, vaulted limestone arches, sunken columns & reef outcrops receive LIVE GLSL CAUSTICS!
+      this._glbPools.seabed = new GlbInstancedAsset(this.reefScene, getNode('SeabedDune_Tile'), 4, cu, 0.72);
+      this._glbPools.grottoArch = new GlbInstancedAsset(this.reefScene, getNode('GrottoArch_Vault'), 8, cu, 0.52);
+      this._glbPools.columnA = new GlbInstancedAsset(this.reefScene, getNode('SunkenColumn_A'), 8, cu, 0.50);
+      this._glbPools.columnB = new GlbInstancedAsset(this.reefScene, getNode('SunkenColumn_B'), 8, cu, 0.50);
+      this._glbPools.outcrop = new GlbInstancedAsset(this.reefScene, getNode('ReefOutcrop_Rock'), 14, cu, 0.58);
+      this._glbPools.amphora = new GlbInstancedAsset(this.reefScene, getNode('SunkenAmphora'), 8, null, 0.0);
+
+      // Upgrade hydrothermal vent chimneys with real sculpted limestone PBR grain from `ReefOutcrop_Rock`!
+      const outcropMat = this._glbPools.outcrop?.meshes?.[0]?.material;
+      if (outcropMat && this.ventInst) {
+        const ventPbr = outcropMat.clone();
+        ventPbr.vertexColors = false;
+        ventPbr.color = new THREE.Color('#6ca29e');
+        ventPbr.emissive = new THREE.Color('#0d9488');
+        ventPbr.emissiveIntensity = 0.16;
+        this.ventInst.material?.dispose?.();
+        this.ventInst.material = ventPbr;
+      }
+
+      // Chunky real 3D sculpted corals & swaying ribbon kelp (fast PBR shading -> locked 60fps D3D11!)
+      this._glbPools.coralStaghorn = new GlbInstancedAsset(this.reefScene, getNode('Coral_Staghorn'), 14, null, 0.0);
+      this._glbPools.coralTable = new GlbInstancedAsset(this.reefScene, getNode('Coral_Table'), 14, null, 0.0);
+      this._glbPools.coralBrain = new GlbInstancedAsset(this.reefScene, getNode('Coral_BrainDome'), 14, null, 0.0);
+      this._glbPools.coralAnemone = new GlbInstancedAsset(this.reefScene, getNode('Coral_Anemone'), 14, null, 0.0);
+      this._glbPools.kelp = new GlbInstancedAsset(this.reefScene, getNode('Kelp_Cluster'), 18, null, 0.0);
+
+      // Chunky 3D antique-bronze & crystal glowing hydro-rings (replaces wireframe hoops!)
+      this._glbPools.hydroRing = new GlbInstancedAsset(this.reefScene, getNode('HydroRing_Reef'), 14, null, 0.0);
+
+      // Mount sculpted Pelagian `HydroRing_Reef` onto the Crystal Grotto Warp Portal (zero legacy warp_cavern.glb!)
+      const grottoRing = getNode('HydroRing_Reef');
+      if (grottoRing && this.grottoGroup?.userData?.grottoRim) {
+        this.grottoGroup.userData.grottoRim.visible = false;
+        const cl = grottoRing.clone(true);
+        cl.scale.setScalar(1.32);
+        this.grottoGroup.add(cl);
+      }
+    }
+
+    // Upgrade tropical fish instanced meshes from real GLBs if available
+    const extractFirstGeo = (sceneObj) => {
+      let found = null;
+      sceneObj?.traverse((o) => {
+        if (!found && o.isMesh && o.geometry) found = o.geometry;
+      });
+      return found;
+    };
+    const f1Geo = extractFirstGeo(fish1);
+    if (f1Geo) {
+      this.fishInst1.geometry = f1Geo;
+      this.ambFishInst.geometry = f1Geo;
+    }
+    const f2Geo = extractFirstGeo(fish2);
+    if (f2Geo) this.fishInst2.geometry = f2Geo;
 
     if (mine) {
       for (const slot of this.minePool) {
         slot.fallback.visible = false;
         const cl = mine.clone(true);
-        cl.scale.setScalar(0.52);
+        cl.scale.setScalar(0.54);
         slot.group.add(cl);
       }
     }
 
-    if (grotto) {
-      this.grottoGroup.userData.grottoRim.visible = false;
-      const cl = grotto.clone(true);
-      cl.scale.setScalar(1.22);
-      this.grottoGroup.add(cl);
-    }
-
-    // Bind brightly lit Sea Turtle & River Otter GLBs into BOTH luminous Crystal Rescue Orbs & Escort Pool!
+    // Brightly lit Sea Turtles & River Otters inside translucent Fresnel rescue bubbles & escorts!
     const brightenCritter = (root, tintHex) => {
       root.traverse((o) => {
         if (!o.isMesh || !o.material) return;
@@ -2669,113 +1217,44 @@ function createFeatheredSnellTex(size = 256) {
           const cm = m.clone();
           if (cm.emissive) {
             cm.emissive.set(tintHex);
-            cm.emissiveIntensity = 0.24;
+            cm.emissiveIntensity = 0.28;
           }
           return cm;
         });
         o.material = Array.isArray(o.material) ? cloned : cloned[0];
       });
     };
-    const allCritterSlots = [...this.cagePool, ...(this.escortPool || [])];
-    for (const slot of allCritterSlots) {
+    const allSlots = [...this.cagePool, ...this.escortPool];
+    for (const slot of allSlots) {
       if (turtle) {
         slot.turtleGroup.clear();
-        const tClone = turtle.clone(true);
-        tClone.scale.setScalar(1.12);
-        brightenCritter(tClone, '#134e4a');
-        slot.flipperL = tClone.getObjectByName('flipper_L') || null;
-        slot.flipperR = tClone.getObjectByName('flipper_R') || null;
-        slot.turtleGroup.add(tClone);
+        const cl = turtle.clone(true);
+        cl.scale.setScalar(1.16);
+        brightenCritter(cl, '#155e58');
+        slot.flipperL = cl.getObjectByName('flipper_L') || null;
+        slot.flipperR = cl.getObjectByName('flipper_R') || null;
+        slot.turtleGroup.add(cl);
       }
       if (otter) {
         slot.otterGroup.clear();
-        const oClone = otter.clone(true);
-        oClone.scale.setScalar(1.12);
-        brightenCritter(oClone, '#451a03');
-        slot.otterTail = oClone.getObjectByName('otter_tail') || null;
-        slot.otterGroup.add(oClone);
+        const cl = otter.clone(true);
+        cl.scale.setScalar(1.16);
+        brightenCritter(cl, '#4d2208');
+        slot.otterTail = cl.getObjectByName('otter_tail') || null;
+        slot.otterGroup.add(cl);
       }
     }
 
-    // Bind `core_reactor_props.glb` (`reactor_turbine`, `siphon_crystal_lock`, `harmonic_seed_anchor`)
-    if (coreProps) {
-      const turbSrc = coreProps.getObjectByName('reactor_turbine');
-      const lockSrc = coreProps.getObjectByName('siphon_crystal_lock');
-      const ancSrc = coreProps.getObjectByName('harmonic_seed_anchor');
-
-      if (turbSrc) {
-        for (const slot of this.turbineSlots) {
-          slot.fallback.visible = false;
-          const cl = turbSrc.clone(true);
-          cl.traverse((o) => {
-            if (!o.isMesh || !o.material) return;
-            const mats = Array.isArray(o.material) ? o.material : [o.material];
-            const replaced = mats.map((m) => {
-              const nm = String(m.name || '').toLowerCase();
-              const isStarkHub =
-                nm.includes('aqua') ||
-                nm.includes('glow') ||
-                nm.includes('pearl') ||
-                nm.includes('white') ||
-                (m.emissive && m.emissive.g > 0.5 && m.emissive.b > 0.5) ||
-                (m.color && m.color.r > 0.72 && m.color.g > 0.72 && m.color.b > 0.72);
-              if (isStarkHub) {
-                return this.coreSeaGlassMat;
-              }
-              if (nm.includes('bronze') && !nm.includes('verdigris')) {
-                return this.coreBronzeMat;
-              }
-              if (nm.includes('verdigris')) {
-                const vm = m.clone();
-                vm.color.set('#4c6b5c');
-                vm.roughness = 0.42;
-                vm.metalness = 0.78;
-                return vm;
-              }
-              if (nm.includes('copper')) {
-                return this.coreCopperMat;
-              }
-              return m;
-            });
-            o.material = Array.isArray(o.material) ? replaced : replaced[0];
-          });
-          cl.position.set(0, 0, 0);
-          cl.rotation.x = Math.PI * 0.5;
-          slot.group.add(cl);
-        }
-      }
-      if (lockSrc) {
-        for (const slot of this.lockSlots) {
-          slot.fallback.visible = false;
-          const cl = lockSrc.clone(true);
-          cl.position.set(0, 0, 0);
-          slot.group.add(cl);
-        }
-      }
-      if (ancSrc) {
-        this.seedAnchorGroup.userData.fbLotus.visible = false;
-        const cl = ancSrc.clone(true);
-        cl.position.set(0, 0, 0);
-        this.seedAnchorGroup.add(cl);
-      }
-    }
     this.prewarm();
   }
 
-  // ============================================================================
-  // 3. RENDER `reef_swim` (GATEWAY CORAL REEF & LAKEBED FREE-SWIM)
-  // ============================================================================
+  renderCoreDescent(state, opts = {}) {
+    // Compatibility fallback if invoked directly (Main GameRenderer handles Core Descent in renderer.js)
+    this.render(state, opts);
+  }
 
   render(stageOrSubOrState, opts = {}) {
     if (this._disposed || !this.webgl || !stageOrSubOrState) return;
-    const isCore = stageOrSubOrState.mode
-      ? stageOrSubOrState.mode === 'core_descent'
-      : Boolean(stageOrSubOrState.coreDescent?.active);
-    if (isCore) {
-      this.renderCoreDescent(stageOrSubOrState, opts);
-      return;
-    }
-
     const stage =
       stageOrSubOrState.reefSwim ||
       stageOrSubOrState.subStage ||
@@ -2787,256 +1266,247 @@ function createFeatheredSnellTex(size = 256) {
     const dt = clamp(time - this._lastTime || 0.016, 0.001, 0.05);
     this._lastTime = time;
 
-    if (opts.skinId && opts.skinId !== this.skinId) {
-      this.setSkin(opts.skinId);
-    }
+    if (opts.skinId && opts.skinId !== this.skinId) this.setSkin(opts.skinId);
     if (opts?.envMap && this.reefScene.environment !== opts.envMap) {
       this.reefScene.environment = opts.envMap;
-      this.reefScene.environmentIntensity = 0.88;
+      this.reefScene.environmentIntensity = 0.92;
     }
 
-    const rawBiome = opts?.biomeKey || opts?.biome || stage.biome || stageOrSubOrState.tower?.theme || 'coral_sea';
-    const bKey = String(rawBiome).includes('canyon') || String(rawBiome).includes('river')
+    const rawBiome = String(opts?.biomeKey || opts?.biome || stage.biome || stageOrSubOrState.tower?.theme || 'coral_sea').toLowerCase();
+    const bKey = rawBiome.includes('canyon') || rawBiome.includes('river')
       ? 'canyon_river'
-      : String(rawBiome).includes('alpine') || String(rawBiome).includes('lake')
+      : rawBiome.includes('alpine') || rawBiome.includes('lake')
       ? 'alpine_lake'
-      : String(rawBiome).includes('bayou')
+      : rawBiome.includes('bayou')
       ? 'mist_bayou'
-      : String(rawBiome).includes('storm') || String(rawBiome).includes('ocean')
+      : rawBiome.includes('storm') || rawBiome.includes('ocean')
       ? 'storm_ocean'
       : 'coral_sea';
     const pal = BIOME_UNDERWATER_PALETTES[bKey] || BIOME_UNDERWATER_PALETTES.coral_sea;
 
-    this.reefScene.background.set(pal.bgTop);
+    this.reefScene.background.set(pal.horizon);
     this.reefScene.fog.color.set(pal.fog);
-    this.reefSun.color.set('#fff3d6');
-    this.seabedMat.color.set('#d2ece6');
+    this.reefSun.color.set(pal.sun);
+
+    this.domeMat.uniforms.uZenithColor.value.set(pal.zenith);
+    this.domeMat.uniforms.uHorizonColor.value.set(pal.horizon);
+    this.domeMat.uniforms.uAbyssColor.value.set(pal.abyss);
+    this.domeMat.uniforms.uSunColor.value.set(pal.sun);
+    this.domeMat.uniforms.uTime.value = time;
+
+    const scroll = Number(stage.scroll ?? time * 96) || 0;
+    this._causticUniforms.uTime.value = time;
+    this._causticUniforms.uScroll.value = scroll;
+    this._causticUniforms.uColor.value.set(pal.caustic);
+
+    this.waterCeilingMat.uniforms.uTime.value = time;
+    this.waterCeilingMat.uniforms.uScroll.value = scroll;
+    this.waterCeilingMat.uniforms.uSunColor.value.set(pal.sun);
+    this.waterCeilingMat.uniforms.uZenithColor.value.set(pal.zenith);
+    this.rescueBubbleMat.uniforms.uTime.value = time;
 
     const aspect = this.width / Math.max(1, this.height);
     const portrait = aspect < 0.85;
     this._updateReefCamMetrics();
 
-    const scroll = Number(stage.scroll ?? time * 96) || 0;
-    this.causticTex.offset.set((scroll * 0.0022) % 1, Math.sin(time * 0.35) * 0.06);
-    if (this.coralSandWebp) {
-      this.coralSandWebp.offset.set((scroll * 0.0022) % 1, 0);
-    }
+    const surfaceY = stage.surfaceY != null ? Math.min(stage.surfaceY, this.height * 0.14) : this.height * 0.10;
+    const seabedY = stage.seabedY != null ? Math.max(stage.seabedY, this.height * 0.84) : this.height * 0.88;
+    const surfWorldY = this._screenToWorld(this.width * 0.5, surfaceY, 0).y;
+    const bedWorldY = this._screenToWorld(this.width * 0.5, seabedY, 0).y;
 
-    // Aspect-cover studio-painted deep reef panorama backdrop (zero stretching on 412x915 portrait or 1920x1080 desktop!)
-    const bgDist = this._reefCamZ + 24;
-    const bgH = 2 * Math.tan((this._reefFov * 0.5) * DEG) * bgDist * 1.06;
-    const bgW = bgH * aspect * 1.06;
-    const imgAspect = 1376 / 768;
-    const quadAspect = bgW / Math.max(0.01, bgH);
-    this.reefBackdrop.scale.set(bgW, bgH, 1);
-    this.reefBackdrop.position.set(0, 0, -24);
-    if (this.reefBgWebp) {
-      if (quadAspect < imgAspect) {
-        const repX = clamp(quadAspect / imgAspect, 0.28, 1);
-        const drift = (Math.sin(scroll * 0.00055) * 0.5 + 0.5) * (1 - repX);
-        this.reefBgWebp.repeat.set(repX, 1);
-        this.reefBgWebp.offset.set(drift, 0);
-      } else {
-        const repY = clamp(imgAspect / quadAspect, 0.45, 1);
-        this.reefBgWebp.repeat.set(1, repY);
-        this.reefBgWebp.offset.set(0, (1 - repY) * 0.5);
-      }
-    }
-
-    const surfaceY = stage.surfaceY != null ? Math.min(stage.surfaceY, this.height * 0.16) : this.height * 0.12;
-    const seabedY = stage.seabedY != null ? Math.max(stage.seabedY, this.height * 0.82) : this.height * 0.875;
-    const surfW = this._screenToWorld(this.width * 0.5, surfaceY, 0);
-    const surfWorldY = surfW.y;
-    const bedW = this._screenToWorld(this.width * 0.5, seabedY, 0);
-    const bedWorldY = bedW.y;
-    const playHalfW = bedW.halfW;
-    const playHalfH = bedW.halfH;
-    this.seabedMesh.position.y = bedWorldY - 0.55;
-    if (this.snellSurfaceMesh) {
-      this.snellSurfaceMesh.position.y = surfWorldY + 1.15;
-      this.snellSurfaceMat.opacity = 0.34 + Math.sin(time * 2.1) * 0.05;
-    }
-
+    this.waterCeilingMesh.position.set(0, surfWorldY + 1.85, -8.5);
     const dm = this._dummy;
 
-    // Anchor large sculpted sunlit limestone reef canyon outcrops naturally into the midground seabed (1 draw call!)
-    const ridgeX = [];
-    const ridgeY = [];
-    const ridgeZ = [];
-    for (let i = 0; i < 8; i++) {
-      const ox = (((i * 6.5 - scroll * 0.012) % 52) + 52) % 52 - 26;
-      const oz = -6.0 - (i % 3) * 2.1;
-      const oy = bedWorldY - 0.72 + reefSeabedHeight(ox, oz + 3.5) * 0.65;
-      const sx = 0.92 + (i % 3) * 0.22;
-      const sy = 0.88 + (i % 2) * 0.26;
-      const sz = 0.90 + ((i + 1) % 3) * 0.16;
-      ridgeX[i] = ox;
-      ridgeY[i] = oy;
-      ridgeZ[i] = oz;
-      dm.position.set(ox, oy, oz);
-      dm.rotation.set(0, (i * 0.95) % TAU, 0);
-      dm.scale.set(sx, sy, sz);
-      dm.updateMatrix();
-      this.ridgeInst.setMatrixAt(i, dm.matrix);
+    // 1. Seamlessly Tiled 3D Sandy Seabed Dunes (`SeabedDune_Tile`, 24m tiles with live GLSL caustics!)
+    if (this._glbPools.seabed) {
+      const tileW = 24.0;
+      const bedShift = ((scroll * 0.022) % tileW + tileW) % tileW;
+      for (let i = 0; i < 4; i++) {
+        dm.position.set((i - 1.5) * tileW - bedShift + tileW * 0.5, bedWorldY - 0.55, -4.5);
+        dm.rotation.set(0, 0, 0);
+        dm.scale.setScalar(1.0);
+        dm.updateMatrix();
+        this._glbPools.seabed.setMatrixAt(i, dm.matrix);
+      }
+      this._glbPools.seabed.commit(4);
     }
-    this.ridgeInst.instanceMatrix.needsUpdate = true;
 
-    // Animate sunlit caustic god-ray shafts across the upper reef water column (1 instanced draw call!)
+    // 2. Layered 3D Vaulted Underwater Pelagian Limestone Arches & Fluted Sunken Columns!
+    if (this._glbPools.grottoArch) {
+      let aIdx = 0;
+      // Midground arches (`z = -7.5..-9.5`)
+      for (let i = 0; i < 4; i++) {
+        const ax = ((((i * 15.5 + 3.0) - scroll * 0.013) % 62) + 62) % 62 - 31;
+        const az = -7.8 - (i % 2) * 1.8;
+        dm.position.set(ax, bedWorldY - 0.55, az);
+        dm.rotation.set(0, (i % 2 === 0 ? 0.16 : -0.18), 0);
+        dm.scale.setScalar(1.02 + (i % 2) * 0.10);
+        dm.updateMatrix();
+        this._glbPools.grottoArch.setMatrixAt(aIdx++, dm.matrix);
+      }
+      // Deep atmospheric background cathedral arches (`z = -16..-21`) dissolving into turquoise FogExp2!
+      for (let i = 0; i < 4; i++) {
+        const ax = ((((i * 19.0 + 10.0) - scroll * 0.008) % 76) + 76) % 76 - 38;
+        const az = -16.5 - (i % 2) * 3.8;
+        dm.position.set(ax, bedWorldY - 0.2, az);
+        dm.rotation.set(0, (i % 2 === 0 ? -0.24 : 0.22), 0);
+        dm.scale.setScalar(1.32 + (i % 2) * 0.16);
+        dm.updateMatrix();
+        this._glbPools.grottoArch.setMatrixAt(aIdx++, dm.matrix);
+      }
+      this._glbPools.grottoArch.commit(aIdx);
+    }
+
+    if (this._glbPools.columnA && this._glbPools.columnB) {
+      for (let i = 0; i < 6; i++) {
+        const cx = ((((i * 10.2 + 2.5) - scroll * 0.016) % 61.2) + 61.2) % 61.2 - 30.6;
+        const cz = -5.2 - (i % 3) * 1.6;
+        dm.position.set(cx, bedWorldY - 0.55, cz);
+        dm.rotation.set(0, i * 0.9, 0);
+        dm.scale.setScalar(0.95 + (i % 2) * 0.14);
+        dm.updateMatrix();
+        this._glbPools.columnA.setMatrixAt(i, dm.matrix);
+
+        const bx = ((((i * 10.2 + 7.6) - scroll * 0.018) % 61.2) + 61.2) % 61.2 - 30.6;
+        const bz = -3.8 - (i % 2) * 1.4;
+        dm.position.set(bx, bedWorldY - 0.55, bz);
+        dm.rotation.set(0, i * 1.4, 0);
+        dm.scale.setScalar(0.96 + (i % 3) * 0.10);
+        dm.updateMatrix();
+        this._glbPools.columnB.setMatrixAt(i, dm.matrix);
+      }
+      this._glbPools.columnA.commit(6);
+      this._glbPools.columnB.commit(6);
+    }
+
+    // 3. Lush 100% Real 3D Sculpted Coral Reef Gardens, Ribbon Kelp & Sunken Amphorae!
+    const gardenSpan = 46.0;
+    const coralBase = portrait ? 0.88 : 1.04;
+    if (this._glbPools.outcrop) {
+      let nOut = 0, nStag = 0, nTab = 0, nBrain = 0, nAnem = 0, nAmp = 0;
+      for (let i = 0; i < 9; i++) {
+        const gx = ((((i * 5.1) - scroll * 0.022) % gardenSpan) + gardenSpan) % gardenSpan - gardenSpan * 0.5;
+        const gz = -1.45 - (i % 4) * 1.05;
+        const gy = bedWorldY - 0.55 + reefDuneHeightApprox(gx, gz);
+        const sc = (0.85 + (i % 3) * 0.16) * coralBase;
+
+        dm.position.set(gx, gy - 0.28, gz);
+        dm.rotation.set(0, i * 1.25, 0);
+        dm.scale.set(sc * 1.05, sc * 0.85, sc);
+        dm.updateMatrix();
+        this._glbPools.outcrop.setMatrixAt(nOut++, dm.matrix);
+
+        // Staghorn coral cluster on crest
+        dm.position.set(gx - 0.55 * sc, gy + 0.26 * sc, gz + 0.18 * sc);
+        dm.rotation.set(0, i * 1.7, Math.sin(time * 0.85 + i) * 0.02);
+        dm.scale.setScalar(sc * 1.05);
+        dm.updateMatrix();
+        this._glbPools.coralStaghorn?.setMatrixAt(nStag++, dm.matrix);
+
+        // Scalloped table coral tier on opposite shoulder
+        dm.position.set(gx + 0.65 * sc, gy + 0.18 * sc, gz - 0.12 * sc);
+        dm.rotation.set(0, i * 2.1, 0);
+        dm.scale.setScalar(sc * 0.96);
+        dm.updateMatrix();
+        this._glbPools.coralTable?.setMatrixAt(nTab++, dm.matrix);
+
+        // Deeply-carved meandering brain-coral domes (seated firmly into sand/rock, ZERO floating!)
+        dm.position.set(gx + (i % 2 === 0 ? 0.12 : -0.18) * sc, gy - 0.04 * sc, gz + 0.42 * sc);
+        dm.rotation.set(0, i * 1.45, 0);
+        dm.scale.setScalar(sc * 0.88);
+        dm.updateMatrix();
+        this._glbPools.coralBrain?.setMatrixAt(nBrain++, dm.matrix);
+
+        // Glowing coral-peach & aqua anemone cluster
+        dm.position.set(gx + (i % 2 === 0 ? -0.82 : 0.88) * sc, gy + 0.08 * sc, gz + 0.36 * sc);
+        dm.rotation.set(0, i * 1.9, Math.sin(time * 1.6 + i) * 0.04);
+        dm.scale.setScalar(sc * 0.92);
+        dm.updateMatrix();
+        this._glbPools.coralAnemone?.setMatrixAt(nAnem++, dm.matrix);
+
+        // Sunken antique-bronze treasure amphorae nestled beside alternate outcrops
+        if (i % 2 === 0 && nAmp < 8) {
+          dm.position.set(gx + 1.25 * sc, gy + 0.04, gz + 0.22);
+          dm.rotation.set(0, i * 0.85, 0);
+          dm.scale.setScalar(sc * 0.82);
+          dm.updateMatrix();
+          this._glbPools.amphora?.setMatrixAt(nAmp++, dm.matrix);
+        }
+      }
+      this._glbPools.outcrop.commit(nOut);
+      this._glbPools.coralStaghorn?.commit(nStag);
+      this._glbPools.coralTable?.commit(nTab);
+      this._glbPools.coralBrain?.commit(nBrain);
+      this._glbPools.coralAnemone?.commit(nAnem);
+      this._glbPools.amphora?.commit(nAmp);
+    }
+
+    // Gently swaying 3D undulating ribbon kelp forests
+    if (this._glbPools.kelp) {
+      for (let i = 0; i < 16; i++) {
+        const kx = ((((i * 3.0 + 1.4) - scroll * 0.022) % gardenSpan) + gardenSpan) % gardenSpan - gardenSpan * 0.5;
+        const kz = -2.2 - (i % 4) * 1.35;
+        const ky = bedWorldY - 0.55 + reefDuneHeightApprox(kx, kz);
+        const kSc = (0.85 + (i % 3) * 0.22) * coralBase;
+        dm.position.set(kx, ky - 0.12, kz);
+        dm.rotation.set(Math.cos(time * 1.15 + i * 0.7) * 0.05, i * 1.65, Math.sin(time * 1.45 + i * 0.95) * 0.11);
+        dm.scale.set(kSc, kSc * (0.95 + (i % 3) * 0.16), kSc);
+        dm.updateMatrix();
+        this._glbPools.kelp.setMatrixAt(i, dm.matrix);
+      }
+      this._glbPools.kelp.commit(16);
+    }
+
+    // 4. Sunlit Volumetric God-Ray Shafts slicing down through the water column!
     for (let i = 0; i < MAX_RAYS; i++) {
-      const rx = (((i * 3.2 - scroll * 0.011) % 36) + 36) % 36 - 18;
-      dm.position.set(rx, surfWorldY - 1.4, -2.5 - (i % 3) * 1.4);
+      const rx = ((((i * 6.4) - scroll * 0.010) % 44.8) + 44.8) % 44.8 - 22.4;
+      dm.position.set(rx, surfWorldY - 1.8, -3.2 - (i % 3) * 2.2);
       dm.rotation.set(0, 0, -0.22 + (i % 4) * 0.045);
-      dm.scale.setScalar(1);
+      dm.scale.setScalar(1.0);
       dm.updateMatrix();
       this.rayInst.setMatrixAt(i, dm.matrix);
-      const rayBright = 0.65 + 0.30 * Math.sin(time * 1.5 + i * 1.2);
-      this._col.set(pal.ray).multiplyScalar(rayBright);
+      const bright = 0.62 + 0.34 * Math.sin(time * 1.45 + i * 1.15);
+      this._col.set(pal.ray).multiplyScalar(bright);
       this.rayInst.setColorAt(i, this._col);
     }
+    this.rayInst.count = MAX_RAYS;
     this.rayInst.instanceMatrix.needsUpdate = true;
     if (this.rayInst.instanceColor) this.rayInst.instanceColor.needsUpdate = true;
 
-    // Abzû-Tier Sculpted Multi-Hued 3D Coral Reef Gardens nestled naturally onto sunlit limestone outcrops
-    // alongside gently swaying 3D kelp ribbons (ZERO flat 2D stickers, ZERO straight grass sticks!)
-    const coralBaseScale = portrait ? 0.92 : 1.06;
-    for (let i = 0; i < 18; i++) {
-      const cx = (((i * 2.44 - scroll * 0.022) % 44) + 44) % 44 - 22;
-      const cz = -0.95 - (i % 5) * 1.18;
-      const sandY = bedWorldY - 0.55 + reefSeabedHeight(cx, cz + 3.5);
-      const sc = (0.78 + (i % 4) * 0.16) * coralBaseScale;
-
-      // 1. Sunlit `biome_rock_limestone` reef mound grounded solidly into the undulating sandy seabed
-      dm.position.set(cx, sandY - 0.14, cz);
-      dm.rotation.set(0, i * 1.37, 0);
-      dm.scale.set(sc * 1.05, sc * (0.82 + (i % 3) * 0.14), sc);
-      dm.updateMatrix();
-      this.boulderInst.setMatrixAt(i, dm.matrix);
-
-      // 2. Sculpted organically curved branching Acropora / Staghorn coral nestled onto the limestone crest!
-      const bOffX = (i % 2 === 0 ? -0.24 : 0.22) * sc;
-      const bOffZ = (i % 3 === 0 ? 0.08 : -0.10) * sc;
-      const bSc = (0.86 + ((i + 1) % 3) * 0.20) * coralBaseScale;
-      dm.position.set(cx + bOffX, sandY + 0.10 * sc, cz + bOffZ);
-      dm.rotation.set(0.05 * Math.sin(i * 2.3), i * 1.73, Math.sin(time * 0.85 + i) * 0.022);
-      dm.scale.set(bSc, bSc * (0.94 + (i % 3) * 0.12), bSc);
-      dm.updateMatrix();
-      this.branchCoralInst.setMatrixAt(i, dm.matrix);
-
-      // 3. Sculpted multi-tiered scalloped table-coral rosette terraced on the rock's sunlit shoulder!
-      const tOffX = (i % 2 === 0 ? 0.44 : -0.46) * sc;
-      const tOffZ = (i % 2 === 0 ? 0.18 : 0.12) * sc;
-      const tSc = (0.76 + (i % 3) * 0.18) * coralBaseScale;
-      dm.position.set(cx + tOffX, sandY + 0.02 * sc, cz + tOffZ);
-      dm.rotation.set(0.04 * Math.cos(i * 1.9), i * 2.14, 0.04 * Math.sin(i * 1.5));
-      dm.scale.set(tSc, tSc * 0.92, tSc);
-      dm.updateMatrix();
-      this.tableCoralInst.setMatrixAt(i, dm.matrix);
-
-      // 4. Sculpted cupped 3D Gorgonian Sea-Fan swaying gently on the back flank of the reef outcrop!
-      const fOffX = (i % 2 === 0 ? 0.12 : -0.18) * sc;
-      const fOffZ = -0.28 * sc;
-      const fSc = (0.84 + ((i + 2) % 3) * 0.18) * coralBaseScale;
-      dm.position.set(cx + fOffX, sandY + 0.14 * sc, cz + fOffZ);
-      dm.rotation.set(
-        Math.sin(time * 1.1 + i * 0.8) * 0.045,
-        ((i * 0.72) % 1.4) - 0.7,
-        Math.sin(time * 1.35 + i * 1.1) * 0.075
-      );
-      dm.scale.set(fSc, fSc * (0.96 + (i % 2) * 0.16), fSc);
-      dm.updateMatrix();
-      this.seaFanInst.setMatrixAt(i, dm.matrix);
-    }
-
-    // 8 extra midground branching coral crowns perched atop the large limestone canyon ridges (bridges seamlessly to backdrop!)
-    for (let i = 0; i < 8; i++) {
-      const rx = ridgeX[i] + (i % 2 === 0 ? -0.45 : 0.52);
-      const rz = ridgeZ[i] + 0.35;
-      const ry = ridgeY[i] + 0.62;
-      const rSc = (1.18 + (i % 3) * 0.22) * coralBaseScale;
-      dm.position.set(rx, ry, rz);
-      dm.rotation.set(0, i * 2.15, Math.sin(time * 0.75 + i) * 0.02);
-      dm.scale.set(rSc, rSc * 1.08, rSc);
-      dm.updateMatrix();
-      this.branchCoralInst.setMatrixAt(18 + i, dm.matrix);
-    }
-
-    // 22 true 3D sinuous, gently swaying kelp ribbon clusters nestled in sandy crevices beside the reef mounds!
-    for (let i = 0; i < 22; i++) {
-      const kx = (((i * 2.02 + 0.95 - scroll * 0.022) % 44) + 44) % 44 - 22;
-      const kz = -0.85 - ((i + 1) % 5) * 1.32;
-      const kSandY = bedWorldY - 0.55 + reefSeabedHeight(kx, kz + 3.5);
-      const kSc = (0.76 + (i % 4) * 0.16) * coralBaseScale;
-      dm.position.set(kx, kSandY - 0.08, kz);
-      dm.rotation.set(
-        Math.cos(time * 1.15 + i * 0.7) * 0.055,
-        i * 1.85,
-        Math.sin(time * 1.48 + i * 0.95) * 0.115
-      );
-      dm.scale.set(kSc, kSc * (0.92 + (i % 3) * 0.18), kSc);
-      dm.updateMatrix();
-      this.kelpInst.setMatrixAt(i, dm.matrix);
-    }
-
-    this.boulderInst.instanceMatrix.needsUpdate = true;
-    this.branchCoralInst.instanceMatrix.needsUpdate = true;
-    this.tableCoralInst.instanceMatrix.needsUpdate = true;
-    this.seaFanInst.instanceMatrix.needsUpdate = true;
-    this.kelpInst.instanceMatrix.needsUpdate = true;
-
-    // Graceful Mid-Distance Sculpted 3D Reef Manta Ray gliding smoothly through the upper sunlit water column
-    if (this.mantaGroup.visible) {
-      const mx = (((16 - time * 1.45) % 34) + 34) % 34 - 17;
-      const my = 2.75 + Math.sin(time * 1.15) * 0.42;
-      this.mantaGroup.position.set(mx, my, -5.8);
-      this.mantaGroup.rotation.set(Math.sin(time * 1.6) * 0.14, Math.PI, Math.sin(time * 1.15) * 0.08);
-      const mWing = 1 + Math.sin(time * 2.4) * 0.14;
-      this.mantaGroup.scale.set(1.05, 0.98 * mWing, 1.05);
-    }
-
-    // 100% SUBMARINE-FREE GATEWAY 2.0 FREE-SWIM HERO POSE, DOLPHIN-KICK UNDULATION & BARREL-ROLL DASH!
-    const rawSwX = sw.x ?? this.width * (portrait ? 0.38 : 0.28);
-    const rawSwY = sw.y ?? this.height * 0.48;
-    const heroRaw = this._screenToWorld(rawSwX, rawSwY, 0.4);
-    const safeHalfW = heroRaw.halfW * (portrait ? 0.54 : 0.74);
-    const safeHalfH = heroRaw.halfH * (portrait ? 0.52 : 0.64);
-    const heroX = clamp(heroRaw.x, -safeHalfW, safeHalfW);
-    const heroY = clamp(heroRaw.y, -safeHalfH, safeHalfH);
-    const vesselScale = portrait ? 1.18 : 1.32;
-    this.reefHeroInner.scale.setScalar(vesselScale);
+    // 5. Gateway 2.0 Free-Swim Hero — 1:1 Exact Hitbox Alignment (ZERO visual-vs-physics clamp desync!)
+    const rawSwX = sw.x ?? this.width * (portrait ? 0.36 : 0.26);
+    const rawSwY = sw.y ?? this.height * 0.46;
+    const heroRaw = this._screenToWorld(rawSwX, rawSwY, 0.55);
+    const safeHalfW = heroRaw.halfW * 0.94;
+    const heroX = heroRaw.x;
+    const heroY = heroRaw.y;
+    const heroScale = portrait ? 1.24 : 1.38;
+    this.reefHeroInner.scale.setScalar(heroScale);
 
     const vx = sw.vx || 0;
     const vy = sw.vy || 0;
-    const rawPitch = sw.pitch != null ? -clamp(sw.pitch, -0.45, 0.45) : clamp(Math.atan2(-vy, 280), -0.45, 0.45);
-    const rawBank = sw.bank != null ? clamp(sw.bank, -0.52, 0.52) : clamp(-vy * 0.0014, -0.32, 0.32);
+    const rawPitch = sw.pitch != null ? -clamp(sw.pitch, -0.42, 0.42) : clamp(Math.atan2(-vy, 280), -0.42, 0.42);
+    const rawBank = sw.bank != null ? clamp(sw.bank, -0.48, 0.48) : clamp(-vy * 0.0014, -0.32, 0.32);
     const smoothK = 1 - Math.exp(-12 * dt);
     this._subPitchSmooth += (rawPitch - this._subPitchSmooth) * smoothK;
     this._subBankSmooth += (rawBank - this._subBankSmooth) * smoothK;
-    const pitch = this._subPitchSmooth;
     const dashActive = (sw.dashTimer || 0) > 0.01;
-    const roll = this._subBankSmooth + (sw.spin || 0);
-    const swimPhase = sw.swimCycle ?? time * 8.4;
+    const swimPhase = sw.swimCycle ?? time * 8.0;
     const sonarP = stage.sonarPulse || 0;
-    const dolphinWave = Math.sin(swimPhase) * 0.10;
 
-    this.heroSwimAnchor.position.set(heroX, heroY + Math.sin(swimPhase) * 0.055, 0.45);
+    this.heroSwimAnchor.position.set(heroX, heroY + Math.sin(swimPhase) * 0.055, 0.55);
     this.heroSwimAnchor.rotation.set(
-      roll,
-      Math.sin(swimPhase * 0.5) * 0.08 - this._subBankSmooth * 0.14,
-      pitch + dolphinWave
+      this._subBankSmooth + (sw.spin || 0),
+      Math.sin(swimPhase * 0.5) * 0.08 - this._subBankSmooth * 0.12,
+      this._subPitchSmooth + Math.sin(swimPhase) * 0.09
     );
-    if (this.reefHeroLight) {
-      this.reefHeroLight.position.set(heroX + 0.5, heroY + 0.85, 2.2);
-      this.reefHeroLight.intensity = 1.45 + (dashActive ? 0.9 : 0) + sonarP * 0.75;
-    }
 
-    // Agile Barrel-Roll Dash Shimmering Aqua Vortex Cone wrapping Gateway!
     if (this.dashVortexMesh) {
       this.dashVortexMesh.visible = dashActive;
       if (dashActive) {
         const dp = clamp((sw.dashTimer || 0) / 0.4, 0, 1);
         this.dashVortexMat.opacity = 0.25 + dp * 0.52;
         this.dashVortexMesh.rotation.x = time * 26;
-        this.dashVortexMesh.scale.set(1.0 + (1 - dp) * 0.25, 0.95 + dp * 0.25, 0.95 + dp * 0.25);
       }
     }
 
@@ -3051,78 +1521,60 @@ function createFeatheredSnellTex(size = 256) {
       swimPhase,
       anim: dashActive ? 'TailWhip' : (sw.whipTimer || 0) > 0.02 ? 'HeroCelebrate' : 'FreeSwim',
       mood: (sw.stun || 0) > 0 ? 'hurt' : dashActive || sonarP > 0.3 ? 'joyful' : 'happy',
-      frillFlare: 0.46 + sonarP * 0.50 + (dashActive ? 0.42 : 0) + (stage.ventBoostTimer > 0 ? 0.30 : 0),
+      frillFlare: 0.46 + sonarP * 0.50 + (dashActive ? 0.42 : 0),
     });
-    // Stream Gateway 2.0's tail gracefully aft in a horizontal dolphin-kick wave (never curling upright!)
-    const swimBones = this.reefHero.bones;
-    if (swimBones) {
-      if (swimBones.Tail1) swimBones.Tail1.rotateX(-0.56 + Math.sin(swimPhase) * 0.14);
-      if (swimBones.Tail2) swimBones.Tail2.rotateX(-0.18 + Math.sin(swimPhase - 0.65) * 0.12);
-      if (swimBones.Tail3) swimBones.Tail3.rotateX(-0.12 + Math.sin(swimPhase - 1.3) * 0.10);
-      if (swimBones.Tail4) swimBones.Tail4.rotateX(Math.sin(swimPhase - 1.9) * 0.09);
+    // `FreeSwim` already aligns Pelvis horizontally (+1.04 rad) & curves Tail1 upward; counter-pitch Tail1 aft into a sleek horizontal dolphin kick!
+    const sb = this.reefHero.bones;
+    if (sb) {
+      if (sb.Tail1) sb.Tail1.rotateX(-0.42 + Math.sin(swimPhase) * 0.14);
+      if (sb.Tail2) sb.Tail2.rotateX(-0.18 + Math.sin(swimPhase - 0.65) * 0.12);
+      if (sb.Tail3) sb.Tail3.rotateX(-0.08 + Math.sin(swimPhase - 1.3) * 0.10);
+      if (sb.Tail4) sb.Tail4.rotateX(Math.sin(swimPhase - 1.9) * 0.08);
     }
 
-    // Shimmering Underwater Current Stream Boost Rings (`stage.boostRings`)
+    // 6. Chunky 3D Antique-Bronze & Aqua Crystal `HydroRing_Reef` (`stage.boostRings`)
+    // Angle open 3/4 facing camera (-0.36 rad Y) so golden-bronze ring opening is unmistakably readable across viewport!
     const bRings = stage.boostRings || [];
     let brCnt = 0;
-    for (let i = 0; i < bRings.length && brCnt < 12; i++) {
+    for (let i = 0; i < bRings.length && brCnt < 14; i++) {
       const br = bRings[i];
-      const wp = this._screenToWorld(br.x, br.y, 0.05);
-      const rad = Math.max(0.55, this._pxScale(br.r || 34, 0.05) * 0.92);
-      const pop = br.passed ? 1.0 + (br.passT || 0) * 1.15 : 1.0 + Math.sin(time * 3.6 + i) * 0.05;
-      dm.position.set(wp.x, wp.y, 0.05);
-      dm.rotation.set(Math.sin(time * 2.2 + i) * 0.14, Math.PI * 0.42, time * 1.4 + i);
+      const wp = this._screenToWorld(br.x, br.y, 0.10);
+      const rad = Math.max(0.68, this._pxScale(br.r || 36, 0.10) * 1.02);
+      const pop = br.passed ? 1.0 + (br.passT || 0) * 1.1 : 1.0 + Math.sin(time * 3.4 + i) * 0.05;
+      dm.position.set(wp.x, wp.y, 0.10);
+      dm.rotation.set(Math.sin(time * 2.0 + i) * 0.10, -0.36, time * 0.85 + i);
       dm.scale.setScalar(rad * pop);
       dm.updateMatrix();
-      this._col.set(br.passed ? '#fde047' : i % 2 === 0 ? '#5efce8' : '#38bdf8');
-      this.boostRingInst.setColorAt(brCnt, this._col);
-      this.boostRingInst.setMatrixAt(brCnt++, dm.matrix);
+      this._glbPools.hydroRing?.setMatrixAt(brCnt++, dm.matrix);
     }
-    this.boostRingInst.count = brCnt;
-    if (brCnt > 0) {
-      this.boostRingInst.instanceMatrix.needsUpdate = true;
-      if (this.boostRingInst.instanceColor) this.boostRingInst.instanceColor.needsUpdate = true;
-    }
+    this._glbPools.hydroRing?.commit(brCnt);
 
-    // Expanding 3D Harmonic Echo Sonar Sphere + Physical 3D Sonar Shockwave Ring
+    // 7. Bio-Sonar Shockwave Ring
     if (sonarP > 0.01) {
-      const origin = this._screenToWorld(stage.sonarOriginX ?? rawSwX, stage.sonarOriginY ?? rawSwY, 0);
-      const ox = clamp(origin.x, -safeHalfW, safeHalfW);
-      const oy = origin.y;
+      const origin = this._screenToWorld(stage.sonarOriginX ?? rawSwX, stage.sonarOriginY ?? rawSwY, 0.45);
       const prog = 1 - sonarP;
-      this.echoSphere.visible = true;
-      this.echoSphere.position.set(ox, oy, 0);
-      this.echoSphere.scale.setScalar(0.8 + prog * 8.5);
-      this.echoSphere.material.opacity = sonarP * 0.34;
-      this.echoSphere.rotation.y = time * 2.2;
-
       this.sonarRingMesh.visible = true;
-      this.sonarRingMesh.position.set(ox, oy, 0.45);
-      this.sonarRingMesh.scale.setScalar(0.65 + prog * 9.2);
-      this.sonarRingMesh.rotation.set(Math.sin(time * 3.0) * 0.12, Math.cos(time * 2.4) * 0.12, prog * 0.9);
-      this.sonarRingMesh.material.opacity = clamp(sonarP * 0.88, 0, 0.92);
+      this.sonarRingMesh.position.set(clamp(origin.x, -safeHalfW, safeHalfW), origin.y, 0.45);
+      this.sonarRingMesh.scale.setScalar(0.65 + prog * 9.0);
+      this.sonarRingMesh.material.opacity = clamp(sonarP * 0.85, 0, 0.90);
     } else {
-      this.echoSphere.visible = false;
       this.sonarRingMesh.visible = false;
     }
 
-    // Underwater Cross-Current Drift Zone Streaks (pooled InstancedMesh)
+    // 8. Cross-Current Drift Streaks & Slipstream Speed Rings
     const currents = stage.currents || [];
     let csCnt = 0;
-    const perCur = 14;
     for (let ci = 0; ci < currents.length && csCnt < 42; ci++) {
       const cur = currents[ci];
       const cw = this._pxScale(cur.w || 150, -0.4);
       const ch = this._pxScale(cur.h || 100, -0.4);
       const cwp = this._screenToWorld(cur.x, cur.y, -0.4);
       const cAng = Math.atan2(-(cur.vy || 0), (cur.vx || 1) - (stage.scrollSpeed || 96) * 0.35);
-      for (let k = 0; k < perCur && csCnt < 42; k++) {
-        const u = ((time * (0.65 + (k % 3) * 0.18) + k * 0.17 + (cur.phase || 0)) % 1);
-        const lane = ((k + 0.5) / perCur) - 0.5;
-        const lx = cwp.x + (u - 0.5) * cw * (cur.vx >= 0 ? 1 : -1);
-        const ly = cwp.y + lane * ch + Math.sin(u * TAU + k) * 0.12;
+      for (let k = 0; k < 14 && csCnt < 42; k++) {
+        const u = (time * (0.65 + (k % 3) * 0.18) + k * 0.17 + (cur.phase || 0)) % 1;
+        const lane = (k + 0.5) / 14 - 0.5;
         const fade = Math.sin(u * Math.PI);
-        dm.position.set(lx, ly, -0.4 + (k % 3) * 0.08);
+        dm.position.set(cwp.x + (u - 0.5) * cw * (cur.vx >= 0 ? 1 : -1), cwp.y + lane * ch, -0.4 + (k % 3) * 0.08);
         dm.rotation.set(0, 0, cAng);
         dm.scale.set(0.75 + fade * 0.65, 0.55 + fade * 0.55, 1);
         dm.updateMatrix();
@@ -3137,17 +1589,15 @@ function createFeatheredSnellTex(size = 256) {
       if (this.currentStreakInst.instanceColor) this.currentStreakInst.instanceColor.needsUpdate = true;
     }
 
-    // Slipstream Speed Rings trailing behind Pelagian Sub
     const slipRings = stage.slipRings || [];
     let slCnt = 0;
     for (let i = 0; i < slipRings.length && slCnt < 14; i++) {
       const sr = slipRings[i];
       const lifeU = clamp((sr.life || 0) / Math.max(0.01, sr.maxLife || 0.46), 0, 1);
-      const grow = 1 - lifeU;
       const wp = this._screenToWorld(sr.x, sr.y, 0.35);
       dm.position.set(wp.x, wp.y, 0.35);
       dm.rotation.set(0, Math.PI * 0.48, -(sr.pitch || 0));
-      dm.scale.setScalar((0.72 + grow * 0.85) * (sr.boost ? 1.25 : 1.0));
+      dm.scale.setScalar((0.70 + (1 - lifeU) * 0.85) * (sr.boost ? 1.22 : 1.0));
       dm.updateMatrix();
       this._col.set(sr.boost ? '#5efce8' : '#bae6fd').multiplyScalar(lifeU);
       this.slipRingInst.setColorAt(slCnt, this._col);
@@ -3159,51 +1609,47 @@ function createFeatheredSnellTex(size = 256) {
       if (this.slipRingInst.instanceColor) this.slipRingInst.instanceColor.needsUpdate = true;
     }
 
-    // Update Luminous Crystal Glass Critter Rescue Orbs & Freed Companions (`stage.cages` + `stage.escorts`)
+    // 9. Crisp Translucent Iridescent Rescue Bubbles & Freed Turtle/Otter Escorts (`stage.cages` + `stage.escorts`)
     const cages = stage.cages || [];
-    let cageVis = 0;
-    void playHalfW;
-    void playHalfH;
-    for (let i = 0; i < cages.length && cageVis < MAX_CAGES; i++) {
+    for (let i = 0; i < MAX_CAGES; i++) {
+      const slot = this.cagePool[i];
+      if (i >= cages.length) {
+        slot.root.visible = false;
+        continue;
+      }
       const cg = cages[i];
-      const slot = this.cagePool[cageVis++];
-      const wp = this._screenToWorld(cg.x, cg.y, 0);
-      slot.root.visible = true;
-      slot.root.position.set(wp.x, clamp(wp.y, bedWorldY + 0.85, surfWorldY - 0.55), 0.12);
-      slot.root.scale.setScalar(portrait ? 0.92 : 1.08);
+      const wp = this._screenToWorld(cg.x, cg.y, 0.18);
       const isFreed = cg.state === 'freed';
-      slot.cageGroup.visible = !isFreed;
-      slot.cageGroup.rotation.y = time * 1.15 + i;
-      if (slot.energyRing1) slot.energyRing1.rotation.z = time * 2.4 + i;
-      if (slot.energyRing2) slot.energyRing2.rotation.y = -time * 2.1 + i;
+      slot.root.visible = true;
+      slot.root.position.set(wp.x, clamp(wp.y, bedWorldY + 0.9, surfWorldY - 0.55) + Math.sin(time * 2.6 + i) * 0.08, 0.18);
+      slot.root.scale.setScalar(portrait ? 0.96 : 1.12);
+      if (slot.bubbleMesh) {
+        slot.bubbleMesh.visible = !isFreed;
+        slot.bubbleMesh.rotation.y = time * 0.65 + i;
+      }
       const isTurtle = cg.animal !== 'otter';
       slot.turtleGroup.visible = isTurtle;
       slot.otterGroup.visible = !isTurtle;
       const animDir = isFreed ? 0 : Math.PI * 0.85;
-      slot.turtleGroup.rotation.set(0, animDir, Math.sin(time * (isFreed ? 6.5 : 4.2) + i) * 0.16);
-      slot.otterGroup.rotation.set(0, animDir, Math.sin(time * (isFreed ? 7.5 : 4.6) + i) * 0.18);
-      if (slot.flipperL) slot.flipperL.rotation.x = Math.sin(time * (isFreed ? 9.5 : 5.2) + i) * 0.52;
-      if (slot.flipperR) slot.flipperR.rotation.x = -Math.sin(time * (isFreed ? 9.5 : 5.2) + i) * 0.52;
+      slot.turtleGroup.rotation.set(0, animDir, Math.sin(time * (isFreed ? 6.5 : 4.0) + i) * 0.14);
+      slot.otterGroup.rotation.set(0, animDir, Math.sin(time * (isFreed ? 7.2 : 4.4) + i) * 0.16);
+      if (slot.flipperL) slot.flipperL.rotation.x = Math.sin(time * (isFreed ? 9.5 : 5.0) + i) * 0.52;
+      if (slot.flipperR) slot.flipperR.rotation.x = -Math.sin(time * (isFreed ? 9.5 : 5.0) + i) * 0.52;
       if (slot.otterTail) slot.otterTail.rotation.y = Math.sin(time * (isFreed ? 11 : 5.5) + i) * 0.42;
     }
-    for (let i = cageVis; i < MAX_CAGES; i++) {
-      this.cagePool[i].root.visible = false;
-    }
 
-    // Joyous Rescued Critter Escorts swimming right alongside Gateway in V-formation!
     const escorts = stage.escorts || [];
-    for (let i = 0; i < (this.escortPool?.length || 0); i++) {
+    for (let i = 0; i < this.escortPool.length; i++) {
       const slot = this.escortPool[i];
       if (i >= escorts.length) {
         slot.root.visible = false;
         continue;
       }
       const es = escorts[i];
-      const wp = this._screenToWorld(es.x, es.y, 0.28);
+      const wp = this._screenToWorld(es.x, es.y, 0.30);
       slot.root.visible = true;
-      slot.cageGroup.visible = false;
-      slot.root.position.set(wp.x, clamp(wp.y, bedWorldY + 0.6, surfWorldY - 0.4), 0.28);
-      slot.root.scale.setScalar(portrait ? 0.68 : 0.78);
+      slot.root.position.set(wp.x, clamp(wp.y, bedWorldY + 0.6, surfWorldY - 0.4), 0.30);
+      slot.root.scale.setScalar(portrait ? 0.68 : 0.80);
       const isTurtle = es.animal !== 'otter';
       slot.turtleGroup.visible = isTurtle;
       slot.otterGroup.visible = !isTurtle;
@@ -3214,34 +1660,27 @@ function createFeatheredSnellTex(size = 256) {
       if (slot.otterTail) slot.otterTail.rotation.y = Math.sin(time * 10.5 + i) * 0.42;
     }
 
-    // Update Gameplay Vibrant Tropical Reef Fish Schools (Yellow Tangs, Turquoise Chromis, Coral Anthias!), Seeds & Bubbles
+    // 10. Tropical Reef Fish Schools, Bubbled Fish Shells & Water Seeds
     const fishList = stage.fish || [];
-    let c1 = 0;
-    let c2 = 0;
-    let cShell = 0;
-    let cSeed = 0;
+    let c1 = 0, c2 = 0, cShell = 0, cSeed = 0;
     const fishTints = ['#fde047', '#38bdf8', '#fb7185', '#34d399', '#fbbf24'];
-
     for (let i = 0; i < fishList.length; i++) {
       const f = fishList[i];
       if (f.caught) continue;
       const wp = this._screenToWorld(f.x, f.y, 0);
       const isBubbled = Boolean(f.bubbled || (f.state === 'bubbled' && (f.bubbleT ?? 1) >= 0));
-
       if (f.isGear) {
         if (cSeed < 24) {
-          dm.position.set(wp.x, wp.y, 0.1);
+          dm.position.set(wp.x, wp.y, 0.15);
           dm.rotation.set(time * 2.2 + i, time * 3.1 + i, 0);
           dm.scale.setScalar(1.0);
           dm.updateMatrix();
           this.seedGemInst.setMatrixAt(cSeed++, dm.matrix);
         }
       } else if ((f.species ?? i % 2) === 0 && c1 < MAX_FISH) {
-        // Realistic anthias/chromis reef fish scale (`0.48x`) + push clear of Gateway's glass canopy silhouette!
         const sc = f.type === 'big' ? 0.72 : f.type === 'gold' ? 0.62 : 0.48;
-        const nearCanopy = Math.abs(wp.x - heroX) < 1.9 && Math.abs(wp.y - heroY) < 1.15;
-        dm.position.set(wp.x, wp.y, nearCanopy ? -2.2 : -0.35);
-        dm.rotation.set(0, Math.PI + Math.sin(time * 8 + i) * 0.14, clamp((f.vy || 0) * 0.002, -0.32, 0.32));
+        dm.position.set(wp.x, wp.y, -0.35);
+        dm.rotation.set(0, Math.PI + Math.sin(time * 8 + i) * 0.14, clamp((f.vy || 0) * 0.002, -0.30, 0.30));
         dm.scale.setScalar(sc);
         dm.updateMatrix();
         this._col.set(f.type === 'gold' ? '#fef08a' : fishTints[(f.color || i) % fishTints.length]);
@@ -3249,21 +1688,19 @@ function createFeatheredSnellTex(size = 256) {
         this.fishInst1.setMatrixAt(c1++, dm.matrix);
       } else if (c2 < MAX_FISH) {
         const sc = f.type === 'big' ? 0.68 : 0.48;
-        const nearCanopy = Math.abs(wp.x - heroX) < 1.9 && Math.abs(wp.y - heroY) < 1.15;
-        dm.position.set(wp.x, wp.y, nearCanopy ? -2.2 : -0.35);
-        dm.rotation.set(0, Math.PI + Math.sin(time * 7.5 + i) * 0.15, clamp((f.vy || 0) * 0.002, -0.32, 0.32));
+        dm.position.set(wp.x, wp.y, -0.35);
+        dm.rotation.set(0, Math.PI + Math.sin(time * 7.5 + i) * 0.15, clamp((f.vy || 0) * 0.002, -0.30, 0.30));
         dm.scale.setScalar(sc);
         dm.updateMatrix();
         this._col.set(f.type === 'gold' ? '#fef08a' : fishTints[(f.color || i + 1) % fishTints.length]);
         this.fishInst2.setColorAt(c2, this._col);
         this.fishInst2.setMatrixAt(c2++, dm.matrix);
       }
-
       if (isBubbled && cShell < MAX_BUBBLE_SHELLS) {
-        const br = this._pxScale(f.bubbleR || 20, 0);
+        const br = Math.max(0.36, this._pxScale(f.bubbleR || 20, 0));
         dm.position.set(wp.x, wp.y, 0.15);
-        dm.rotation.set(0, time * 1.5, 0);
-        dm.scale.setScalar(Math.max(0.32, br));
+        dm.rotation.set(0, time * 1.4, 0);
+        dm.scale.setScalar(br);
         dm.updateMatrix();
         this.bubbleShellInst.setMatrixAt(cShell++, dm.matrix);
       }
@@ -3283,19 +1720,13 @@ function createFeatheredSnellTex(size = 256) {
     if (cShell > 0) this.bubbleShellInst.instanceMatrix.needsUpdate = true;
     if (cSeed > 0) this.seedGemInst.instanceMatrix.needsUpdate = true;
 
-    // Background Sunlit Reef Shoal parting gracefully around Gateway (deep mid-distance lanes, realistic 0.36x scale!)
+    // Ambient distant tropical fish shoal swimming gracefully through the Pelagian arches
     for (let i = 0; i < MAX_AMB; i++) {
-      const bx = (((i * 1.9 - time * (1.8 + (i % 4) * 0.35)) % 44) + 44) % 44 - 22;
-      let by = Math.sin(i * 2.1 + time * 1.2) * 3.6;
-      const bz = -3.8 - (i % 5) * 1.2;
-      const dx = bx - heroX;
-      const dy = by - heroY;
-      const d2 = dx * dx + dy * dy;
-      if (d2 < 8.0) {
-        by += (dy >= 0 ? 1 : -1) * (1 - d2 / 8.0) * 1.45;
-      }
+      const bx = ((((i * 1.9 - time * (1.8 + (i % 4) * 0.35)) % 44) + 44) % 44) - 22;
+      const by = Math.sin(i * 2.1 + time * 1.2) * 2.8 + 0.4;
+      const bz = -3.8 - (i % 5) * 1.4;
       dm.position.set(bx, by, bz);
-      dm.rotation.set(0, Math.PI + Math.sin(time * 7 + i) * 0.15, 0);
+      dm.rotation.set(0, Math.PI + Math.sin(time * 7 + i) * 0.14, 0);
       dm.scale.setScalar(0.32 + (i % 3) * 0.08);
       dm.updateMatrix();
       this._col.set(fishTints[i % fishTints.length]);
@@ -3306,40 +1737,37 @@ function createFeatheredSnellTex(size = 256) {
     this.ambFishInst.instanceMatrix.needsUpdate = true;
     if (this.ambFishInst.instanceColor) this.ambFishInst.instanceColor.needsUpdate = true;
 
-    // Gateway's Hydro-Pulse Projectiles
+    // Hydro-Pulses, Jellyfish, Mines + Chains, Clams, Vents, Grotto Sanctuary & Arrival Spire
     const shots = stage.bubbles || [];
-    let pCount = 0;
-    for (let i = 0; i < shots.length && pCount < MAX_PULSES; i++) {
-      const b = shots[i];
-      const wp = this._screenToWorld(b.x, b.y, 0);
+    let pCnt = 0;
+    for (let i = 0; i < shots.length && pCnt < MAX_PULSES; i++) {
+      const wp = this._screenToWorld(shots[i].x, shots[i].y, 0.25);
       dm.position.set(wp.x, wp.y, 0.25);
       dm.rotation.set(time * 6 + i, time * 8, 0);
       dm.scale.setScalar(1.05);
       dm.updateMatrix();
-      this.pulseInst.setMatrixAt(pCount++, dm.matrix);
+      this.pulseInst.setMatrixAt(pCnt++, dm.matrix);
     }
-    this.pulseInst.count = pCount;
-    if (pCount > 0) this.pulseInst.instanceMatrix.needsUpdate = true;
+    this.pulseInst.count = pCnt;
+    if (pCnt > 0) this.pulseInst.instanceMatrix.needsUpdate = true;
 
-    // Jellyfish
     const jellies = stage.jellies || [];
-    let jCount = 0;
-    for (let i = 0; i < jellies.length && jCount < MAX_JELLY; i++) {
+    let jCnt = 0;
+    for (let i = 0; i < jellies.length && jCnt < MAX_JELLY; i++) {
       const j = jellies[i];
-      const wp = this._screenToWorld(j.x, j.y, 0);
-      const sq = 1 + Math.sin(j.pulse || time * 3) * 0.16;
+      const wp = this._screenToWorld(j.x, j.y, 0.05);
+      const sq = 1 + Math.sin(j.pulse || time * 3) * 0.15;
       dm.position.set(wp.x, wp.y, 0.05);
       dm.rotation.set(0, time * 0.6 + i, Math.sin(time + i) * 0.1);
       dm.scale.set(1 / Math.sqrt(sq), sq, 1 / Math.sqrt(sq));
       dm.updateMatrix();
-      this.jellyInst.setMatrixAt(jCount++, dm.matrix);
+      this.jellyInst.setMatrixAt(jCnt++, dm.matrix);
     }
-    this.jellyInst.count = jCount;
-    if (jCount > 0) this.jellyInst.instanceMatrix.needsUpdate = true;
+    this.jellyInst.count = jCnt;
+    if (jCnt > 0) this.jellyInst.instanceMatrix.needsUpdate = true;
 
-    // Siphon Surge Mines & Swaying Chains
     const mines = stage.mines || [];
-    let chCount = 0;
+    let chCnt = 0;
     for (let i = 0; i < MAX_MINES; i++) {
       const slot = this.minePool[i];
       if (i >= mines.length) {
@@ -3353,21 +1781,19 @@ function createFeatheredSnellTex(size = 256) {
       slot.group.rotation.set(time * 0.4 + i, m.spin || time * 0.6, 0);
       if (m.kind !== 'float') {
         const span = Math.max(0, wp.y - (bedWorldY - 0.2));
-        const links = Math.min(12, Math.floor(span / 0.35));
-        for (let k = 0; k < links && chCount < MAX_CHAINS; k++) {
-          const ly = wp.y - 0.45 - k * 0.35;
-          dm.position.set(wp.x + Math.sin(time * 2 + k * 0.5) * 0.05, ly, -0.05);
+        const links = Math.min(11, Math.floor(span / 0.36));
+        for (let k = 0; k < links && chCnt < MAX_CHAINS; k++) {
+          dm.position.set(wp.x + Math.sin(time * 2 + k * 0.5) * 0.05, wp.y - 0.45 - k * 0.36, -0.05);
           dm.rotation.set(0, (k % 2) * 1.57, 0);
           dm.scale.setScalar(1);
           dm.updateMatrix();
-          this.chainInst.setMatrixAt(chCount++, dm.matrix);
+          this.chainInst.setMatrixAt(chCnt++, dm.matrix);
         }
       }
     }
-    this.chainInst.count = chCount;
-    if (chCount > 0) this.chainInst.instanceMatrix.needsUpdate = true;
+    this.chainInst.count = chCnt;
+    if (chCnt > 0) this.chainInst.instanceMatrix.needsUpdate = true;
 
-    // Tidal Pearl Clams & Geyser Vents
     const clams = stage.clams || [];
     for (let i = 0; i < MAX_CLAMS; i++) {
       const slot = this.clamSlots[i];
@@ -3376,126 +1802,144 @@ function createFeatheredSnellTex(size = 256) {
         continue;
       }
       const c = clams[i];
-      const wp = this._screenToWorld(c.x, c.y, 0);
+      const wp = this._screenToWorld(c.x, c.y, 0.1);
       slot.root.visible = true;
-      slot.root.position.set(wp.x, bedWorldY - 0.08, 0.1);
-      slot.topPiv.rotation.x = -(c.open || 0) * 0.95;
+      slot.root.position.set(wp.x, bedWorldY - 0.24, 0.1);
+      slot.topPiv.rotation.x = -(c.open || 0) * 0.62;
       slot.pearl.visible = Boolean(c.hasPearl);
     }
 
     const vents = stage.vents || [];
-    let vCount = 0;
-    for (let i = 0; i < vents.length && vCount < MAX_VENTS; i++) {
-      const v = vents[i];
-      const wp = this._screenToWorld(v.x, seabedY, 0);
-      const vyBed = bedWorldY - 0.62 + reefSeabedHeight(wp.x, 3.0);
-      dm.position.set(wp.x, vyBed, -0.5);
+    let vCnt = 0;
+    for (let i = 0; i < vents.length && vCnt < MAX_VENTS; i++) {
+      const wp = this._screenToWorld(vents[i].x, seabedY, -0.4);
+      dm.position.set(wp.x, bedWorldY - 0.48, -0.4);
       dm.rotation.set(0, i * 1.4, 0);
-      dm.scale.set(0.95, 0.78, 0.92);
+      dm.scale.set(0.95, 0.80, 0.92);
       dm.updateMatrix();
-      this.ventInst.setMatrixAt(vCount++, dm.matrix);
+      this.ventInst.setMatrixAt(vCnt++, dm.matrix);
     }
-    this.ventInst.count = vCount;
-    if (vCount > 0) this.ventInst.instanceMatrix.needsUpdate = true;
+    this.ventInst.count = vCnt;
+    if (vCnt > 0) this.ventInst.instanceMatrix.needsUpdate = true;
 
-    // Coral Sanctuary Grotto Arch (`warpCave`) & Arrival Spire
     const wc = stage.warpCave;
     if (wc && wc.active && !wc.entered && wc.x < this.width + 180) {
-      const wp = this._screenToWorld(wc.x, wc.y, 0);
+      const wp = this._screenToWorld(wc.x, wc.y, -0.35);
       this.grottoGroup.visible = true;
-      this.grottoGroup.position.set(wp.x, wp.y, -0.4);
+      this.grottoGroup.position.set(wp.x, wp.y, -0.35);
       this.grottoGroup.userData.grottoPortal.rotation.z = time * 1.6;
     } else {
       this.grottoGroup.visible = false;
     }
 
     if (stage.tower?.active) {
-      const twp = this._screenToWorld(stage.tower.x, this.height * 0.5, -4.5);
+      const twp = this._screenToWorld(stage.tower.x, this.height * 0.5, -5.0);
       this.arrivalSpire.visible = true;
-      this.arrivalSpire.position.set(twp.x, 0, -4.5);
+      this.arrivalSpire.position.set(twp.x, 0, -5.0);
       this.arrivalSpire.rotation.y = time * 0.25;
     } else {
       this.arrivalSpire.visible = false;
     }
 
-    // Shockwave Rings, Underwater Bubbles & Popups
+    // Shockwave Rings & Rising Glassy Underwater Bubbles (tail stream + ambient + stage particles!)
     const rings = stage.rings || stage.shockwaves || [];
-    let rCount = 0;
-    for (let i = 0; i < rings.length && rCount < MAX_RINGS; i++) {
+    let rCnt = 0;
+    for (let i = 0; i < rings.length && rCnt < MAX_RINGS; i++) {
       const r = rings[i];
       const u = 1 - clamp(r.life / Math.max(0.01, r.maxLife || 0.5), 0, 1);
-      const radPx = lerp(r.r0 ?? 10, r.r1 ?? r.maxR ?? 85, u);
-      const wp = this._screenToWorld(r.x, r.y, 0);
+      const wp = this._screenToWorld(r.x, r.y, 0.3);
       dm.position.set(wp.x, wp.y, 0.3);
       dm.rotation.set(r.flat ? Math.PI * 0.46 : 0, 0, 0);
-      dm.scale.setScalar(Math.max(0.15, this._pxScale(radPx, 0)));
+      dm.scale.setScalar(Math.max(0.15, this._pxScale(lerp(r.r0 ?? 10, r.r1 ?? r.maxR ?? 85, u), 0.3)));
       dm.updateMatrix();
       this._col.set(r.color || '#5efce8');
-      this.ringInst.setColorAt(rCount, this._col);
-      this.ringInst.setMatrixAt(rCount++, dm.matrix);
+      this.ringInst.setColorAt(rCnt, this._col);
+      this.ringInst.setMatrixAt(rCnt++, dm.matrix);
     }
-    this.ringInst.count = rCount;
-    if (rCount > 0) {
+    this.ringInst.count = rCnt;
+    if (rCnt > 0) {
       this.ringInst.instanceMatrix.needsUpdate = true;
       if (this.ringInst.instanceColor) this.ringInst.instanceColor.needsUpdate = true;
     }
 
-    // Delicate Translucent Rising Glassy Micro-Bubbles streaming directly off Gateway's tail-fin & paws + Stage Particles
-    let ptCount = 0;
-    const propOriginX = heroX - 0.78 * vesselScale;
-    for (let i = 0; i < 36 && ptCount < MAX_PARTICLES; i++) {
-      const age = (time * 1.55 + i * 0.19) % 1;
-      const bx = propOriginX - age * 2.95 - Math.sin(i * 3.1) * 0.14;
-      const by = heroY - 0.02 + Math.sin(time * 5.6 + i * 1.9) * (0.09 + age * 0.24) + age * 0.92;
-      const bSize = (0.34 + (i % 5) * 0.14) * (1 - age * 0.55);
-      dm.position.set(bx, by, 0.25 + (i % 3) * 0.06);
+    let ptCnt = 0;
+    // Streaming glassy bubbles off Gateway's tail-fin
+    for (let i = 0; i < 32 && ptCnt < MAX_PARTICLES; i++) {
+      const age = (time * 1.45 + i * 0.19) % 1;
+      dm.position.set(
+        heroX - 0.95 - age * 2.8,
+        heroY + Math.sin(time * 5.2 + i * 1.9) * (0.08 + age * 0.22) + age * 0.95,
+        0.35 + (i % 3) * 0.06
+      );
       dm.rotation.set(0, 0, 0);
-      dm.scale.setScalar(bSize);
+      dm.scale.setScalar((0.32 + (i % 4) * 0.12) * (1 - age * 0.5));
       dm.updateMatrix();
-      this._col.set(i % 2 === 0 ? '#e0f7ff' : '#99f6e4');
-      this.particleInst.setColorAt(ptCount, this._col);
-      this.particleInst.setMatrixAt(ptCount++, dm.matrix);
+      this._col.set(i % 2 === 0 ? '#e6fcff' : '#99f6e4');
+      this.particleInst.setColorAt(ptCnt, this._col);
+      this.particleInst.setMatrixAt(ptCnt++, dm.matrix);
+    }
+    // Ambient drifting underwater bubble columns rising gently across the reef grotto
+    for (let i = 0; i < 40 && ptCnt < MAX_PARTICLES; i++) {
+      const age = (time * (0.32 + (i % 4) * 0.08) + i * 0.17) % 1;
+      const bx = ((((i * 1.8 - scroll * 0.015) % 26) + 26) % 26) - 13;
+      const by = lerp(bedWorldY, surfWorldY + 0.6, age);
+      dm.position.set(bx + Math.sin(time * 2.2 + i) * 0.18, by, -1.2 - (i % 5) * 1.1);
+      dm.rotation.set(0, 0, 0);
+      dm.scale.setScalar((0.26 + (i % 4) * 0.14) * Math.sin(age * Math.PI));
+      dm.updateMatrix();
+      this._col.set('#d8faff');
+      this.particleInst.setColorAt(ptCnt, this._col);
+      this.particleInst.setMatrixAt(ptCnt++, dm.matrix);
     }
     const extParts = opts.particles || stageOrSubOrState.particles || [];
-    for (let i = 0; i < extParts.length && ptCount < MAX_PARTICLES; i++) {
+    for (let i = 0; i < extParts.length && ptCnt < MAX_PARTICLES; i++) {
       const p = extParts[i];
       if (p.x == null || p.y == null) continue;
-      const wp = this._screenToWorld(p.x, p.y, 0);
+      const wp = this._screenToWorld(p.x, p.y, 0.4);
       const a = clamp(p.life / Math.max(0.01, p.maxLife || 1), 0, 1);
       dm.position.set(wp.x, wp.y, 0.4);
-      dm.scale.setScalar(a * 1.15);
+      dm.rotation.set(0, 0, 0);
+      dm.scale.setScalar(a * 1.05);
       dm.updateMatrix();
       this._col.set(p.color || '#ffffff');
-      this.particleInst.setColorAt(ptCount, this._col);
-      this.particleInst.setMatrixAt(ptCount++, dm.matrix);
+      this.particleInst.setColorAt(ptCnt, this._col);
+      this.particleInst.setMatrixAt(ptCnt++, dm.matrix);
     }
-    this.particleInst.count = ptCount;
+    this.particleInst.count = ptCnt;
     this.particleInst.instanceMatrix.needsUpdate = true;
     if (this.particleInst.instanceColor) this.particleInst.instanceColor.needsUpdate = true;
 
-    this._syncPopups(opts.popups || stageOrSubOrState.popups || [], heroX, heroY, vesselScale, surfWorldY, portrait);
+    this._syncPopups(opts.popups || stageOrSubOrState.popups || [], heroX, heroY, heroScale, surfWorldY, portrait);
 
-    // Camera subtle surge, gentle bank-follow & shake
     const sh = Number(opts.shake ?? stageOrSubOrState.shake) || 0;
     const sx = sh > 0.01 ? Math.sin(time * 67) * sh * 0.02 : 0;
     const sy = sh > 0.01 ? Math.cos(time * 59) * sh * 0.02 : 0;
     this.reefCam.position.set(sx, sy, this._reefCamZ);
     this.reefCam.lookAt(sx, sy, 0);
+    this.underwaterDome.position.copy(this.reefCam.position);
 
-    // Route through main GameRenderer's CinematicPostFX when provided, with ACES standalone fallback!
-    const postfx = opts?.postfx;
+    // Adaptive 60fps PostFX guard (matches `src/postfx.js` automatic bypass guarantee!)
+    const nowPerf = typeof performance !== 'undefined' ? performance.now() : 0;
+    if (this._lastFrameTs > 0 && nowPerf > this._lastFrameTs) {
+      const fms = clamp(nowPerf - this._lastFrameTs, 4, 80);
+      this._frameMsEma = this._frameMsEma * 0.88 + fms * 0.12;
+      if (this._frameMsEma > 19.5) this._bypassPostFx = true;
+      else if (this._frameMsEma < 11.5) this._bypassPostFx = false;
+    }
+    this._lastFrameTs = nowPerf;
+
+    const postfx = !this._bypassPostFx ? opts?.postfx : null;
     if (postfx && postfx.enabled && !postfx._disposed && typeof postfx.render === 'function') {
       this.postfxActive = true;
       postfx.render(this.reefScene, this.reefCam, {
         biome: bKey,
         exposure: 1.08,
         bloomThreshold: 0.78,
-        bloomStrength: 0.36,
+        bloomStrength: 0.32,
         bloomRadius: 0.42,
       });
     } else {
       this.postfxActive = false;
-      const prevTarget = this.webgl.getRenderTarget();
       const prevTone = this.webgl.toneMapping;
       const prevExp = this.webgl.toneMappingExposure;
       try {
@@ -3506,364 +1950,12 @@ function createFeatheredSnellTex(size = 256) {
       } finally {
         this.webgl.toneMapping = prevTone;
         this.webgl.toneMappingExposure = prevExp;
-        this.webgl.setRenderTarget(prevTarget);
       }
     }
   }
 
-  // ============================================================================
-  // 4. RENDER `core_descent` (360° FLOODED CENTRAL REACTOR SHAFT DIVE!)
-  // ============================================================================
-
-  renderCoreDescent(state, opts = {}) {
-    if (this._disposed || !this.webgl || !state) return;
-    const cd = state.coreDescent || state.descent || state.core || {};
-    const time = Number(opts.time ?? state.time ?? cd.timer) || 0;
-    const dt = clamp(time - this._lastTime || 0.016, 0.001, 0.05);
-    this._lastTime = time;
-
-    const skin = state.gateway?.skinId || state.player?.skinId || opts.skinId || this.skinId;
-    if (skin && skin !== this.skinId) this.setSkin(skin);
-    if (opts?.envMap && this.coreScene.environment !== opts.envMap) {
-      this.coreScene.environment = opts.envMap;
-      this.coreScene.environmentIntensity = 0.92;
-    }
-
-    const totalDepthMeters = Math.max(10, Number(cd.totalDepth) || 420);
-    const progress = clamp(
-      cd.progress ?? (cd.depth != null ? cd.depth / totalDepthMeters : cd.duration > 0 ? (cd.timer || 0) / cd.duration : (time % 21) / 21),
-      0,
-      1
-    );
-
-    // 3-Zone Architectural Depth-Zone Lighting Shift (0-35% Upper Intake -> 35-75% Crystal Conduit Gallery -> 75-100% Bedrock Lotus Sanctum!)
-    if (progress < 0.35) {
-      this.coreScene.background.set('#0a3250');
-      this.coreScene.fog.color.set('#0e4266');
-      if (this.conduitGlowMat) {
-        this.conduitGlowMat.emissive.set('#22d3ee');
-        this.conduitGlowMat.emissiveIntensity = 1.85 + Math.sin(time * 5.0) * 0.25;
-      }
-    } else if (progress < 0.75) {
-      this.coreScene.background.set('#0c385a');
-      this.coreScene.fog.color.set('#114a70');
-      if (this.conduitGlowMat) {
-        this.conduitGlowMat.emissive.set('#38bdf8');
-        this.conduitGlowMat.emissiveIntensity = 2.15 + Math.sin(time * 7.5) * 0.35;
-      }
-    } else {
-      this.coreScene.background.set('#0d4c66');
-      this.coreScene.fog.color.set('#146680');
-      if (this.conduitGlowMat) {
-        this.conduitGlowMat.emissive.set('#5efce8');
-        this.conduitGlowMat.emissiveIntensity = 2.45 + Math.sin(time * 9.0) * 0.40;
-      }
-    }
-    const worldSpan = 165;
-    const diveY = -progress * worldSpan;
-
-    // Normalized steering coordinates inside the `R = 3.45` reactor shaft (`-1..+1` -> `-2.15..+2.15u`)
-    const rawX = clamp(Number(cd.x ?? cd.playerX ?? state.gateway?.vx * 0.12) || 0, -1, 1);
-    const rawZ = clamp(Number(cd.y ?? cd.z ?? cd.playerZ ?? 0) || 0, -1, 1);
-    const radLen = Math.hypot(rawX, rawZ);
-    const clampedScale = radLen > 1 ? 1 / radLen : 1;
-    const hx = rawX * clampedScale * 2.05;
-    const hz = rawZ * clampedScale * 2.05;
-
-    const whipT = Number(cd.whipTimer ?? cd.spinTimer ?? state.gateway?.tailWhipTimer) || 0;
-    const seedPlanted = Boolean(cd.seedPlanted || cd.phase === 'purify' || progress >= 0.96);
-
-    // Loop the 18 instanced stone-and-bronze shaft ring segments smoothly around `diveY`
-    const spacing = 5.6;
-    const baseIdx = Math.floor(-diveY / spacing);
-    const dm = this._dummy;
-    for (let i = 0; i < MAX_CORE_RINGS; i++) {
-      const ringIdx = baseIdx - 3 + i;
-      const ry = -ringIdx * spacing;
-      const rotY = ringIdx * 0.26;
-      dm.position.set(0, ry, 0);
-      dm.rotation.set(0, rotY, 0);
-      dm.scale.setScalar(1);
-      dm.updateMatrix();
-      this.shaftWallInst.setMatrixAt(i, dm.matrix);
-      this.shaftRingInst.setMatrixAt(i, dm.matrix);
-      dm.position.set(0, ry + 0.24, 0);
-      dm.updateMatrix();
-      this.shaftGlowInst.setMatrixAt(i, dm.matrix);
-    }
-    this.shaftWallInst.instanceMatrix.needsUpdate = true;
-    this.shaftRingInst.instanceMatrix.needsUpdate = true;
-    this.shaftGlowInst.instanceMatrix.needsUpdate = true;
-
-    // Position the studio-painted domed hydro-reactor abyss backdrop down-shaft
-    this.coreAbyssBackdrop.position.set(0, diveY - 40, 0);
-    this.coreAbyssBackdrop.rotation.z = time * 0.04;
-
-    // Update Gateway Headfirst Dive Pose
-    this.coreHeroAnchor.position.set(hx, diveY, hz);
-    this.coreHeroAnchor.rotation.set(
-      clamp((cd.vy ?? cd.vz ?? 0) * 0.12, -0.35, 0.35),
-      whipT > 0.01 ? time * 18 : Math.atan2(hx, hz + 0.001) * 0.15,
-      clamp(-(cd.vx ?? 0) * 0.14, -0.42, 0.42)
-    );
-    this.coreHero.update(dt, {
-      time,
-      vx: 3.5,
-      vy: -6.0,
-      onGround: false,
-      isSwimming: true,
-      coreDive: true,
-      anim: seedPlanted ? 'HeroCelebrate' : whipT > 0.01 ? 'TailWhip' : 'CoreDive',
-      mood: seedPlanted ? 'joyful' : whipT > 0.01 ? 'determined' : 'determined',
-      swimPhase: time * 11.5,
-      frillFlare: 0.72 + (whipT > 0.01 ? 0.35 : 0),
-    });
-    this.coreHeroLight.position.set(hx, diveY + 1.2, hz);
-    this.coreHeroLight.intensity = 2.25 + (whipT > 0.01 ? 1.4 : 0) + (this._shardBurstT || 0) * 2.2;
-
-    if (whipT > 0.01) {
-      const wp = clamp(whipT * 2.4, 0, 1);
-      this.coreWhipRing.material.opacity = wp * 0.90;
-      this.coreWhipRing.scale.setScalar(1.0 + (1 - wp) * 0.90);
-      if (this.coreDrillCone) {
-        this.coreDrillCone.visible = true;
-        this.coreDrillCone.material.opacity = wp * 0.62;
-        this.coreDrillCone.rotation.y = time * 24;
-      }
-    } else {
-      this.coreWhipRing.material.opacity = 0;
-      if (this.coreDrillCone) this.coreDrillCone.visible = false;
-    }
-
-    // Spinning Hydro-Turbine Obstacles (1:1 with `game.js` `cd.turbines`: `depth`, `rotAngle`, `rotSpeed`)
-    // Hide any turbine once it passes Gateway's depth plane (`ty > diveY - 0.85`) so it NEVER passes between `coreCam` and Gateway!
-    const turbines = cd.turbines || cd.obstacles || null;
-    for (let i = 0; i < MAX_CORE_TURBINES; i++) {
-      const slot = this.turbineSlots[i];
-      if (turbines && turbines.length > 0) {
-        if (i >= turbines.length) {
-          slot.group.visible = false;
-          continue;
-        }
-        const tb = turbines[i];
-        const tp = tb.progress ?? (tb.depth != null ? tb.depth / totalDepthMeters : (i + 1) / (turbines.length + 1));
-        const ty = -tp * worldSpan;
-        if (ty > diveY - 0.85 || diveY - ty > 48) {
-          slot.group.visible = false;
-          continue;
-        }
-        slot.group.visible = true;
-        slot.group.position.set(0, ty, 0);
-        const rotA = tb.rotAngle ?? tb.angle ?? tb.gapAngle ?? time * (tb.rotSpeed || tb.speed || 1.35) * (i % 2 ? 1 : -1);
-        // `-rotA` around `+Y` maps blade angles `(X, Z)` to `ba + rotA`, matching `game.js` `atan2(y, x) - tb.rotAngle` 1:1!
-        slot.group.rotation.set(0, -rotA, 0);
-      } else {
-        const tp = 0.14 + i * 0.085;
-        if (tp > 0.88) {
-          slot.group.visible = false;
-          continue;
-        }
-        const ty = -tp * worldSpan;
-        slot.group.visible = ty <= diveY - 0.85 && (diveY - ty) < 46;
-        slot.group.position.set(0, ty, 0);
-        slot.group.rotation.set(0, -time * (1.2 + (i % 3) * 0.25) * (i % 2 === 0 ? 1 : -1) - i * 1.1, 0);
-      }
-    }
-
-    // Glowing Siphon Crystal Locks (1:1 with `game.js` `cd.crystalLocks`: `shattered`, `depth`, `x`, `y`)
-    const locks = cd.crystalLocks || cd.cores || cd.locks || null;
-    for (let i = 0; i < MAX_CORE_LOCKS; i++) {
-      const slot = this.lockSlots[i];
-      if (locks && locks.length > 0) {
-        if (i >= locks.length || locks[i].shattered || locks[i].smashed || locks[i].destroyed) {
-          slot.group.visible = false;
-          continue;
-        }
-        const lk = locks[i];
-        const lp = lk.progress ?? (lk.depth != null ? lk.depth / totalDepthMeters : (i + 1) * 0.22);
-        const ly = -lp * worldSpan;
-        slot.group.visible = ly <= diveY - 0.65 && (diveY - ly) < 46;
-        slot.group.position.set((lk.x || 0) * 2.15, ly, (lk.y ?? 0) * 2.15);
-        slot.group.rotation.set(time * 1.4 + i, time * 2.2 + i, 0);
-      } else if (i < 3) {
-        const lp = 0.24 + i * 0.24;
-        const ly = -lp * worldSpan;
-        slot.group.visible = progress < lp + 0.02 && ly <= diveY - 0.65 && (diveY - ly) < 46;
-        const ang = i * 2.1 + time * 0.6;
-        slot.group.position.set(Math.cos(ang) * 1.35, ly, Math.sin(ang) * 1.35);
-        slot.group.rotation.set(time * 1.5, time * 2.4, 0);
-      } else {
-        slot.group.visible = false;
-      }
-    }
-
-    // Bioluminescent Hydro-Speed Boost Rings (`cd.rings`) & Downward Hydro-Pulses (`cd.pulses`)
-    const boostRings = cd.rings || cd.pickups || [];
-    let brCnt = 0;
-    for (let i = 0; i < boostRings.length && brCnt < 16; i++) {
-      const rg = boostRings[i];
-      if (rg.collected) continue;
-      const rp = rg.progress ?? (rg.depth != null ? rg.depth / totalDepthMeters : (i + 1) * 0.09);
-      const ry = -rp * worldSpan;
-      if (ry > diveY - 0.45 || diveY - ry > 46) continue;
-      dm.position.set((rg.x || 0) * 2.15, ry, (rg.y || 0) * 2.15);
-      dm.rotation.set(Math.PI * 0.5, 0, time * 2.2 + i);
-      dm.scale.setScalar(1.0);
-      dm.updateMatrix();
-      this.coreBoostRingInst.setMatrixAt(brCnt++, dm.matrix);
-    }
-    this.coreBoostRingInst.count = brCnt;
-    if (brCnt > 0) this.coreBoostRingInst.instanceMatrix.needsUpdate = true;
-
-    const divePulses = cd.pulses || [];
-    let dpCnt = 0;
-    for (let i = 0; i < divePulses.length && dpCnt < 16; i++) {
-      const pl = divePulses[i];
-      const pp = pl.depth != null ? pl.depth / totalDepthMeters : progress + 0.02;
-      const py = -pp * worldSpan;
-      if (Math.abs(py - diveY) > 46) continue;
-      dm.position.set((pl.x || 0) * 2.15, py, (pl.y || 0) * 2.15);
-      dm.rotation.set(time * 9, time * 11, 0);
-      dm.scale.setScalar(1.1);
-      dm.updateMatrix();
-      this.coreDivePulseInst.setMatrixAt(dpCnt++, dm.matrix);
-    }
-    this.coreDivePulseInst.count = dpCnt;
-    if (dpCnt > 0) this.coreDivePulseInst.instanceMatrix.needsUpdate = true;
-
-    // Bedrock Harmonic Seed Lotus Anchor (`y = -worldSpan - 3.2`)
-    const anchorY = -worldSpan - 3.2;
-    if (Math.abs(anchorY - diveY) < 55) {
-      this.seedAnchorGroup.visible = true;
-      this.seedAnchorGroup.position.set(0, anchorY, 0);
-      this.seedAnchorGroup.rotation.y = time * 0.65;
-      const beam = this.seedAnchorGroup.userData.eruptionBeam;
-      if (seedPlanted) {
-        beam.material.opacity = 0.65 + Math.sin(time * 14) * 0.14;
-        this.coreScene.background.set('#0e5874');
-      } else {
-        beam.material.opacity = 0.16;
-      }
-    } else {
-      this.seedAnchorGroup.visible = false;
-    }
-
-    // Subtle Hair-Thin Peripheral Air-Rush Streaks ONLY near outer shaft wall & strictly below Gateway!
-    for (let i = 0; i < MAX_CORE_STREAKS; i++) {
-      const ang = i * 2.39996;
-      const rad = 2.88 + (i % 5) * 0.095;
-      const relY = -1.8 - ((((i * 0.48 + time * 19) % 26) + 26) % 26);
-      dm.position.set(Math.cos(ang) * rad, diveY + relY, Math.sin(ang) * rad);
-      dm.rotation.set(0, 0, 0);
-      dm.scale.set(0.75, 1.05 + (cd.boostTimer > 0 || whipT > 0.01 ? 0.55 : 0), 0.75);
-      dm.updateMatrix();
-      this.streakInst.setMatrixAt(i, dm.matrix);
-    }
-    this.streakInst.count = MAX_CORE_STREAKS;
-    this.streakInst.instanceMatrix.needsUpdate = true;
-
-    // 14 Faceted 3D Rose-Quartz Crystal Shards + Expanding Turquoise Harmonic Shatter Shockwave Ring!
-    const curSmashed = Number(cd.crystalsSmashed ?? cd.coresSmashed) || 0;
-    if (curSmashed > this._lastCoreSmashed) {
-      this._shardBurstT = 1.0;
-      this._shardOrigin.x = hx;
-      this._shardOrigin.y = diveY - 3.6;
-      this._shardOrigin.z = hz;
-    }
-    this._lastCoreSmashed = curSmashed;
-    if (this._shardBurstT > 0.01) {
-      this._shardBurstT = Math.max(0, this._shardBurstT - dt * 1.45);
-      const p = 1 - this._shardBurstT;
-      if (this.coreShatterWave) {
-        this.coreShatterWave.visible = true;
-        this.coreShatterWave.position.set(this._shardOrigin.x, this._shardOrigin.y, this._shardOrigin.z);
-        this.coreShatterWave.scale.setScalar(0.65 + p * 4.2);
-        this.coreShatterWave.material.opacity = this._shardBurstT * 0.92;
-      }
-      const SHARD_CNT = 14;
-      for (let i = 0; i < SHARD_CNT; i++) {
-        const a1 = (i / SHARD_CNT) * TAU + 0.35;
-        const a2 = ((i * 5) % 9) * 0.18 - 0.8;
-        const sp = 1.35 + p * (2.8 + (i % 4) * 0.45);
-        dm.position.set(
-          this._shardOrigin.x + Math.cos(a1) * sp,
-          this._shardOrigin.y + Math.sin(a2) * sp * 0.8 - p * 1.8,
-          this._shardOrigin.z + Math.sin(a1) * sp
-        );
-        dm.rotation.set(time * 7 + i * 1.3, time * 9 - i, i * 0.8);
-        const sBase = this._shardBurstT * (0.72 + (i % 3) * 0.28);
-        dm.scale.set(sBase * 0.72, sBase * 1.45, sBase * 0.72);
-        dm.updateMatrix();
-        this.coreShardInst.setMatrixAt(i, dm.matrix);
-      }
-      this.coreShardInst.count = SHARD_CNT;
-      this.coreShardInst.instanceMatrix.needsUpdate = true;
-    } else {
-      this.coreShardInst.count = 0;
-      if (this.coreShatterWave) this.coreShatterWave.visible = false;
-    }
-
-    // Exhilarating 360° Chase Camera Above Gateway Looking Down the Flooded Reactor Shaft
-    const aspect = this.width / Math.max(1, this.height);
-    const portrait = aspect < 0.85;
-    const baseFov = portrait ? 56 : 55;
-    const boostFov = cd.boostTimer > 0 || whipT > 0.01 ? baseFov + 11 : baseFov;
-    if (Math.abs(this.coreCam.fov - boostFov) > 0.1) {
-      this.coreCam.fov = lerp(this.coreCam.fov, boostFov, 0.16);
-      this.coreCam.updateProjectionMatrix();
-    }
-    this.coreHeroInner.scale.setScalar(portrait ? 1.18 : 1.24);
-    const sh = Number(opts.shake ?? state.shake) || 0;
-    const sx = sh > 0.01 ? Math.sin(time * 71) * sh * 0.025 : 0;
-    const sz = sh > 0.01 ? Math.cos(time * 63) * sh * 0.025 : 0;
-
-    if (seedPlanted) {
-      const orbitA = time * 0.9;
-      this.coreCam.position.set(Math.cos(orbitA) * 2.5, anchorY + 6.2, Math.sin(orbitA) * 2.5);
-      this.coreCam.up.set(0, 1, 0);
-      this.coreCam.lookAt(0, anchorY + 1.2, 0);
-    } else if (portrait) {
-      this.coreCam.position.set(hx * 0.44 + sx, diveY + 5.85, hz * 0.44 + 1.25 + sz);
-      this.coreCam.up.set(0, 0, -1);
-      this.coreCam.lookAt(hx * 0.76, diveY - 6.0, hz * 0.76 - 0.60);
-    } else {
-      this.coreCam.position.set(hx * 0.46 + sx, diveY + 5.55, hz * 0.46 + 1.05 + sz);
-      this.coreCam.up.set(0, 0, -1);
-      this.coreCam.lookAt(hx * 0.80, diveY - 6.0, hz * 0.80 - 0.85);
-    }
-
-    const postfx = opts?.postfx;
-    if (postfx && postfx.enabled && !postfx._disposed && typeof postfx.render === 'function') {
-      this.postfxActive = true;
-      postfx.render(this.coreScene, this.coreCam, {
-        biome: 'storm_ocean',
-        exposure: 1.14,
-        bloomThreshold: 0.66,
-        bloomStrength: 0.48,
-        bloomRadius: 0.46,
-        flash: this._shardBurstT * 0.35,
-      });
-    } else {
-      this.postfxActive = false;
-      const prevTarget = this.webgl.getRenderTarget();
-      const prevTone = this.webgl.toneMapping;
-      const prevExp = this.webgl.toneMappingExposure;
-      try {
-        this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
-        this.webgl.toneMappingExposure = 1.14;
-        this.webgl.setRenderTarget(null);
-        this.webgl.render(this.coreScene, this.coreCam);
-      } finally {
-        this.webgl.toneMapping = prevTone;
-        this.webgl.toneMappingExposure = prevExp;
-        this.webgl.setRenderTarget(prevTarget);
-      }
-    }
-  }
-
-  _syncPopups(popups, heroX = 0, heroY = 0, vesselScale = 1.2, surfWorldY = 3.2, portrait = false) {
-    const canopyTopY = heroY + 0.62 * vesselScale;
-    const minAboveCanopyY = canopyTopY + 0.85;
+  _syncPopups(popups, heroX, heroY, heroScale, surfWorldY, portrait) {
+    const minAbove = heroY + 0.62 * heroScale + 0.78;
     for (let i = 0; i < MAX_POPUPS; i++) {
       const slot = this.popupPool[i];
       if (i >= popups.length || popups[i].x == null || popups[i].y == null) {
@@ -3882,12 +1974,10 @@ function createFeatheredSnellTex(size = 256) {
       const t = 1 - clamp(p.life / Math.max(0.01, p.maxLife || 1), 0, 1);
       const safeX = clamp(wp.x, -wp.halfW * 0.68, wp.halfW * 0.68);
       let py = wp.y + 0.25 + t * 0.45;
-      // Guarantee score/surge popups NEVER cover Gateway piloting inside the crystal bubble canopy!
-      if (Math.abs(safeX - heroX) < 1.95 * vesselScale && py > heroY - 0.85 * vesselScale && py < minAboveCanopyY) {
-        py = minAboveCanopyY + t * 0.35;
+      if (Math.abs(safeX - heroX) < 1.8 * heroScale && py > heroY - 0.8 * heroScale && py < minAbove) {
+        py = minAbove + t * 0.35;
       }
-      const maxHudClearY = Math.min(surfWorldY + 0.15, wp.halfH * 0.66);
-      py = Math.min(py, maxHudClearY);
+      py = Math.min(py, Math.min(surfWorldY + 0.15, wp.halfH * 0.66));
       slot.sprite.visible = true;
       slot.sprite.position.set(safeX, py, 0.8);
       slot.sprite.scale.set(portrait ? 1.85 : 2.2, portrait ? 0.37 : 0.44, 1);
@@ -3898,19 +1988,13 @@ function createFeatheredSnellTex(size = 256) {
   dispose() {
     if (this._disposed) return;
     this._disposed = true;
-    this.reefHero?.dispose();
-    this.coreHero?.dispose();
-    if (this._ownDotTex) this.softDotTex?.dispose();
-    this.causticTex?.dispose();
-    this.snellSurfaceTex?.dispose();
-    this.godRayTex?.dispose();
-    this.backdropTex?.dispose();
-    this.reefStoneTex?.dispose();
-    this.barkTex?.dispose();
-    this.coralPorousAlbedo?.dispose();
-    this.coralPorousNormal?.dispose();
+    this.reefHero?.dispose?.();
     this._ownEnvRt?.dispose();
-    if (!this._ownEnvRt) this.envTex?.dispose();
+    this.godRayTex?.dispose();
+    this.bubbleTex?.dispose();
+    this.beamTex?.dispose();
+    for (const pool of Object.values(this._glbPools)) pool?.dispose?.();
+    this._glbPools = {};
     for (const p of this.popupPool) {
       p.sprite.material.map?.dispose();
       p.sprite.material.dispose();

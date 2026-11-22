@@ -189,7 +189,7 @@ export class SubStage {
     this.arriveT = 0;
     this.progress = 0;
     this.scroll = 0;
-    this.baseSpeed = 96 * this.s;
+    this.baseSpeed = this._computeBaseSpeed();
     this.scrollSpeed = this.baseSpeed;
     this._finished = false;
     this._bannerShown = false;
@@ -292,16 +292,29 @@ export class SubStage {
       }
     );
 
-    // Spawn initial trapped wildlife orb + welcoming Current Stream Boost Ring right into view!
-    this._spawnCage(this.width * (portrait ? 0.72 : 0.78), this.height * 0.44);
+    // Spawn initial trapped wildlife orbs + welcoming Current Stream Boost Rings across viewport (zero desktop dead-zone!)
+    this._spawnCage(this.width * (portrait ? 0.70 : 0.56), this.height * 0.44);
+    if (!portrait) {
+      this._spawnCage(this.width * 0.86, this.height * 0.54);
+    }
     this.boostRings.push({
-      x: this.width * (portrait ? 0.88 : 0.62),
+      x: this.width * (portrait ? 0.88 : 0.44),
       y: this.height * 0.36,
       r: 34 * this.s,
       phase: 0.4,
       passed: false,
       passT: 0,
     });
+    if (!portrait) {
+      this.boostRings.push({
+        x: this.width * 0.74,
+        y: this.height * 0.40,
+        r: 34 * this.s,
+        phase: 1.9,
+        passed: false,
+        passT: 0,
+      });
+    }
 
     this.hiddenCaches.push(
       { x: this.width * 0.72, y: this.seabedY - 46 * this.s },
@@ -336,6 +349,12 @@ export class SubStage {
 
   _scaleFor(w, h) {
     return clamp(Math.sqrt((w * h) / (390 * 620)), 0.8, 1.6);
+  }
+
+  _computeBaseSpeed() {
+    // Keep horizontal screen traverse consistent (~4.2s) on both 412x915 mobile & 1920x1080 desktop!
+    const widthRatio = Math.max(1.0, this.width / Math.max(1, 420 * this.s));
+    return 96 * this.s * Math.min(2.35, 0.52 + 0.48 * widthRatio);
   }
 
   _towerRadius() {
@@ -380,6 +399,11 @@ export class SubStage {
     swimmer.ry *= ks;
     for (const f of this.fish) fixXY(f);
     for (const cg of this.cages) fixXY(cg);
+    for (const br of this.boostRings) fixXY(br);
+    for (const es of this.escorts) {
+      es.x *= kx;
+      es.y *= ky;
+    }
     for (const j of this.jellies) fixXY(j);
     for (const m of this.mines) fixXY(m);
     for (const c of this.clams) {
@@ -413,7 +437,7 @@ export class SubStage {
     for (const b of this.bubbles) fixXY(b);
     this.rings.length = 0;
     this.vfx.length = 0;
-    this.baseSpeed = 96 * this.s;
+    this.baseSpeed = this._computeBaseSpeed();
     const t = this.tower;
     t.r = this._towerRadius();
     t.targetX = this.width - t.r * 0.62;
@@ -528,14 +552,10 @@ export class SubStage {
     this._prevFire = fireNow;
 
     // Jump or Whip triggers Gateway's agile Barrel-Roll Dash + Bio-Sonar Ring!
+    // Fire taps fire Hydro-Pulse strictly WITHOUT wasting the 2.6s Bio-Sonar cooldown.
     const wantFire = Boolean(firePressed || fireEdge || whipEdge);
     const wantDash = Boolean(jumpEdge || whipEdge);
-    const wantSonar = Boolean(
-      sonarPressed ||
-        jumpEdge ||
-        whipEdge ||
-        ((firePressed || fireEdge) && this.sonarCooldown <= 0)
-    );
+    const wantSonar = Boolean(sonarPressed || jumpEdge || whipEdge);
 
     if (wantDash && this.sub.stun <= 0 && (this.sub.dashCooldown || 0) <= 0) {
       this._triggerBarrelRollDash(fx, sound);
@@ -606,10 +626,14 @@ export class SubStage {
     fx.banner?.(`SPIRE ${this.towerIndex + 2}`, `ARRIVING: ${this.nextTowerName}`);
   }
 
-  _addFlow(fx, amount, reason = '') {
+  _addFlow(fx, amount, opts = '') {
     if (!amount) return;
     this.flowCharge = clamp((this.flowCharge || 0) + amount, 0, 100);
-    fx?.addFlowCharge?.(amount, reason);
+    const payload =
+      opts && typeof opts === 'object'
+        ? { combo: true, ...opts }
+        : { reason: String(opts || ''), combo: true };
+    fx?.addFlowCharge?.(amount, payload);
   }
 
   _triggerBarrelRollDash(fx, sound) {
@@ -752,7 +776,7 @@ export class SubStage {
     const mult = this._comboHit();
     const pts = CAGE_RESCUE_POINTS * mult;
     this._score(fx, pts);
-    this._addFlow(fx, 18, 'CRITTER RESCUE');
+    this._addFlow(fx, 18, { reason: 'CRITTER RESCUE', combo: true, critter: cg.animal });
     fx.onCritterRescued?.({ species: cg.animal, x: cg.x, y: cg.y });
 
     // Joyous freed companion joins Gateway's active reef escort formation!
@@ -1223,9 +1247,13 @@ export class SubStage {
         this.grottosFound = (this.grottosFound || 0) + 1;
         this.gearsEarned += 5;
         fx.addGear?.(5);
-        fx.onWarpCave?.();
         this._score(fx, GROTTO_POINTS);
-        this._addFlow(fx, 22, 'CRYSTAL GROTTO');
+        if (typeof fx.onWarpCave === 'function') {
+          this.flowCharge = clamp((this.flowCharge || 0) + 22, 0, 100);
+          fx.onWarpCave();
+        } else {
+          this._addFlow(fx, 22, { reason: 'CRYSTAL GROTTO', combo: true });
+        }
         this.sub.catches++;
         this._ring(wc.x, wc.y, 12 * s, 125 * s, '#5efce8', 0.78);
         this._ring(wc.x, wc.y, 8 * s, 92 * s, '#fde047', 0.62);
