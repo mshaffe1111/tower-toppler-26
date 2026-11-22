@@ -385,7 +385,7 @@ describe('Round 4 Buttonless Glass, Motion-Sensor Wrist-Whip & Gesture Controls'
     expect(input.justPressed.whip).toBe(true);
   });
 
-  it('5. tilt mode: horizontal slash swipe fires Tail-Whip; single tap anywhere fires Hydro-Pulse; upward flick jumps', () => {
+  it('5. tilt mode: horizontal slash swipe fires Tail-Whip; right-half press holds Jump; left-half tap fires Hydro-Pulse; upward flick jumps', () => {
     input.setControlMode('tilt');
     input.clearFrame();
 
@@ -397,25 +397,29 @@ describe('Round 4 Buttonless Glass, Motion-Sensor Wrist-Whip & Gesture Controls'
     expect(input._lastSlashVfx?.kind).toBe('slash');
     env.firePointer('pointerup', { pointerId: 10, clientX: 170, clientY: 505, timeStamp: 1060 });
 
-    // Single tap on RIGHT half of screen -> Hydro-Pulse (fire), NOT jump!
+    // Press & hold on RIGHT half of screen -> true holdable variable Jump (#603 Section 4.4)!
     input.clearFrame();
     env.firePointer('pointerdown', { pointerId: 11, clientX: 360, clientY: 520, timeStamp: 1500 });
-    env.firePointer('pointerup', { pointerId: 11, clientX: 362, clientY: 521, timeStamp: 1555 });
-    expect(input.justPressed.fire).toBe(true);
-    expect(input.justPressed.jump).toBe(false);
+    expect(input.justPressed.jump).toBe(true);
+    expect(input.state.jump).toBe(true);
+    expect(input.justPressed.fire).toBe(false);
+    env.firePointer('pointerup', { pointerId: 11, clientX: 362, clientY: 521, timeStamp: 1680 });
+    expect(input.state.jump).toBe(false);
+    expect(input.justPressed.fire).toBe(false);
 
     // Single tap on LEFT half of screen -> Hydro-Pulse (fire)
     input.clearFrame();
     env.firePointer('pointerdown', { pointerId: 12, clientX: 70, clientY: 520, timeStamp: 1700 });
     env.firePointer('pointerup', { pointerId: 12, clientX: 71, clientY: 522, timeStamp: 1750 });
     expect(input.justPressed.fire).toBe(true);
+    expect(input.justPressed.jump).toBe(false);
 
-    // Upward flick anywhere -> Jump
+    // Upward flick on left half -> Jump
     input.clearFrame();
-    env.firePointer('pointerdown', { pointerId: 13, clientX: 210, clientY: 540, timeStamp: 2000 });
-    env.firePointer('pointermove', { pointerId: 13, clientX: 212, clientY: 495, timeStamp: 2045 });
+    env.firePointer('pointerdown', { pointerId: 13, clientX: 150, clientY: 540, timeStamp: 2000 });
+    env.firePointer('pointermove', { pointerId: 13, clientX: 152, clientY: 495, timeStamp: 2045 });
     expect(input.justPressed.jump).toBe(true);
-    env.firePointer('pointerup', { pointerId: 13, clientX: 212, clientY: 490, timeStamp: 2060 });
+    env.firePointer('pointerup', { pointerId: 13, clientX: 152, clientY: 490, timeStamp: 2060 });
   });
 
   it('6. gesture mode: 0ms grounded post-release carry, smooth walk-to-run curve, and <=45ms diagonal jump takeoff bridge', () => {

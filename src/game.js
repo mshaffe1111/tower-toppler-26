@@ -43,32 +43,64 @@ function approach(cur, target, maxDelta) {
   return target;
 }
 
-// True 120Hz Fixed-Timestep Tactile Hydro-Lizard Physics Engine (COLS = 20, 1 col = 1.323m, 1 floor = 1.50m, Gateway 1.52m / 38kg)
-export const FIXED_STEP = 1 / 120;       // Deterministic 120Hz physics sub-step (zero slow-motion at 15fps, zero tunneling at 144Hz!)
+// True 120Hz Fixed-Timestep Nintendo/Celeste Hydro-Lizard Physics Engine (COLS = 20, 1 col = 1.323m, 1 floor = 1.50m, Gateway 2.0 = 1.22m)
+export const FIXED_STEP = 1 / 120;       // Deterministic 120Hz physics sub-step
 const FIXED_EPS = 1e-9;
 const MAX_FRAME_DT = 0.10;               // Spike cap (up to 12 deterministic 1/120s sub-steps per frame)
 const MAX_SUBSTEPS = 12;
 
-export const BASE_WALK_SPEED = 3.30;     // 4.37 m/s (303ms/stone, 1,009 px/s @ 1080p, 624 CSS px/s @ 412x915)
-export const GROUND_ACCEL = 19.5;        // 0.169s weighted claw-plant ramp-up (cols/s²)
-export const GROUND_FRICTION = 24.0;     // 0.138s, 0.22 col planted heel-stop (cols/s²)
-export const GROUND_SKID_DECEL = 34.0;   // 0.19s braced turnaround skid (cols/s²)
-export const JUMP_HORIZ_IMPULSE = 1.18;  // 3.89 cols/s athletic lizard hind-leg running leap drive
-const ICE_ACCEL = 9.5;
-const ICE_FRICTION = 3.8;
-export const AIR_ACCEL = 14.5;           // Realistic mid-air directional thrust (cols/s²)
-export const AIR_DRAG = 1.6;             // Aerodynamic horizontal drag (cols/s²)
+export const BASE_WALK_SPEED = 3.55;     // 4.70 m/s (282ms/stone, 5.63s per 360° lap)
+export const GROUND_ACCEL = 38.0;        // 0.093s crisp ramp-up (cols/s²)
+export const GROUND_FRICTION = 44.0;     // 0.081s, 0.143 col planted heel-stop (cols/s²)
+export const GROUND_SKID_DECEL = 52.0;   // 0.136s punchy turnaround skid (cols/s²)
+export const JUMP_HORIZ_IMPULSE = 1.04;  // Gentle 4% athletic takeoff nudge (zero 1-col overshoot!)
+const ICE_ACCEL = 14.5;
+const ICE_FRICTION = 6.2;
+export const AIR_ACCEL = 26.0;           // Responsive mid-air control (31.2 at apex!)
+export const AIR_DRAG = 8.5;             // Smooth mid-air release braking (cols/s²)
 
-export const BASE_JUMP_VY = 11.60;       // +1.444F (2.17m) crisp lizard leap apex in 0.245s
-export const GRAV_RISE = 46.5;           // Snappy weighted ascent
-export const GRAV_JUMP_CUT = 88.0;       // +0.68F crisp short-hop release
-export const GRAV_APEX = 54.0;           // Heavier than rise -> ZERO mid-air float!
-export const GRAV_FALL = 69.0;           // 0.455s total level air-time
-const MAX_FALL_SPEED = 24.0;
-export const SPRING_LAUNCH_VY = 18.0;    // +3.48F Snap-Crab carapace & Hydro-Geyser vault launch!
-const COYOTE_WINDOW = 0.145;             // 145ms crisp coyote forgiveness
-const JUMP_BUFFER_WINDOW = 0.140;        // 140ms jump buffer forgiveness
-const MANTLE_MAX_GAP = 0.36;             // 0.36 floors crisp ledge-edge mantle
+export const BASE_JUMP_VY = 9.40;        // +1.534F (2.30m) expressive leap apex in 0.358s rise / 0.325s fall
+export const GRAV_RISE = 28.5;           // 4.36G athletic ascent
+export const APEX_VY_THRESH = 1.45;      // Celeste/Mario apex hang band [-1.45, +1.45]
+export const GRAV_APEX = 16.5;           // 0.58x GRAV_RISE true Celeste/Mario apex hang-time!
+export const GRAV_FALL = 45.0;           // 1.58x GRAV_RISE weighty descent (t_fall < t_rise)
+export const GRAV_JUMP_CUT = 78.0;       // Paired with one-time 0.68x jump-release velocity damp
+export const MAX_FALL_SPEED = 17.5;
+export const SPRING_LAUNCH_VY = 12.50;   // Calibrated deck-level spring velocity reference
+export const GRAV_SPRING_RISE = 24.5;    // Buoyant spring ascent
+export const GRAV_SPRING_APEX = 14.0;    // Generous crest steering hang
+export const GRAV_SPRING_FALL = 41.0;    // Crisp controlled spring descent
+export const SPRING_APEX_THRESH = 1.65;
+export const CRAB_BOUNCE_PEAK_F = 3.24;  // Yields exact 120Hz discrete peak = +3.185F ± 0.004F above en.floor!
+export const GEYSER_BASE_PEAK_F = 3.92;  // Yields exact 120Hz discrete peak = +3.85F (capped <= 4.25F)
+const COYOTE_WINDOW = 0.135;             // 135ms crisp coyote forgiveness
+const JUMP_BUFFER_WINDOW = 0.135;        // 135ms jump buffer forgiveness
+export const MANTLE_MAX_GAP = 0.30;      // 0.30F crisp mantle (full jump + mantle < 2.00F -> zero bypass!)
+
+export function solveSpringVy(remainingFloors) {
+  const hApex = (SPRING_APEX_THRESH * SPRING_APEX_THRESH) / (2 * GRAV_SPRING_APEX);
+  const h = Math.max(1.2, Number(remainingFloors) || 1.2);
+  if (h <= hApex) return Math.sqrt(2 * GRAV_SPRING_APEX * h);
+  return Math.sqrt(SPRING_APEX_THRESH * SPRING_APEX_THRESH + 2 * GRAV_SPRING_RISE * (h - hApex));
+}
+
+export function smoothDamp(current, target, velRef, key, smoothTime, maxSpeed, dt) {
+  const st = Math.max(0.0001, smoothTime);
+  const omega = 2 / st;
+  const x = omega * dt;
+  const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+  let change = current - target;
+  const maxChange = maxSpeed * st;
+  change = Math.max(-maxChange, Math.min(maxChange, change));
+  const temp = (velRef[key] + omega * change) * dt;
+  velRef[key] = (velRef[key] - omega * temp) * exp;
+  let output = current - change + (change + temp) * exp;
+  if ((target - current > 0) === (output > target)) {
+    output = target;
+    velRef[key] = 0;
+  }
+  return output;
+}
 
 const MINI_MODE_CANONICAL = {
   core_descent: 'core_descent',
@@ -238,7 +270,51 @@ export class ToweringWatersGame {
     this._critterSonarPingTimer = 0;
 
     this.camCol = 0;
-    this.camFloor = 2;
+    this.camFloor = 0;
+    this.camAnchorFloor = 0;
+    this._camLookAheadCol = 0;
+    this._camMoveDir = 1;
+    this._camDirHoldSec = 0;
+    this._camTurnOriginCol = 0;
+    this._camVel = { col: 0, floor: 0, lead: 0 };
+
+    // Watershed Flow Meter (0..100%), Carry-Over Spire Perks, Supply Crate Power-Ups & Floodgate Surge (#601)
+    this.watershedFlowPct = 0;
+    this.watershedFlow = {
+      meter: 0,
+      combo: 0,
+      maxCombo: 0,
+      tricksLanded: 0,
+      grottosFound: 0,
+      rescuedThisStage: [],
+    };
+    this._pendingSpirePerks = {
+      tidalAegis: false,
+      pressurizedSluice: false,
+      hydroOvercharge: false,
+    };
+    this.activeSpirePerks = {
+      tidalAegis: false,
+      pressurizedSluice: false,
+      hydroOvercharge: false,
+      hydroOverchargeTimer: 0,
+    };
+    this.activeFlowPerks = {
+      tidalAegis: { active: false, charges: 0, maxCharges: 1, rechargeTimer: 0, rechargeDuration: 18.0 },
+      sluiceSurge: { active: false, bonusSec: 0, lowerSluiceUnlocked: false },
+      hydroOvercharge: { active: false, remainingSec: 0, maxSec: 25.0, whipScale: 1.25, speedMult: 1.15 },
+    };
+    this.activePowerUp = null;
+    this.floodgateSurgeTimer = 0;
+    this.spireFloodgateSurgeFx = {
+      active: false,
+      timer: 0,
+      duration: 1.85,
+      sourceDoor: null,
+      targetNode: null,
+      rewardSummary: null,
+    };
+    this.rescuedCritterEscorts = this.prog?.getRescuedCompanions?.() || [];
 
     // Hero object exposed as `gateway` (with renderer compatibility aliases)
     this.gateway = this._createDefaultGateway(0.5, 0);
@@ -250,6 +326,7 @@ export class ToweringWatersGame {
     this.switches = [];
     this.wallStrips = [];
     this.grappleRings = [];
+    this.hydroRings = [];
     this.collectibles = [];
     this.enemies = [];
     this.enemyProjectiles = [];
@@ -407,8 +484,21 @@ export class ToweringWatersGame {
       coyoteTimer: 0,
       jumpBufferTimer: 0,
       jumpCutEligible: false,
+      jumpCutApplied: false,
       stepHopActive: false,
       steamBoostActive: false,
+      springKind: null,
+      springSomersault: false,
+      springSomersaultTimer: 0,
+      hydroRingBoostTimer: 0,
+      mood: 'happy',
+      joyfulTimer: 0,
+      idleTimer: 0,
+      edgeTeeter: 0,
+      _teeterSfxCooldown: 0,
+      wetShakeTimer: 0,
+      lookTarget: null,
+      surfaceMaterial: 'stone',
       jumpStartCol: col,
       jumpStartFloor: floor,
       knockbackTimer: 0,
@@ -425,9 +515,9 @@ export class ToweringWatersGame {
       active: false,
       phase: 'idle',
       timer: 0,
-      duration: 21.0,
+      duration: 13.5,
       depth: 0,
-      totalDepth: 420,
+      totalDepth: 360,
       progress: 0,
       shaftRadius: 3.6,
       theme: 'canyon_river',
@@ -437,10 +527,11 @@ export class ToweringWatersGame {
       vy: 0,
       angle: 0,
       radial: 0,
-      speed: 20.0,
+      speed: 26.8,
       whipTimer: 0,
       spinTimer: 0,
       boostTimer: 0,
+      crystalFlashTimer: 0,
       invuln: 0,
       crystalsSmashed: 0,
       crystalsRequired: 3,
@@ -877,6 +968,41 @@ export class ToweringWatersGame {
     this.nextTowerTimeBonus = 0;
     this.nextTowerShield = false;
     this.nextTowerWarpFloors = 0;
+    this.watershedFlowPct = 0;
+    this.watershedFlow = {
+      meter: 0,
+      combo: 0,
+      maxCombo: 0,
+      tricksLanded: 0,
+      grottosFound: 0,
+      rescuedThisStage: [],
+    };
+    this._pendingSpirePerks = {
+      tidalAegis: false,
+      pressurizedSluice: false,
+      hydroOvercharge: false,
+    };
+    this.activeSpirePerks = {
+      tidalAegis: false,
+      pressurizedSluice: false,
+      hydroOvercharge: false,
+      hydroOverchargeTimer: 0,
+    };
+    this.activeFlowPerks = {
+      tidalAegis: { active: false, charges: 0, maxCharges: 1, rechargeTimer: 0, rechargeDuration: 18.0 },
+      sluiceSurge: { active: false, bonusSec: 0, lowerSluiceUnlocked: false },
+      hydroOvercharge: { active: false, remainingSec: 0, maxSec: 25.0, whipScale: 1.25, speedMult: 1.15 },
+    };
+    this.activePowerUp = null;
+    this.floodgateSurgeTimer = 0;
+    this.spireFloodgateSurgeFx = {
+      active: false,
+      timer: 0,
+      duration: 1.85,
+      sourceDoor: null,
+      targetNode: null,
+      rewardSummary: null,
+    };
     this.subStage = null;
     this.reefSwim = null;
     this.glideStage = null;
@@ -938,6 +1064,12 @@ export class ToweringWatersGame {
     this.treasureChest = t.treasureChest;
     this.wallStrips = (t.wallStrips || []).map((ws) => ({ ...ws }));
     this.grappleRings = (t.grappleRings || []).map((gr) => ({ ...gr, _cooldown: 0 }));
+    this.hydroRings = (t.hydroRings || []).map((hr, idx) => ({
+      ...hr,
+      id: hr.id || `hr_${idx}`,
+      collected: false,
+    }));
+    t.hydroRings = this.hydroRings;
 
     this.puzzleData = null;
     this.puzzleDoor = null;
@@ -994,7 +1126,58 @@ export class ToweringWatersGame {
 
     this.tower = t;
 
-    const bonusSec = this.nextTowerTimeBonus || 0;
+    // Resolve carry-over Watershed Flow Perks earned in the preceding transit mini-game (#601)
+    const pendingPerks = this._pendingSpirePerks || {
+      tidalAegis: false,
+      pressurizedSluice: false,
+      hydroOvercharge: false,
+    };
+    const perksAllowed = this.runType !== 'purist' && this.mode !== 'title';
+    const hasTidalAegisPerk = perksAllowed && Boolean(pendingPerks.tidalAegis);
+    const hasSluicePerk = perksAllowed && Boolean(pendingPerks.pressurizedSluice);
+    const hasOverchargePerk = perksAllowed && Boolean(pendingPerks.hydroOvercharge);
+    if (perksAllowed && (hasTidalAegisPerk || hasSluicePerk || hasOverchargePerk)) {
+      this._pendingSpirePerks = { tidalAegis: false, pressurizedSluice: false, hydroOvercharge: false };
+    }
+    this.activeSpirePerks = {
+      tidalAegis: hasTidalAegisPerk,
+      pressurizedSluice: hasSluicePerk,
+      hydroOvercharge: hasOverchargePerk,
+      hydroOverchargeTimer: hasOverchargePerk ? 25.0 : 0,
+    };
+    this.activeFlowPerks = {
+      tidalAegis: {
+        active: hasTidalAegisPerk,
+        charges: hasTidalAegisPerk ? 1 : 0,
+        maxCharges: 1,
+        rechargeTimer: 0,
+        rechargeDuration: 18.0,
+      },
+      sluiceSurge: {
+        active: hasSluicePerk,
+        bonusSec: hasSluicePerk ? 20 : 0,
+        lowerSluiceUnlocked: false,
+      },
+      hydroOvercharge: {
+        active: hasOverchargePerk,
+        remainingSec: hasOverchargePerk ? 25.0 : 0,
+        maxSec: 25.0,
+        whipScale: 1.25,
+        speedMult: 1.15,
+      },
+    };
+    this.activePowerUp = null;
+    this.floodgateSurgeTimer = 0;
+    this.spireFloodgateSurgeFx = {
+      active: false,
+      timer: 0,
+      duration: 1.85,
+      sourceDoor: null,
+      targetNode: null,
+      rewardSummary: null,
+    };
+
+    const bonusSec = (this.nextTowerTimeBonus || 0) + (hasSluicePerk ? 20 : 0);
     this.nextTowerTimeBonus = 0;
     const rawLimit = t.timeLimit || 105;
     // Purist Arcade (0.84x) and Master Watershed NG+ (0.88x) enforce tighter high-stakes clocks!
@@ -1091,6 +1274,7 @@ export class ToweringWatersGame {
       ...l,
       origType: l.type || 'solid',
       type: l.type || 'solid',
+      powerUp: l.powerUp || null,
       switchGroup: l.switchGroup || null,
       pipeGroup: l.pipeGroup || null,
       stairDir: l.stairDir !== undefined ? l.stairDir : undefined,
@@ -1176,6 +1360,37 @@ export class ToweringWatersGame {
 
     this._syncDynamicLedges(0, true);
 
+    // Carry-Over Perk >=70%: Pre-Pressurized Sluice automatically pressurizes lower `pipeA` lift if present!
+    if (hasSluicePerk) {
+      let pressurizedAny = false;
+      for (const el of this.elevators) {
+        if (el.pipeGroup === 'pipeA' && !el.powered) {
+          el.powered = true;
+          pressurizedAny = true;
+        }
+      }
+      if (pressurizedAny) {
+        this.pipeStates.pipeA = true;
+        this.switchStates.pipeA = true;
+        for (const sw of this.switches) {
+          if (sw.mode === 'pipeValve' && (sw.pipeGroup || sw.group || 'pipeA') === 'pipeA') {
+            sw.active = true;
+            sw.valveAngle = Math.PI * 1.5;
+            sw.targetValveAngle = Math.PI * 1.5;
+          }
+        }
+        const pipeSeal = this.sealObjectives.find(
+          (s) => !s.broken && (s.pipeGroup === 'pipeA' || s.kind === 'pipe_valves')
+        );
+        if (pipeSeal) {
+          pipeSeal.broken = true;
+          this.crownSealsBroken = this.sealObjectives.filter((s) => s.broken).length;
+        }
+        this.activeFlowPerks.sluiceSurge.lowerSluiceUnlocked = true;
+        this._syncDynamicLedges(0, true);
+      }
+    }
+
     const isMasterNg = Boolean(this.masterWatershed || this.runType === 'master_watershed');
     const rawEnemies = isSanctumTower
       ? (t.enemies || []).filter((e) => Boolean(e && e.harmless))
@@ -1208,7 +1423,10 @@ export class ToweringWatersGame {
 
     const grantShield =
       this.runType !== 'purist' &&
-      (Boolean(this.nextTowerShield) || this.hasMutation('bubble_aegis') || this.getSkillRank('tidal_aegis') > 0);
+      (Boolean(this.nextTowerShield) ||
+        hasTidalAegisPerk ||
+        this.hasMutation('bubble_aegis') ||
+        this.getSkillRank('tidal_aegis') > 0);
     this.nextTowerShield = false;
 
     if (this.mode !== 'title') {
@@ -1235,8 +1453,15 @@ export class ToweringWatersGame {
     this.stallFloor = spawnFloor;
     this.stallTimer = 0;
 
+    // Unified single-source-of-truth camera anchored directly to hero-feet floor coordinates (#603)
     this.camCol = hero.col;
-    this.camFloor = Math.max(1.5, hero.floor + 1.45);
+    this.camFloor = Math.max(0.0, hero.floor);
+    this.camAnchorFloor = hero.floor;
+    this._camLookAheadCol = 0;
+    this._camMoveDir = hero.facing || 1;
+    this._camDirHoldSec = 0;
+    this._camTurnOriginCol = hero.col;
+    this._camVel = { col: 0, floor: 0, lead: 0 };
 
     sound?.setWind?.(0);
     sound?.setMiniGameMode?.(null);
@@ -1394,6 +1619,18 @@ export class ToweringWatersGame {
       stunTimer: 0,
       flipped: false,
       flipTimer: 0,
+      springArmTimer: 0,
+      bounceCooldown: 0,
+      bounceSquash: 0,
+      shellPunted: false,
+      shellPuntDir: 1,
+      shellPuntTimer: 0,
+      slamWaveActive: false,
+      slamWaveProgress: 0,
+      slamWaveOriginCol: initCol,
+      mortarArc: null,
+      aggroAlertTimer: 0,
+      emoteCurioTimer: 0,
       slitherPhase: (idx * 0.9) % (Math.PI * 2),
       openAmount: 0,
       fireTimer: 1.1 + (idx % 3) * 0.65,
@@ -2228,6 +2465,333 @@ export class ToweringWatersGame {
     return '▲';
   }
 
+  addFlowCharge(amount, opts = {}) {
+    const delta = Number(amount) || 0;
+    if (delta <= 0 && !opts?.critter) return this.watershedFlowPct;
+    const prevPct = this.watershedFlowPct || 0;
+    this.watershedFlowPct = Math.max(0, Math.min(100, prevPct + delta));
+    this.watershedFlow.meter = this.watershedFlowPct;
+    if (opts?.combo) {
+      this.watershedFlow.combo = (this.watershedFlow.combo || 0) + 1;
+      this.watershedFlow.maxCombo = Math.max(this.watershedFlow.maxCombo || 0, this.watershedFlow.combo);
+    }
+    if (opts?.trick) {
+      this.watershedFlow.tricksLanded = (this.watershedFlow.tricksLanded || 0) + 1;
+    }
+    if (opts?.grotto) {
+      this.watershedFlow.grottosFound = (this.watershedFlow.grottosFound || 0) + 1;
+    }
+    if (opts?.critter) {
+      const entry = {
+        species: String(opts.critter.species || 'otter'),
+        color: String(opts.critter.color || '#5efce8'),
+        name: String(opts.critter.name || opts.critter.species || 'Water Critter'),
+      };
+      this.watershedFlow.rescuedThisStage.push(entry);
+      this.rescuedCritterEscorts.push(entry);
+      if (this.rescuedCritterEscorts.length > 6) {
+        this.rescuedCritterEscorts = this.rescuedCritterEscorts.slice(-6);
+      }
+      this.prog?.recordRescuedCompanion?.(entry);
+      sound?.playGatewayVoice?.('rescue');
+    }
+
+    // Unlock carry-over Spire Perks at 35% / 70% / 100% Watershed Flow thresholds (#601)
+    if (this.watershedFlowPct >= 35 && !this._pendingSpirePerks.tidalAegis) {
+      this._pendingSpirePerks.tidalAegis = true;
+      this.activeSpirePerks.tidalAegis = true;
+      this.activeFlowPerks.tidalAegis.active = true;
+      this.activeFlowPerks.tidalAegis.charges = 1;
+      if (prevPct < 35) {
+        this.addPopup({
+          x: (this.renderer?.width || 390) * 0.5,
+          y: (this.renderer?.height || 680) * 0.28,
+          text: '◈ TIDAL AEGIS PERK UNLOCKED! (35%)',
+          color: '#67e8f9',
+          maxLife: 1.4,
+        });
+      }
+    }
+    if (this.watershedFlowPct >= 70 && !this._pendingSpirePerks.pressurizedSluice) {
+      this._pendingSpirePerks.pressurizedSluice = true;
+      this.activeSpirePerks.pressurizedSluice = true;
+      this.activeFlowPerks.sluiceSurge.active = true;
+      this.activeFlowPerks.sluiceSurge.bonusSec = 20;
+      if (prevPct < 70) {
+        this.addPopup({
+          x: (this.renderer?.width || 390) * 0.5,
+          y: (this.renderer?.height || 680) * 0.24,
+          text: '▲ PRESSURIZED SLUICE +20s UNLOCKED! (70%)',
+          color: '#38bdf8',
+          maxLife: 1.5,
+        });
+      }
+    }
+    if (this.watershedFlowPct >= 100 && !this._pendingSpirePerks.hydroOvercharge) {
+      this._pendingSpirePerks.hydroOvercharge = true;
+      this.activeSpirePerks.hydroOvercharge = true;
+      this.activeSpirePerks.hydroOverchargeTimer = 25.0;
+      this.activeFlowPerks.hydroOvercharge.active = true;
+      this.activeFlowPerks.hydroOvercharge.remainingSec = 25.0;
+      if (prevPct < 100) {
+        this.addPopup({
+          x: (this.renderer?.width || 390) * 0.5,
+          y: (this.renderer?.height || 680) * 0.20,
+          text: '★ HYDRO-OVERCHARGE UNLOCKED! (100%)',
+          color: '#5efce8',
+          maxLife: 1.6,
+        });
+      }
+    }
+    return this.watershedFlowPct;
+  }
+
+  _grantSupplyPowerUp(kind, col, floor) {
+    const p = this.gateway;
+    const norm = String(kind || '').toLowerCase();
+    if (norm === 'turbo_current') {
+      this.activePowerUp = {
+        type: 'turbo_current',
+        label: 'TURBO CURRENT',
+        remainingSec: 10.0,
+        maxSec: 10.0,
+      };
+      this.addPopup({ col, floor: floor + 0.5, text: '⚡ TURBO CURRENT! (10s)', color: '#38bdf8', maxLife: 1.35 });
+    } else if (norm === 'bubble_shield') {
+      if (this.runType !== 'purist') p.shield = true;
+      this.activePowerUp = {
+        type: 'bubble_shield',
+        label: 'BUBBLE SHIELD',
+        remainingSec: 30.0,
+        maxSec: 30.0,
+      };
+      this.addPopup({ col, floor: floor + 0.5, text: '◈ BUBBLE SHIELD!', color: '#67e8f9', maxLife: 1.35 });
+    } else if (norm === 'hydro_magnet') {
+      this.activePowerUp = {
+        type: 'hydro_magnet',
+        label: 'HYDRO-MAGNET',
+        remainingSec: 12.0,
+        maxSec: 12.0,
+      };
+      this.addPopup({ col, floor: floor + 0.5, text: '✦ HYDRO-MAGNET! (12s)', color: '#fbbf24', maxLife: 1.35 });
+    } else {
+      return;
+    }
+    if (p) p.joyfulTimer = Math.max(p.joyfulTimer || 0, 1.25);
+    sound?.collectStar?.();
+    sound?.playGatewayVoice?.('victory');
+    const pos = this._colFloorToScreen(col, floor, 12);
+    if (pos) this._spawnParticles(pos.x, pos.y, '#5efce8', 14, 120, 150, col, floor);
+  }
+
+  _triggerExteriorFloodgateSurge(sourceDoor = null, rewardSummary = {}) {
+    const srcCol = sourceDoor ? wrapCol(sourceDoor.col + 0.5) : this.gateway?.col ?? 0.5;
+    const srcFloor = sourceDoor ? sourceDoor.floor : this.gateway?.floor ?? 0;
+    const targetGate =
+      this.ledges.find((l) => l.origType === 'laserGate' || l.origType === 'phaseBlock') ||
+      this.elevators.find((e) => e.pipeGroup) ||
+      null;
+    const targetNode = targetGate
+      ? {
+          col: wrapCol((targetGate.col ?? srcCol) + 0.5),
+          floor: targetGate.floor ?? srcFloor + 2,
+          kind: targetGate.origType === 'laserGate' ? 'laserGate' : targetGate.pipeGroup ? 'expressLift' : 'shortcutBridge',
+        }
+      : { col: srcCol, floor: srcFloor + 2.5, kind: 'shortcutBridge' };
+
+    this.floodgateSurgeTimer = 1.85;
+    this.spireFloodgateSurgeFx = {
+      active: true,
+      timer: 1.85,
+      duration: 1.85,
+      sourceDoor: { col: srcCol, floor: srcFloor },
+      targetNode,
+      rewardSummary: {
+        shield: Boolean(rewardSummary.shield),
+        bonusSec: Number(rewardSummary.bonusSec) || 20,
+        relic: Boolean(rewardSummary.relic),
+        parBonus: Boolean(rewardSummary.parBonus),
+      },
+    };
+    if (this.gateway) {
+      this.gateway.joyfulTimer = Math.max(this.gateway.joyfulTimer || 0, 1.85);
+    }
+    this.addShake(5.2);
+    const sp = this._colFloorToScreen(srcCol, srcFloor + 0.6, 14);
+    if (sp) {
+      this._spawnSplashDroplets(sp.x, sp.y, srcCol, srcFloor + 0.5, 22, 1.15);
+    }
+    sound?.playFloodgateSurge?.();
+    sound?.playGatewayVoice?.('victory');
+  }
+
+  _detectHeroSurface(landedLedge = null) {
+    const p = this.gateway;
+    if (!p) return 'stone';
+    if (p.isSwimming || p.floor <= this.waterFloor + 0.16) return 'water';
+    if (p.onElevator) return 'bronze';
+    const l = landedLedge || (p.onGround ? this._findLedgeAt(p.col, p.floor) : null);
+    if (!l) return 'stone';
+    if (l.type === 'ice') return 'ice';
+    if (
+      l.type === 'conveyorR' ||
+      l.type === 'conveyorL' ||
+      l.type === 'piston' ||
+      l.type === 'steamVent' ||
+      l.type === 'phaseBlock'
+    ) {
+      return 'bronze';
+    }
+    if (l.material === 'wood' || l.type === 'bridge' || l.type === 'raft') return 'wood';
+    if (
+      (this.tower?.theme === 'mist_bayou' || this.tower?.theme === 'canyon_river') &&
+      l.type === 'crumble'
+    ) {
+      return 'wood';
+    }
+    return 'stone';
+  }
+
+  _updateGatewayPersonality(dt, underLedge) {
+    const p = this.gateway;
+    if (!p) return;
+
+    if ((p.joyfulTimer || 0) > 0) p.joyfulTimer = Math.max(0, p.joyfulTimer - dt);
+    if ((p.wetShakeTimer || 0) > 0) p.wetShakeTimer = Math.max(0, p.wetShakeTimer - dt);
+    if ((p._teeterSfxCooldown || 0) > 0) p._teeterSfxCooldown = Math.max(0, p._teeterSfxCooldown - dt);
+    if ((p.springSomersaultTimer || 0) > 0) {
+      p.springSomersaultTimer = Math.max(0, p.springSomersaultTimer - dt);
+      if (p.springSomersaultTimer <= 0) p.springSomersault = false;
+    } else {
+      p.springSomersault = false;
+    }
+
+    // Track idle timer (triggers `IdleCurious` / 'curious' after ~3.2s idle)
+    const isCalmIdle =
+      p.onGround &&
+      !p.onStairs &&
+      !p.isSwimming &&
+      Math.abs(p.vx) < 0.08 &&
+      (p.tailWhipTimer || 0) <= 0 &&
+      (p.muzzleFlash || 0) <= 0 &&
+      (p.hurtTimer || 0) <= 0;
+    if (isCalmIdle) {
+      p.idleTimer = (p.idleTimer || 0) + dt;
+    } else {
+      p.idleTimer = 0;
+    }
+
+    // Edge-Teeter detection (`0..1` when nearly idle within 0.28 cols of a drop-off facing void!)
+    let teetering = false;
+    if (
+      p.onGround &&
+      !p.onStairs &&
+      !p.onElevator &&
+      !p.isSwimming &&
+      Math.abs(p.vx) < 0.45 &&
+      (p.tailWhipTimer || 0) <= 0 &&
+      (p.hurtTimer || 0) <= 0 &&
+      underLedge
+    ) {
+      const offsetInTile = colDist(underLedge.col + 0.5, p.col);
+      const faceDir = p.facing >= 0 ? 1 : -1;
+      if (offsetInTile * faceDir >= 0.22) {
+        const nextCol = wrapCol(underLedge.col + faceDir);
+        const hasNextSupport =
+          this.ledges.some(
+            (l) =>
+              this._isWalkableLedge(l) &&
+              wrapCol(l.col) === nextCol &&
+              l.floor >= underLedge.floor - 0.65 &&
+              l.floor <= underLedge.floor + 1.15
+          ) ||
+          this.elevators.some(
+            (el) => wrapCol(el.col) === nextCol && Math.abs(el.floor - underLedge.floor) < 0.85
+          );
+        if (!hasNextSupport) {
+          teetering = true;
+        }
+      }
+    }
+    const prevTeeter = p.edgeTeeter || 0;
+    p.edgeTeeter = approach(prevTeeter, teetering ? 1 : 0, dt * (teetering ? 7.5 : 9.0));
+    if (teetering && prevTeeter < 0.5 && p.edgeTeeter >= 0.5 && (p._teeterSfxCooldown || 0) <= 0) {
+      p._teeterSfxCooldown = 1.25;
+      sound?.playGatewayVoice?.('teeter');
+    }
+
+    // Nearest enemy or collectible gaze target for Gateway 2.0's live eye/head tracker (#611)
+    let bestTarget = null;
+    let bestDist = 5.2;
+    for (const en of this.enemies) {
+      if (en.dead) continue;
+      const dc = colDist(p.col, en.col);
+      const df = en.floor - p.floor;
+      const d = Math.hypot(dc, df);
+      if (d < bestDist && Math.abs(df) <= 2.6) {
+        bestDist = d;
+        bestTarget = { col: en.col, floor: en.floor + 0.35, kind: 'enemy', dist: d, dCol: dc, dFloor: df };
+      }
+    }
+    if (!bestTarget) {
+      for (const c of this.collectibles) {
+        if (c.collected) continue;
+        const cCol = wrapCol(c.col + 0.5);
+        const dc = colDist(p.col, cCol);
+        const df = c.floor - p.floor;
+        const d = Math.hypot(dc, df);
+        if (d < bestDist && Math.abs(df) <= 2.4) {
+          bestDist = d;
+          bestTarget = { col: cCol, floor: c.floor + 0.35, kind: 'collectible', dist: d, dCol: dc, dFloor: df };
+        }
+      }
+    }
+    if (bestTarget) {
+      const dTheta = bestTarget.dCol * ((Math.PI * 2) / COLS);
+      const dy = bestTarget.dFloor * 1.5;
+      const yaw = Math.max(-0.85, Math.min(0.85, dTheta * 1.6));
+      const pitch = Math.max(-0.55, Math.min(0.55, Math.atan2(dy, Math.max(0.8, Math.abs(bestTarget.dCol) * 1.323))));
+      p.lookTarget = {
+        col: bestTarget.col,
+        floor: bestTarget.floor,
+        kind: bestTarget.kind,
+        dist: bestTarget.dist,
+        dTheta,
+        dy,
+        yaw,
+        pitch,
+      };
+    } else {
+      p.lookTarget = null;
+    }
+
+    p.surfaceMaterial = this._detectHeroSurface(underLedge);
+
+    // 6-Mood Priority Resolver ('happy' | 'curious' | 'determined' | 'joyful' | 'surprised' | 'hurt')
+    const nearWarden = this.enemies.some(
+      (e) => !e.dead && e.type === 'siphon_warden' && Math.abs(e.floor - p.floor) < 4.5
+    );
+    if ((p.hurtTimer || 0) > 0) {
+      p.mood = 'hurt';
+    } else if (p.edgeTeeter > 0.35 || (!p.onGround && p.vy < -11.5)) {
+      p.mood = 'surprised';
+    } else if (p.springSomersault || (p.joyfulTimer || 0) > 0 || this.mode === 'topple' || this.comboCount >= 3) {
+      p.mood = 'joyful';
+    } else if (
+      (p.tailWhipTimer || 0) > 0 ||
+      (p.muzzleFlash || 0) > 0.02 ||
+      (p.skidTimer || 0) > 0.04 ||
+      (p.pushingBox || 0) > 0.3 ||
+      nearWarden
+    ) {
+      p.mood = 'determined';
+    } else if ((p.idleTimer || 0) >= 2.8 || (p.lookTarget?.kind === 'collectible' && Math.abs(p.vx) < 0.25)) {
+      p.mood = 'curious';
+    } else {
+      p.mood = 'happy';
+    }
+  }
+
   _buildHudPayload() {
     const activeMode = this.mode === 'paused' ? this.pausedFrom || 'tower' : this.mode;
     const interactCtx = this._evaluateInteractContext();
@@ -2449,6 +3013,24 @@ export class ToweringWatersGame {
       critterSonar: this.critterSonar?.active ? { ...this.critterSonar } : null,
       skillRanks: this.prog?.getAllSkillRanks?.() || {},
       comboMult: Math.max(1, this.comboCount || 1),
+      gatewayMood: p?.mood || 'happy',
+      watershedFlowPct: Math.round(this.watershedFlowPct || 0),
+      watershedFlow: {
+        ...this.watershedFlow,
+        meter: Math.round(this.watershedFlowPct || 0),
+      },
+      activeSpirePerks: {
+        tidalAegis: Boolean(this.activeSpirePerks?.tidalAegis),
+        pressurizedSluice: Boolean(this.activeSpirePerks?.pressurizedSluice),
+        hydroOvercharge: Boolean(
+          this.activeSpirePerks?.hydroOvercharge && (this.activeSpirePerks?.hydroOverchargeTimer || 0) > 0
+        ),
+        hydroOverchargeTimer: Number((this.activeSpirePerks?.hydroOverchargeTimer || 0).toFixed(1)),
+      },
+      activeFlowPerks: this.activeFlowPerks,
+      activePowerUp: this.activePowerUp ? { ...this.activePowerUp } : null,
+      floodgateSurgeTimer: Number((this.floodgateSurgeTimer || 0).toFixed(2)),
+      rescuedCritterEscorts: (this.rescuedCritterEscorts || []).map((c) => ({ ...c })),
       actionPrompt,
       interactKind: crownLocked && interactCtx.door?.isExit ? '' : interactCtx.kind,
       canPeekClue,
@@ -2477,6 +3059,7 @@ export class ToweringWatersGame {
       switches: this.switches,
       wallStrips: this.wallStrips,
       grappleRings: this.grappleRings,
+      hydroRings: this.hydroRings,
       collectibles: this.collectibles,
       critterPods: this.critterPods,
       enemies: this.enemies,
@@ -2499,6 +3082,13 @@ export class ToweringWatersGame {
       sealObjectives: (this.sealObjectives || []).map((s) => ({ ...s })),
       switchStates: this.switchStates,
       pipeStates: this.pipeStates,
+      watershedFlowPct: Math.round(this.watershedFlowPct || 0),
+      activeSpirePerks: this.activeSpirePerks,
+      activeFlowPerks: this.activeFlowPerks,
+      activePowerUp: this.activePowerUp,
+      floodgateSurgeTimer: this.floodgateSurgeTimer || 0,
+      spireFloodgateSurgeFx: this.spireFloodgateSurgeFx,
+      rescuedCritterEscorts: this.rescuedCritterEscorts,
     };
   }
 
@@ -2982,12 +3572,19 @@ export class ToweringWatersGame {
     }
     if (typeof sound?.hitBlock === 'function') sound.hitBlock();
     else sound?.hitEnemy?.();
+
+    // Siphon Supply Crate Power-Up Drop ('turbo_current' | 'bubble_shield' | 'hydro_magnet') (#601)
+    if (box.powerUp) {
+      this._grantSupplyPowerUp(box.powerUp, box.col + 0.5, box.floor + 0.65);
+    }
   }
 
   _executeTailWhip() {
     const p = this.gateway;
     const isTriple = this.hasMutation('triple_whip');
     const vortexRank = this.getSkillRank('wide_tail_vortex');
+    const overchargeActive =
+      Boolean(this.activeSpirePerks?.hydroOvercharge) && (this.activeSpirePerks?.hydroOverchargeTimer || 0) > 0;
     const dur = isTriple ? 0.40 : 0.32;
     p.tailWhipTimer = dur;
     p.whipTimer = dur;
@@ -3018,11 +3615,12 @@ export class ToweringWatersGame {
     if (typeof sound?.tailWhip === 'function') sound.tailWhip();
     else if (typeof sound?.whip === 'function') sound.whip();
     else sound?.jump?.();
+    sound?.playGatewayVoice?.('whip');
     this.input?.haptic?.(16);
     this._emitProgEvent('tail_whip', { towerId: this.tower?.id || 1 });
 
-    const reachCols = (isTriple ? 2.10 : 1.65) * (1 + vortexRank * 0.14);
-    const reachFloors = 1.18 * (1 + vortexRank * 0.08);
+    const reachCols = (isTriple ? 2.10 : 1.65) * (1 + vortexRank * 0.14) * (overchargeActive ? 1.25 : 1.0);
+    const reachFloors = 1.18 * (1 + vortexRank * 0.08) * (overchargeActive ? 1.12 : 1.0);
 
     const screenPos = this._colFloorToScreen(p.col, p.floor + 0.45, 14);
     if (screenPos) {
@@ -3056,18 +3654,20 @@ export class ToweringWatersGame {
       }
     }
 
-    // 3. Deflect Parabolic Barnacle Mortar Bubbles along a fast pressurized return trajectory (speed = 7.8) + 35ms hit-stop!
+    // 3. Baseball-Bat Home-Run Reflect: Parabolic Mortar Bubbles return at high velocity + juicy 55ms hit-stop! (#602)
     for (const proj of this.enemyProjectiles) {
       if (
         !proj.deflected &&
-        Math.abs(proj.floor - (p.floor + 0.4)) <= reachFloors + 0.35 &&
-        Math.abs(colDist(p.col, proj.col)) <= reachCols + 0.30
+        Math.abs(proj.floor - (p.floor + 0.4)) <= reachFloors + 0.45 &&
+        Math.abs(colDist(p.col, proj.col)) <= reachCols + 0.55
       ) {
         proj.deflected = true;
+        proj.homeRun = true;
+        proj.batReady = false;
         proj.speed = isTriple ? 9.2 : 7.8;
         // Aim pressurized return trajectory back at originating mortar/warden or opposite direction!
         let returnTarget = null;
-        let bestDist = 9.0;
+        let bestDist = 9.5;
         for (const en of this.enemies) {
           if (en.dead || en.harmless) continue;
           const dC = Math.abs(colDist(proj.col, en.col));
@@ -3088,17 +3688,19 @@ export class ToweringWatersGame {
           proj.grav = 2.0;
           proj.vy = 0.65;
         }
-        proj.life = 1.6;
-        this.hitStopTimer = Math.max(this.hitStopTimer || 0, 0.035);
-        this._scoreActionHit(120, { col: proj.col, floor: proj.floor + 0.5 }, '#5efce8');
+        proj.life = 1.65;
+        this.hitStopTimer = Math.max(this.hitStopTimer || 0, 0.055);
+        p.joyfulTimer = Math.max(p.joyfulTimer || 0, 0.85);
+        this._scoreActionHit(180, { col: proj.col, floor: proj.floor + 0.5 }, '#fde047');
         this.addPopup({
           col: proj.col,
-          floor: proj.floor + 0.9,
-          text: '◎ DEFLECTED!',
-          color: '#5efce8',
-          maxLife: 1.0,
+          floor: proj.floor + 0.95,
+          text: '★ HOME-RUN REFLECT! +180',
+          color: '#fde047',
+          maxLife: 1.15,
         });
-        this.addShake(3.8);
+        this.addShake(4.8);
+        sound?.playEnemySfx?.('barnacle_mortar', 'mortar_reflect');
         sound?.deflect?.();
       }
     }
@@ -3126,9 +3728,42 @@ export class ToweringWatersGame {
     const pos = this._colFloorToScreen(en.col, en.floor + 0.35, 14);
 
     if (en.type === 'snap_crab') {
+      // NEW (#602): Tail-Whipping an ALREADY-FLIPPED Snap-Crab punts its spinning shell across the terrace (8.5 cols/s)!
+      if (en.flipped && !en.shellPunted && source === 'whip') {
+        const puntDir = Math.sign(colDist(this.gateway.col, en.col)) || this.gateway.facing || 1;
+        en.shellPunted = true;
+        en.shellPuntDir = puntDir;
+        en.shellPuntTimer = 2.4;
+        en.flipTimer = 2.4;
+        en.stunTimer = 2.4;
+        en.aiState = 'shell_slide';
+        en.velCol = puntDir * 8.5;
+        en.velFloor = 0;
+        en.bounceSquash = 0.85;
+        this.hitStopTimer = Math.max(this.hitStopTimer || 0, 0.040);
+        if (this.gateway) this.gateway.joyfulTimer = Math.max(this.gateway.joyfulTimer || 0, 0.85);
+        this._scoreActionHit(180, { col: en.col, floor: en.floor + 0.65 }, '#fde047');
+        this.addPopup({
+          col: en.col,
+          floor: en.floor + 1.1,
+          text: '★ SHELL PUNT!',
+          color: '#fde047',
+          maxLife: 1.05,
+        });
+        this.addShake(4.2);
+        if (pos) this._spawnParticles(pos.x, pos.y, '#fde047', 14, 130, 165, en.col, en.floor + 0.35);
+        sound?.playEnemySfx?.('snap_crab', 'crab_punt');
+        sound?.hitBlock?.();
+        return;
+      }
+
       en.flipped = true;
-      en.flipTimer = 5.6;
-      en.stunTimer = 5.6;
+      en.shellPunted = false;
+      en.flipTimer = 6.0;
+      en.stunTimer = 6.0;
+      en.springArmTimer = 0.22; // 0.22s post-flip arming delay -> ZERO same-frame instant whip catapults! (#603)
+      en.bounceCooldown = 0;
+      en.bounceSquash = 0.65;
       en.aiState = 'flipped';
       en.velCol = 0;
       en.velFloor = 0;
@@ -3146,6 +3781,7 @@ export class ToweringWatersGame {
       });
       this.addShake(3.5);
       if (pos) this._spawnParticles(pos.x, pos.y, '#2dd4bf', 10, 105, 160, en.col, en.floor + 0.35);
+      sound?.playEnemySfx?.('snap_crab', 'crab_flip');
       sound?.stunEnemy?.();
       this._tryUnlockTrophy('roller_shatter');
       this._emitProgEvent('snowball_hit', { kind: 'snap_crab', runType: this.runType, combo: this.comboCount });
@@ -3174,6 +3810,7 @@ export class ToweringWatersGame {
         this.addShake(3.2);
         if (pos) this._spawnParticles(pos.x, pos.y, '#67e8f9', 10, 115, 160, en.col, en.floor + 0.5);
         this.addPopup({ col: en.col, floor: en.floor + 0.95, text: '◈ SHIELD CRACKED • STRIKE CORE!', color: '#67e8f9', maxLife: 1.05 });
+        sound?.playEnemySfx?.('siphon_warden', 'warden_crack');
         sound?.stunEnemy?.();
         return;
       }
@@ -3182,7 +3819,7 @@ export class ToweringWatersGame {
       en.hp = Math.max(0, (en.hp || 1) - dmg);
       en.stunTimer = 0.48;
       en.bossHitCooldown = 0.45;
-      if (source === 'whip' || source === 'deflect') this.hitStopTimer = Math.max(this.hitStopTimer || 0, 0.035);
+      if (source === 'whip' || source === 'deflect') this.hitStopTimer = Math.max(this.hitStopTimer || 0, 0.040);
       this.addShake(5.5);
       if (pos) this._spawnParticles(pos.x, pos.y, '#f472b6', 14, 130, 170, en.col, en.floor + 0.5);
       if (en.hp <= 0) {
@@ -3193,6 +3830,7 @@ export class ToweringWatersGame {
         en.velFloor = 0;
         en.deathTimer = 0.45;
         this.bossHazards = [];
+        if (this.gateway) this.gateway.joyfulTimer = Math.max(this.gateway.joyfulTimer || 0, 1.8);
         for (const sw of this.switches) {
           if (sw.mode === 'sluiceSeal') {
             sw._playerInside = false;
@@ -3212,6 +3850,8 @@ export class ToweringWatersGame {
             : '+8 HYDRO-GEARS • CROWN CLEAR'
         );
         this._emitProgEvent('warden_defeat', { towerId: this.tower?.id || 1 });
+        sound?.playEnemySfx?.('siphon_warden', 'warden_crack');
+        sound?.playGatewayVoice?.('victory');
         sound?.hitEnemy?.();
         const anyWardenAlive = this.enemies.some((other) => !other.dead && other.type === 'siphon_warden');
         if (!anyWardenAlive) {
@@ -3298,15 +3938,33 @@ export class ToweringWatersGame {
     }
 
     if (en.type === 'gulp_hopper') {
-      if (source === 'whip' || en.stunTimer > 0) {
+      const isBellyPop = (en.inflatePhase || 0) >= 0.50 || (source === 'whip' && en.stunTimer > 0);
+      if (isBellyPop || source === 'whip' || en.stunTimer > 0) {
         en.dead = true;
         en.velCol = 0;
         en.velFloor = 0;
         en.inflatePhase = 0;
-        en.deathTimer = 0.28;
-        if (source === 'whip') this.hitStopTimer = Math.max(this.hitStopTimer || 0, 0.030);
+        en.slamWaveActive = false;
+        en.slamWaveProgress = 0;
+        en.deathTimer = 0.30;
+        if (isBellyPop) {
+          this.hitStopTimer = Math.max(this.hitStopTimer || 0, 0.040);
+          this._awardGears(2);
+          this._scoreActionHit(150, { col: en.col, floor: en.floor + 0.6 }, '#5efce8');
+          this.addPopup({
+            col: en.col,
+            floor: en.floor + 1.15,
+            text: '★ BELLY POP! +2 GEARS',
+            color: '#5efce8',
+            maxLife: 1.1,
+          });
+          if (pos) this._spawnSplashDroplets(pos.x, pos.y, en.col, en.floor + 0.4, 18, 1.0);
+          sound?.playEnemySfx?.('gulp_hopper', 'frog_slam');
+        } else {
+          if (source === 'whip') this.hitStopTimer = Math.max(this.hitStopTimer || 0, 0.030);
+          this._scoreActionHit(100, { col: en.col, floor: en.floor + 0.5 }, '#38bdf8');
+        }
         this.towerEnemiesDestroyed += 1;
-        this._scoreActionHit(100, { col: en.col, floor: en.floor + 0.5 }, '#38bdf8');
         this._triggerStormSiphonShockwave(en.col, en.floor);
         sound?.hitEnemy?.();
       } else {
@@ -3320,7 +3978,7 @@ export class ToweringWatersGame {
         this._scoreActionHit(60, { col: en.col, floor: en.floor + 0.5 }, '#a7f3d0');
         sound?.stunEnemy?.();
       }
-      this.addShake(2.4);
+      this.addShake(isBellyPop ? 4.0 : 2.4);
       if (pos) this._spawnParticles(pos.x, pos.y, '#a7f3d0', 8, 85, 155, en.col, en.floor + 0.3);
       this._tryUnlockTrophy('bouncer_freeze');
       this._emitProgEvent('snowball_hit', { kind: 'gulp_hopper', runType: this.runType, combo: this.comboCount });
@@ -3328,12 +3986,13 @@ export class ToweringWatersGame {
     }
 
     if (en.type === 'volt_eel') {
-      // Bio-Electric Conduit Hunter: meleeing while `shockActive` bounces off the discharge aura; punish during `exhausted`!
+      // Bio-Electric Conduit Hunter: meleeing while `shockActive` bounces off the discharge aura; punish during `exhausted` or stunned!
       if (en.shockActive && source === 'whip') {
         const p = this.gateway;
         const bounceDir = Math.sign(colDist(en.col, p.col)) || -p.facing;
         p.vx = bounceDir * 3.1;
         p.knockbackTimer = 0.14;
+        sound?.playEnemySfx?.('volt_eel', 'eel_zap');
         sound?.deflect?.();
         this.addPopup({
           col: en.col,
@@ -3348,17 +4007,24 @@ export class ToweringWatersGame {
         return;
       }
       const wasExhausted = en.aiState === 'exhausted';
+      const wasStunned = (en.stunTimer || 0) > 0;
       en.shockActive = false;
       en.coilBlend = 0;
       en.telegraph = 0;
       en.velCol = 0;
       en.velFloor = 0;
-      if (wasExhausted && source === 'whip') {
+      if ((wasExhausted || wasStunned) && source === 'whip') {
         en.dead = true;
         en.deathTimer = 0.30;
-        this.hitStopTimer = Math.max(this.hitStopTimer || 0, 0.035);
+        this.hitStopTimer = Math.max(this.hitStopTimer || 0, 0.040);
         this.towerEnemiesDestroyed += 1;
-        this._scoreActionHit(140, { col: en.col, floor: en.floor + 0.5 }, '#67e8f9');
+        if (wasStunned) {
+          this._awardGears(2);
+          this._scoreActionHit(160, { col: en.col, floor: en.floor + 0.55 }, '#fde047');
+          this.addPopup({ col: en.col, floor: en.floor + 1.05, text: '★ STUN-KICK FINISHER! +2 GEARS', color: '#fde047', maxLife: 1.05 });
+        } else {
+          this._scoreActionHit(140, { col: en.col, floor: en.floor + 0.5 }, '#67e8f9');
+        }
         this._triggerStormSiphonShockwave(en.col, en.floor);
         sound?.hitEnemy?.();
       } else {
@@ -3375,7 +4041,31 @@ export class ToweringWatersGame {
       return;
     }
 
-    // rail_skater, vent_stalker
+    // rail_skater, vent_stalker — Stun-Kick Finisher when Tail-Whipping an already-stunned enemy! (#602)
+    if ((en.stunTimer || 0) > 0 && source === 'whip') {
+      en.dead = true;
+      en.deathTimer = 0.32;
+      en.velCol = (this.gateway?.facing || 1) * 6.5;
+      en.velFloor = 2.0;
+      this.hitStopTimer = Math.max(this.hitStopTimer || 0, 0.040);
+      this.towerEnemiesDestroyed += 1;
+      this._awardGears(2);
+      this._scoreActionHit(160, { col: en.col, floor: en.floor + 0.6 }, '#fde047');
+      this.addPopup({
+        col: en.col,
+        floor: en.floor + 1.1,
+        text: '★ STUN-KICK FINISHER! +2 GEARS',
+        color: '#fde047',
+        maxLife: 1.05,
+      });
+      this._triggerStormSiphonShockwave(en.col, en.floor);
+      this.addShake(4.0);
+      if (pos) this._spawnParticles(pos.x, pos.y, '#fde047', 14, 130, 175, en.col, en.floor + 0.35);
+      sound?.hitEnemy?.();
+      this._emitProgEvent('snowball_hit', { kind: en.type, runType: this.runType, combo: this.comboCount });
+      return;
+    }
+
     const bonusWindow =
       (en.type === 'rail_skater' && (en.aiState === 'spark_brake' || en.aiState === 'windup')) ||
       (en.type === 'vent_stalker' && en.aiState === 'cooldown');
@@ -3462,16 +4152,25 @@ export class ToweringWatersGame {
       this._aquaStepCooldown = Math.max(0, this._aquaStepCooldown - dt);
     }
 
-    // Bubble Aegis mutation / Tidal Aegis Bio-Skill auto-regeneration
+    // Bubble Aegis mutation / Tidal Aegis Bio-Skill / Carry-Over Tidal Aegis Perk auto-regeneration
     const aegisSkillRank = this.getSkillRank('tidal_aegis');
-    const hasAutoAegis = this.hasMutation('bubble_aegis') || aegisSkillRank > 0;
+    const hasPerkAegis = Boolean(this.activeSpirePerks?.tidalAegis);
+    const hasAutoAegis = this.hasMutation('bubble_aegis') || aegisSkillRank > 0 || hasPerkAegis;
     if (hasAutoAegis && !p.shield) {
       const skillPeriod = aegisSkillRank === 3 ? 18.0 : aegisSkillRank === 2 ? 24.0 : 32.0;
-      const aegisPeriod = this.hasMutation('bubble_aegis') ? Math.min(18.0, skillPeriod) : skillPeriod;
+      const aegisPeriod =
+        this.hasMutation('bubble_aegis') || hasPerkAegis ? Math.min(18.0, skillPeriod) : skillPeriod;
       this._aegisRechargeTimer += dt;
+      if (this.activeFlowPerks?.tidalAegis) {
+        this.activeFlowPerks.tidalAegis.rechargeTimer = this._aegisRechargeTimer;
+      }
       if (this._aegisRechargeTimer >= aegisPeriod) {
         this._aegisRechargeTimer = 0;
         p.shield = true;
+        if (this.activeFlowPerks?.tidalAegis) {
+          this.activeFlowPerks.tidalAegis.charges = 1;
+          this.activeFlowPerks.tidalAegis.rechargeTimer = 0;
+        }
         this.addPopup({
           col: p.col,
           floor: p.floor + 1.3,
@@ -3481,6 +4180,38 @@ export class ToweringWatersGame {
         });
       }
     }
+
+    // Active Watershed Flow Overcharge, Supply Crate Power-Up & Exterior Floodgate Surge timers
+    if (this.activeSpirePerks?.hydroOvercharge && (this.activeSpirePerks.hydroOverchargeTimer || 0) > 0) {
+      this.activeSpirePerks.hydroOverchargeTimer = Math.max(0, this.activeSpirePerks.hydroOverchargeTimer - dt);
+      if (this.activeFlowPerks?.hydroOvercharge) {
+        this.activeFlowPerks.hydroOvercharge.remainingSec = this.activeSpirePerks.hydroOverchargeTimer;
+        if (this.activeSpirePerks.hydroOverchargeTimer <= 0) {
+          this.activeSpirePerks.hydroOvercharge = false;
+          this.activeFlowPerks.hydroOvercharge.active = false;
+        }
+      }
+    }
+    if (this.activePowerUp && this.activePowerUp.type !== 'bubble_shield') {
+      this.activePowerUp.remainingSec = Math.max(0, (this.activePowerUp.remainingSec || 0) - dt);
+      if (this.activePowerUp.remainingSec <= 0) {
+        this.activePowerUp = null;
+      }
+    }
+    if ((this.floodgateSurgeTimer || 0) > 0) {
+      this.floodgateSurgeTimer = Math.max(0, this.floodgateSurgeTimer - dt);
+      if (this.spireFloodgateSurgeFx) {
+        this.spireFloodgateSurgeFx.timer = this.floodgateSurgeTimer;
+        if (this.floodgateSurgeTimer <= 0) {
+          this.spireFloodgateSurgeFx.active = false;
+        }
+      }
+    }
+    if ((p.hydroRingBoostTimer || 0) > 0) {
+      p.hydroRingBoostTimer = Math.max(0, p.hydroRingBoostTimer - dt);
+    }
+
+    const wasSwimming = Boolean(p.isSwimming);
 
     // Cooldowns & spring poses
     if (p.invuln > 0) p.invuln = Math.max(0, p.invuln - dt);
@@ -3543,7 +4274,8 @@ export class ToweringWatersGame {
       if (p.tunnelTarget) {
         const dc = colDist(this.camCol, p.tunnelTarget.col + 0.5);
         this.camCol = wrapCol(this.camCol + dc * Math.min(1, dt * 12));
-        const tf = Math.max(1.5, p.tunnelTarget.floor + 1.45);
+        const tf = Math.max(0.0, p.tunnelTarget.floor);
+        this.camAnchorFloor = tf;
         this.camFloor += (tf - this.camFloor) * Math.min(1, dt * 9.5);
       }
       if (p.tunnelTimer <= 0 && p.tunnelTarget) {
@@ -3765,8 +4497,22 @@ export class ToweringWatersGame {
     const springRank = this.getSkillRank('geyser_spring');
     const updraftRank = this.getSkillRank('thermal_updraft');
     const graceRank = this.getSkillRank('harmonic_grace');
-    const walkSpeed = BASE_WALK_SPEED * (hasGeckoMut ? 1.22 : 1.0) * (1 + scalesRank * 0.06);
-    const jumpVy = BASE_JUMP_VY * (1 + springRank * 0.05);
+    const overchargeSpeedMult =
+      this.activeSpirePerks?.hydroOvercharge && (this.activeSpirePerks?.hydroOverchargeTimer || 0) > 0 ? 1.15 : 1.0;
+    const turboSpeedMult = this.activePowerUp?.type === 'turbo_current' ? 1.35 : 1.0;
+    const ringBoostMult = (p.hydroRingBoostTimer || 0) > 0 ? 1.22 : 1.0;
+    const walkSpeed =
+      BASE_WALK_SPEED *
+      (hasGeckoMut ? 1.22 : 1.0) *
+      (1 + scalesRank * 0.06) *
+      overchargeSpeedMult *
+      turboSpeedMult *
+      ringBoostMult;
+    // Sqrt-scaled geyser_spring caps Rank 3 jump height at <= 1.65F (+0.30F mantle <= 1.945F < 2.0F — ZERO bypass!)
+    const jumpVy =
+      BASE_JUMP_VY *
+      Math.sqrt(1 + springRank * 0.024) *
+      (this.activePowerUp?.type === 'turbo_current' ? 1.06 : 1.0);
 
     // -------------------------------------------------------------------------
     // GECKO WALL-SCAMPER STRIP ATTACHMENT & CLIMBING
@@ -3811,7 +4557,8 @@ export class ToweringWatersGame {
         this._footstepAccum += Math.abs(vertIntent) * climbRate * dt;
         if (this._footstepAccum >= 0.65) {
           this._footstepAccum = 0;
-          sound?.step?.();
+          if (typeof sound?.stepSurface === 'function') sound.stepSurface('stone');
+          else sound?.step?.();
         }
       }
 
@@ -3825,7 +4572,9 @@ export class ToweringWatersGame {
         p.jumpStartCol = p.col;
         p.jumpStartFloor = p.floor;
         p.jumpCutEligible = true;
+        p.jumpCutApplied = false;
         sound?.jump?.();
+        sound?.playGatewayVoice?.('jump');
       } else if (Math.abs(moveIntent) > 0.35 && (p.floor >= ws.maxFloor - 0.15 || p.floor <= ws.minFloor + 0.15)) {
         p.wallScamper = false;
         p.climbing = false;
@@ -3912,26 +4661,28 @@ export class ToweringWatersGame {
         windPush = 0;
       }
       let effSpeed = p.isSwimming ? walkSpeed * 0.88 : walkSpeed;
-      // Real staircase slope physics: uphill resistance (0.86x), downhill gravity-assisted stride (1.12x)!
+      // Smooth staircase slope feel: gentle 0.94x uphill / 1.04x downhill (#603)
       if (wasOnStairs && p.onGround && !p.onElevator && !p.isSwimming && p.stairDir !== 0) {
-        if (effectiveMoveIntent * p.stairDir > 0.05) effSpeed *= 0.86;
-        else if (effectiveMoveIntent * p.stairDir < -0.05) effSpeed *= 1.12;
+        if (effectiveMoveIntent * p.stairDir > 0.05) effSpeed *= 0.94;
+        else if (effectiveMoveIntent * p.stairDir < -0.05) effSpeed *= 1.04;
       }
       const targetVx = effectiveMoveIntent * effSpeed;
 
       if ((p.knockbackTimer || 0) <= 0 && (p.grappleTimer || 0) <= 0) {
         const desiredVx = targetVx + convPush + windPush;
         const isCounterSteer = effectiveMoveIntent * p.vx < -0.15;
+        const inApexBand = !p.onGround && Math.abs(p.vy) <= APEX_VY_THRESH;
         let rate;
         if (!p.onGround) {
-          // True air-momentum conservation: running takeoff impulse (1.18x) bleeds only aerodynamic AIR_DRAG when steering with momentum!
+          // Celeste apex maneuverability boost: +20% AIR_ACCEL & +6% air cap inside apex hang band!
+          const effAirAccel = inApexBand ? AIR_ACCEL * 1.20 : AIR_ACCEL;
           if (descendingIslandBrake) {
             rate = 18.0;
           } else if (Math.abs(effectiveMoveIntent) > 0.05) {
             if (p.vx * desiredVx > 0 && Math.abs(p.vx) > Math.abs(desiredVx)) {
               rate = AIR_DRAG;
             } else {
-              rate = AIR_ACCEL;
+              rate = effAirAccel;
             }
           } else {
             rate = AIR_DRAG;
@@ -3941,12 +4692,14 @@ export class ToweringWatersGame {
         } else if (isIce) {
           rate = Math.abs(effectiveMoveIntent) > 0.05 ? ICE_ACCEL : ICE_FRICTION;
         } else if (Math.abs(effectiveMoveIntent) > 0.05) {
-          if (isCounterSteer && Math.abs(p.vx) > 1.45) {
+          if (isCounterSteer && Math.abs(p.vx) > 2.0) {
             rate = GROUND_SKID_DECEL;
             p.skidTimer = 0.19;
             if ((p._skidSfxCooldown || 0) <= 0) {
               p._skidSfxCooldown = 0.18;
-              sound?.step?.();
+              const surf = this._detectHeroSurface(underLedge);
+              if (typeof sound?.stepSurface === 'function') sound.stepSurface(surf);
+              else sound?.step?.();
               const sp = this._colFloorToScreen(p.col, p.floor + 0.08, 10);
               if (sp) this._spawnParticles(sp.x, sp.y, '#d6c2a8', 4, 65, 190, p.col, p.floor + 0.08);
             }
@@ -3954,13 +4707,14 @@ export class ToweringWatersGame {
             rate = GROUND_ACCEL;
           }
         } else {
-          // Natural planted claw-stop friction (~0.22 col stop inside 1 stone without robot snap!)
+          // Crisp planted heel-stop friction (~0.143 col stop inside 1 stone!)
           rate = GROUND_FRICTION;
         }
         p.vx = approach(p.vx, desiredVx, rate * dt);
 
         if (!p.onGround && (p.riptideDashTimer || 0) <= 0) {
-          const maxAirVx = walkSpeed * JUMP_HORIZ_IMPULSE + Math.abs(convPush + windPush);
+          const apexCapMult = inApexBand ? 1.06 : 1.0;
+          const maxAirVx = walkSpeed * JUMP_HORIZ_IMPULSE * apexCapMult + Math.abs(convPush + windPush);
           p.vx = Math.max(-maxAirVx, Math.min(maxAirVx, p.vx));
         }
       }
@@ -4035,12 +4789,10 @@ export class ToweringWatersGame {
           if (Math.abs(p.vx) > 0.05) {
             p.stairPhase = (p.stairPhase + Math.abs(p.vx) * dt * 2.4) % 1;
           }
-          // Discrete 5-tread physical riser cadence micro-impulses!
+          // Crisp 5-step foot cadence IK/VFX/audio hint (zero vertical floor/camera jitter!)
           if (stairSample.onRamp && stairSample.treadIndex !== p.stairStepIndex && Math.abs(p.vx) > 0.35) {
             p.stairStepIndex = stairSample.treadIndex;
             p.stairStepBob = 1.0;
-            p.squashY = Math.min(p.squashY, 0.95);
-            p.squashX = Math.max(p.squashX, 1.05);
           }
           this._registerLedgeStand(stairSample.supportLedge);
         } else if (wasOnStairs) {
@@ -4058,13 +4810,15 @@ export class ToweringWatersGame {
           }
         }
 
-        // Organic 6-variation footstep cadence on grounded movement
+        // Surface-aware organic footstep cadence ('stone' | 'ice' | 'wood' | 'water' | 'bronze')
         const movedCols = Math.abs(colDist(prevCol, p.col));
         if (movedCols > 0.001) {
           this._footstepAccum += movedCols;
           if (this._footstepAccum >= 0.56) {
             this._footstepAccum = 0;
-            sound?.step?.();
+            const surf = this._detectHeroSurface(underLedge);
+            if (typeof sound?.stepSurface === 'function') sound.stepSurface(surf);
+            else sound?.step?.();
           }
         }
       }
@@ -4100,11 +4854,13 @@ export class ToweringWatersGame {
     }
 
     const magnetSkillRank = this.getSkillRank('pelagic_magnet');
-    const magnetRangeCol = this.hasMutation('tidal_magnet')
+    const hasHydroMagnetPowerUp = this.activePowerUp?.type === 'hydro_magnet';
+    const baseMagnetRange = this.hasMutation('tidal_magnet')
       ? Math.max(2.6, 1.2 + magnetSkillRank * 0.8)
       : magnetSkillRank > 0
       ? 0.4 + magnetSkillRank * 0.8
       : 0;
+    const magnetRangeCol = hasHydroMagnetPowerUp ? Math.max(3.2, baseMagnetRange) : baseMagnetRange;
     for (const c of this.collectibles) {
       if (c.collected) continue;
       const dCol = colDist(c.col + 0.5, p.col);
@@ -4115,6 +4871,29 @@ export class ToweringWatersGame {
       }
       if (Math.abs(c.floor - p.floor) < 0.85 && Math.abs(colDist(p.col, c.col + 0.5)) < 0.72) {
         this._collectSpireItem(c);
+      }
+    }
+
+    // Hydro-Ring Speed Lines (`tower.hydroRings`) — speed burst + combo + ascending chime! (#601)
+    if (this.hydroRings && this.hydroRings.length > 0) {
+      for (const hr of this.hydroRings) {
+        if (hr.collected) continue;
+        const ringCol = Number.isInteger(hr.col) ? wrapCol(hr.col + 0.5) : wrapCol(hr.col);
+        if (Math.abs(hr.floor - (p.floor + 0.35)) < 0.95 && Math.abs(colDist(p.col, ringCol)) < 0.88) {
+          hr.collected = true;
+          p.hydroRingBoostTimer = Math.max(p.hydroRingBoostTimer || 0, 2.2);
+          p.joyfulTimer = Math.max(p.joyfulTimer || 0, 0.95);
+          const boostDir = Math.abs(p.vx) > 0.2 ? Math.sign(p.vx) : p.facing || 1;
+          p.vx = approach(p.vx, boostDir * Math.max(walkSpeed * 1.22, Math.abs(p.vx)), 2.5);
+          this._scoreActionHit(120, { col: ringCol, floor: hr.floor + 0.55 }, '#5efce8');
+          if (typeof sound?.hydroRingChime === 'function') sound.hydroRingChime(this.comboCount);
+          else if (typeof sound?.ringChime === 'function') sound.ringChime(this.comboCount);
+          else if (typeof sound?.boostGate === 'function') sound.boostGate(this.comboCount);
+          else sound?.collectGear?.();
+          this.input?.haptic?.(12);
+          const pos = this._colFloorToScreen(ringCol, hr.floor + 0.35, 12);
+          if (pos) this._spawnParticles(pos.x, pos.y, '#5efce8', 10, 115, 90, ringCol, hr.floor + 0.35);
+        }
       }
     }
 
@@ -4322,7 +5101,13 @@ export class ToweringWatersGame {
           Math.abs(p.floor - gr.floor) < 1.32
       );
       const autoApexSnag =
-        nearRing && Math.abs(moveIntent) > 0.25 && p.vy < 2.2 && p.vy > -4.8 && p.floor < nearRing.floor + 0.3;
+        nearRing &&
+        Math.abs(moveIntent) > 0.25 &&
+        Math.abs(colDist(p.col, nearRing.col)) < 0.95 &&
+        Math.abs(p.floor - nearRing.floor) < 0.92 &&
+        p.vy < 2.2 &&
+        p.vy > -3.5 &&
+        p.floor < nearRing.floor + 0.3;
       if (nearRing && (jumpEdge || whipEdge || p.jumpBufferTimer > 0 || autoApexSnag)) {
         nearRing._cooldown = 1.1;
         p.grappleTarget = nearRing;
@@ -4330,7 +5115,10 @@ export class ToweringWatersGame {
         p.jumpBufferTimer = 0;
         const swingDir = Math.abs(moveIntent) > 0.1 ? Math.sign(moveIntent) : p.facing;
         p.facing = swingDir;
-        p.col = wrapCol(nearRing.col);
+        // Never teleport Gateway backward against her swing direction when tail-snagging a ring
+        if (colDist(p.col, nearRing.col) * swingDir > 0) {
+          p.col = wrapCol(nearRing.col);
+        }
         p.floor = Math.max(p.floor, nearRing.floor - 0.35);
         p.vx = swingDir * (walkSpeed * 1.26 * (1 + updraftRank * 0.08));
         p.vy = jumpVy * (1 + updraftRank * 0.06);
@@ -4357,15 +5145,19 @@ export class ToweringWatersGame {
       if (p.onGround || p.coyoteTimer > 0 || p.isSwimming) {
         if (!p.isSwimming) {
           if (Math.abs(moveIntent) > 0.55 && Math.abs(p.vx) > 1.8 && moveIntent * p.vx > 0) {
-            // Athletic lizard hind-leg running takeoff boost (JUMP_HORIZ_IMPULSE = 1.18 -> 3.89 cols/s)
+            // Gentle 4% athletic takeoff nudge (JUMP_HORIZ_IMPULSE = 1.04 — zero 1-col overshoot!)
             p.vx = Math.sign(moveIntent) * Math.max(Math.abs(p.vx), walkSpeed * JUMP_HORIZ_IMPULSE);
           } else if (Math.abs(moveIntent) > 0.55 && moveIntent * p.vx >= 0) {
             // Responsive standing/walk directional takeoff for one-thumb diagonal flicks
             p.vx = Math.sign(moveIntent) * Math.max(Math.abs(p.vx), walkSpeed * 0.86 * Math.abs(moveIntent));
           }
         }
+        const wasSwimmingBeforeJump = Boolean(p.isSwimming);
         p.vy = p.isSwimming ? jumpVy * 1.04 : jumpVy;
         p.isSwimming = false;
+        if (wasSwimmingBeforeJump) {
+          p.wetShakeTimer = 0.65;
+        }
         p.isGliding = false;
         p.frillFlare = 0;
         p.waterDipOffset = 0;
@@ -4373,7 +5165,11 @@ export class ToweringWatersGame {
         p.onStairs = false;
         p.stairSlope = 0;
         p.jumpCutEligible = true;
+        p.jumpCutApplied = false;
         p.steamBoostActive = false;
+        p.springKind = null;
+        p.springSomersault = false;
+        p.springSomersaultTimer = 0;
         p.jumpStartCol = p.col;
         p.jumpStartFloor = p.floor;
         p.onGround = false;
@@ -4384,12 +5180,18 @@ export class ToweringWatersGame {
         p.squashX = 0.86;
         p.squashY = 1.16;
         sound?.jump?.();
+        sound?.playGatewayVoice?.('jump');
       } else if ((p.airJumpsLeft || 0) > 0) {
         p.airJumpsLeft -= 1;
         p.vy = jumpVy;
         p.isGliding = false;
         p.frillFlare = 0;
         p.jumpCutEligible = true;
+        p.jumpCutApplied = false;
+        p.steamBoostActive = false;
+        p.springKind = null;
+        p.springSomersault = false;
+        p.springSomersaultTimer = 0;
         p.jumpStartCol = p.col;
         p.jumpStartFloor = p.floor;
         p.jumpBufferTimer = 0;
@@ -4398,6 +5200,7 @@ export class ToweringWatersGame {
         const pos = this._colFloorToScreen(p.col, p.floor, 12);
         if (pos) this._spawnParticles(pos.x, pos.y, '#38bdf8', 12, 110, 150, p.col, p.floor);
         sound?.jump?.();
+        sound?.playGatewayVoice?.('doubleJump');
         this.input?.haptic?.(16);
       }
     }
@@ -4590,11 +5393,30 @@ export class ToweringWatersGame {
       let grav = GRAV_RISE;
       p.frillFlare = 0;
       p.isGliding = false;
-      if (p.vy > 1.4 && !inp.jump && p.jumpCutEligible) {
+      if (p.steamBoostActive) {
+        // Dedicated buoyant spring gravity for Snap-Crab & Hydro-Geyser vaults (#603)
+        if (p.vy > SPRING_APEX_THRESH) {
+          if (p.springKind === 'crab' && vertIntent < -0.5 && p.floor >= (p.jumpStartFloor ?? 0) + 1.25) {
+            grav = 64.0; // Active Down-cut shortens crab bounce on demand!
+          } else {
+            grav = GRAV_SPRING_RISE;
+          }
+        } else if (Math.abs(p.vy) <= SPRING_APEX_THRESH) {
+          grav = GRAV_SPRING_APEX;
+        } else {
+          grav = GRAV_SPRING_FALL;
+        }
+      } else if (p.vy > APEX_VY_THRESH && !inp.jump && p.jumpCutEligible) {
+        // Silky parabolic short-hop: one-time 0.68x release damp + GRAV_JUMP_CUT until apex!
+        if (!p.jumpCutApplied) {
+          p.vy *= 0.68;
+          p.jumpCutApplied = true;
+        }
         grav = GRAV_JUMP_CUT;
-      } else if (Math.abs(p.vy) <= 1.4) {
+      } else if (Math.abs(p.vy) <= APEX_VY_THRESH) {
+        // True Celeste/Mario apex hang-time (GRAV_APEX = 16.5 = 0.58x GRAV_RISE)!
         grav = lowGravApex ? GRAV_APEX * 0.78 : GRAV_APEX;
-      } else if (p.vy < -1.4) {
+      } else if (p.vy < -APEX_VY_THRESH) {
         grav = GRAV_FALL;
       }
 
@@ -4604,14 +5426,15 @@ export class ToweringWatersGame {
       p.floor += p.vy * dt;
       p.onGround = false;
 
-      // Overhead ceiling check: hard `pillar` bulkheads always block; `steamBoostActive` shatters overhead `box` crates & passes through exterior terraces!
+      // Overhead ceiling check + Celeste/Mario Corner-Correction Nudge (0.17..0.34 col) (#603)!
       if (p.vy > 0) {
         const head = p.floor + 0.76;
         const prevHead = prevFloor + 0.76;
         const startFloor = p.jumpStartFloor ?? prevFloor;
         for (const l of this.ledges) {
           if (l.gone || !l.active || l.type === 'laserGate') continue;
-          if (Math.abs(colDist(p.col, l.col + 0.5)) >= 0.34) continue;
+          const dc = colDist(l.col + 0.5, p.col);
+          if (Math.abs(dc) >= 0.34) continue;
           if (l.type === 'box' && p.steamBoostActive) {
             if (prevHead <= l.floor + 0.08 && head >= l.floor - 0.05) {
               this._shatterSiphonBox(l, p.facing, 75);
@@ -4624,10 +5447,28 @@ export class ToweringWatersGame {
           }
           const bottom = isWallBlock ? l.floor : l.floor - 0.14;
           if (prevHead <= bottom + 0.01 && head >= bottom) {
+            // Overhead corner-correction nudge: grazing outer 0.17..0.34 col edge nudges Gateway cleanly around it preserving vy!
+            if (isWallBlock && Math.abs(dc) >= 0.17 && Math.abs(dc) < 0.34) {
+              const nudgeDir = Math.sign(dc) || p.facing || 1;
+              const adjCol = wrapCol(l.col + nudgeDir);
+              const adjBlocked = this.ledges.some(
+                (o) =>
+                  !o.gone &&
+                  o.active &&
+                  (o.type === 'box' || o.type === 'pillar') &&
+                  wrapCol(o.col) === adjCol &&
+                  (o.h ? l.floor >= o.floor - 0.1 && l.floor < o.floor + o.h : Math.abs(o.floor - l.floor) < 0.8)
+              );
+              if (!adjBlocked) {
+                p.col = wrapCol(l.col + 0.5 + nudgeDir * 0.37);
+                continue;
+              }
+            }
             p.floor = bottom - 0.761;
             p.vy = 0;
             p.jumpCutEligible = false;
             p.steamBoostActive = false;
+            p.springKind = null;
             break;
           }
         }
@@ -4670,10 +5511,12 @@ export class ToweringWatersGame {
         }
       }
 
-      // Generous 0.42F Waist/Knee Ledge-Edge Mantle
+      // Crisp 0.30F Ledge-Edge Mantle (capped strictly below +2.0F bypass on normal jumps; reaches +4F on geysers!)
       if (!p.onGround && p.vy <= 2.6 && (Math.abs(p.vx) > 0.12 || Math.abs(moveIntent) > 0.05)) {
         const approachDir = Math.abs(p.vx) > 0.12 ? Math.sign(p.vx) : Math.sign(moveIntent);
-        const maxMantleRise = (p.jumpStartFloor ?? p.floor) + (p.steamBoostActive ? 3.55 : 1.65);
+        const maxMantleRise =
+          (p.jumpStartFloor ?? p.floor) +
+          (p.steamBoostActive ? (p.springKind === 'geyser' ? 4.20 : 3.55) : 1.92);
         const mantleLedge = this.ledges.find((l) => {
           if (!this._isWalkableLedge(l)) return false;
           if (l.floor > maxMantleRise) return false;
@@ -4691,7 +5534,11 @@ export class ToweringWatersGame {
           p.vy = 0;
           p.isSwimming = false;
           p.jumpCutEligible = false;
+          p.jumpCutApplied = false;
           p.steamBoostActive = false;
+          p.springKind = null;
+          p.springSomersault = false;
+          p.springSomersaultTimer = 0;
           p.onGround = true;
           p.landImpact = Math.max(p.landImpact, 0.35);
           if (!liveHorizHeld) {
@@ -4707,7 +5554,7 @@ export class ToweringWatersGame {
       }
     }
 
-    // Hydro-Geyser Updraft Launch ('steamVent')
+    // Hydro-Geyser Updraft Launch ('steamVent') — altitude-compensated solveSpringVy capped <= 4.25F! (#603)
     for (const l of this.ledges) {
       if (
         l.type === 'steamVent' &&
@@ -4716,13 +5563,21 @@ export class ToweringWatersGame {
         Math.abs(colDist(p.col, l.col + 0.5)) < 0.62 &&
         p.vy < 8.5
       ) {
-        const geyserSkillMult = 1 + updraftRank * 0.10 + springRank * 0.04;
-        p.vy = (this.hasMutation('carapace_vault') ? 20.4 : SPRING_LAUNCH_VY) * geyserSkillMult;
+        const geyserPeak = Math.min(
+          4.25,
+          GEYSER_BASE_PEAK_F + (this.hasMutation('carapace_vault') ? 0.22 : 0) + updraftRank * 0.08 + springRank * 0.04
+        );
+        const contactElev = Math.max(0, Math.min(0.65, p.floor - l.floor));
+        p.vy = solveSpringVy(geyserPeak - contactElev);
         p.wallScamper = false;
         p.climbing = false;
         p.isSwimming = false;
         p.jumpCutEligible = false;
+        p.jumpCutApplied = false;
         p.steamBoostActive = true;
+        p.springKind = 'geyser';
+        p.springSomersault = true;
+        p.springSomersaultTimer = 0.78;
         p.jumpStartCol = l.col + 0.5;
         p.jumpStartFloor = l.floor;
         p.onGround = false;
@@ -4732,6 +5587,7 @@ export class ToweringWatersGame {
         p.squashY = 1.22;
         this.towerSteamLaunches += 1;
         sound?.steamBurst?.();
+        sound?.playGatewayVoice?.('whee');
         this.input?.haptic?.(22);
         this._tryUnlockTrophy('steam_surfer');
         this._emitProgEvent('steam_launch', { towerId: this.tower?.id || 1 });
@@ -4826,21 +5682,39 @@ export class ToweringWatersGame {
       }
     }
 
+    // Any transition out of swimming triggers Gateway 2.0's adorable 0.65s WetShake! (#602 + #611)
+    if (wasSwimming && !p.isSwimming && (p.wetShakeTimer || 0) <= 0.1) {
+      p.wetShakeTimer = 0.65;
+      sound?.playGatewayVoice?.('wetShake');
+    }
+
+    // Update Gateway 2.0 Live Personality, Mood, Edge-Teeter, Wet-Shake & Eye-Look Target (#602 + #611)
+    this._updateGatewayPersonality(dt, underLedge);
+
     // Update Skeletal Animation State Hint for `GatewayRig` (`src/gateway.js` — ZERO `FrillGlide` on tower jumps!)
     p.isGliding = false;
     p.frillFlare = 0;
     if (p.tailWhipTimer > 0) p.anim = 'TailWhip';
     else if (p.muzzleFlash > 0.04) p.anim = 'HydroCast';
+    else if (p.hurtTimer > 0.14) p.anim = 'HurtFlinch';
     else if (p.wallScamper) p.anim = 'WallScamper';
     else if (p.isSwimming) p.anim = 'FreeSwim';
     else if (!p.onGround) {
-      p.anim = p.vy >= 0.6 ? 'AirRise' : 'Fall';
+      p.anim = p.springSomersault ? 'SpringSomersault' : p.vy >= -0.5 ? 'AirRise' : 'Fall';
+    } else if ((p.wetShakeTimer || 0) > 0 && Math.abs(p.vx) < 0.2) {
+      p.anim = 'WetShake';
+    } else if ((p.edgeTeeter || 0) > 0.45) {
+      p.anim = 'EdgeTeeter';
+    } else if ((p.skidTimer || 0) > 0.04) {
+      p.anim = 'SkidStop';
     } else if (p.onStairs && Math.abs(p.vx) > 0.15) {
       p.anim = 'StairClimb';
     } else if (Math.abs(p.vx) > 1.55) {
       p.anim = 'FluidRun';
     } else if (Math.abs(p.vx) > 0.10) {
       p.anim = 'Walk';
+    } else if ((p.idleTimer || 0) >= 3.2) {
+      p.anim = 'IdleCurious';
     } else {
       p.anim = 'IdleBreathe';
     }
@@ -4925,8 +5799,20 @@ export class ToweringWatersGame {
       const critterRes = this.prog?.rescueCritter?.(c.critterId || c.id || null);
       this._handleProgTrophyReturn(critterRes);
       this.addScore(500);
+      if (this.gateway) this.gateway.joyfulTimer = Math.max(this.gateway.joyfulTimer || 0, 1.3);
+      const escortEntry = {
+        species: String(critterRes?.critter?.species || c.species || 'otter').toLowerCase(),
+        color: '#5efce8',
+        name: String(critterRes?.critter?.name || c.species || 'Water Critter'),
+      };
+      this.rescuedCritterEscorts.push(escortEntry);
+      if (this.rescuedCritterEscorts.length > 6) {
+        this.rescuedCritterEscorts = this.rescuedCritterEscorts.slice(-6);
+      }
+      this.prog?.recordRescuedCompanion?.(escortEntry);
       if (typeof sound?.critterRescue === 'function') sound.critterRescue();
       else sound?.collectStar?.();
+      sound?.playGatewayVoice?.('rescue');
       const pos = this._colFloorToScreen(c.col + 0.5, c.floor + 0.5, 14);
       if (pos) this._spawnParticles(pos.x, pos.y, '#5efce8', 16, 125, 140, c.col + 0.5, c.floor + 0.5);
       const spName = String(critterRes?.critter?.species || c.species || 'WATER CRITTER').toUpperCase();
@@ -4970,7 +5856,11 @@ export class ToweringWatersGame {
     const p = this.gateway;
     const inp = this.input?.state;
     p.jumpCutEligible = false;
+    p.jumpCutApplied = false;
     p.steamBoostActive = false;
+    p.springKind = null;
+    p.springSomersault = false;
+    p.springSomersaultTimer = 0;
     p.airJumpsLeft = this.hasMutation('hydro_double_jump') ? 1 : 0;
 
     const neutralHoriz = !inp || (!inp.left && !inp.right && Math.abs(inp.analogX || 0) <= 0.08);
@@ -4986,16 +5876,17 @@ export class ToweringWatersGame {
 
     if (isDryStone && !wasOnGround) {
       if (neutralHoriz) {
-        p.vx *= 0.2;
-        if (Math.abs(p.vx) < 0.5) p.vx = 0;
+        // Smooth grounded landing transition (0.65x + GROUND_FRICTION = 44.0 finishes cleanly in ~50ms!) (#603)
+        p.vx *= 0.65;
+        if (Math.abs(p.vx) < 0.35) p.vx = 0;
       } else if (!rawLive && landed && Math.abs(p.vx) > 0.1) {
         const adjCol = wrapCol(landed.col + Math.sign(p.vx));
         const hasAdj = this.ledges.some(
           (n) => this._isWalkableLedge(n) && wrapCol(n.col) === adjCol && Math.abs(n.floor - landed.floor) <= 1.05
         );
         if (!hasAdj) {
-          p.vx *= 0.15;
-          if (Math.abs(p.vx) < 0.55) p.vx = 0;
+          p.vx *= 0.25;
+          if (Math.abs(p.vx) < 0.45) p.vx = 0;
         }
       }
     }
@@ -5010,7 +5901,9 @@ export class ToweringWatersGame {
         this.addShake(1.2 + impact * 2.1);
       }
       if (Math.abs(prevVy) > 2.4) {
-        sound?.land?.(impact);
+        const surf = this._detectHeroSurface(landed);
+        if (typeof sound?.landSurface === 'function') sound.landSurface(surf, impact);
+        else sound?.land?.(impact);
         const sp = this._colFloorToScreen(p.col, p.floor + 0.05, 10);
         if (sp) {
           this._spawnParticles(sp.x, sp.y, '#d6c2a8', Math.round(4 + impact * 6), 72, 210, p.col, p.floor + 0.05);
@@ -5378,6 +6271,7 @@ export class ToweringWatersGame {
       }
 
       if (pr.deflected) {
+        pr.batReady = false;
         // Deflected pressurized water-bomb shatters enemies or Wardens (2.0x scale hitboxes)!
         for (const en of this.enemies) {
           if (en.dead) continue;
@@ -5389,6 +6283,11 @@ export class ToweringWatersGame {
           }
         }
       } else {
+        // Expose `batReady` so `enemyRig.js` / `renderer.js` flashes the golden `BAT IT!` ring inside Tail-Whip range!
+        pr.batReady =
+          !p.hidden &&
+          Math.abs(pr.floor - (p.floor + 0.4)) <= 1.55 &&
+          Math.abs(colDist(pr.col, p.col)) <= 2.35;
         if (
           p.invuln <= 0 &&
           !p.hidden &&
@@ -5479,9 +6378,110 @@ export class ToweringWatersGame {
       const prevCol = en.col;
       const prevFloor = en.floor;
 
-      // Flipped Snap-Crab Dredger -> Harmless glowing Hydro-Bounce Springboard!
+      if ((en.aggroAlertTimer || 0) > 0) en.aggroAlertTimer = Math.max(0, en.aggroAlertTimer - dt);
+      if ((en.emoteCurioTimer || 0) > 0) en.emoteCurioTimer = Math.max(0, en.emoteCurioTimer - dt);
+      if ((en.bounceSquash || 0) > 0) en.bounceSquash = approach(en.bounceSquash, 0, dt * 4.5);
+
+      // Gulp-Hopper Expanding Ground Shockwave Ring (jumpable ripple hazard!) (#602)
+      if (en.slamWaveActive) {
+        en.slamWaveProgress = Math.min(1, (en.slamWaveProgress || 0) + dt / 0.42);
+        const waveRadius = 0.35 + en.slamWaveProgress * 1.50;
+        if (
+          !en.harmless &&
+          en.slamWaveProgress < 0.92 &&
+          p.invuln <= 0 &&
+          !p.hidden &&
+          !(p.onElevator && p.onElevator.powered !== false) &&
+          Math.abs(p.floor - en.baseFloor) < 0.30 &&
+          Math.abs(Math.abs(colDist(p.col, en.slamWaveOriginCol ?? en.col)) - waveRadius) < 0.30
+        ) {
+          this._applyHazardHit(en.slamWaveOriginCol ?? en.col);
+        }
+        if (en.slamWaveProgress >= 1) {
+          en.slamWaveActive = false;
+          en.slamWaveProgress = 0;
+        }
+      }
+
+      // 0. Punted Spinning Snap-Crab Shell (`shellPunted === true`, 8.5 cols/s bowling through crates & enemies!) (#602)
+      if (en.shellPunted) {
+        en.shellPuntTimer = Math.max(0, (en.shellPuntTimer || 0) - dt);
+        en.aiState = 'shell_slide';
+        const puntSpeed = 8.5;
+        const puntDir = en.shellPuntDir >= 0 ? 1 : -1;
+        const nextCol = wrapCol(en.col + puntDir * puntSpeed * dt);
+        en.col = nextCol;
+        en.velCol = puntDir * puntSpeed;
+        en.velFloor = 0;
+
+        // Shatter Siphon Box crates along the terrace!
+        for (const l of this.ledges) {
+          if (
+            !l.gone &&
+            l.active &&
+            l.type === 'box' &&
+            Math.abs(l.floor - en.floor) < 0.85 &&
+            Math.abs(colDist(en.col, l.col + 0.5)) < 0.72
+          ) {
+            this._shatterSiphonBox(l, puntDir, 100);
+          }
+        }
+
+        // Bowl through other enemies / crack Warden shields for combo bursts!
+        for (const other of this.enemies) {
+          if (other === en || other.dead || other.harmless) continue;
+          if (Math.abs(other.floor - en.floor) < 0.95 && Math.abs(colDist(en.col, other.col)) < 0.85) {
+            if (other.type === 'siphon_warden') {
+              this._applyAttackToEnemy(other, 'deflect');
+              en.dead = true;
+              en.shellPunted = false;
+              en.deathTimer = 0.25;
+              break;
+            }
+            other.dead = true;
+            other.deathTimer = 0.28;
+            this.towerEnemiesDestroyed += 1;
+            this._awardGears(2);
+            this._scoreActionHit(250, { col: other.col, floor: other.floor + 0.65 }, '#fde047');
+            this.addPopup({
+              col: other.col,
+              floor: other.floor + 1.15,
+              text: '★ SHELL STRIKE! +250',
+              color: '#fde047',
+              maxLife: 1.1,
+            });
+            this.addShake(3.8);
+            sound?.hitEnemy?.();
+          }
+        }
+
+        // Bounce off hard pillars/laserGates, or shatter cleanly off ledge edge / timer expiry
+        const hitHardWall = this.ledges.some(
+          (l) =>
+            !l.gone &&
+            l.active &&
+            (l.type === 'pillar' || l.type === 'laserGate') &&
+            Math.abs(l.floor - en.floor) < 0.95 &&
+            Math.abs(colDist(en.col, l.col + 0.5)) < 0.62
+        );
+        if (hitHardWall) {
+          en.shellPuntDir = -puntDir;
+          sound?.hitBlock?.();
+        } else if (en.shellPuntTimer <= 0 || !this._findLedgeAt(en.col, en.floor)) {
+          en.dead = true;
+          en.shellPunted = false;
+          en.deathTimer = 0.25;
+          const sp = this._colFloorToScreen(en.col, en.floor + 0.35, 12);
+          if (sp) this._spawnParticles(sp.x, sp.y, '#5efce8', 10, 110, 175, en.col, en.floor + 0.35);
+        }
+        continue;
+      }
+
+      // Flipped Snap-Crab Dredger -> Calibrated Altitude-Compensated Hydro-Bounce Springboard! (#602 + #603)
       if (en.flipped) {
         en.flipTimer = Math.max(0, (en.flipTimer || 0) - dt);
+        en.springArmTimer = Math.max(0, (en.springArmTimer || 0) - dt);
+        en.bounceCooldown = Math.max(0, (en.bounceCooldown || 0) - dt);
         en.stunTimer = en.flipTimer;
         en.aiState = 'flipped';
         en.velCol = 0;
@@ -5491,14 +6491,30 @@ export class ToweringWatersGame {
         if (en.flipTimer <= 0) {
           en.flipped = false;
           en.stunTimer = 0;
+          en.springArmTimer = 0;
+          en.bounceCooldown = 0;
           en.aiState = 'patrol';
         } else {
+          const relFloor = p.floor - en.floor;
+          const absColDist = Math.abs(colDist(p.col, en.col));
+          const jumpActive = Boolean(this.input?.state?.jump || (p.jumpBufferTimer || 0) > 0);
+          // Reconciled Rule (#606): require 0.22s arming grace, tight carapace box, AND aerial descent OR active Jump press!
+          // Flat-walking past a flipped crab NEVER catapults Gateway!
+          const intentionalBounce = (!p.onGround && p.vy <= 0.8) || jumpActive;
           const hitCrabSpring =
-            p.vy <= 1.6 &&
-            Math.abs(p.floor - en.floor) < 0.92 &&
-            Math.abs(colDist(p.col, en.col)) < 0.92;
+            (en.springArmTimer || 0) <= 0 &&
+            (en.bounceCooldown || 0) <= 0 &&
+            intentionalBounce &&
+            p.vy <= 0.8 &&
+            relFloor >= -0.12 &&
+            relFloor <= 0.52 &&
+            absColDist < 0.56;
           if (hitCrabSpring) {
-            p.vy = this.hasMutation('carapace_vault') ? 20.4 : SPRING_LAUNCH_VY;
+            const targetPeak = this.hasMutation('carapace_vault') ? 3.58 : CRAB_BOUNCE_PEAK_F;
+            const contactElev = Math.max(0, Math.min(0.52, relFloor));
+            p.vy = solveSpringVy(targetPeak - contactElev);
+            en.bounceCooldown = 0.28;
+            en.bounceSquash = 1.0;
             p.onGround = false;
             p.onElevator = null;
             p.wallScamper = false;
@@ -5506,12 +6522,20 @@ export class ToweringWatersGame {
             p.isGliding = false;
             p.frillFlare = 0;
             p.jumpCutEligible = false;
+            p.jumpCutApplied = false;
+            p.jumpBufferTimer = 0;
             p.steamBoostActive = true;
+            p.springKind = 'crab';
+            p.springSomersault = true;
+            p.springSomersaultTimer = 0.72;
+            p.joyfulTimer = Math.max(p.joyfulTimer || 0, 0.85);
             p.jumpStartCol = en.col;
             p.jumpStartFloor = en.floor;
             p.airJumpsLeft = this.hasMutation('hydro_double_jump') ? 1 : 0;
             p.squashX = 0.80;
             p.squashY = 1.24;
+            sound?.playEnemySfx?.('snap_crab', 'crab_boing');
+            sound?.playGatewayVoice?.('whee');
             sound?.jump?.();
             this.input?.haptic?.(22);
             this._emitProgEvent('crab_springboard', { towerId: this.tower?.id || 1 });
@@ -5537,6 +6561,41 @@ export class ToweringWatersGame {
         en.chargeBlend = 0;
         en.brakeBlend = 0;
         en.telegraph = 0;
+        en.mortarArc = null;
+
+        // Stun-Kick Finisher: walking into a stunned non-boss enemy kicks it flying for combo bonus + Gears! (#602)
+        if (
+          !en.harmless &&
+          en.type !== 'siphon_warden' &&
+          !p.hidden &&
+          Math.abs(p.vx) > 0.25 &&
+          Math.abs(en.floor - p.floor) < 0.72 &&
+          Math.abs(colDist(en.col, p.col)) < 0.72
+        ) {
+          en.dead = true;
+          en.deathTimer = 0.34;
+          en.velCol = (p.facing || 1) * 7.0;
+          en.velFloor = 2.2;
+          this.hitStopTimer = Math.max(this.hitStopTimer || 0, 0.040);
+          this.towerEnemiesDestroyed += 1;
+          this._awardGears(2);
+          p.joyfulTimer = Math.max(p.joyfulTimer || 0, 0.85);
+          this._scoreActionHit(160, { col: en.col, floor: en.floor + 0.65 }, '#fde047');
+          this.addPopup({
+            col: en.col,
+            floor: en.floor + 1.15,
+            text: '★ STUN-KICK FINISHER! +2 GEARS',
+            color: '#fde047',
+            maxLife: 1.05,
+          });
+          this.addShake(3.8);
+          const sp = this._colFloorToScreen(en.col, en.floor + 0.35, 12);
+          if (sp) this._spawnParticles(sp.x, sp.y, '#fde047', 14, 130, 175, en.col, en.floor + 0.35);
+          sound?.hitEnemy?.();
+          sound?.playGatewayVoice?.('whip');
+          continue;
+        }
+
         if (en.stunTimer <= 0) {
           en.aiState =
             en.type === 'gulp_hopper'
@@ -5563,8 +6622,8 @@ export class ToweringWatersGame {
           !en.harmless &&
           !p.hidden &&
           (en.aggroCooldown || 0) <= 0 &&
-          Math.abs(en.floor - p.floor) < 0.65 &&
-          Math.abs(distToHero) <= 2.8;
+          Math.abs(en.floor - p.floor) < 1.1 &&
+          Math.abs(distToHero) <= 4.2;
 
         if (en.aiState === 'edge_look') {
           en.aiTimer -= dt;
@@ -5574,6 +6633,8 @@ export class ToweringWatersGame {
             if (Math.abs(distToHero) > 0.05) en.dir = Math.sign(distToHero);
             en.aiState = 'aggro_tell';
             en.aiTimer = 0.42;
+            en.aggroAlertTimer = 0.55;
+            sound?.playEnemySfx?.('snap_crab', 'crab_clack');
           } else if (en.aiTimer <= 0) {
             en.dir = en.nextDir || -en.dir;
             en.aiState = 'patrol';
@@ -5620,21 +6681,24 @@ export class ToweringWatersGame {
             if (Math.abs(distToHero) > 0.05) en.dir = Math.sign(distToHero);
             en.aiState = 'aggro_tell';
             en.aiTimer = 0.42;
+            en.aggroAlertTimer = 0.55;
+            sound?.playEnemySfx?.('snap_crab', 'crab_clack');
           } else {
             const patrolSpd = 0.88 * ngScale;
             const { hitBound } = this._moveEnemyAlongSpan(en, patrolSpd, dt, 1.35);
             if (hitBound) {
               en.aiState = 'edge_look';
               en.aiTimer = 0.45;
+              en.emoteCurioTimer = 0.45;
               en.nextDir = -en.dir;
             }
           }
         }
       }
-      // 2. `gulp_hopper` — Gluttonous Ambush Bullfrog (`0.00` grounded sit_watch -> `0.85s` 1.45x inflate -> ballistic `vy=8.6, grav=26` leap -> `0.55s` land_recover)
+      // 2. `gulp_hopper` — Gluttonous Ambush Bullfrog (`0.00` grounded sit_watch -> `0.85s` inflate -> leap -> land_recover + ground shockwave!)
       else if (en.type === 'gulp_hopper') {
         const distToHero = colDist(en.col, p.col);
-        const heroNear = Math.abs(en.baseFloor - p.floor) <= 2.5 && Math.abs(distToHero) <= 5.0;
+        const heroNear = Math.abs(en.baseFloor - p.floor) <= 2.5 && Math.abs(distToHero) <= 6.0;
 
         if (en.aiState === 'inflate') {
           en.aiTimer -= dt;
@@ -5645,7 +6709,6 @@ export class ToweringWatersGame {
             en.dir = Math.sign(distToHero);
           }
           if (en.aiTimer <= 0) {
-            // Ensure hop direction has room on the terrace span; bounce inward if sitting at span boundary!
             if (en.spanStart != null && en.spanLen != null) {
               const minOff = en.spanMinOff ?? 0.58;
               const maxOff = en.spanMaxOff ?? Math.max(minOff, en.spanLen - 0.58);
@@ -5676,6 +6739,14 @@ export class ToweringWatersGame {
               en.dir = en.nextDir;
               en.nextDir = 0;
             }
+            // Spawn expanding jumpable ground shockwave ring on belly-flop landing! (#602)
+            en.slamWaveActive = true;
+            en.slamWaveProgress = 0.01;
+            en.slamWaveOriginCol = en.col;
+            if (heroNear) {
+              sound?.playEnemySfx?.('gulp_hopper', 'frog_slam');
+              this.addShake(2.2);
+            }
             en.aiState = 'land_recover';
             en.aiTimer = 0.55;
           }
@@ -5701,6 +6772,10 @@ export class ToweringWatersGame {
           if (en.aiTimer <= 0) {
             en.aiState = 'inflate';
             en.aiTimer = 0.85;
+            if (heroNear) {
+              en.aggroAlertTimer = 0.50;
+              sound?.playEnemySfx?.('gulp_hopper', 'frog_gulp');
+            }
           }
         }
       }
@@ -5716,6 +6791,9 @@ export class ToweringWatersGame {
             en.aiTimer = 0.85;
             en.coilBlend = 1;
             en.shockActive = true;
+            if (Math.abs(en.floor - p.floor) < 5 && Math.abs(colDist(en.col, p.col)) < 5.0) {
+              sound?.playEnemySfx?.('volt_eel', 'eel_zap');
+            }
           }
         } else if (en.aiState === 'discharge') {
           en.coilBlend = 1;
@@ -5778,6 +6856,10 @@ export class ToweringWatersGame {
           if (en.aiTimer <= 0) {
             en.aiState = 'windup';
             en.aiTimer = 0.25;
+            if (Math.abs(en.floor - p.floor) < 4.5 && Math.abs(colDist(en.col, p.col)) < 5.5) {
+              en.aggroAlertTimer = 0.35;
+              sound?.playEnemySfx?.('rail_skater', 'skater_rev');
+            }
           }
         } else if (en.aiState === 'windup') {
           en.aiTimer -= dt;
@@ -5899,13 +6981,18 @@ export class ToweringWatersGame {
             en.stalkClock = 0;
             en.aiState = 'hiss_tell';
             en.aiTimer = 0.80;
+            if (Math.abs(en.floor - p.floor) < 5 && Math.abs(colDist(en.col, p.col)) < 5.0) {
+              en.aggroAlertTimer = 0.55;
+              sound?.playEnemySfx?.('vent_stalker', 'stalker_hiss');
+            }
           } else if (hitEnd || en.aiTimer <= 0) {
             en.aiState = 'sniff';
             en.aiTimer = 0.35;
+            en.emoteCurioTimer = 0.35;
           }
         }
       }
-      // 6. `barnacle_mortar` — Paranoid Siege Hermit (`watch` -> `0.90s` swell_tell -> parabolic `lob_recoil`; `< 1.35 col` panics into `shell_hide`!)
+      // 6. `barnacle_mortar` — Paranoid Siege Hermit (`watch` -> `0.90s` swell_tell + dotted `mortarArc` -> parabolic `lob_recoil`; `< 1.35 col` panics into `shell_hide`!)
       else if (en.type === 'barnacle_mortar') {
         const distToHero = colDist(en.col, p.col);
         const absDist = Math.abs(distToHero);
@@ -5916,11 +7003,14 @@ export class ToweringWatersGame {
         if (panicClose) {
           en.aiState = 'shell_hide';
           en.aiTimer = 1.1;
+          en.emoteCurioTimer = 0.5;
+          en.mortarArc = null;
           en.shellHide = approach(en.shellHide || 0, 1, dt * 10.0);
           en.openAmount = 1 - en.shellHide;
           en.telegraph = 0;
         } else if (en.aiState === 'shell_hide') {
           en.aiTimer -= dt;
+          en.mortarArc = null;
           en.shellHide = approach(en.shellHide || 0, 1, dt * 8.0);
           en.openAmount = 1 - en.shellHide;
           en.telegraph = 0;
@@ -5934,22 +7024,59 @@ export class ToweringWatersGame {
             en.aiTimer -= dt;
             en.telegraph = Math.max(0, Math.min(1, 1 - en.aiTimer / 0.90));
             en.openAmount = en.telegraph;
+
+            // Expose dotted parabolic targeting arc (`en.mortarArc`) for `enemyRig.js`! (#602)
+            const shotDir = Math.sign(distToHero) || en.dir || 1;
+            const aimCol = absDist <= 8.5 ? p.col : wrapCol(en.col + shotDir * 3.6);
+            const aimFloor = Math.abs(dFloor) <= 4.0 ? p.floor : en.floor;
+            const col0 = wrapCol(en.col + shotDir * 0.45);
+            const floor0 = en.floor + 0.55;
+            const grav = 10.5;
+            const dfClamp = Math.max(-2.5, Math.min(2.8, aimFloor - floor0));
+            const vy0 = 3.8 + dfClamp * 0.6;
+            const disc = Math.max(0.09, vy0 * vy0 - 2 * grav * (aimFloor + 0.30 - floor0));
+            const tHit = (vy0 + Math.sqrt(disc)) / grav;
+            const distCols = Math.max(1.2, Math.min(8.2, Math.abs(colDist(col0, aimCol))));
+            const horizSpeed = Math.max(2.1, Math.min(6.4, distCols / Math.max(0.32, tHit)));
+            const arcPoints = [];
+            for (let k = 0; k <= 8; k++) {
+              const tk = (tHit * k) / 8;
+              arcPoints.push({
+                col: wrapCol(col0 + shotDir * horizSpeed * tk),
+                floor: floor0 + vy0 * tk - 0.5 * grav * tk * tk,
+              });
+            }
+            en.mortarArc = {
+              active: true,
+              startCol: col0,
+              startFloor: floor0,
+              targetCol: wrapCol(col0 + shotDir * horizSpeed * tHit),
+              targetFloor: aimFloor,
+              dir: shotDir,
+              speed: horizSpeed,
+              vy: vy0,
+              grav,
+              tFlight: tHit,
+              progress: en.telegraph,
+              points: arcPoints,
+            };
+
             if (en.aiTimer <= 0) {
               en.aiState = 'lob_recoil';
               en.aiTimer = 0.38;
               en.telegraph = 0;
               en.openAmount = 1;
+              en.mortarArc = null;
               if (this.enemyProjectiles.length < 5) {
-                const shotDir = Math.sign(distToHero) || en.dir || 1;
-                const aimCol = absDist <= 8.5 ? p.col : wrapCol(en.col + shotDir * 3.6);
-                const aimFloor = Math.abs(dFloor) <= 4.0 ? p.floor : en.floor;
                 this._spawnParabolicMortar(en, shotDir, aimCol, aimFloor, 10.5);
+                sound?.playEnemySfx?.('barnacle_mortar', 'mortar_pop');
                 sound?.bubble?.();
               }
             }
           } else if (en.aiState === 'lob_recoil') {
             en.aiTimer -= dt;
             en.telegraph = 0;
+            en.mortarArc = null;
             en.openAmount = Math.max(0.15, en.aiTimer / 0.38);
             if (en.aiTimer <= 0) {
               en.aiState = 'watch';
@@ -5960,6 +7087,7 @@ export class ToweringWatersGame {
             en.aiState = 'watch';
             en.fireTimer -= dt;
             en.telegraph = 0;
+            en.mortarArc = null;
             en.openAmount = approach(en.openAmount || 0, 0.15, dt * 3.0);
             const inSight =
               (absDist >= 1.35 && absDist <= 7.8 && Math.abs(dFloor) <= 3.8) ||
@@ -5967,6 +7095,7 @@ export class ToweringWatersGame {
             if (en.fireTimer <= 0 && inSight) {
               en.aiState = 'swell_tell';
               en.aiTimer = 0.90;
+              en.aggroAlertTimer = 0.50;
             }
           }
         }
@@ -6049,6 +7178,8 @@ export class ToweringWatersGame {
             en.bossPhase = 'telegraph';
             en.aiState = 'telegraph';
             en.bossTimer = phaseTier === 3 ? 0.75 : 0.92;
+            en.aggroAlertTimer = 0.65;
+            sound?.playEnemySfx?.('siphon_warden', 'warden_horn');
           }
         } else if (en.bossPhase === 'telegraph') {
           en.aiState = 'telegraph';
@@ -6334,6 +7465,13 @@ export class ToweringWatersGame {
 
     if (p.shield && this.runType !== 'purist') {
       p.shield = false;
+      if (this.activeFlowPerks?.tidalAegis) {
+        this.activeFlowPerks.tidalAegis.charges = 0;
+        this.activeFlowPerks.tidalAegis.rechargeTimer = 0;
+      }
+      if (this.activePowerUp?.type === 'bubble_shield') {
+        this.activePowerUp = null;
+      }
       p.invuln = 1.65;
       sound?.stunEnemy?.();
       this.addShake(4.0);
@@ -6353,12 +7491,17 @@ export class ToweringWatersGame {
     this.towerHurtCount += 1;
     this.runHurtTotal += 1;
     p.jumpCutEligible = false;
+    p.jumpCutApplied = false;
     p.steamBoostActive = false;
+    p.springKind = null;
+    p.springSomersault = false;
+    p.springSomersaultTimer = 0;
     p.wallScamper = false;
     p.climbing = false;
     this.comboCount = 0;
     this.comboTimer = 0;
     sound?.hurt?.();
+    sound?.playGatewayVoice?.('hurt');
     this.addShake(8.5);
     this.input?.haptic?.(40);
 
@@ -6471,18 +7614,16 @@ export class ToweringWatersGame {
         if (!this.isPhysicsStairFlight(lowLedge, upDir)) continue;
 
         const linearFloor = l0.floor + df * rampT;
-        // 5-riser physical tread quantization blended with smooth step climb + exact landing snap at t<=0.12 & t>=0.88!
+        // 100% continuous C1-smooth physical ramp (eliminating 14Hz camera jitter!) while keeping 5-step treadIndex strictly for leg IK/VFX/audio! (#603)
         const treadPos = Math.max(0, Math.min(4.999, rampT * 5));
         const treadIndex = Math.floor(treadPos);
-        const treadFrac = treadPos - treadIndex;
-        const steppedRamp = (treadIndex + Math.min(1, treadFrac * 1.45)) / 5;
         let surfFloor;
         if (t <= 0.12) {
           surfFloor = l0.floor;
         } else if (t >= 0.88) {
           surfFloor = l1.floor;
         } else {
-          surfFloor = l0.floor + df * (rampT * 0.55 + steppedRamp * 0.45);
+          surfFloor = linearFloor;
         }
         const err = Math.abs(linearFloor - refFloor);
         if (err <= bestErr) {
@@ -6557,22 +7698,78 @@ export class ToweringWatersGame {
 
   _updateCamera(dt) {
     const p = this.gateway;
-    const d = colDist(this.camCol, p.col);
-    this.camCol = wrapCol(this.camCol + d * Math.min(1, dt * 14));
+    if (!p) return;
+    if (!this._camVel) this._camVel = { col: 0, floor: 0, lead: 0 };
 
-    const climbingBoost =
-      (p.onElevator && p.onElevator.dir > 0) || p.wallScamper || p.onStairs || p.vy > 1.2
-        ? 0.35
-        : p.vy < -2.2
-        ? -0.15
-        : 0;
-    const minCamFloor = Math.max(1.45, this.waterFloor + 2.0);
-    const maxCamFloor = Math.max(minCamFloor, (this.tower?.floors || 18) + 0.6);
-    const rawTarget = p.floor + 1.45 + climbingBoost;
-    const targetFloor = Math.max(minCamFloor, Math.min(maxCamFloor, rawTarget));
-    const vertDelta = targetFloor - this.camFloor;
-    const vertRate = vertDelta < 0 ? 12.0 : 9.5;
-    this.camFloor += vertDelta * Math.min(1, dt * vertRate);
+    // 1. Horizontal Cylindrical Look-Ahead with 0.14s Turnaround Hysteresis + Feedforward Critical Damping (#603)
+    if (Math.abs(p.vx) > 0.75) {
+      const dir = Math.sign(p.vx);
+      if (dir !== this._camMoveDir) {
+        if ((this._camDirHoldSec || 0) === 0) {
+          this._camTurnOriginCol = p.col;
+        }
+        this._camDirHoldSec = (this._camDirHoldSec || 0) + dt;
+        if (this._camDirHoldSec >= 0.14 || Math.abs(colDist(this._camTurnOriginCol ?? p.col, p.col)) >= 0.35) {
+          this._camMoveDir = dir;
+          this._camDirHoldSec = 0;
+        }
+      } else {
+        this._camDirHoldSec = 0;
+      }
+    } else {
+      this._camDirHoldSec = 0;
+    }
+
+    const moveDir = this._camMoveDir || p.facing || 1;
+    const speedRatio = Math.max(0.35, Math.min(1.0, Math.abs(p.vx) / BASE_WALK_SPEED));
+    const targetLead = Math.abs(p.vx) > 0.35 ? moveDir * 0.48 * speedRatio : moveDir * 0.20;
+    this._camLookAheadCol = smoothDamp(this._camLookAheadCol || 0, targetLead, this._camVel, 'lead', 0.24, 4.8, dt);
+
+    // Feedforward `p.vx * 0.085` eliminates ramp tracking lag on the 2nd-order critically damped spring
+    // so steady running achieves true +0.44..+0.48 col forward look-ahead (NEVER trailing behind Gateway!)
+    const targetCol = wrapCol(p.col + this._camLookAheadCol + p.vx * 0.085);
+    const errCol = colDist(this.camCol, targetCol);
+    const stepCol = smoothDamp(0, errCol, this._camVel, 'col', 0.085, 20.0, dt);
+    this.camCol = wrapCol(this.camCol + stepCol);
+
+    // 2. Vertical Platform-Snap + [anchor - 0.45, anchor + 1.65] Jump Deadzone + Bounce Anticipation + Fall Look-Down (#603)
+    if (this.camAnchorFloor === undefined || this.camAnchorFloor === null) {
+      this.camAnchorFloor = p.floor;
+    }
+
+    let targetFloor = this.camAnchorFloor;
+    let smoothT = 0.16;
+
+    if (p.onGround || p.onStairs || p.onElevator || p.wallScamper) {
+      this.camAnchorFloor = p.floor;
+      targetFloor = this.camAnchorFloor;
+      smoothT = p.onStairs || p.onElevator || p.wallScamper ? 0.10 : 0.16;
+    } else if (p.steamBoostActive && p.vy > 0) {
+      // Snap-Crab & Hydro-Geyser Upward Anticipation (+1.10F) frames +3F loft BEFORE apex!
+      targetFloor = Math.max(this.camAnchorFloor, p.floor + 1.10);
+      smoothT = 0.12;
+    } else if (p.floor < this.camAnchorFloor - 0.45) {
+      // Falling Look-Down Bias (-0.65F) reveals landing platforms immediately!
+      this.camAnchorFloor = p.floor;
+      targetFloor = p.floor - 0.65;
+      smoothT = 0.11;
+    } else if (p.floor > this.camAnchorFloor + 1.65) {
+      this.camAnchorFloor = p.floor - 1.65;
+      targetFloor = this.camAnchorFloor;
+      smoothT = 0.14;
+    }
+
+    // Subtle Exterior Floodgate Water-Surge upward glance during middle of the 1.85s surge animation (#601)
+    if ((this.floodgateSurgeTimer || 0) > 0 && this.spireFloodgateSurgeFx?.active && this.spireFloodgateSurgeFx.targetNode) {
+      const prog = 1 - this.floodgateSurgeTimer / Math.max(0.1, this.spireFloodgateSurgeFx.duration || 1.85);
+      const blend = Math.sin(Math.max(0, Math.min(1, prog)) * Math.PI) * 0.45;
+      targetFloor += (this.spireFloodgateSurgeFx.targetNode.floor - targetFloor) * blend;
+    }
+
+    const minFloor = Math.max(0.0, this.waterFloor + 0.55);
+    const maxFloor = Math.max(minFloor, (this.tower?.floors || 20) - 1.2);
+    const clampedTarget = Math.max(minFloor, Math.min(maxFloor, targetFloor));
+    this.camFloor = smoothDamp(this.camFloor, clampedTarget, this._camVel, 'floor', smoothT, 18.0, dt);
   }
 
   _zenBuoyantRescue() {
@@ -6609,6 +7806,8 @@ export class ToweringWatersGame {
     p.onElevator = null;
     p.invuln = rescueInvuln;
     p.landingFloor = this._computeLandingFloor(p.col, p.floor);
+    this.camAnchorFloor = p.floor;
+    this.camFloor = Math.max(0.0, p.floor);
     this.cb.onBanner?.('BUOYANT RESCUE', 'HARMONIC ASSIST ACTIVE');
     this._syncHud();
   }
@@ -6726,6 +7925,8 @@ export class ToweringWatersGame {
     this.comboCount = 0;
     this.comboTimer = 0;
     p.landingFloor = this._computeLandingFloor(p.col, p.floor);
+    this.camAnchorFloor = p.floor;
+    this.camFloor = Math.max(0.0, p.floor);
     this._syncHud();
   }
 
@@ -6770,26 +7971,26 @@ export class ToweringWatersGame {
     const rings = [];
     const pulses = [];
 
-    // 7 giant spinning 5-blade Hydro-Turbine Gates synced 1:1 with `core_reactor_props.glb` (#411 Fix #7)
+    // 7 giant spinning 5-blade Hydro-Turbine Gates tuned for thrilling 13.5s plunge (`totalDepth = 360`) (#601)
     for (let i = 0; i < 7; i++) {
-      const depth = 52 + i * 48;
+      const depth = 44 + i * 44;
       turbines.push({
         id: i + 1,
         depth,
         z: depth,
         rotAngle: (i * 1.1) % (Math.PI * 2),
-        rotSpeed: (i % 2 === 0 ? 1 : -1) * (1.25 + i * 0.14),
+        rotSpeed: (i % 2 === 0 ? 1 : -1) * (1.35 + i * 0.16),
         bladeCount: 5,
-        gapSpan: 0.95,
+        gapSpan: 0.96,
         passed: false,
       });
     }
 
-    // 4 glowing Siphon Crystal Cores/Locks (smash 3+ to supercharge the Seed!)
+    // 4 glowing Siphon Crystal Cores/Locks (smash 3+ to supercharge the Bedrock Lotus!)
     for (let c = 0; c < 4; c++) {
-      const depth = 76 + c * 78;
+      const depth = 64 + c * 74;
       const ang = (c * 1.65 + 0.5) % (Math.PI * 2);
-      const rad = 0.46;
+      const rad = 0.45;
       crystalLocks.push({
         id: c + 1,
         depth,
@@ -6808,7 +8009,7 @@ export class ToweringWatersGame {
 
     // 10 Bioluminescent Hydro-Speed & Gear Rings
     for (let r = 0; r < 10; r++) {
-      const depth = 36 + r * 35;
+      const depth = 30 + r * 32;
       const ang = (r * 0.95) % (Math.PI * 2);
       const rad = 0.35 + (r % 3) * 0.14;
       rings.push({
@@ -6825,9 +8026,9 @@ export class ToweringWatersGame {
       active: true,
       phase: 'dive',
       timer: 0,
-      duration: 21.0,
+      duration: 13.5,
       depth: 0,
-      totalDepth: 420,
+      totalDepth: 360,
       progress: 0,
       shaftRadius: 3.6,
       theme,
@@ -6837,10 +8038,11 @@ export class ToweringWatersGame {
       vy: 0,
       angle: 0,
       radial: 0,
-      speed: 20.0,
+      speed: 26.8,
       whipTimer: 0,
       spinTimer: 0,
       boostTimer: 0,
+      crystalFlashTimer: 0,
       invuln: 0,
       crystalsSmashed: 0,
       crystalsRequired: 3,
@@ -6872,6 +8074,7 @@ export class ToweringWatersGame {
     cd.timer += dt;
     if (cd.invuln > 0) cd.invuln = Math.max(0, cd.invuln - dt);
     if (cd.boostTimer > 0) cd.boostTimer = Math.max(0, cd.boostTimer - dt);
+    if ((cd.crystalFlashTimer || 0) > 0) cd.crystalFlashTimer = Math.max(0, cd.crystalFlashTimer - dt);
     if (cd.spinTimer > 0) {
       cd.spinTimer = Math.max(0, cd.spinTimer - dt);
       cd.whipTimer = cd.spinTimer;
@@ -6882,8 +8085,8 @@ export class ToweringWatersGame {
     // 2D tube steering in normalized [-0.85..+0.85] circle
     const ax = Math.abs(inp.analogX || 0) > 0.05 ? inp.analogX : (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
     const ay = Math.abs(inp.analogY || 0) > 0.05 ? inp.analogY : (inp.down ? 1 : 0) - (inp.up ? 1 : 0);
-    cd.vx = approach(cd.vx, ax * 2.35, 11.5 * dt);
-    cd.vy = approach(cd.vy, ay * 2.35, 11.5 * dt);
+    cd.vx = approach(cd.vx, ax * 2.55, 13.0 * dt);
+    cd.vy = approach(cd.vy, ay * 2.55, 13.0 * dt);
     cd.x += cd.vx * dt;
     cd.y += cd.vy * dt;
     const rLen = Math.hypot(cd.x, cd.y);
@@ -6894,17 +8097,18 @@ export class ToweringWatersGame {
     cd.radial = Math.hypot(cd.x, cd.y);
     cd.angle = Math.atan2(cd.y, cd.x);
 
-    // Corkscrew Tail-Spin / Hydro-Jet Boost & Downward Hydro-Pulse!
+    // Corkscrew Hydro-Drill Spin-Attack / Hydro-Jet Boost & Downward Hydro-Pulse!
     const whipPressed = this.input.consumeJustPressed('whip');
     const jumpPressed = this.input.consumeJustPressed('jump');
     const firePressed = this.input.consumeJustPressed('fire');
 
     if (whipPressed || jumpPressed) {
-      cd.spinTimer = 0.45;
-      cd.whipTimer = 0.45;
-      cd.boostTimer = Math.max(cd.boostTimer, 0.85);
+      cd.spinTimer = 0.42;
+      cd.whipTimer = 0.42;
+      cd.boostTimer = Math.max(cd.boostTimer, 0.95);
       if (typeof sound?.tailWhip === 'function') sound.tailWhip();
       else sound?.jump?.();
+      sound?.playGatewayVoice?.('whip');
       this.input?.haptic?.(16);
     }
 
@@ -6914,15 +8118,15 @@ export class ToweringWatersGame {
         z: cd.depth + 2.5,
         x: cd.x,
         y: cd.y,
-        speed: 58,
-        life: 1.3,
+        speed: 68,
+        life: 1.2,
       });
       if (typeof sound?.hydroPulse === 'function') sound.hydroPulse();
       else sound?.bubble?.();
     }
 
     if (cd.phase === 'dive') {
-      cd.speed = cd.boostTimer > 0 ? 27.5 : 20.5;
+      cd.speed = cd.boostTimer > 0 ? 36.0 : 26.8;
       cd.depth = Math.min(cd.totalDepth, cd.depth + cd.speed * dt);
       cd.progress = Math.min(1, cd.depth / cd.totalDepth);
 
@@ -7037,14 +8241,20 @@ export class ToweringWatersGame {
   _smashCoreCrystal(cd, cl) {
     if (cl.shattered) return;
     cl.shattered = true;
-    cl.shatterTimer = 0.5;
+    cl.shatterTimer = 0.55;
     cd.crystalsSmashed += 1;
     cd.coresSmashed = cd.crystalsSmashed;
+    cd.crystalFlashTimer = 0.22;
+    cd.boostTimer = Math.max(cd.boostTimer || 0, 0.85);
     this._awardGears(2);
-    this._scoreActionHit(250, { x: (this.renderer?.width || 390) * 0.5, y: (this.renderer?.height || 680) * 0.42 }, '#f472b6');
-    this.addShake(5.0);
+    const sx = (this.renderer?.width || 390) * 0.5;
+    const sy = (this.renderer?.height || 680) * 0.42;
+    this._scoreActionHit(250, { x: sx, y: sy }, '#f472b6');
+    this._spawnParticles(sx, sy, cl.color || '#5efce8', 16, 175, 110);
+    this.addShake(6.2);
     sound?.hitBlock ? sound.hitBlock() : sound?.hitEnemy?.();
-    this.input?.haptic?.(22);
+    sound?.playGatewayVoice?.('victory');
+    this.input?.haptic?.(24);
     if (cd.crystalsSmashed >= 3) {
       this._tryUnlockTrophy('core_triple_smash');
     }
@@ -7462,6 +8672,16 @@ export class ToweringWatersGame {
 
   _initSubmarineStage() {
     this.mode = 'reef_swim';
+    this.watershedFlowPct = 0;
+    this.watershedFlow = {
+      meter: 0,
+      combo: 0,
+      maxCombo: 0,
+      tricksLanded: 0,
+      grottosFound: 0,
+      rescuedThisStage: [],
+    };
+    this._subFlowSnap = { fish: 0, cages: 0, mines: 0, warp: false, directCharged: false };
     const w = this.renderer?.width || 390;
     const h = this.renderer?.height || 680;
     const isCalm = this.runType === 'sanctum_trials';
@@ -7512,15 +8732,21 @@ export class ToweringWatersGame {
       addScore: (pts) => this.addScore(pts),
       addGear: awardSubGears,
       addGears: awardSubGears,
+      addFlowCharge: (amt, opts) => {
+        if (this._subFlowSnap) this._subFlowSnap.directCharged = true;
+        return this.addFlowCharge(amt, opts);
+      },
       onWarpCave: () => {
         this.nextTowerShield = true;
         this.nextTowerWarpFloors = 2;
+        this.addFlowCharge(22, { grotto: true, combo: true });
         this._tryUnlockTrophy('grotto_explorer');
         this._tryUnlockTrophy('warp_finder');
       },
       grantWarpReward: () => {
         this.nextTowerShield = true;
         this.nextTowerWarpFloors = 2;
+        this.addFlowCharge(22, { grotto: true, combo: true });
         this._tryUnlockTrophy('grotto_explorer');
         this._tryUnlockTrophy('warp_finder');
       },
@@ -7533,6 +8759,28 @@ export class ToweringWatersGame {
     };
 
     const done = st.update(dt, this.input.state, firePressed, fx);
+    // Graceful Watershed Flow fallback tracking if SubStage has not directly invoked fx.addFlowCharge (#601)
+    if (this._subFlowSnap && !this._subFlowSnap.directCharged) {
+      const fishNow = st.fishCaught || 0;
+      const cagesNow = st.cagesFreed || 0;
+      const minesNow = st.minesDestroyed || 0;
+      if (fishNow > this._subFlowSnap.fish) {
+        this.addFlowCharge((fishNow - this._subFlowSnap.fish) * 6, { combo: true });
+      }
+      if (cagesNow > this._subFlowSnap.cages) {
+        this.addFlowCharge((cagesNow - this._subFlowSnap.cages) * 18, {
+          combo: true,
+          critter: { species: 'otter', color: '#5efce8', name: 'Reef Critter' },
+        });
+      }
+      if (minesNow > this._subFlowSnap.mines) {
+        this.addFlowCharge((minesNow - this._subFlowSnap.mines) * 10, { combo: true });
+      }
+      this._subFlowSnap.fish = fishNow;
+      this._subFlowSnap.cages = cagesNow;
+      this._subFlowSnap.mines = minesNow;
+    }
+
     // Keep `this.sub` mirrored for any renderer reading `state.sub`
     this.sub.x = st.sub.x;
     this.sub.y = st.sub.y;
@@ -7550,6 +8798,7 @@ export class ToweringWatersGame {
 
     this._syncHud();
     if (done) {
+      if (this.gateway) this.gateway.wetShakeTimer = 0.65;
       this._tryUnlockTrophy('sub_novice');
       if ((st.fishCaught || 0) >= 10) this._tryUnlockTrophy('sub_ace');
       if ((st.minesDestroyed || 0) >= 1) this._tryUnlockTrophy('sub_mine_sweeper');
@@ -7557,6 +8806,7 @@ export class ToweringWatersGame {
         fishCaught: st.fishCaught || 0,
         minesDestroyed: st.minesDestroyed || 0,
         warpEntered: Boolean(st.warpEntered),
+        watershedFlowPct: Math.round(this.watershedFlowPct || 0),
         score: this.score,
       });
       this.subStage = null;
@@ -7571,6 +8821,15 @@ export class ToweringWatersGame {
 
   _initSkimmerStage() {
     this.mode = 'rapids_surf';
+    this.watershedFlowPct = 0;
+    this.watershedFlow = {
+      meter: 0,
+      combo: 0,
+      maxCombo: 0,
+      tricksLanded: 0,
+      grottosFound: 0,
+      rescuedThisStage: [],
+    };
     this.skimmer = {
       laneX: 0,
       vx: 0,
@@ -7597,6 +8856,10 @@ export class ToweringWatersGame {
       lastLane: 0,
       rampsUsed: 0,
       cratesDestroyed: 0,
+      hits: 0,
+      fromRamp: false,
+      trickFlipTimer: 0,
+      trickDoneThisJump: false,
     };
     this.rapidsSurf = this.skimmer;
     this.rapids = this.skimmer;
@@ -7654,7 +8917,7 @@ export class ToweringWatersGame {
       sk.gears.push({
         z: zAhead + 2.5,
         laneX: Math.max(-3.0, Math.min(3.0, -lane)),
-        y: 0.35,
+        y: 0.85,
         collected: false,
       });
     }
@@ -7667,13 +8930,19 @@ export class ToweringWatersGame {
 
     sk.timer += dt;
     if (sk.whipTimer > 0) sk.whipTimer = Math.max(0, sk.whipTimer - dt);
+    if (sk.trickFlipTimer > 0) sk.trickFlipTimer = Math.max(0, sk.trickFlipTimer - dt);
     if (sk.timer >= sk.duration) {
+      if ((sk.hits || 0) === 0) {
+        this.addFlowCharge(15, { combo: true });
+      }
+      if (this.gateway) this.gateway.wetShakeTimer = 0.65;
       this.nextTowerTimeBonus = sk.boostMult * 3;
       this._tryUnlockTrophy('skimmer_novice');
       this._emitProgEvent('rapids_surf_complete', {
         maxBoost: sk.maxBoost || sk.boostMult || 1,
         rampsUsed: sk.rampsUsed || 0,
         cratesDestroyed: sk.cratesDestroyed || 0,
+        watershedFlowPct: Math.round(this.watershedFlowPct || 0),
         score: this.score,
       });
       this._finishTransitionMiniGame();
@@ -7701,6 +8970,7 @@ export class ToweringWatersGame {
     sk.surfBank = approach(sk.surfBank || 0, -steer * 0.55, 8.5 * dt);
 
     const hopPressed = this.input.consumeJustPressed('jump') || this.input.consumeJustPressed('up');
+    const whipSurf = this.input.consumeJustPressed('whip');
     if (hopPressed) sk.jumpBuffer = 0.14;
     else if ((sk.jumpBuffer || 0) > 0) sk.jumpBuffer = Math.max(0, sk.jumpBuffer - dt);
 
@@ -7708,7 +8978,25 @@ export class ToweringWatersGame {
       sk.jumpBuffer = 0;
       sk.vy = 8.6;
       sk.onWater = false;
+      sk.fromRamp = false;
+      sk.trickDoneThisJump = false;
       sound?.jump?.();
+    } else if (!sk.onWater && sk.fromRamp && !sk.trickDoneThisJump && (hopPressed || whipSurf)) {
+      // Mid-air Ramp Trick-Flip! (+14% Watershed Flow + stylish score burst #601)
+      sk.trickDoneThisJump = true;
+      sk.trickFlipTimer = 0.55;
+      sk.vy = Math.max(sk.vy, 3.8);
+      this.addScore(200 * sk.boostMult);
+      this.addFlowCharge(14, { trick: true, combo: true });
+      this.addPopup({
+        x: (this.renderer?.width || 390) * 0.5,
+        y: (this.renderer?.height || 680) * 0.34,
+        text: '★ WAVE FLIP! +14% FLOW',
+        color: '#5efce8',
+        maxLife: 1.0,
+      });
+      sound?.playGatewayVoice?.('victory');
+      this.input?.haptic?.([14, 24, 18]);
     }
 
     if (!sk.onWater) {
@@ -7718,12 +9006,13 @@ export class ToweringWatersGame {
         sk.y = 0;
         sk.vy = 0;
         sk.onWater = true;
-        sound?.land?.(0.45);
+        sk.fromRamp = false;
+        sk.trickDoneThisJump = false;
+        sound?.landSurface?.('water', 0.5) || sound?.land?.(0.45);
       }
     }
 
     if (sk.fireCooldown > 0) sk.fireCooldown -= dt;
-    const whipSurf = this.input.consumeJustPressed('whip');
     if (whipSurf) {
       sk.whipTimer = 0.34;
       if (typeof sound?.tailWhip === 'function') sound.tailWhip();
@@ -7756,6 +9045,7 @@ export class ToweringWatersGame {
             this._awardGears(1);
             this._tryUnlockTrophy('skimmer_crate_buster');
             this.addScore(100 * sk.boostMult);
+            this.addFlowCharge(12, { combo: true });
             sound?.hitBlock?.();
             sk.hazards.splice(hi, 1);
           } else {
@@ -7776,11 +9066,12 @@ export class ToweringWatersGame {
         sk.maxBoost = Math.max(sk.maxBoost || 1, sk.boostMult);
         sk.boostTimer = 5.8;
         this.addScore(150 * sk.boostMult);
+        this.addFlowCharge(sk.boostMult >= 3 ? 11 : 7, { combo: true });
         sound?.boostGate?.(sk.boostMult);
         this.input?.haptic?.(18);
         if (sk.boostMult >= 4) this._tryUnlockTrophy('skimmer_pro');
       }
-      if (g.z < -6) sk.gates.splice(i, 1);
+      if (g.z < -0.45) sk.gates.splice(i, 1);
     }
 
     for (let i = sk.ramps.length - 1; i >= 0; i--) {
@@ -7791,11 +9082,13 @@ export class ToweringWatersGame {
         sk.rampsUsed = (sk.rampsUsed || 0) + 1;
         sk.vy = 10.8;
         sk.onWater = false;
+        sk.fromRamp = true;
+        sk.trickDoneThisJump = false;
         sound?.jump?.();
         this.input?.haptic?.(20);
         this._tryUnlockTrophy('skimmer_ramp_air');
       }
-      if (r.z < -6) sk.ramps.splice(i, 1);
+      if (r.z < -0.45) sk.ramps.splice(i, 1);
     }
 
     for (let i = sk.gears.length - 1; i >= 0; i--) {
@@ -7810,9 +9103,10 @@ export class ToweringWatersGame {
         g.collected = true;
         this._awardGears(1);
         this.addScore(125 * sk.boostMult);
+        this.addFlowCharge(4);
         sound?.collectGear?.();
       }
-      if (g.z < -6 || g.collected) sk.gears.splice(i, 1);
+      if (g.z < -0.45 || g.collected) sk.gears.splice(i, 1);
     }
 
     for (let i = sk.hazards.length - 1; i >= 0; i--) {
@@ -7822,10 +9116,16 @@ export class ToweringWatersGame {
       if (Math.abs(h.z) < 0.85 && Math.abs(sk.laneX - h.laneX) < 0.66 && sk.y < hitHeight) {
         if (isCalm || sk.whipTimer > 0) {
           this.addScore(75);
+          if (h.type === 'crate') {
+            sk.cratesDestroyed = (sk.cratesDestroyed || 0) + 1;
+            this.addFlowCharge(12, { combo: true });
+          }
           sound?.hitBlock?.();
           sk.hazards.splice(i, 1);
           continue;
         }
+        sk.hits = (sk.hits || 0) + 1;
+        this.watershedFlow.combo = 0;
         sk.boostMult = 1;
         sk.boostTimer = 0;
         this.addShake(7.0);
@@ -7834,7 +9134,7 @@ export class ToweringWatersGame {
         sk.hazards.splice(i, 1);
         continue;
       }
-      if (h.z < -6) sk.hazards.splice(i, 1);
+      if (h.z < -0.45) sk.hazards.splice(i, 1);
     }
 
     this._syncHud();
@@ -7846,6 +9146,16 @@ export class ToweringWatersGame {
 
   _initGlideStage() {
     this.mode = 'frill_glide';
+    this.watershedFlowPct = 0;
+    this.watershedFlow = {
+      meter: 0,
+      combo: 0,
+      maxCombo: 0,
+      tricksLanded: 0,
+      grottosFound: 0,
+      rescuedThisStage: [],
+    };
+    this._glideFlowSnap = { gates: 0, lanterns: 0, gold: 0, directCharged: false };
     this.glideGoldenOrChain4 = false;
     this._glideThermalUnlockedHere = false;
     this.glideStage = new GlideStage();
@@ -7901,6 +9211,10 @@ export class ToweringWatersGame {
         this.glideGoldenOrChain4 = true;
         sound?.collectGear?.();
       },
+      addFlowCharge: (amt, opts) => {
+        if (this._glideFlowSnap) this._glideFlowSnap.directCharged = true;
+        return this.addFlowCharge(amt, opts);
+      },
       popup: (x, y, text, color) => this.addPopup({ x, y, text, color }),
       particles: (x, y, color, count, spd) => this._spawnParticles(x, y, color, count, spd),
       shake: (a) => this.addShake(a),
@@ -7910,6 +9224,25 @@ export class ToweringWatersGame {
     };
 
     const done = st.update(dt, this.input.state, firePressed, fx);
+    // Graceful Watershed Flow fallback tracking if GlideStage hasn't directly called fx.addFlowCharge (#601)
+    if (this._glideFlowSnap && !this._glideFlowSnap.directCharged) {
+      const gatesNow = st.gatesPassed || 0;
+      const lanternsNow = st.lanternsCaught || 0;
+      const goldNow = st.goldCaught || 0;
+      if (gatesNow > this._glideFlowSnap.gates) {
+        this.addFlowCharge((gatesNow - this._glideFlowSnap.gates) * 10, { combo: true });
+      }
+      if (lanternsNow > this._glideFlowSnap.lanterns) {
+        this.addFlowCharge((lanternsNow - this._glideFlowSnap.lanterns) * 5, { combo: true });
+      }
+      if (goldNow > this._glideFlowSnap.gold) {
+        this.addFlowCharge((goldNow - this._glideFlowSnap.gold) * 16, { combo: true });
+      }
+      this._glideFlowSnap.gates = gatesNow;
+      this._glideFlowSnap.lanterns = lanternsNow;
+      this._glideFlowSnap.gold = goldNow;
+    }
+
     if (
       (st.goldCaught || 0) > 0 ||
       Boolean(st.hitFourGateChain) ||
@@ -7937,6 +9270,7 @@ export class ToweringWatersGame {
         perfect: Boolean(st.perfect),
         hits: st.hits || 0,
         thermalTime: st.thermalTime || 0,
+        watershedFlowPct: Math.round(this.watershedFlowPct || 0),
       });
       this.glideStage = null;
       this.frillGlide = null;
@@ -8026,6 +9360,7 @@ export class ToweringWatersGame {
         this._awardGears(g);
         sound?.collectGear?.();
       },
+      addFlowCharge: (amt, opts) => this.addFlowCharge(amt, opts),
       popup: (x, y, text, color) => this.addPopup({ x, y, text, color }),
       particles: (x, y, color, count, spd) => this._spawnParticles(x, y, color, count, spd),
       shake: (a) => this.addShake(a),
@@ -8090,7 +9425,9 @@ export class ToweringWatersGame {
       return;
     }
 
+    let justSolvedHere = false;
     if (solved && !door.solved) {
+      justSolvedHere = true;
       door.solved = true;
       this.towerVaultCleared = true;
       this.vaultCrackedThisTower = true;
@@ -8128,6 +9465,18 @@ export class ToweringWatersGame {
     p.vy = 0;
     p.invuln = 1.8;
     p.landingFloor = this._computeLandingFloor(p.col, p.floor);
+    this.camAnchorFloor = p.floor;
+    this.camFloor = Math.max(0.0, p.floor);
+
+    // 1.85s Exterior Floodgate Water-Surge visual & camera glance (#601)
+    if (justSolvedHere) {
+      this._triggerExteriorFloodgateSurge(door, {
+        shield: this.runType !== 'purist',
+        bonusSec: 20,
+        relic: true,
+        parBonus: (room?.moves || 99) <= (room?.par || 8),
+      });
+    }
 
     sound?.setMiniGameMode?.(null);
     sound?.setTheme?.(this.tower?.theme || 'canyon_river');
@@ -8213,6 +9562,7 @@ export class ToweringWatersGame {
             }
           } else {
             v.strikes += 1;
+            ring.speed *= 0.90;
             this.addShake(5);
             sound?.vaultTick?.(false);
             this.input?.haptic?.(35);
@@ -8254,6 +9604,7 @@ export class ToweringWatersGame {
           this.input?.consumeJustPressed?.('jump');
           this.input?.consumeJustPressed?.('up');
           const p = this.gateway;
+          const returnWon = v.status === 'won';
           p.col = this.vaultReturnState.col;
           p.floor = this.vaultReturnState.floor;
           p.onGround = true;
@@ -8261,7 +9612,15 @@ export class ToweringWatersGame {
           p.vy = 0;
           p.invuln = 2.0;
           p.landingFloor = this._computeLandingFloor(p.col, p.floor);
+          this.camAnchorFloor = p.floor;
+          this.camFloor = Math.max(0.0, p.floor);
           this.vaultReturnState = null;
+          if (returnWon) {
+            this._triggerExteriorFloodgateSurge(
+              { col: wrapCol(p.col - 0.5), floor: p.floor },
+              { shield: this.runType !== 'purist', bonusSec: 0, relic: true }
+            );
+          }
           sound?.setMiniGameMode?.(null);
           sound?.setTheme?.(this.tower?.theme || 'canyon_river');
           sound?.setTowerTheme?.(this.tower?.id || 1, this.tower?.theme || 'canyon_river');
