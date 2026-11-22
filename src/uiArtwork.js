@@ -897,18 +897,29 @@ export function getMinigamePortalSVG(gameId = 'core_descent') {
       <!-- Pelagian Bio-Submersible with Crystal Canopy & Hydro-Sonar Beam -->
       <polygon points="254,64 366,34 366,94" fill="url(#${uid}-beam)" opacity="0.72"/>
       <g transform="translate(198, 66)">
-        <!-- Rear Bronze Hydro-Propeller Ring -->
-        <ellipse cx="-42" cy="0" rx="5.5" ry="15" fill="none" stroke="url(#${uid}-bronze)" stroke-width="3.2"/>
-        <!-- Crystal Bubble Canopy & Gateway Silhouette Inside -->
-        <path d="M -14 -12 A 22 18 0 0 1 28 -10 Z" fill="rgba(165,243,252,0.34)" stroke="#fde047" stroke-width="1.8"/>
-        <circle cx="8" cy="-16" r="5" fill="#5efce8"/>
-        <path d="M 4 -19 L -4 -25 L 3 -15 M 12 -19 L 19 -25 L 13 -15" fill="#fb7185" opacity="0.9"/>
-        <!-- Sculpted Dark-Bronze Hydro-Hull -->
-        <path d="M -38 -8 C -22 -14, 24 -14, 46 -6 C 54 -2, 54 4, 46 8 C 24 16, -22 16, -38 8 Z" fill="#0b354a" stroke="url(#${uid}-bronze)" stroke-width="2.1"/>
-        <!-- Warm Illuminated Brass Portholes & Nose Emitter -->
-        <circle cx="-10" cy="2" r="5.2" fill="#fef08a" stroke="#b45309" stroke-width="1.4"/>
-        <circle cx="14" cy="2" r="5.2" fill="#fef08a" stroke="#b45309" stroke-width="1.4"/>
-        <ellipse cx="48" cy="1" rx="3.4" ry="7.5" fill="#5efce8" stroke="#fde047" stroke-width="1.2"/>
+        <!-- Free-Swimming Gateway 2.0 with Glowing Coral Frills, Trailing Scarf & Rescued Sea Turtle! -->
+        <path d="M -52 6 Q -32 -4, -14 2" fill="none" stroke="#ff6b7a" stroke-width="4" stroke-linecap="round" opacity="0.9"/>
+        <path d="M -50 11 Q -30 4, -12 8" fill="none" stroke="#fde047" stroke-width="2" stroke-linecap="round" opacity="0.82"/>
+        <path d="M -46 0 C -26 -10, -14 10, 0 0" fill="none" stroke="#20d8c8" stroke-width="5.5" stroke-linecap="round"/>
+        <ellipse cx="14" cy="0" rx="15" ry="8.5" fill="#14b8a6" stroke="#99f6e4" stroke-width="1.2"/>
+        <ellipse cx="14" cy="3" rx="10" ry="4.5" fill="#fff6eb" opacity="0.88"/>
+        <circle cx="29" cy="-2" r="8.5" fill="#20d8c8" stroke="#99f6e4" stroke-width="1"/>
+        <!-- Volumetric Coral Ear-Frills -->
+        <path d="M 24 -8 L 13 -19 L 22 -5 M 25 -10 L 18 -21 L 26 -7 M 23 3 L 13 10 L 22 6" fill="#ff758f" stroke="#fde047" stroke-width="0.7" opacity="0.95"/>
+        <!-- Soulful Jewel Eye + Sparkle -->
+        <circle cx="32.5" cy="-3.2" r="2.8" fill="#083344"/>
+        <circle cx="32.8" cy="-3.3" r="1.7" fill="#38bdf8"/>
+        <circle cx="33.5" cy="-4.1" r="0.8" fill="#ffffff"/>
+        <!-- Joyful Rescued Sea Turtle Escort -->
+        <g transform="translate(-14, -22) scale(0.75)">
+          <ellipse cx="0" cy="0" rx="12" ry="7" fill="#0d9488" stroke="#fde047" stroke-width="1.2"/>
+          <circle cx="13" cy="-1" r="4" fill="#5eead4"/>
+          <path d="M -2 -6 L 4 -14 L 7 -5 M -2 6 L 3 13 L 6 5" fill="#2dd4bf"/>
+        </g>
+        <!-- Shimmering Bubble Trail -->
+        <circle cx="-36" cy="-12" r="3" fill="none" stroke="#a5f3fc" stroke-width="1.2"/>
+        <circle cx="-24" cy="14" r="2.2" fill="none" stroke="#a5f3fc" stroke-width="1.1"/>
+        <circle cx="48" cy="-8" r="2.6" fill="none" stroke="#fef08a" stroke-width="1.2"/>
       </g>
     `;
   } else if (id === 'rapids_surf') {
@@ -1036,6 +1047,181 @@ export function getCutscenePortraitSVG(speaker = 'gateway') {
       <polygon points="36,12 92,12 117,64 92,116 36,116 11,64" fill="none" stroke="${rimPalette.inner}" stroke-width="1.5" opacity="0.74" stroke-linejoin="round"/>
     </svg>`.trim();
   PORTRAIT_SVG_CACHE[key] = markup;
+  return markup;
+}
+
+// ============================================================================
+// 5B. ANIMATED GATEWAY 2.0 6-MOOD HUD PORTRAIT MEDALLION
+//     Modes: 'happy' | 'curious' | 'determined' | 'joyful' | 'surprised' | 'hurt'
+// ============================================================================
+
+const GATEWAY_MOOD_SVG_CACHE = Object.create(null);
+
+export function normalizeGatewayMood(rawMood = 'happy') {
+  const m = String(rawMood || 'happy').trim().toLowerCase();
+  if (m.includes('joy') || m.includes('triumph') || m.includes('celeb') || m.includes('win')) return 'joyful';
+  if (m.includes('determ') || m.includes('whip') || m.includes('focus') || m.includes('cast') || m.includes('dash')) return 'determined';
+  if (m.includes('surpris') || m.includes('teeter') || m.includes('shock') || m.includes('gasp')) return 'surprised';
+  if (m.includes('hurt') || m.includes('wince') || m.includes('pain') || m.includes('hit')) return 'hurt';
+  if (m.includes('curio') || m.includes('wave') || m.includes('wonder')) return 'curious';
+  return 'happy';
+}
+
+export function getGatewayMoodMedallionSVG(rawMood = 'happy') {
+  const mood = normalizeGatewayMood(rawMood);
+  if (GATEWAY_MOOD_SVG_CACHE[mood]) return GATEWAY_MOOD_SVG_CACHE[mood];
+
+  const rimColors = {
+    happy: { outer: '#5efce8', inner: '#ffd166', bgA: '#0b4a66', bgB: '#041d30' },
+    curious: { outer: '#7dd3fc', inner: '#fde047', bgA: '#0d4e70', bgB: '#062038' },
+    determined: { outer: '#22f5e6', inner: '#fb923c', bgA: '#0c3f64', bgB: '#081b34' },
+    joyful: { outer: '#fde047', inner: '#5efce8', bgA: '#0e5b68', bgB: '#062a3d' },
+    surprised: { outer: '#fbbf24', inner: '#7dd3fc', bgA: '#134668', bgB: '#072038' },
+    hurt: { outer: '#fb7185', inner: '#fbbf24', bgA: '#4a1c34', bgB: '#1c0a18' },
+  }[mood];
+
+  const frillLift = mood === 'joyful' ? -4 : mood === 'hurt' ? 7 : mood === 'curious' ? -2 : 0;
+  const headTilt = mood === 'curious' ? 'rotate(-6 50 54)' : mood === 'hurt' ? 'rotate(5 50 54)' : '';
+
+  let eyesSvg = '';
+  let browsSvg = '';
+  let mouthSvg = '';
+  let fxSvg = '';
+
+  if (mood === 'joyful') {
+    // Radiant Pixar ^ ^ happy crescent squint eyes + laughing smile + golden sparkles!
+    eyesSvg = `
+      <path d="M 31 53 Q 38 44 45 53" fill="none" stroke="#06283d" stroke-width="3.4" stroke-linecap="round"/>
+      <path d="M 55 53 Q 62 44 69 53" fill="none" stroke="#06283d" stroke-width="3.4" stroke-linecap="round"/>
+      <path d="M 33 52 Q 38 47 43 52" fill="none" stroke="#5efce8" stroke-width="1.2" stroke-linecap="round" opacity="0.7"/>
+      <path d="M 57 52 Q 62 47 67 52" fill="none" stroke="#5efce8" stroke-width="1.2" stroke-linecap="round" opacity="0.7"/>
+    `;
+    browsSvg = `
+      <path d="M 30 41 Q 38 35 45 39" fill="none" stroke="#ffd166" stroke-width="2.6" stroke-linecap="round"/>
+      <path d="M 55 39 Q 62 35 70 41" fill="none" stroke="#ffd166" stroke-width="2.6" stroke-linecap="round"/>
+    `;
+    mouthSvg = `
+      <path d="M 41 62 Q 50 72 59 62 Z" fill="#ff6b7a" stroke="#06283d" stroke-width="1.8" stroke-linejoin="round"/>
+      <path d="M 44 63 Q 50 66 56 63" fill="none" stroke="#fff6eb" stroke-width="1.4" stroke-linecap="round"/>
+    `;
+    fxSvg = `
+      <path d="M 16 20 L 18.5 25.5 L 24 28 L 18.5 30.5 L 16 36 L 13.5 30.5 L 8 28 L 13.5 25.5 Z" fill="#fde047"/>
+      <path d="M 83 18 L 85 22 L 89 24 L 85 26 L 83 30 L 81 26 L 77 24 L 81 22 Z" fill="#5efce8"/>
+    `;
+  } else if (mood === 'hurt') {
+    // Tight > < wince eyes + grimace + amber flash
+    eyesSvg = `
+      <path d="M 31 48 L 43 53 L 31 58" fill="none" stroke="#06283d" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M 69 48 L 57 53 L 69 58" fill="none" stroke="#06283d" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+    `;
+    browsSvg = `
+      <path d="M 31 44 L 45 47" fill="none" stroke="#fbbf24" stroke-width="2.6" stroke-linecap="round"/>
+      <path d="M 69 44 L 55 47" fill="none" stroke="#fbbf24" stroke-width="2.6" stroke-linecap="round"/>
+    `;
+    mouthSvg = `<path d="M 42 66 Q 50 61 58 66" fill="none" stroke="#06283d" stroke-width="2.3" stroke-linecap="round"/>`;
+    fxSvg = `<path d="M 78 24 L 86 18 M 82 32 L 90 30" stroke="#fb7185" stroke-width="2.4" stroke-linecap="round"/>`;
+  } else {
+    // Huge soulful Pixar jewel eyes with friendly dilated pupils & dual pure-white catchlights!
+    const eyeRy = mood === 'surprised' ? 9.6 : mood === 'determined' ? 7.4 : 8.5;
+    const pupilR = mood === 'surprised' ? 3.2 : mood === 'determined' ? 4.3 : 4.8;
+    const gazeShiftX = mood === 'curious' ? 1.8 : 0;
+    eyesSvg = `
+      <g class="gw-eyes-blink">
+        <ellipse cx="38" cy="52" rx="7.6" ry="${eyeRy}" fill="#fcf8f2" stroke="#06283d" stroke-width="1.6"/>
+        <ellipse cx="62" cy="52" rx="7.6" ry="${eyeRy}" fill="#fcf8f2" stroke="#06283d" stroke-width="1.6"/>
+        <circle cx="${38 + gazeShiftX}" cy="52.4" r="6.1" fill="#0ea5e9"/>
+        <circle cx="${62 + gazeShiftX}" cy="52.4" r="6.1" fill="#0ea5e9"/>
+        <circle cx="${38 + gazeShiftX}" cy="53" r="${pupilR}" fill="#071e30"/>
+        <circle cx="${62 + gazeShiftX}" cy="53" r="${pupilR}" fill="#071e30"/>
+        <circle cx="${35.4 + gazeShiftX}" cy="49.2" r="2.2" fill="#ffffff"/>
+        <circle cx="${59.4 + gazeShiftX}" cy="49.2" r="2.2" fill="#ffffff"/>
+        <circle cx="${40.6 + gazeShiftX}" cy="55.2" r="1.05" fill="#fef08a"/>
+        <circle cx="${64.6 + gazeShiftX}" cy="55.2" r="1.05" fill="#fef08a"/>
+      </g>
+    `;
+    if (mood === 'determined') {
+      browsSvg = `
+        <path d="M 29 41 L 46 46" fill="none" stroke="#ffd166" stroke-width="3.0" stroke-linecap="round"/>
+        <path d="M 71 41 L 54 46" fill="none" stroke="#ffd166" stroke-width="3.0" stroke-linecap="round"/>
+      `;
+      mouthSvg = `<path d="M 43 64 Q 51 67 59 62" fill="none" stroke="#06283d" stroke-width="2.3" stroke-linecap="round"/>`;
+      fxSvg = `<circle cx="50" cy="50" r="44" fill="none" stroke="#5efce8" stroke-width="1.8" stroke-dasharray="9 6" opacity="0.72"/>`;
+    } else if (mood === 'surprised') {
+      browsSvg = `
+        <path d="M 30 37 Q 38 32 45 36" fill="none" stroke="#ffd166" stroke-width="2.6" stroke-linecap="round"/>
+        <path d="M 55 36 Q 62 32 70 37" fill="none" stroke="#ffd166" stroke-width="2.6" stroke-linecap="round"/>
+      `;
+      mouthSvg = `<ellipse cx="50" cy="65.5" rx="4.2" ry="5.0" fill="#ff6b7a" stroke="#06283d" stroke-width="1.8"/>`;
+      fxSvg = `<path class="gw-sweat-drop" d="M 80 22 C 77 27 76 30 76 32.5 a 4 4 0 0 0 8 0 C 84 30 83 27 80 22 Z" fill="#7dd3fc" stroke="#ffffff" stroke-width="1"/>`;
+    } else if (mood === 'curious') {
+      browsSvg = `
+        <path d="M 30 37 Q 38 33 45 38" fill="none" stroke="#ffd166" stroke-width="2.6" stroke-linecap="round"/>
+        <path d="M 55 41 Q 62 39 70 42" fill="none" stroke="#ffd166" stroke-width="2.6" stroke-linecap="round"/>
+      `;
+      mouthSvg = `<path d="M 44 64 Q 50 67.5 57 63" fill="none" stroke="#06283d" stroke-width="2.2" stroke-linecap="round"/>`;
+      fxSvg = `<circle cx="82" cy="24" r="3" fill="#fde047" opacity="0.85"/>`;
+    } else {
+      browsSvg = `
+        <path d="M 30 40 Q 38 36 45 39" fill="none" stroke="#ffd166" stroke-width="2.5" stroke-linecap="round"/>
+        <path d="M 55 39 Q 62 36 70 40" fill="none" stroke="#ffd166" stroke-width="2.5" stroke-linecap="round"/>
+      `;
+      mouthSvg = `<path d="M 42 63 Q 50 69.5 58 63" fill="none" stroke="#06283d" stroke-width="2.3" stroke-linecap="round"/>`;
+    }
+  }
+
+  const markup = `
+    <svg class="gw-mood-svg mood-${mood}" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <radialGradient id="gw-bg-${mood}" cx="50%" cy="38%" r="62%">
+          <stop offset="0%" stop-color="${rimColors.bgA}"/>
+          <stop offset="100%" stop-color="${rimColors.bgB}"/>
+        </radialGradient>
+        <linearGradient id="gw-skin-${mood}" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="#3bf2df"/>
+          <stop offset="100%" stop-color="#12a8a0"/>
+        </linearGradient>
+        <clipPath id="gw-clip-${mood}">
+          <circle cx="50" cy="50" r="44"/>
+        </clipPath>
+      </defs>
+      <circle cx="50" cy="50" r="46" fill="url(#gw-bg-${mood})"/>
+      <g clip-path="url(#gw-clip-${mood})">
+        <g transform="${headTilt}">
+          <!-- 6 Volumetric Translucent Coral-Petal Axolotl Ear-Frills -->
+          <g transform="translate(0, ${frillLift})">
+            <path d="M 24 44 C 10 34, 6 24, 15 24 C 21 24, 26 33, 29 40 Z" fill="#ff758f" stroke="#ffd166" stroke-width="1.2"/>
+            <path d="M 22 52 C 6 48, 4 40, 12 39 C 18 39, 24 45, 26 50 Z" fill="#ff6b7a" stroke="#ffd166" stroke-width="1.1"/>
+            <path d="M 24 60 C 11 63, 10 56, 17 53 C 21 52, 24 55, 26 58 Z" fill="#fb7185" stroke="#fde68a" stroke-width="1"/>
+            <path d="M 76 44 C 90 34, 94 24, 85 24 C 79 24, 74 33, 71 40 Z" fill="#ff758f" stroke="#ffd166" stroke-width="1.2"/>
+            <path d="M 78 52 C 94 48, 96 40, 88 39 C 82 39, 76 45, 74 50 Z" fill="#ff6b7a" stroke="#ffd166" stroke-width="1.1"/>
+            <path d="M 76 60 C 89 63, 90 56, 83 53 C 79 52, 76 55, 74 58 Z" fill="#fb7185" stroke="#fde68a" stroke-width="1"/>
+          </g>
+          <!-- Flowing Coral-Sunset & Gold Explorer Scarf Collar -->
+          <path d="M 22 86 C 28 73, 72 73, 78 86 L 82 98 L 18 98 Z" fill="#ff6b7a" stroke="#ffd166" stroke-width="2.2"/>
+          <circle cx="50" cy="83" r="5.5" fill="#38bdf8" stroke="#ffd166" stroke-width="2"/>
+          <!-- Adorable Rounded Heart-Shaped Sea-Dragon Head -->
+          <ellipse cx="50" cy="54" rx="28" ry="24.5" fill="url(#gw-skin-${mood})" stroke="#0b5563" stroke-width="1.6"/>
+          <!-- Soft Warm Cream-Pearl Chin & Rosy Coral Cheek Blushes -->
+          <ellipse cx="50" cy="67" rx="18" ry="9" fill="#fff6eb" opacity="0.62"/>
+          <ellipse cx="29.5" cy="59.5" rx="5.2" ry="3.1" fill="#ff8fa3" opacity="0.65"/>
+          <ellipse cx="70.5" cy="59.5" rx="5.2" ry="3.1" fill="#ff8fa3" opacity="0.65"/>
+          <circle cx="28" cy="62" r="1.1" fill="#99f6e4"/>
+          <circle cx="32" cy="63" r="0.9" fill="#99f6e4"/>
+          <circle cx="72" cy="62" r="1.1" fill="#99f6e4"/>
+          <circle cx="68" cy="63" r="0.9" fill="#99f6e4"/>
+          <!-- Soulful Eyes, Expressive Brows & Cute Smile -->
+          ${eyesSvg}
+          ${browsSvg}
+          ${mouthSvg}
+        </g>
+        ${fxSvg}
+      </g>
+      <!-- Sculpted Pelagian Sea-Glass & Gold Medallion Rim -->
+      <circle cx="50" cy="50" r="46" fill="none" stroke="${rimColors.outer}" stroke-width="3.6"/>
+      <circle cx="50" cy="50" r="42.2" fill="none" stroke="${rimColors.inner}" stroke-width="1.2" opacity="0.78"/>
+    </svg>`.trim();
+
+  GATEWAY_MOOD_SVG_CACHE[mood] = markup;
   return markup;
 }
 

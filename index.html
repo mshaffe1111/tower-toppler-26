@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="./assets/fonts/fonts.css" />
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body data-control-mode="gesture">
+<body data-control-mode="joystick">
   <!-- Shared Bespoke Vector Symbol Definitions (Zero External Assets, Zero Emojis) -->
   <svg width="0" height="0" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
     <defs>
@@ -110,7 +110,7 @@
     </defs>
   </svg>
 
-  <div id="app" data-control-mode="gesture" data-title-open="true" data-game-mode="title">
+  <div id="app" data-control-mode="joystick" data-title-open="true" data-game-mode="title">
     <!-- Full-Bleed 100vw x 100dvh Sunlit 3D Stage -->
     <main id="stage-wrap">
       <canvas id="game-canvas"></canvas>
@@ -118,6 +118,8 @@
       <canvas id="slash-vfx-canvas" class="slash-vfx-canvas" aria-hidden="true"></canvas>
       <!-- Startup Asset Pre-Warm Veil (dismisses smoothly once WebGL + Story Art are decoded) -->
       <div id="stage-transition-veil" class="stage-transition-veil" aria-hidden="true"></div>
+      <!-- Pelagian Ripple-Iris Mode Transition Overlay (0.42s GPU-composited aquatic iris) -->
+      <div id="pelagian-iris-veil" class="pelagian-iris-veil" aria-hidden="true"></div>
 
       <!-- Right-Edge Vertical Spire Altitude & Rising Surge Meter -->
       <div id="altitude-meter" class="altitude-meter hidden" aria-label="Spire Altitude">
@@ -141,6 +143,21 @@
           <div id="core-depth-fill" class="core-depth-fill"></div>
         </div>
         <div id="core-hud-sub" class="core-hud-sub">STEER TURBINES • TAIL-WHIP CRYSTAL CORES • PLANT WATER SEED</div>
+      </div>
+
+      <!-- Watershed Flow Meter (0-100% carry-over perks bar during rapids_surf / reef_swim / frill_glide) -->
+      <div id="watershed-flow-hud" class="watershed-flow-hud hidden" role="region" aria-label="Watershed Flow Meter">
+        <div class="wf-head">
+          <span class="wf-title">WATERSHED FLOW</span>
+          <span id="wf-pct-label" class="wf-pct">0%</span>
+        </div>
+        <div class="wf-track">
+          <div id="wf-fill" class="wf-fill"></div>
+          <span class="wf-tick wf-tick-35" id="wf-tick-aegis" title="35%: Tidal Aegis Shield">35</span>
+          <span class="wf-tick wf-tick-70" id="wf-tick-sluice" title="70%: Pre-Pressurized Sluice +20s">70</span>
+          <span class="wf-tick wf-tick-100" id="wf-tick-overcharge" title="100%: Hydro-Overcharge">MAX</span>
+        </div>
+        <div id="wf-sub-label" class="wf-sub">35% AEGIS • 70% SLUICE +20S • 100% OVERCHARGE</div>
       </div>
 
       <!-- Contextual Tappable Action Prompt Pill -->
@@ -179,9 +196,30 @@
     <!-- Floating Translucent Hydro-Glass Top HUD -->
     <header id="hud" aria-label="Game Status">
       <div class="hud-left">
-        <div id="hud-mode-label" class="hud-label">GATEWAY</div>
-        <div id="score-display" class="hud-score">00000000</div>
-        <div id="lives-display" class="hud-lives" aria-label="Harmonic Shields"></div>
+        <div class="hud-hero-row">
+          <div id="gateway-mood-badge" class="gateway-mood-badge" data-mood="happy" aria-label="Gateway Expression"></div>
+          <div class="hud-hero-stats">
+            <div id="hud-mode-label" class="hud-label">GATEWAY</div>
+            <div id="score-display" class="hud-score">00000000</div>
+            <div id="lives-display" class="hud-lives" aria-label="Harmonic Shields"></div>
+          </div>
+        </div>
+        <!-- Active Carry-Over Flow Perks & Supply Crate Power-Up Strip -->
+        <div id="hud-perk-strip" class="hud-perk-strip hidden" aria-label="Active Spire Perks">
+          <span id="perk-tidal-aegis" class="hud-perk-badge perk-aegis hidden" title="Tidal Aegis Shield">
+            <span class="perk-dot"></span><span class="perk-lbl">AEGIS</span>
+          </span>
+          <span id="perk-sluice-surge" class="hud-perk-badge perk-sluice hidden" title="Pre-Pressurized Sluice +20s">
+            <span class="perk-dot"></span><span id="perk-sluice-lbl" class="perk-lbl">SLUICE +20S</span>
+          </span>
+          <span id="perk-hydro-overcharge" class="hud-perk-badge perk-overcharge hidden" title="Hydro-Overcharge">
+            <span class="perk-dot"></span><span id="perk-overcharge-lbl" class="perk-lbl">OVERCHARGE</span>
+          </span>
+          <span id="hud-powerup-pill" class="hud-powerup-pill hidden" role="status">
+            <span id="hud-powerup-lbl" class="powerup-lbl">TURBO CURRENT</span>
+            <span id="hud-powerup-time" class="powerup-time">10s</span>
+          </span>
+        </div>
       </div>
 
       <div class="hud-center">
@@ -250,8 +288,8 @@
       </div>
     </header>
 
-    <!-- Ergonomic Hydro-Glass Touch Controls (100% Buttonless Glass in Gesture & Tilt; Buttons ONLY in Stick & D-Pad) -->
-    <footer id="touch-controls" data-control-mode="gesture" aria-label="Touch Controls">
+    <!-- Ergonomic Hydro-Glass Touch Controls (Default: Floating Dynamic Thumbstick + Right-Thumb Radial-Arc Cluster) -->
+    <footer id="touch-controls" data-control-mode="joystick" aria-label="Touch Controls">
       <div class="corner-bracket corner-bl" aria-hidden="true"></div>
       <div class="corner-bracket corner-br" aria-hidden="true"></div>
 
@@ -264,13 +302,13 @@
           <span id="hud-ctrl-hint-text" class="gesture-glyph">Slide &amp; Hold: Walk/Run • Quick Side-Slash or 2-Finger Tap: Tail-Whip • Flick Up: Jump • Tap: Hydro-Pulse</span>
         </div>
 
-        <div id="joystick-zone" class="joystick-zone" role="group" aria-label="Virtual Joystick">
+        <div id="joystick-zone" class="joystick-zone" data-role="joystick-base" role="group" aria-label="Floating Virtual Thumbstick">
           <div id="joystick-ring" class="joystick-ring">
             <span class="joy-tick joy-n"></span>
             <span class="joy-tick joy-e"></span>
             <span class="joy-tick joy-s"></span>
             <span class="joy-tick joy-w"></span>
-            <div id="joystick-puck" class="joystick-puck"></div>
+            <div id="joystick-puck" class="joystick-puck" data-role="joystick-knob"></div>
           </div>
         </div>
 
@@ -305,8 +343,12 @@
         </div>
       </div>
 
-      <!-- Right-Corner Ergonomic 3-Action Arc: Visible ONLY in D-Pad & Virtual Stick Modes -->
+      <!-- Anatomical Right-Thumb Radial-Arc Action Cluster: Visible in Floating Stick & D-Pad Modes -->
       <div id="action-cluster" class="touch-right">
+        <button id="btn-interact" class="action-interact-pill hidden" type="button" aria-label="Interact">
+          <span id="btn-interact-lbl">ENTER</span>
+        </button>
+
         <button id="btn-whip" class="action-btn action-whip" type="button" aria-label="Lizard Tail-Whip">
           <svg class="reticle-svg" viewBox="0 0 44 44" aria-hidden="true">
             <circle cx="22" cy="22" r="18.5" fill="none" stroke="currentColor" stroke-width="1.4" />
@@ -348,9 +390,9 @@
         <input id="toggle-zen" type="checkbox" />
         <label for="select-control-mode">Controls</label>
         <select id="select-control-mode">
-          <option value="gesture">TUNED GESTURE</option>
-          <option value="joystick">VIRTUAL STICK</option>
+          <option value="joystick" selected>FLOATING STICK (RECOMMENDED)</option>
           <option value="dpad">CLASSIC D-PAD</option>
+          <option value="gesture">GESTURE GLASS</option>
           <option value="tilt">MOTION TILT</option>
         </select>
       </div>
@@ -371,7 +413,7 @@
           <button id="btn-title-settings" class="title-settings-btn" type="button" aria-expanded="false" aria-controls="title-settings-drawer" title="Audio Mixer, Controls &amp; Flow Mode">
             <svg class="ico-svg ico-gear-gold" viewBox="0 0 24 24"><use href="#ico-gear"/></svg>
             <span id="title-ctrl-glyph" class="title-ctrl-glyph"></span>
-            <span id="title-ctrl-code" class="title-ctrl-code">GESTURE</span>
+            <span id="title-ctrl-code" class="title-ctrl-code">STICK</span>
           </button>
 
           <!-- Translucent Hydro-Glass Tuning & 3-Channel Audio Mixer Popover -->
@@ -408,24 +450,24 @@
 
             <span class="popover-section-lbl">TOUCH CONTROLS</span>
             <div class="ctrl-pills-grid" role="radiogroup" aria-label="Touch Control Scheme">
-              <button class="ctrl-pill-btn active" data-ctrl-pick="gesture" type="button">
-                <span class="ctrl-pill-ico" data-ctrl-ico="gesture"></span>
-                <span>GESTURE</span>
-              </button>
-              <button class="ctrl-pill-btn" data-ctrl-pick="joystick" type="button">
+              <button class="ctrl-pill-btn active" data-ctrl-pick="joystick" type="button">
                 <span class="ctrl-pill-ico" data-ctrl-ico="joystick"></span>
-                <span>STICK</span>
+                <span>FLOATING STICK</span>
               </button>
               <button class="ctrl-pill-btn" data-ctrl-pick="dpad" type="button">
                 <span class="ctrl-pill-ico" data-ctrl-ico="dpad"></span>
                 <span>D-PAD</span>
+              </button>
+              <button class="ctrl-pill-btn" data-ctrl-pick="gesture" type="button">
+                <span class="ctrl-pill-ico" data-ctrl-ico="gesture"></span>
+                <span>GESTURE</span>
               </button>
               <button class="ctrl-pill-btn" data-ctrl-pick="tilt" type="button">
                 <span class="ctrl-pill-ico" data-ctrl-ico="tilt"></span>
                 <span>TILT</span>
               </button>
             </div>
-            <p id="title-ctrl-guide" class="ctrl-guide-copy">Slide &amp; Hold: Walk/Run • Quick Side-Slash or 2-Finger Tap: Tail-Whip • Flick Up: Jump • Tap: Hydro-Pulse</p>
+            <p id="title-ctrl-guide" class="ctrl-guide-copy">Floating Left Stick: Walk/Run • Right Radial Arc: Hold Jump, Hydro-Pulse &amp; Tail-Whip</p>
           </div>
         </div>
       </div>
@@ -433,8 +475,8 @@
       <!-- Sculpted 3D Hydro-Sanctum Crest ("TOWERING WATERS: GATEWAY'S DESCENT") -->
       <div id="title-crest-stage" class="title-crest-stage" role="banner" aria-label="Towering Waters: Gateway's Descent — Created by Matt Shaffer"></div>
 
-      <!-- 100% Crystal-Clear Center Live 3D Vista & Animated Skeletal Gateway Window -->
-      <div id="title-diorama-stage" class="title-diorama-stage" role="button" tabindex="0" aria-label="Tap Live 3D Gateway Vista to Begin Story Campaign"></div>
+      <!-- 100% Crystal-Clear Center Live 3D Vista & Interactive Gateway 2.0 Star Showcase -->
+      <div id="title-diorama-stage" class="title-diorama-stage" role="button" tabindex="0" aria-label="Tap Gateway to Make Her Hop and Wave"></div>
 
       <!-- Bottom Hydro-Glass Command Dock -->
       <div class="title-command-dock">
@@ -838,9 +880,9 @@
         <p id="pause-tower-name" class="modal-sub">Act I: Redwood Canyon Spire</p>
 
         <select id="pause-control-mode" class="sr-only" aria-hidden="true" tabindex="-1">
-          <option value="gesture">TUNED GESTURE</option>
-          <option value="joystick">VIRTUAL STICK</option>
+          <option value="joystick" selected>FLOATING STICK (RECOMMENDED)</option>
           <option value="dpad">CLASSIC D-PAD</option>
+          <option value="gesture">GESTURE GLASS</option>
           <option value="tilt">MOTION TILT</option>
         </select>
 
@@ -850,24 +892,24 @@
             <button id="btn-pause-calibrate" class="btn-calibrate-sm hidden" type="button" title="Zero Neutral Tilt Angle">CALIBRATE TILT</button>
           </div>
           <div class="pause-ctrl-pills" role="radiogroup" aria-label="Control Scheme">
-            <button class="ctrl-scheme-pill active" data-pause-ctrl="gesture" type="button">
-              <span class="ctrl-pill-ico" data-ctrl-ico="gesture"></span>
-              <span>GESTURE</span>
-            </button>
-            <button class="ctrl-scheme-pill" data-pause-ctrl="joystick" type="button">
+            <button class="ctrl-scheme-pill active" data-pause-ctrl="joystick" type="button">
               <span class="ctrl-pill-ico" data-ctrl-ico="joystick"></span>
-              <span>STICK</span>
+              <span>FLOATING STICK</span>
             </button>
             <button class="ctrl-scheme-pill" data-pause-ctrl="dpad" type="button">
               <span class="ctrl-pill-ico" data-ctrl-ico="dpad"></span>
               <span>D-PAD</span>
+            </button>
+            <button class="ctrl-scheme-pill" data-pause-ctrl="gesture" type="button">
+              <span class="ctrl-pill-ico" data-ctrl-ico="gesture"></span>
+              <span>GESTURE</span>
             </button>
             <button class="ctrl-scheme-pill" data-pause-ctrl="tilt" type="button">
               <span class="ctrl-pill-ico" data-ctrl-ico="tilt"></span>
               <span>TILT</span>
             </button>
           </div>
-          <p id="pause-ctrl-guide" class="ctrl-guide-copy">Slide &amp; Hold: Walk/Run • Quick Side-Slash or 2-Finger Tap: Tail-Whip • Flick Up: Jump • Tap: Hydro-Pulse</p>
+          <p id="pause-ctrl-guide" class="ctrl-guide-copy">Floating Left Stick: Walk/Run • Right Radial Arc: Hold Jump, Hydro-Pulse &amp; Tail-Whip</p>
 
           <span class="config-lbl" style="margin-top:4px;">3-CHANNEL AUDIO MIXER</span>
           <div class="audio-mixer-box">

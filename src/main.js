@@ -34,10 +34,21 @@ const appEl = document.getElementById('app');
 const stageWrap = document.getElementById('stage-wrap');
 const canvas = document.getElementById('game-canvas');
 const stageTransitionVeilEl = document.getElementById('stage-transition-veil');
+const pelagianIrisVeilEl = document.getElementById('pelagian-iris-veil');
 const hudEl = document.getElementById('hud');
 const touchControlsEl = document.getElementById('touch-controls');
 
 // Top HUD
+const gatewayMoodBadgeEl = document.getElementById('gateway-mood-badge');
+const hudPerkStripEl = document.getElementById('hud-perk-strip');
+const perkTidalAegisEl = document.getElementById('perk-tidal-aegis');
+const perkSluiceSurgeEl = document.getElementById('perk-sluice-surge');
+const perkSluiceLblEl = document.getElementById('perk-sluice-lbl');
+const perkHydroOverchargeEl = document.getElementById('perk-hydro-overcharge');
+const perkOverchargeLblEl = document.getElementById('perk-overcharge-lbl');
+const hudPowerupPillEl = document.getElementById('hud-powerup-pill');
+const hudPowerupLblEl = document.getElementById('hud-powerup-lbl');
+const hudPowerupTimeEl = document.getElementById('hud-powerup-time');
 const hudModeLabelEl = document.getElementById('hud-mode-label');
 const hudTimerCaptionEl = document.getElementById('hud-timer-caption');
 const scoreEl = document.getElementById('score-display');
@@ -81,6 +92,14 @@ const coreHudLocksEl = document.getElementById('core-hud-locks');
 const coreDepthFillEl = document.getElementById('core-depth-fill');
 const coreHudSubEl = document.getElementById('core-hud-sub');
 
+const watershedFlowHudEl = document.getElementById('watershed-flow-hud');
+const wfPctLabelEl = document.getElementById('wf-pct-label');
+const wfFillEl = document.getElementById('wf-fill');
+const wfTickAegisEl = document.getElementById('wf-tick-aegis');
+const wfTickSluiceEl = document.getElementById('wf-tick-sluice');
+const wfTickOverchargeEl = document.getElementById('wf-tick-overcharge');
+const wfSubLabelEl = document.getElementById('wf-sub-label');
+
 const actionPromptEl = document.getElementById('action-prompt');
 const puzzleHudEl = document.getElementById('puzzle-hud');
 const puzzleHudTitleEl = document.getElementById('puzzle-hud-title');
@@ -100,6 +119,8 @@ const trophyToastIconEl = trophyToastEl?.querySelector('.trophy-toast-icon');
 // Touch Controls
 const btnCalibrateTilt = document.getElementById('btn-calibrate-tilt');
 const btnWhip = document.getElementById('btn-whip');
+const btnInteract = document.getElementById('btn-interact');
+const btnInteractLbl = document.getElementById('btn-interact-lbl');
 const hudCtrlHintEl = document.getElementById('hud-ctrl-hint');
 const hudCtrlHintTextEl = document.getElementById('hud-ctrl-hint-text');
 const tiltCtrlHintEl = document.getElementById('tilt-ctrl-hint');
@@ -349,10 +370,10 @@ const CTRL_SHORT_CODES = {
 };
 
 const CTRL_GUIDE_TEXT = {
-  gesture: 'Slide & Hold: Walk/Run • Quick Side-Slash or 2-Finger Tap: Tail-Whip • Flick Up: Jump • Tap: Hydro-Pulse',
-  tilt: 'Tilt: Walk/Run • Wrist-Flick or Swipe Sideways: Tail-Whip • Flick Up: Jump • Tap: Hydro-Pulse',
-  joystick: 'Thumb Stick: Walk/Run • Right Buttons: Tail-Whip, Hydro-Pulse & Jump',
-  dpad: 'Classic D-Pad: 4-Way Move • Right Buttons: Tail-Whip, Hydro-Pulse & Jump',
+  joystick: 'Floating Left Stick: Walk/Run • Right Radial Arc: Hold Jump, Hydro-Pulse & Tail-Whip',
+  dpad: 'Classic 4-Way D-Pad: Move • Right Radial Arc: Hold Jump, Hydro-Pulse & Tail-Whip',
+  gesture: 'Drag: Walk/Run • Flick Up: Jump • Flick Down or 2-Finger Tap: Tail-Whip • Tap: Hydro-Pulse',
+  tilt: 'Tilt: Walk/Run • Hold Right Half: Variable Jump • Left Tap: Hydro-Pulse • Wrist-Flick: Tail-Whip',
 };
 
 const DIR_CHEVRON_SVGS = {
@@ -693,7 +714,7 @@ document.querySelectorAll('[data-ctrl-ico]').forEach((slot) => {
 const initSettings = progression.getSettings?.() || {};
 
 const input = new InputController({
-  mode: initSettings.controlMode || 'gesture',
+  mode: initSettings.controlMode || 'joystick',
   hapticsEnabled: initSettings.hapticsEnabled !== false,
 });
 input.setTiltSensitivity?.(initSettings.tiltSensitivity ?? 1.0);
@@ -722,8 +743,26 @@ function clearBanner() {
   bannerEl?.classList.add('hidden');
 }
 
+let pelagianIrisTimer = null;
+function triggerPelagianIrisTransition(playAudio = true) {
+  if (!pelagianIrisVeilEl) return;
+  pelagianIrisVeilEl.classList.remove('is-pulsing');
+  void pelagianIrisVeilEl.offsetWidth;
+  pelagianIrisVeilEl.classList.add('is-pulsing');
+  if (playAudio) sound.playTransitionRipple?.();
+  clearTimeout(pelagianIrisTimer);
+  pelagianIrisTimer = setTimeout(() => {
+    pelagianIrisVeilEl.classList.remove('is-pulsing');
+  }, 460);
+}
+
 function showBanner(sub, title) {
   if (!bannerEl) return;
+  // Suppress stage banner during core_descent so #core-descent-hud has 100% unobstructed space (#601)
+  if (game?.mode === 'core_descent') {
+    bannerEl.classList.add('hidden');
+    return;
+  }
   if (bannerSubEl) bannerSubEl.textContent = sub || '';
   if (bannerTitleEl) bannerTitleEl.textContent = title || '';
   bannerEl.classList.remove('hidden');
@@ -1145,6 +1184,16 @@ const hudCache = {
   promptLocked: false,
   interactActive: null,
   interactKind: null,
+  gatewayMood: '',
+  gatewayShielded: null,
+  perksKey: '',
+  perksVisible: false,
+  flowVisible: false,
+  flowPct: -1,
+  flowSub: '',
+  interactPillVisible: false,
+  interactPillLbl: '',
+  floodgateSurgeActive: false,
 };
 
 let currentPromptAction = null;
@@ -1164,6 +1213,15 @@ function resetHudVisibilityCache() {
   hudCache.missionVisible = false;
   hudCache.altVisible = false;
   hudCache.coreVisible = false;
+  hudCache.perksVisible = false;
+  hudCache.perksKey = '';
+  hudCache.flowVisible = false;
+  hudCache.flowPct = -1;
+  hudCache.interactPillVisible = false;
+  hudCache.floodgateSurgeActive = false;
+  watershedFlowHudEl?.classList.add('hidden');
+  hudPerkStripEl?.classList.add('hidden');
+  btnInteract?.classList.add('hidden');
   hudCache.puzzleVisible = false;
   hudCache.promptVisible = false;
   hudCache.promptKey = '';
@@ -1521,9 +1579,164 @@ const game = new GameEngineClass(
 
       const nextAppMode = hud.mode || 'tower';
       if (appEl && nextAppMode !== hudCache.appGameMode) {
+        const prevMode = hudCache.appGameMode;
         hudCache.appGameMode = nextAppMode;
         appEl.dataset.gameMode = nextAppMode;
+        if (nextAppMode === 'core_descent') {
+          clearBanner();
+        }
+        // Trigger smooth Pelagian Ripple-Iris transition between distinct major stages!
+        if (
+          prevMode &&
+          prevMode !== 'paused' &&
+          nextAppMode !== 'paused' &&
+          prevMode !== nextAppMode &&
+          startupVeilDismissed
+        ) {
+          triggerPelagianIrisTransition(true);
+        }
       }
+
+      // 6B. Animated Gateway 2.0 6-Mood HUD Portrait Medallion (dirty-checked, O(1) cached SVG!)
+      const heroObj = game.gateway || game.player;
+      const rawMood =
+        hud.gatewayMood ||
+        heroObj?.mood ||
+        (heroObj?.hurtTimer > 0.02
+          ? 'hurt'
+          : (heroObj?.edgeTeeter || 0) > 0.25
+          ? 'surprised'
+          : (heroObj?.tailWhipTimer || heroObj?.whipTimer || 0) > 0.02
+          ? 'determined'
+          : (heroObj?.springSomersault || (game.comboCount || 0) >= 3 || hud.mode === 'victory')
+          ? 'joyful'
+          : 'happy');
+      const normMood =
+        typeof uiArtMod.normalizeGatewayMood === 'function'
+          ? uiArtMod.normalizeGatewayMood(rawMood)
+          : String(rawMood || 'happy');
+      if (gatewayMoodBadgeEl && normMood !== hudCache.gatewayMood) {
+        hudCache.gatewayMood = normMood;
+        gatewayMoodBadgeEl.dataset.mood = normMood;
+        if (typeof uiArtMod.getGatewayMoodMedallionSVG === 'function') {
+          gatewayMoodBadgeEl.innerHTML = uiArtMod.getGatewayMoodMedallionSVG(normMood);
+        }
+      }
+
+      // 6C. Active Spire Carry-Over Flow Perks & Supply Crate Power-Up Strip (dirty-checked!)
+      const perksObj = hud.activeSpirePerks || game.activeSpirePerks || hud.activeFlowPerks || game.activeFlowPerks || null;
+      const aegisRaw = perksObj?.tidalAegis;
+      const aegisOn = Boolean(aegisRaw === true || aegisRaw?.active);
+      const aegisRecharging = Boolean(aegisRaw && typeof aegisRaw === 'object' && aegisRaw.active && (aegisRaw.charges ?? 1) <= 0);
+      const sluiceRaw = perksObj?.pressurizedSluice ?? perksObj?.sluiceSurge;
+      const sluiceOn = Boolean(sluiceRaw === true || sluiceRaw?.active);
+      const sluiceSec = Math.round(Number(sluiceRaw?.bonusSec ?? 20) || 20);
+      const overRaw = perksObj?.hydroOvercharge;
+      const overOn = Boolean(overRaw === true || overRaw?.active);
+      const overSec = Math.ceil(Number(overRaw?.remainingSec ?? overRaw?.timer ?? 0) || 0);
+
+      const rawPowerUp = hud.activePowerUp ?? game.activePowerUp ?? null;
+      const puKind = typeof rawPowerUp === 'string'
+        ? rawPowerUp
+        : String(rawPowerUp?.kind || rawPowerUp?.type || rawPowerUp?.id || '').toLowerCase();
+      const puSec = Math.ceil(Number(rawPowerUp?.remainingSec ?? rawPowerUp?.timer ?? rawPowerUp?.remaining ?? 0) || 0);
+      const puOn = Boolean(puKind && (puSec > 0 || puKind.includes('shield')));
+
+      const isShieldedNow = Boolean(heroObj?.shield || (aegisOn && !aegisRecharging) || puKind.includes('shield'));
+      if (gatewayMoodBadgeEl && isShieldedNow !== hudCache.gatewayShielded) {
+        hudCache.gatewayShielded = isShieldedNow;
+        gatewayMoodBadgeEl.classList.toggle('is-shielded', isShieldedNow);
+      }
+
+      const showPerks = !titleOpen && !cutsceneState.active && hud.mode === 'tower' && (aegisOn || sluiceOn || overOn || puOn);
+      if (hudPerkStripEl) {
+        if (showPerks !== hudCache.perksVisible) {
+          hudCache.perksVisible = showPerks;
+          hudPerkStripEl.classList.toggle('hidden', !showPerks);
+        }
+        if (showPerks) {
+          const pKey = `${aegisOn ? 1 : 0}${aegisRecharging ? 1 : 0}|${sluiceOn ? sluiceSec : 0}|${overOn ? overSec : 0}|${puOn ? `${puKind}:${puSec}` : ''}`;
+          if (pKey !== hudCache.perksKey) {
+            hudCache.perksKey = pKey;
+            if (perkTidalAegisEl) {
+              perkTidalAegisEl.classList.toggle('hidden', !aegisOn);
+              perkTidalAegisEl.classList.toggle('is-recharging', aegisRecharging);
+            }
+            if (perkSluiceSurgeEl) {
+              perkSluiceSurgeEl.classList.toggle('hidden', !sluiceOn);
+              if (perkSluiceLblEl) perkSluiceLblEl.textContent = `SLUICE +${sluiceSec}S`;
+            }
+            if (perkHydroOverchargeEl) {
+              perkHydroOverchargeEl.classList.toggle('hidden', !overOn);
+              if (perkOverchargeLblEl) perkOverchargeLblEl.textContent = overSec > 0 ? `OVERCHARGE ${overSec}S` : 'OVERCHARGE';
+            }
+            if (hudPowerupPillEl) {
+              hudPowerupPillEl.classList.toggle('hidden', !puOn);
+              if (puOn) {
+                const labelMap = {
+                  turbo_current: 'TURBO CURRENT',
+                  bubble_shield: 'BUBBLE SHIELD',
+                  hydro_magnet: 'HYDRO-MAGNET',
+                };
+                if (hudPowerupLblEl) hudPowerupLblEl.textContent = labelMap[puKind] || puKind.replace(/_/g, ' ').toUpperCase();
+                if (hudPowerupTimeEl) hudPowerupTimeEl.textContent = puSec > 0 ? `${puSec}s` : 'ACTIVE';
+              }
+            }
+          }
+        }
+      }
+
+      // 6D. Watershed Flow Meter (0-100%) during transit mini-games (`rapids_surf`, `reef_swim`, `frill_glide`)
+      const isTransitMode =
+        hud.mode === 'rapids_surf' ||
+        hud.mode === 'skimmer' ||
+        hud.mode === 'reef_swim' ||
+        hud.mode === 'submarine' ||
+        hud.mode === 'frill_glide' ||
+        hud.mode === 'glide';
+      const showFlowHud = isTransitMode && !titleOpen && !cutsceneState.active;
+      if (watershedFlowHudEl) {
+        if (showFlowHud !== hudCache.flowVisible) {
+          hudCache.flowVisible = showFlowHud;
+          watershedFlowHudEl.classList.toggle('hidden', !showFlowHud);
+        }
+        if (showFlowHud) {
+          const rawFlow = Number(hud.watershedFlowPct ?? game.watershedFlowPct ?? game.watershedFlow?.meter ?? 0) || 0;
+          const pct = Math.round(Math.max(0, Math.min(100, rawFlow)));
+          const escorts = hud.rescuedCritterEscorts || game.rescuedCritterEscorts || game.watershedFlow?.rescuedThisStage || [];
+          const escortCnt = Array.isArray(escorts) ? escorts.length : 0;
+          const subStr =
+            pct >= 100
+              ? `MAX FLOW! ALL 3 SPIRE PERKS LOCKED${escortCnt > 0 ? ` • ${escortCnt} ESCORTS` : ''}`
+              : pct >= 70
+              ? `AEGIS + SLUICE +20S READY • REACH 100% FOR OVERCHARGE`
+              : pct >= 35
+              ? `TIDAL AEGIS READY • REACH 70% FOR SLUICE +20S`
+              : `CHAIN RINGS & RESCUES • 35% AEGIS • 70% SLUICE • 100% OVERCHARGE`;
+          if (pct !== hudCache.flowPct) {
+            hudCache.flowPct = pct;
+            if (wfPctLabelEl) wfPctLabelEl.textContent = `${pct}%`;
+            if (wfFillEl) wfFillEl.style.width = `${pct}%`;
+            wfTickAegisEl?.classList.toggle('is-unlocked', pct >= 35);
+            wfTickSluiceEl?.classList.toggle('is-unlocked', pct >= 70);
+            wfTickOverchargeEl?.classList.toggle('is-unlocked', pct >= 100);
+          }
+          if (wfSubLabelEl && subStr !== hudCache.flowSub) {
+            hudCache.flowSub = subStr;
+            wfSubLabelEl.textContent = subStr;
+          }
+        }
+      }
+
+      // 6E. Exterior Spire Floodgate Water-Surge audio cue trigger on rising edge
+      const surgeNow = Boolean(
+        (Number(hud.floodgateSurgeTimer ?? game.floodgateSurgeTimer) || 0) > 0.05 ||
+        game.spireFloodgateSurgeFx?.active
+      );
+      if (surgeNow && !hudCache.floodgateSurgeActive) {
+        sound.playFloodgateSurge?.();
+      }
+      hudCache.floodgateSurgeActive = surgeNow;
 
       // 7. Aqueduct Sanctum Clue HUD (dirty-checked)
       const isSanctumMode = hud.mode === 'puzzle' || hud.mode === 'aqueduct_sanctum';
@@ -1629,6 +1842,29 @@ const game = new GameEngineClass(
             } else {
               setInteractContextCached(false, '');
             }
+
+            // Mirror actionable tower context into the Right-Thumb Contextual #btn-interact pill!
+            const showInteractBtn = Boolean(hud.mode === 'tower' && isActionable && !isLocked);
+            if (btnInteract) {
+              if (showInteractBtn !== hudCache.interactPillVisible) {
+                hudCache.interactPillVisible = showInteractBtn;
+                btnInteract.classList.toggle('hidden', !showInteractBtn);
+              }
+              if (showInteractBtn && btnInteractLbl) {
+                const rawP = String(promptRaw).toUpperCase();
+                const pillTxt = rawP.includes('VALVE') || rawP.includes('SPIN') || rawP.includes('TURBINE')
+                  ? 'SPIN'
+                  : rawP.includes('LIFT') || rawP.includes('ELEV') || rawP.includes('RIDE')
+                  ? 'RIDE'
+                  : rawP.includes('CRAFT')
+                  ? 'CRAFT'
+                  : 'ENTER';
+                if (pillTxt !== hudCache.interactPillLbl) {
+                  hudCache.interactPillLbl = pillTxt;
+                  btnInteractLbl.textContent = pillTxt;
+                }
+              }
+            }
           }
         } else {
           if (hudCache.promptKey || hudCache.promptVisible) {
@@ -1647,6 +1883,10 @@ const game = new GameEngineClass(
               hudCache.promptVisible = false;
               actionPromptEl.classList.add('hidden');
             }
+          }
+          if (btnInteract && hudCache.interactPillVisible) {
+            hudCache.interactPillVisible = false;
+            btnInteract.classList.add('hidden');
           }
           if (hud.mode !== 'tower') {
             setInteractContextCached(false, '');
@@ -2415,7 +2655,7 @@ function refreshTitleMeta() {
 let ctrlHintFreshTimer = null;
 
 async function applyControlMode(mode, fromUserGesture = false) {
-  const validMode = CONTROL_MODES.includes(mode) ? mode : 'gesture';
+  const validMode = CONTROL_MODES.includes(mode) ? mode : 'joystick';
   if (validMode === 'tilt' && fromUserGesture) {
     try {
       await input.requestTiltPermission?.();
@@ -2432,11 +2672,11 @@ async function applyControlMode(mode, fromUserGesture = false) {
 
   if (selectControlMode) selectControlMode.value = validMode;
   if (pauseControlMode) pauseControlMode.value = validMode;
-  if (btnCtrlMode) btnCtrlMode.innerHTML = CTRL_SVGS[validMode] || CTRL_SVGS.gesture;
-  if (titleCtrlGlyphEl) titleCtrlGlyphEl.innerHTML = CTRL_SVGS[validMode] || CTRL_SVGS.gesture;
-  if (titleCtrlCodeEl) titleCtrlCodeEl.textContent = CTRL_SHORT_CODES[validMode] || 'GESTURE';
+  if (btnCtrlMode) btnCtrlMode.innerHTML = CTRL_SVGS[validMode] || CTRL_SVGS.joystick;
+  if (titleCtrlGlyphEl) titleCtrlGlyphEl.innerHTML = CTRL_SVGS[validMode] || CTRL_SVGS.joystick;
+  if (titleCtrlCodeEl) titleCtrlCodeEl.textContent = CTRL_SHORT_CODES[validMode] || 'STICK';
 
-  const guideCopy = CTRL_GUIDE_TEXT[validMode] || CTRL_GUIDE_TEXT.gesture;
+  const guideCopy = CTRL_GUIDE_TEXT[validMode] || CTRL_GUIDE_TEXT.joystick;
   if (titleCtrlGuideEl) titleCtrlGuideEl.textContent = guideCopy;
   if (pauseCtrlGuideEl) pauseCtrlGuideEl.textContent = guideCopy;
   if (hudCtrlHintTextEl) hudCtrlHintTextEl.textContent = CTRL_GUIDE_TEXT.gesture;
@@ -3445,6 +3685,8 @@ function returnToTitle() {
   loadTitlePreviewTower();
   overlayTitle?.classList.remove('hidden');
   syncTitleShowcaseState();
+  renderer.triggerTitleHeroWave?.();
+  triggerPelagianIrisTransition(false);
   scheduleModeSpiresPrewarm();
 }
 
@@ -3496,6 +3738,16 @@ btnWhip?.addEventListener('pointerdown', (e) => {
 });
 btnWhip?.addEventListener('pointerup', () => btnWhip.classList.remove('active'));
 btnWhip?.addEventListener('pointercancel', () => btnWhip.classList.remove('active'));
+
+btnInteract?.addEventListener('pointerdown', (e) => {
+  if (input.controlMode === 'gesture' || input.controlMode === 'tilt') return;
+  e.preventDefault();
+  e.stopPropagation();
+  btnInteract.classList.add('active');
+  triggerCurrentPromptInteract();
+});
+btnInteract?.addEventListener('pointerup', () => btnInteract.classList.remove('active'));
+btnInteract?.addEventListener('pointercancel', () => btnInteract.classList.remove('active'));
 
 let lastActionPromptPointerTs = -1000;
 function triggerCurrentPromptInteract() {
@@ -3669,18 +3921,35 @@ btnCloseWorlds?.addEventListener('click', () => {
 
 btnStart?.addEventListener('click', () => launchGameMode('campaign'));
 
-const handleTitleStageActivate = () => {
+// Interactive Title Screen Star Showcase: Pointer Eye-Tracking + Tap Gateway to Hop & Chirp!
+window.addEventListener('pointermove', (e) => {
+  if (!isTitleScreenOpen()) return;
+  const vw = Math.max(1, window.innerWidth || 1);
+  const vh = Math.max(1, window.innerHeight || 1);
+  const nx = ((e.clientX / vw) - 0.5) * 2;
+  const ny = ((e.clientY / vh) - 0.5) * 2;
+  renderer.setTitlePointerGaze?.(nx, ny);
+}, { passive: true });
+
+const handleTitleHeroTap = () => {
   if (titleSettingsDrawer && !titleSettingsDrawer.classList.contains('hidden')) {
     closeTitleDrawers();
     return;
   }
-  launchGameMode('campaign');
+  sound.unlock?.(true);
+  renderer.triggerTitleHeroHop?.();
+  if (typeof sound.playGatewayVoice === 'function') {
+    sound.playGatewayVoice('hop');
+  } else {
+    sound.gatewayCheer?.();
+  }
+  input.haptic?.(12);
 };
-titleDioramaStageEl?.addEventListener('click', handleTitleStageActivate);
+titleDioramaStageEl?.addEventListener('click', handleTitleHeroTap);
 titleDioramaStageEl?.addEventListener('keydown', (e) => {
   if (e.code === 'Enter' || e.code === 'Space') {
     e.preventDefault();
-    handleTitleStageActivate();
+    launchGameMode('campaign');
   }
 });
 
@@ -3724,7 +3993,7 @@ titleCtrlPickBtns.forEach((btn) => {
   btn.addEventListener('click', () => {
     sound.unlock?.();
     sound.switchToggle?.();
-    applyControlMode(btn.dataset.ctrlPick || 'gesture', true);
+    applyControlMode(btn.dataset.ctrlPick || 'joystick', true);
   });
 });
 
@@ -3732,17 +4001,17 @@ pauseCtrlPillBtns.forEach((btn) => {
   btn.addEventListener('click', () => {
     sound.unlock?.();
     sound.switchToggle?.();
-    applyControlMode(btn.dataset.pauseCtrl || 'gesture', true);
+    applyControlMode(btn.dataset.pauseCtrl || 'joystick', true);
   });
 });
 
 btnCtrlMode?.addEventListener('click', () => {
   sound.unlock?.();
-  const cur = input.controlMode || 'gesture';
+  const cur = input.controlMode || 'joystick';
   const idx = CONTROL_MODES.indexOf(cur);
   const next = CONTROL_MODES[(idx + 1) % CONTROL_MODES.length];
   applyControlMode(next, true);
-  const modeLabel = next === 'tilt' ? 'MOTION (TILT)' : next === 'gesture' ? 'TOUCH (GESTURE)' : `${next.toUpperCase()} MODE`;
+  const modeLabel = next === 'joystick' ? 'FLOATING STICK' : next === 'tilt' ? 'MOTION (TILT)' : next === 'gesture' ? 'GESTURE GLASS' : `${next.toUpperCase()} MODE`;
   showBanner(modeLabel, CTRL_GUIDE_TEXT[next] || `${next.toUpperCase()} MODE`);
 });
 
@@ -3993,7 +4262,7 @@ function triggerPauseToggle() {
     if (pauseTowerName) {
       const pf = game.pausedFrom;
       if (pf === 'core_descent') pauseTowerName.textContent = 'Reactor Core Descent';
-      else if (pf === 'reef_swim' || pf === 'submarine') pauseTowerName.textContent = 'Pelagian Reef Dive (Bio-Submersible)';
+      else if (pf === 'reef_swim' || pf === 'submarine') pauseTowerName.textContent = 'Pelagian Reef Free-Swim';
       else if (pf === 'rapids_surf' || pf === 'skimmer') pauseTowerName.textContent = 'Whitewater Rapids Tail-Surf';
       else if (pf === 'frill_glide' || pf === 'glide') pauseTowerName.textContent = 'Canyon Updraft Frill-Glide';
       else if (pf === 'aqueduct_sanctum' || pf === 'puzzle') pauseTowerName.textContent = 'Aqueduct Sanctum';
@@ -4115,6 +4384,8 @@ function prewarmStartupAssets() {
       missionStatusPillEl,
       altMeterEl,
       actionPromptEl,
+      hudPerkStripEl,
+      watershedFlowHudEl,
     ].filter(Boolean);
     const wasHidden = hudLayoutWarmEls.map((el) => el.classList.contains('hidden'));
     hudLayoutWarmEls.forEach((el) => {
@@ -4166,11 +4437,16 @@ function prewarmStartupAssets() {
   setTimeout(dismissStartupTransitionVeil, 850);
 }
 
-applyControlMode(initSettings.controlMode || 'gesture', false);
+applyControlMode(initSettings.controlMode || 'joystick', false);
+if (gatewayMoodBadgeEl && typeof uiArtMod.getGatewayMoodMedallionSVG === 'function') {
+  gatewayMoodBadgeEl.innerHTML = uiArtMod.getGatewayMoodMedallionSVG('happy');
+  hudCache.gatewayMood = 'happy';
+}
 refreshTitleMeta();
 renderLivesPips(3, false);
 loadTitlePreviewTower(0);
 syncTitleShowcaseState();
+renderer.triggerTitleHeroWave?.();
 handleResize();
 prewarmStartupAssets();
 

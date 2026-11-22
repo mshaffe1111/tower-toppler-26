@@ -192,6 +192,19 @@ class EqualPowerStemDeck {
     this.bookmarks = new Map();
     this.targetFilename = null;
     this.requestToken = 0;
+    this.playbackRate = 1.0;
+  }
+
+  setPlaybackRate(rate = 1.0, rampSec = 0.45) {
+    const clamped = clamp(rate, 0.82, 1.18);
+    this.playbackRate = clamped;
+    const ctx = this.engine.ctx;
+    if (!ctx || ctx.state !== 'running' || !this.activeVoice?.src?.playbackRate) return;
+    try {
+      this.activeVoice.src.playbackRate.setTargetAtTime(clamped, ctx.currentTime, Math.max(0.05, rampSec * 0.35));
+    } catch {
+      // Ignore rate schedule errors
+    }
   }
 
   _scheduleEqualPowerIn(gainParam, now, durationSec, peak = 1.0) {
@@ -313,6 +326,7 @@ class EqualPowerStemDeck {
       const src = liveCtx.createBufferSource();
       src.buffer = buffer;
       src.loop = true;
+      src.playbackRate.setValueAtTime(this.playbackRate || 1.0, now);
 
       const gain = liveCtx.createGain();
       const fadeDur = hadPrevious ? crossfadeSec : Math.min(1.35, crossfadeSec);
@@ -417,6 +431,9 @@ export class SoundEngine {
     this.reverbLPF = null;
 
     this.musicBus = null;
+    this.musicLPF = null;
+    this.musicHighShelf = null;
+    this.musicReverbSend = null;
     this.ambienceBus = null;
     this.ambienceLPF = null;
     this.sfxGain = null;
@@ -561,7 +578,7 @@ export class SoundEngine {
 
     this.antiFatigueLPF = ctx.createBiquadFilter();
     this.antiFatigueLPF.type = 'lowpass';
-    this.antiFatigueLPF.frequency.value = 5400;
+    this.antiFatigueLPF.frequency.value = 7600;
     this.antiFatigueLPF.Q.value = 0.62;
 
     this.limiter = ctx.createDynamicsCompressor();
@@ -599,9 +616,26 @@ export class SoundEngine {
     this.reverb.connect(this.reverbLPF);
     this.reverbLPF.connect(this.masterGain);
 
-    // 4. Independent 3-Channel Studio Mixer Buses (Music / Water Ambience / Organic SFX)
+    // 4. Independent 3-Channel Studio Mixer Buses (Music w/ Act-Consistent Adaptive Filter/Reverb / Water Ambience / Organic SFX)
     this.musicBus = ctx.createGain();
-    this.musicBus.connect(this.masterGain);
+    this.musicLPF = ctx.createBiquadFilter();
+    this.musicLPF.type = 'lowpass';
+    this.musicLPF.frequency.value = 18000;
+    this.musicLPF.Q.value = 0.72;
+
+    this.musicHighShelf = ctx.createBiquadFilter();
+    this.musicHighShelf.type = 'highshelf';
+    this.musicHighShelf.frequency.value = 6000;
+    this.musicHighShelf.gain.value = 0;
+
+    this.musicReverbSend = ctx.createGain();
+    this.musicReverbSend.gain.value = 0.04;
+
+    this.musicBus.connect(this.musicLPF);
+    this.musicLPF.connect(this.musicHighShelf);
+    this.musicHighShelf.connect(this.masterGain);
+    this.musicLPF.connect(this.musicReverbSend);
+    this.musicReverbSend.connect(this.reverbHPF);
 
     this.ambienceBus = ctx.createGain();
     this.ambienceLPF = ctx.createBiquadFilter();
@@ -832,40 +866,48 @@ export class SoundEngine {
 
   _resolveDesiredStems() {
     const activeBiome = CANONICAL_BIOMES.includes(this.biome) ? this.biome : 'canyon_river';
+    const actMusic = MUSIC_STEMS[activeBiome] || MUSIC_STEMS.canyon_river;
 
     if (this.miniGameMode === 'core_descent') {
       return {
         harmonyKey: 'core_descent',
         musicFile: MUSIC_STEMS.core_descent,
         ambienceFile: AMBIENCE_STEMS.core_descent,
+        crossfadeSec: 1.2,
       };
     }
+    // Act-Consistent Mini-Game Remixes: preserve the current Act's musical score via bookmark
+    // while smoothly reshaping filter, playback energy, reverb send, and water ambience!
     if (this.miniGameMode === 'reef_swim') {
       return {
-        harmonyKey: 'coral_sea',
-        musicFile: MUSIC_STEMS.coral_sea,
+        harmonyKey: activeBiome,
+        musicFile: actMusic,
         ambienceFile: AMBIENCE_STEMS.coral_sea,
+        crossfadeSec: 1.4,
       };
     }
     if (this.miniGameMode === 'rapids_surf') {
       return {
-        harmonyKey: 'canyon_river',
-        musicFile: MUSIC_STEMS.canyon_river,
+        harmonyKey: activeBiome,
+        musicFile: actMusic,
         ambienceFile: AMBIENCE_STEMS.canyon_river,
+        crossfadeSec: 1.4,
       };
     }
     if (this.miniGameMode === 'frill_glide') {
       return {
-        harmonyKey: 'alpine_lake',
-        musicFile: MUSIC_STEMS.alpine_lake,
+        harmonyKey: activeBiome,
+        musicFile: actMusic,
         ambienceFile: AMBIENCE_STEMS.alpine_lake,
+        crossfadeSec: 1.5,
       };
     }
     if (this.miniGameMode === 'aqueduct_sanctum') {
       return {
-        harmonyKey: 'sanctum_menu',
-        musicFile: MUSIC_STEMS.sanctum_menu,
-        ambienceFile: AMBIENCE_STEMS.mist_bayou,
+        harmonyKey: activeBiome,
+        musicFile: actMusic,
+        ambienceFile: AMBIENCE_STEMS[activeBiome] || AMBIENCE_STEMS.mist_bayou,
+        crossfadeSec: 1.4,
       };
     }
 
@@ -878,6 +920,7 @@ export class SoundEngine {
         harmonyKey: 'warden_boss',
         musicFile: MUSIC_STEMS.warden_boss,
         ambienceFile: AMBIENCE_STEMS[activeBiome] || AMBIENCE_STEMS.warden_boss,
+        crossfadeSec: 1.25,
       };
     }
 
@@ -886,6 +929,7 @@ export class SoundEngine {
         harmonyKey: 'core_descent',
         musicFile: MUSIC_STEMS.core_descent,
         ambienceFile: AMBIENCE_STEMS[activeBiome] || AMBIENCE_STEMS.core_descent,
+        crossfadeSec: 1.35,
       };
     }
 
@@ -894,21 +938,24 @@ export class SoundEngine {
         harmonyKey: 'sanctum_menu',
         musicFile: MUSIC_STEMS.sanctum_menu,
         ambienceFile: AMBIENCE_STEMS.alpine_lake,
+        crossfadeSec: 1.8,
       };
     }
 
     if (this.zenMode || this.gameMode === 'sanctum_trials') {
       return {
-        harmonyKey: 'sanctum_menu',
-        musicFile: MUSIC_STEMS.sanctum_menu,
+        harmonyKey: activeBiome,
+        musicFile: actMusic,
         ambienceFile: AMBIENCE_STEMS[activeBiome],
+        crossfadeSec: 1.8,
       };
     }
 
     return {
       harmonyKey: activeBiome,
-      musicFile: MUSIC_STEMS[activeBiome],
+      musicFile: actMusic,
       ambienceFile: AMBIENCE_STEMS[activeBiome],
+      crossfadeSec: CROSSFADE_SECONDS,
     };
   }
 
@@ -1246,7 +1293,8 @@ export class SoundEngine {
       return;
     }
 
-    const { musicFile, ambienceFile } = this._resolveDesiredStems();
+    const { musicFile, ambienceFile, crossfadeSec } = this._resolveDesiredStems();
+    const fadeSec = crossfadeSec || CROSSFADE_SECONDS;
     const wantMusic = Boolean(
       this.musicActive && this.musicEnabled && !this.muted && this.musicVolume > 0.002
     );
@@ -1254,10 +1302,59 @@ export class SoundEngine {
       this.musicActive && this.ambienceEnabled && !this.muted && this.ambienceVolume > 0.002
     );
 
+    const now = this.ctx.currentTime;
+
+    // Smooth Act-consistent adaptive music contour (zero jarring track jumps between Spire & Mini-Games!)
+    let targetMusicCutoff = 18000;
+    let targetMusicShelfDb = 0.0;
+    let targetMusicRev = 0.05;
+    let targetRate = 1.0;
+
+    if (this.miniGameMode === 'reef_swim') {
+      targetMusicCutoff = 2400;
+      targetMusicShelfDb = -1.5;
+      targetMusicRev = 0.16;
+      targetRate = 0.98;
+    } else if (this.miniGameMode === 'rapids_surf') {
+      targetMusicCutoff = 18000;
+      targetMusicShelfDb = 1.8;
+      targetMusicRev = 0.05;
+      targetRate = 1.06;
+    } else if (this.miniGameMode === 'frill_glide') {
+      targetMusicCutoff = 18000;
+      targetMusicShelfDb = 3.0;
+      targetMusicRev = 0.22;
+      targetRate = 1.02;
+    } else if (this.miniGameMode === 'aqueduct_sanctum') {
+      targetMusicCutoff = 1850;
+      targetMusicShelfDb = -1.2;
+      targetMusicRev = 0.24;
+      targetRate = 0.96;
+    } else if (this.miniGameMode === 'core_descent') {
+      targetMusicCutoff = 18000;
+      targetMusicShelfDb = 1.5;
+      targetMusicRev = 0.12;
+      targetRate = 1.04;
+    } else if (this.zenMode || this.gameMode === 'sanctum_trials') {
+      targetMusicCutoff = 3800;
+      targetMusicRev = 0.16;
+      targetRate = 0.97;
+    }
+
+    if (this.musicLPF) {
+      this.musicLPF.frequency.setTargetAtTime(targetMusicCutoff, now, 0.32);
+    }
+    if (this.musicHighShelf) {
+      this.musicHighShelf.gain.setTargetAtTime(targetMusicShelfDb, now, 0.35);
+    }
+    if (this.musicReverbSend) {
+      this.musicReverbSend.gain.setTargetAtTime(targetMusicRev, now, 0.35);
+    }
+    this._musicDeck.setPlaybackRate(targetRate, 0.45);
+
     // Smooth underwater low-pass contour for `reef_swim` vs crisp open-air ambience
     if (this.ambienceLPF) {
-      const now = this.ctx.currentTime;
-      const targetCutoff = this.miniGameMode === 'reef_swim' ? 560 : 18000;
+      const targetCutoff = this.miniGameMode === 'reef_swim' ? 680 : 18000;
       this.ambienceLPF.frequency.setTargetAtTime(targetCutoff, now, 0.38);
     }
 
@@ -1269,7 +1366,7 @@ export class SoundEngine {
         this._musicBufferReady = true;
         this._stopFallbackPad();
       }
-      this._musicDeck.transitionTo(musicFile, CROSSFADE_SECONDS, () => {
+      this._musicDeck.transitionTo(musicFile, fadeSec, () => {
         this._musicBufferReady = true;
         this._stopFallbackPad();
       });
@@ -1279,7 +1376,7 @@ export class SoundEngine {
     }
 
     if (wantAmbience) {
-      this._ambienceDeck.transitionTo(ambienceFile, CROSSFADE_SECONDS);
+      this._ambienceDeck.transitionTo(ambienceFile, fadeSec);
       this._syncModeBed();
     } else {
       this._ambienceDeck.fadeOutAll(0.85);
@@ -1843,63 +1940,197 @@ export class SoundEngine {
     src.start(now, offset, dur + 0.02);
   }
 
-  // --- 6-Variation Organic Round-Robin Footsteps & Traversal Foley ---
+  // --- 5-Material True Surface-Aware Footsteps & Landing Foley ---
 
-  step(surface = 'stone') {
-    if (!this._canPlay('step', 0.068)) return;
-    if (!this._footstepVariations || this._footstepVariations.length === 0) return;
+  _normalizeSurface(surface = 'stone') {
+    const s = String(surface || 'stone').trim().toLowerCase();
+    if (s.includes('ice') || s.includes('crystal') || s.includes('frost') || s.includes('glacier')) return 'ice';
+    if (s.includes('wood') || s.includes('plank') || s.includes('raft') || s.includes('timber') || s.includes('dock')) return 'wood';
+    if (s.includes('water') || s.includes('puddle') || s.includes('splash') || s.includes('shallow') || s.includes('wet')) return 'water';
+    if (s.includes('bronze') || s.includes('metal') || s.includes('lift') || s.includes('elev') || s.includes('brass') || s.includes('valve')) return 'bronze';
+    return 'stone';
+  }
 
-    // Non-repeating 6-variation round-robin index with gentle pitch & stereo variation
-    const stepAdvance = Math.random() < 0.28 ? 2 : 1;
-    this._footstepIdx = (this._footstepIdx + stepAdvance) % this._footstepVariations.length;
-    const buf = this._footstepVariations[this._footstepIdx];
-
-    const now = this.ctx.currentTime;
+  _noiseBurst(dur = 0.05, gainVal = 0.03, filterType = 'bandpass', fStart = 1200, fEnd = 900, q = 2.0, delay = 0, pan = 0, sendReverb = false, usePink = true) {
+    if (!this.ctx || !this.sfxGain || this._activeSfxVoices > 28) return;
+    const buf = usePink ? this._pinkNoiseBuf : this._softAirBuf;
+    if (!buf) return;
+    const now = this.ctx.currentTime + Math.max(0, delay);
+    const d = Math.max(0.012, dur);
     const src = this.ctx.createBufferSource();
     src.buffer = buf;
 
-    const baseRate =
-      surface === 'ice' || surface === 'crystal'
-        ? 1.24
-        : surface === 'wood'
-        ? 1.08
-        : surface === 'water'
-        ? 0.92
-        : 1.0;
-    src.playbackRate.setValueAtTime(this._vary(baseRate, 0.045), now);
+    const filt = this.ctx.createBiquadFilter();
+    filt.type = filterType;
+    filt.frequency.setValueAtTime(clamp(fStart, 60, 12000), now);
+    if (Math.abs(fEnd - fStart) > 2) {
+      filt.frequency.exponentialRampToValueAtTime(clamp(fEnd, 60, 12000), now + d);
+    }
+    filt.Q.setValueAtTime(clamp(q, 0.4, 14), now);
 
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(this._vary(0.055, 0.08), now);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.linearRampToValueAtTime(Math.max(0.0002, gainVal), now + Math.min(0.006, d * 0.2));
+    g.gain.exponentialRampToValueAtTime(0.0001, now + d);
 
-    const pan = (this._footstepIdx % 2 === 0 ? -0.07 : 0.07) + (Math.random() * 2 - 1) * 0.03;
-    src.connect(gain);
-    const panner = this._connectSfx(gain, false, pan);
+    src.connect(filt);
+    filt.connect(g);
+    const panner = this._connectSfx(g, sendReverb, pan);
 
     this._activeSfxVoices++;
     src.onended = () => {
       this._activeSfxVoices = Math.max(0, this._activeSfxVoices - 1);
       try {
         src.disconnect();
-        gain.disconnect();
+        filt.disconnect();
+        g.disconnect();
         if (panner) panner.disconnect();
       } catch {
         // Ignore teardown errors
       }
     };
-    src.start(now);
+    const offset = Math.random() * Math.max(0.01, buf.duration - d - 0.04);
+    src.start(now, offset, d + 0.018);
+  }
 
-    if (surface === 'water') {
-      this._waterDrop(this._vary(540, 0.1), 0.085, 0.022, 0.01, pan, true);
+  stepSurface(surface = 'stone', intensity = 0.72) {
+    if (!this._canPlay('step', 0.068)) return;
+    if (!this.ctx || !this.sfxGain) return;
+    const mat = this._normalizeSurface(surface);
+    const vel = clamp(intensity, 0.25, 1.15);
+    const stepAdvance = Math.random() < 0.28 ? 2 : 1;
+    this._footstepIdx = (this._footstepIdx + stepAdvance) % 6;
+    const pan = (this._footstepIdx % 2 === 0 ? -0.075 : 0.075) + (Math.random() * 2 - 1) * 0.03;
+
+    if (mat === 'ice') {
+      // Crystalline glacier step: tight brittle pop + dual glass-chime shimmer + skate-scrape hiss
+      this._warmBodyTone(this._vary(225, 0.06), 148, 0.024, 0.034 * vel, 0, 'sine', 640, false, pan);
+      this._warmBodyTone(this._vary(2820, 0.06), this._vary(2650, 0.05), 0.045, 0.013 * vel, 0.003, 'sine', 4800, true, pan);
+      this._warmBodyTone(this._vary(4380, 0.06), this._vary(4100, 0.05), 0.036, 0.008 * vel, 0.006, 'sine', 5800, true, -pan);
+      this._noiseBurst(0.045, 0.022 * vel, 'highpass', this._vary(5100, 0.06), 4400, 0.9, 0.004, pan, false, false);
+      return;
+    }
+
+    if (mat === 'wood') {
+      // Redwood dock / raft step: warm hollow timber resonance + dry plank knock + fiber friction
+      this._warmBodyTone(this._vary(118, 0.06), 78, 0.048, 0.054 * vel, 0, 'sine', 300, false, pan);
+      this._noiseBurst(0.034, 0.038 * vel, 'bandpass', this._vary(520, 0.06), 420, 4.5, 0.002, pan, true, true);
+      if (vel > 0.72) {
+        this._warmBodyTone(this._vary(295, 0.06), 240, 0.042, 0.014 * vel, 0.012, 'triangle', 680, false, pan);
+      }
+      return;
+    }
+
+    if (mat === 'water') {
+      // Flooded quay / shallow puddle step: buoyant bloop + wet palm-slap splash + droplet spray
+      this._warmBodyTone(this._vary(260, 0.06), this._vary(425, 0.06), 0.052, 0.034 * vel, 0, 'sine', 960, true, pan);
+      this._noiseBurst(0.062, 0.034 * vel, 'bandpass', this._vary(920, 0.06), this._vary(1920, 0.06), 1.6, 0.004, pan, true, true);
+      this._noiseBurst(0.082, 0.018 * vel, 'highpass', 3200, 2600, 0.85, 0.012, pan, true, false);
+      this._waterDrop(this._vary(580, 0.08), 0.085, 0.022 * vel, 0.014, pan, true);
+      return;
+    }
+
+    if (mat === 'bronze') {
+      // Pelagian elevator / brass deck step: metallic gong-plate thump + inharmonic 1:1.75 ring + boot clink
+      const fBase = this._vary(680, 0.055);
+      this._warmBodyTone(this._vary(142, 0.05), 88, 0.055, 0.048 * vel, 0, 'sine', 360, false, pan);
+      this._warmBodyTone(fBase, fBase * 0.992, 0.095, 0.018 * vel, 0.002, 'triangle', 2600, true, pan);
+      this._warmBodyTone(fBase * 1.75, fBase * 1.74, 0.082, 0.012 * vel, 0.004, 'sine', 3400, true, -pan);
+      this._noiseBurst(0.024, 0.016 * vel, 'bandpass', this._vary(3400, 0.06), 2900, 3.2, 0, pan, false, true);
+      return;
+    }
+
+    // Default 'stone': crisp mineral click + dry stone tap BPF + faint gritty sand-grain scuff
+    this._warmBodyTone(this._vary(160, 0.06), 74, 0.028, 0.042 * vel, 0, 'sine', 340, false, pan);
+    this._noiseBurst(0.026, 0.034 * vel, 'bandpass', this._vary(1150, 0.06), 920, 3.2, 0.002, pan, false, true);
+    this._noiseBurst(0.02, 0.012 * vel, 'highpass', this._vary(3600, 0.06), 3100, 1.0, 0.004, pan, false, false);
+    if (this._footstepVariations && this._footstepVariations.length > 0) {
+      const buf = this._footstepVariations[this._footstepIdx % this._footstepVariations.length];
+      const now = this.ctx.currentTime;
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      src.playbackRate.setValueAtTime(this._vary(1.0, 0.05), now);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(this._vary(0.034 * vel, 0.08), now);
+      src.connect(gain);
+      const panner = this._connectSfx(gain, false, pan);
+      this._activeSfxVoices++;
+      src.onended = () => {
+        this._activeSfxVoices = Math.max(0, this._activeSfxVoices - 1);
+        try {
+          src.disconnect();
+          gain.disconnect();
+          if (panner) panner.disconnect();
+        } catch {
+          // Ignore
+        }
+      };
+      src.start(now);
     }
   }
 
+  landSurface(surface = 'stone', impact = 0.65) {
+    if (!this._canPlay('land', 0.045)) return;
+    if (!this.ctx || !this.sfxGain) return;
+    const mat = this._normalizeSurface(surface);
+    const imp = clamp(impact, 0.18, 1.1);
+
+    if (mat === 'ice') {
+      // Frost-crystal CRACK-TINK landing
+      this._warmBodyTone(this._vary(155, 0.05), 68, 0.085, 0.058 * imp, 0, 'sine', 420, false);
+      this._warmBodyTone(this._vary(2680, 0.06), 2400, 0.11, 0.024 * imp, 0.006, 'sine', 5200, true, -0.08);
+      this._warmBodyTone(this._vary(4220, 0.06), 3800, 0.095, 0.016 * imp, 0.014, 'sine', 6200, true, 0.08);
+      this._noiseBurst(0.075, 0.034 * imp, 'highpass', 4600, 3200, 1.2, 0.004, 0, true, false);
+      return;
+    }
+
+    if (mat === 'wood') {
+      // Resonant dock-plank THUMP-CREAK landing
+      this._warmBodyTone(this._vary(98, 0.05), 52, 0.12, 0.082 * imp, 0, 'sine', 240, true);
+      this._noiseBurst(0.055, 0.046 * imp, 'bandpass', this._vary(460, 0.06), 320, 4.2, 0.004, 0, true, true);
+      this._warmBodyTone(this._vary(245, 0.06), 192, 0.085, 0.022 * imp, 0.028, 'triangle', 580, false);
+      return;
+    }
+
+    if (mat === 'water') {
+      // Lush dual-stage KER-SPLASH + trailing water drips
+      this._warmBodyTone(this._vary(145, 0.06), 46, 0.16, 0.076 * imp, 0, 'sine', 300, true);
+      this._noiseBurst(0.24, 0.062 * imp, 'bandpass', 1240, 380, 1.1, 0.002, 0, true, true);
+      this._noiseBurst(0.18, 0.032 * imp, 'highpass', 3000, 2100, 0.9, 0.022, 0, true, false);
+      this._waterDrop(this._vary(440, 0.08), 0.11, 0.03 * imp, 0.035, -0.14, true);
+      this._waterDrop(this._vary(640, 0.08), 0.095, 0.024 * imp, 0.095, 0.14, true);
+      return;
+    }
+
+    if (mat === 'bronze') {
+      // Heavy Pelagian elevator CLANG-HISS landing
+      const fBase = this._vary(540, 0.05);
+      this._warmBodyTone(this._vary(118, 0.05), 54, 0.13, 0.086 * imp, 0, 'sine', 280, true);
+      this._warmBodyTone(fBase, fBase * 0.985, 0.22, 0.03 * imp, 0.004, 'triangle', 2400, true, -0.06);
+      this._warmBodyTone(fBase * 1.75, fBase * 1.73, 0.18, 0.02 * imp, 0.008, 'sine', 3400, true, 0.06);
+      this._noiseBurst(0.12, 0.024 * imp, 'bandpass', 2400, 1400, 1.6, 0.02, 0, true, false);
+      return;
+    }
+
+    // Default 'stone': deeper hollow temple-stone thud + tiny pebble rattle
+    this._warmBodyTone(this._vary(96, 0.05), 40, 0.1, 0.054 + imp * 0.052, 0, 'sine', 240, false);
+    this._noiseBurst(0.058, 0.038 * imp, 'bandpass', this._vary(980, 0.06), 440, 2.2, 0.004, 0, true, true);
+    if (imp > 0.5) {
+      this._noiseBurst(0.032, 0.018 * imp, 'highpass', 3400, 2600, 1.4, 0.028, 0.09, false, true);
+      this._waterDrop(this._vary(480, 0.09), 0.08, 0.016 * imp, 0.016, 0, true);
+    }
+  }
+
+  step(surface = 'stone') {
+    this.stepSurface(surface, 0.72);
+  }
+
   footstep(surface = 'stone') {
-    this.step(surface);
+    this.stepSurface(surface, 0.72);
   }
 
   stepUp(surface = 'stone') {
-    // Smooth walkable stair tread step (soft stone/wood tap + whisper air brush, NEVER a synth beep!)
-    this.step(surface);
+    this.stepSurface(surface, 0.68);
     if (this._canPlay('stepAir', 0.09)) {
       this._silkyWhoosh(0.075, 0.016, 360, 680, 1.1, 0.005, 0, false, false);
     }
@@ -1907,10 +2138,11 @@ export class SoundEngine {
 
   jump() {
     if (!this._canPlay('jump', 0.045)) return;
-    // Soft wet-stone push-off + silky upward air/frill whoosh + delicate water-bead lift
+    // Soft wet-stone push-off + silky upward air/frill whoosh + delicate water-bead lift + subtle Gateway chirp
     this._warmBodyTone(this._vary(132, 0.04), 58, 0.068, 0.068, 0, 'sine', 280, false);
     this._silkyWhoosh(0.17, 0.046, 290, 1080, 1.15, 0.006, 0, true, false);
     this._waterDrop(this._scaleFreq(2, 0), 0.11, 0.024, 0.015, 0.06, true);
+    this.playGatewayVoice('jump', { gainScale: 0.72 });
   }
 
   doubleJump() {
@@ -1918,25 +2150,11 @@ export class SoundEngine {
     this._silkyWhoosh(0.21, 0.054, 380, 1380, 1.2, 0, 0, true, true);
     this._waterDrop(this._scaleFreq(4, 0), 0.12, 0.034, 0.008, -0.08, true);
     this._kalimbaChime(this._scaleFreq(5, 0), 0.24, 0.032, 0.03, 0.08, true);
+    this.playGatewayVoice('doubleJump', { gainScale: 0.85 });
   }
 
-  land(intensity = 0.6) {
-    if (!this._canPlay('land', 0.045)) return;
-    const imp = clamp(intensity, 0.15, 1.0);
-    this._warmBodyTone(
-      this._vary(108, 0.05),
-      40,
-      0.09,
-      0.048 + imp * 0.052,
-      0,
-      'sine',
-      240,
-      false
-    );
-    this._silkyWhoosh(0.085, 0.018 + imp * 0.024, 520, 210, 1.0, 0.004, 0, true, true);
-    if (imp > 0.62) {
-      this._waterDrop(this._vary(480, 0.09), 0.08, 0.018 * imp, 0.012, 0, true);
-    }
+  land(intensity = 0.6, surface = 'stone') {
+    this.landSurface(surface, intensity);
   }
 
   geckoClimb() {
@@ -1962,14 +2180,18 @@ export class SoundEngine {
 
   // --- Gateway Abilities & Combat (Hydro-Pulse, Tail-Whip, Sea-Glass Bubbles) ---
 
-  tailWhip() {
+  tailWhip(overcharged = false) {
     if (!this._canPlay('tailWhip', 0.055)) return;
-    // Supple 360-degree Lizard Tail-Whip: stereo silky water-ribbon swoosh + liquid scatter
+    // Supple 360-degree Lizard Tail-Whip: stereo silky water-ribbon swoosh + liquid scatter + energetic yip
     this._warmBodyTone(this._vary(158, 0.04), 66, 0.095, 0.068, 0, 'sine', 320, false);
     this._silkyWhoosh(0.22, 0.062, 260, 1280, 1.15, 0, -0.25, true, false);
     this._silkyWhoosh(0.18, 0.045, 1180, 380, 1.2, 0.05, 0.28, true, true);
     this._waterDrop(this._scaleFreq(2, 0), 0.11, 0.03, 0.035, -0.15, true);
     this._waterDrop(this._scaleFreq(4, 0), 0.12, 0.026, 0.075, 0.18, true);
+    if (overcharged) {
+      this._kalimbaChime(this._scaleFreq(6, 0), 0.26, 0.034, 0.02, 0, true);
+    }
+    this.playGatewayVoice('whip', { overcharged, gainScale: 0.78 });
   }
 
   whip() {
@@ -2001,6 +2223,7 @@ export class SoundEngine {
 
   sonarPing() {
     if (!this._canPlay('sonarPing', 0.12)) return;
+    this.pulseSonarMusicBloom();
     // Deep Pelagian underwater sonar ping with warm stereo sub-aquatic echoes (< 2.4kHz)
     const f = clamp(this._scaleFreq(5, 0), 620, 1180);
     this._warmBodyTone(f, f * 1.008, 0.52, 0.052, 0, 'sine', 2100, true, 0);
@@ -2042,9 +2265,7 @@ export class SoundEngine {
 
   crabFlip() {
     if (!this._canPlay('crabFlip', 0.05)) return;
-    this._warmBodyTone(145, 86, 0.11, 0.075, 0, 'sine', 380, false);
-    this._kalimbaChime(this._scaleFreq(1, 0), 0.22, 0.046, 0.015, -0.08, true);
-    this._kalimbaChime(this._scaleFreq(3, 0), 0.26, 0.048, 0.06, 0.08, true);
+    this.playEnemySfx('snap_crab', 'flip');
   }
 
   springBounce() {
@@ -2052,6 +2273,7 @@ export class SoundEngine {
     this._warmBodyTone(118, 245, 0.16, 0.082, 0, 'sine', 560, true);
     this._silkyWhoosh(0.22, 0.048, 320, 1280, 1.2, 0.01, 0, true, false);
     this._kalimbaChime(this._scaleFreq(5, 0), 0.3, 0.045, 0.02, 0, true);
+    this.playGatewayVoice('whee', { gainScale: 0.85 });
   }
 
   deflect() {
@@ -2086,10 +2308,11 @@ export class SoundEngine {
   hurt() {
     if (!this._canPlay('hurt', 0.08)) return;
     const scale = this.zenMode ? 0.65 : 1.0;
-    // Soft muffled water-impact thud (warm low-passed resonance)
+    // Soft muffled water-impact thud (warm low-passed resonance) + empathetic Gateway squeak
     this._warmBodyTone(162, 44, 0.24, 0.11 * scale, 0, 'sine', 280, true);
     this._warmBodyTone(240, 110, 0.2, 0.055 * scale, 0.015, 'triangle', 480, true);
     this._silkyWhoosh(0.18, 0.045 * scale, 640, 180, 1.0, 0, 0, true, true);
+    this.playGatewayVoice('hurt', { gainScale: 0.85 * scale });
   }
 
   jellyZap() {
@@ -2147,11 +2370,12 @@ export class SoundEngine {
 
   critterRescue() {
     if (!this._canPlay('critterRescue', 0.08)) return;
-    // Joyful hidden Earth Water-Critter pod release: ascending water-droplet & kalimba bloom
+    // Joyful hidden Earth Water-Critter pod release: ascending water-droplet & kalimba bloom + Gateway rescue trill!
     this._waterDrop(this._scaleFreq(2, 0), 0.11, 0.04, 0, -0.14, true);
     [0, 2, 4, 5, 7].forEach((d, idx) => {
       this._kalimbaChime(this._scaleFreq(d, 0), 0.36, 0.046, 0.02 + idx * 0.052, (idx - 2) * 0.1, true);
     });
+    this.playGatewayVoice('rescue', { gainScale: 0.92 });
   }
 
   pipeValve() {
@@ -2611,6 +2835,730 @@ export class SoundEngine {
         this._warmBodyTone(f * 0.5, f * 0.5, step.dur, 0.024, step.delay, 'triangle', 950, true, pan);
       });
     }
+    this.playGatewayVoice('victory', { gainScale: 0.9 });
+  }
+
+  // --- Gateway 2.0 Adorable Dual-Formant Pelagian Vocal Synth ---
+
+  /**
+   * Dual-formant resonant bandpass vocal synthesizer for Gateway 2.0
+   * (0.72 triangle + 0.28 sawtooth glottal exciter, organic micro-vibrato, parallel F1/F2 vowel
+   * formants, plus delicate wet aquatic bubble over-sparkle!).
+   */
+  _playFormantSyllable({
+    fStart = 660,
+    fEnd = 880,
+    dur = 0.11,
+    f1Start = 680,
+    f1End = 960,
+    f2Start = 1950,
+    f2End = 2550,
+    gainVal = 0.055,
+    delay = 0,
+    vibRate = 17,
+    vibDepthHz = 7,
+    sparkleHz = 2850,
+    pan = 0,
+    breathy = false,
+  }) {
+    if (!this.ctx || !this.sfxGain || !this.voiceEnabled || this._activeSfxVoices > 28) return;
+    const now = this.ctx.currentTime + Math.max(0, delay);
+    const d = Math.max(0.035, dur);
+
+    const oscTri = this.ctx.createOscillator();
+    oscTri.type = 'triangle';
+    const oscSaw = this.ctx.createOscillator();
+    oscSaw.type = 'sawtooth';
+
+    const f0 = clamp(fStart, 120, 3200);
+    const f1 = clamp(fEnd, 120, 3400);
+    oscTri.frequency.setValueAtTime(f0, now);
+    oscSaw.frequency.setValueAtTime(f0, now);
+    if (Math.abs(f1 - f0) > 1) {
+      oscTri.frequency.exponentialRampToValueAtTime(f1, now + d * 0.88);
+      oscSaw.frequency.exponentialRampToValueAtTime(f1, now + d * 0.88);
+    }
+
+    const vib = this.ctx.createOscillator();
+    vib.type = 'sine';
+    vib.frequency.setValueAtTime(vibRate, now);
+    const vibGain = this.ctx.createGain();
+    vibGain.gain.setValueAtTime(vibDepthHz, now);
+    vib.connect(vibGain);
+    vibGain.connect(oscTri.frequency);
+    vibGain.connect(oscSaw.frequency);
+
+    const triMix = this.ctx.createGain();
+    triMix.gain.setValueAtTime(0.72, now);
+    const sawMix = this.ctx.createGain();
+    sawMix.gain.setValueAtTime(0.28, now);
+
+    const f1Filter = this.ctx.createBiquadFilter();
+    f1Filter.type = 'bandpass';
+    f1Filter.frequency.setValueAtTime(clamp(f1Start, 240, 2600), now);
+    f1Filter.frequency.exponentialRampToValueAtTime(clamp(f1End, 240, 2600), now + d);
+    f1Filter.Q.setValueAtTime(4.5, now);
+
+    const f2Filter = this.ctx.createBiquadFilter();
+    f2Filter.type = 'bandpass';
+    f2Filter.frequency.setValueAtTime(clamp(f2Start, 800, 4200), now);
+    f2Filter.frequency.exponentialRampToValueAtTime(clamp(f2End, 800, 4200), now + d);
+    f2Filter.Q.setValueAtTime(5.5, now);
+
+    const env = this.ctx.createGain();
+    const peak = Math.max(0.0005, gainVal);
+    const attack = Math.min(0.016, d * 0.22);
+    env.gain.setValueAtTime(0.0001, now);
+    env.gain.linearRampToValueAtTime(peak, now + attack);
+    env.gain.exponentialRampToValueAtTime(peak * 0.65, now + d * 0.62);
+    env.gain.exponentialRampToValueAtTime(0.0001, now + d);
+
+    oscTri.connect(triMix);
+    oscSaw.connect(sawMix);
+    triMix.connect(f1Filter);
+    triMix.connect(f2Filter);
+    sawMix.connect(f1Filter);
+    sawMix.connect(f2Filter);
+    f1Filter.connect(env);
+    f2Filter.connect(env);
+    const panner = this._connectSfx(env, true, pan);
+
+    this._activeSfxVoices++;
+    oscTri.onended = () => {
+      this._activeSfxVoices = Math.max(0, this._activeSfxVoices - 1);
+      try {
+        oscTri.disconnect();
+        oscSaw.disconnect();
+        vib.disconnect();
+        vibGain.disconnect();
+        triMix.disconnect();
+        sawMix.disconnect();
+        f1Filter.disconnect();
+        f2Filter.disconnect();
+        env.disconnect();
+        if (panner) panner.disconnect();
+      } catch {
+        // Ignore teardown errors
+      }
+    };
+
+    oscTri.start(now);
+    oscSaw.start(now);
+    vib.start(now);
+    const stopAt = now + d + 0.02;
+    oscTri.stop(stopAt);
+    oscSaw.stop(stopAt);
+    vib.stop(stopAt);
+
+    // Subtle 8% wet sea-dragon aquatic bubble chirp sparkle
+    if (sparkleHz > 0) {
+      this._warmBodyTone(
+        this._vary(sparkleHz, 0.05),
+        this._vary(sparkleHz * 1.18, 0.05),
+        Math.min(0.065, d * 0.65),
+        peak * 0.14,
+        delay + 0.008,
+        'sine',
+        4400,
+        true,
+        pan
+      );
+    }
+    if (breathy) {
+      this._noiseBurst(Math.min(0.08, d), peak * 0.28, 'bandpass', 2200, 2900, 4.5, delay, pan, false, false);
+    }
+  }
+
+  /**
+   * Expressive Gateway 2.0 vocalization cues:
+   * 'jump' | 'doubleJump' | 'whip' | 'teeter' | 'rescue' | 'wetShake' | 'hurt' | 'victory' | 'whee' | 'trick' | 'wave' | 'hop'
+   */
+  playGatewayVoice(cue = 'jump', opts = {}) {
+    if (!this.voiceEnabled || !this.ctx || !this.sfxGain) return false;
+    const raw = String(cue || 'jump').trim().toLowerCase().replace(/[\s_-]+/g, '');
+    const gainScale = clamp(opts?.gainScale ?? 1.0, 0.2, 1.35);
+
+    if (raw === 'jump' || raw === 'hopshort') {
+      if (!this._canPlay('gv_jump', 0.13)) return false;
+      this._playFormantSyllable({
+        fStart: this._vary(784, 0.04),
+        fEnd: this._vary(1046, 0.04),
+        dur: 0.095,
+        f1Start: 680,
+        f1End: 980,
+        f2Start: 1950,
+        f2End: 2550,
+        gainVal: 0.042 * gainScale,
+        vibRate: 16,
+        vibDepthHz: 5,
+        sparkleHz: 2800,
+      });
+      return true;
+    }
+
+    if (raw === 'doublejump' || raw === 'airjump') {
+      if (!this._canPlay('gv_djump', 0.14)) return false;
+      this._playFormantSyllable({
+        fStart: this._vary(988, 0.04),
+        fEnd: this._vary(1244, 0.04),
+        dur: 0.072,
+        f1Start: 760,
+        f1End: 1020,
+        f2Start: 2100,
+        f2End: 2700,
+        gainVal: 0.04 * gainScale,
+        sparkleHz: 3100,
+        pan: -0.06,
+      });
+      this._playFormantSyllable({
+        fStart: this._vary(1174, 0.04),
+        fEnd: this._vary(1396, 0.04),
+        dur: 0.085,
+        delay: 0.058,
+        f1Start: 860,
+        f1End: 1120,
+        f2Start: 2300,
+        f2End: 2850,
+        gainVal: 0.044 * gainScale,
+        sparkleHz: 3400,
+        pan: 0.06,
+      });
+      return true;
+    }
+
+    if (raw === 'whip' || raw === 'tailwhip' || raw === 'whipyip') {
+      if (!this._canPlay('gv_whip', 0.18)) return false;
+      const overcharged = Boolean(opts?.overcharged);
+      this._playFormantSyllable({
+        fStart: this._vary(587, 0.04),
+        fEnd: this._vary(overcharged ? 988 : 880, 0.04),
+        dur: 0.11,
+        f1Start: 820,
+        f1End: 1080,
+        f2Start: 2300,
+        f2End: 2750,
+        gainVal: 0.048 * gainScale,
+        vibRate: 20,
+        vibDepthHz: 8,
+        sparkleHz: overcharged ? 3600 : 2700,
+        breathy: true,
+      });
+      return true;
+    }
+
+    if (raw === 'teeter' || raw === 'edgeteeter' || raw === 'teetergasp' || raw === 'oops') {
+      if (!this._canPlay('gv_teeter', 0.9)) return false;
+      this._playFormantSyllable({
+        fStart: this._vary(880, 0.04),
+        fEnd: this._vary(740, 0.04),
+        dur: 0.075,
+        f1Start: 620,
+        f1End: 560,
+        f2Start: 1850,
+        f2End: 1700,
+        gainVal: 0.042 * gainScale,
+        breathy: true,
+        pan: -0.05,
+      });
+      this._playFormantSyllable({
+        fStart: this._vary(740, 0.04),
+        fEnd: this._vary(988, 0.04),
+        dur: 0.095,
+        delay: 0.072,
+        f1Start: 700,
+        f1End: 940,
+        f2Start: 2050,
+        f2End: 2600,
+        gainVal: 0.045 * gainScale,
+        vibRate: 22,
+        vibDepthHz: 11,
+        breathy: true,
+        pan: 0.05,
+      });
+      return true;
+    }
+
+    if (raw === 'rescue' || raw === 'rescuetrill' || raw === 'critter') {
+      if (!this._canPlay('gv_rescue', 0.45)) return false;
+      const notes = [1046.5, 1318.5, 1568.0, 1318.5, 1760.0];
+      notes.forEach((hz, idx) => {
+        this._playFormantSyllable({
+          fStart: hz * 0.97,
+          fEnd: hz * 1.02,
+          dur: 0.068,
+          delay: idx * 0.044,
+          f1Start: 780,
+          f1End: 1020,
+          f2Start: 2200,
+          f2End: 2800,
+          gainVal: 0.04 * gainScale,
+          vibRate: 18,
+          vibDepthHz: 6,
+          sparkleHz: 3200,
+          pan: (idx - 2) * 0.08,
+        });
+      });
+      // Tiny high-pitched rescued Critter Chirp answer 165ms later!
+      this._playFormantSyllable({
+        fStart: 1397,
+        fEnd: 1760,
+        dur: 0.095,
+        delay: 0.26,
+        f1Start: 950,
+        f1End: 1150,
+        f2Start: 2550,
+        f2End: 2950,
+        gainVal: 0.032 * gainScale,
+        sparkleHz: 3500,
+        pan: 0.16,
+      });
+      return true;
+    }
+
+    if (raw === 'wetshake' || raw === 'shake') {
+      if (!this._canPlay('gv_wetshake', 0.45)) return false;
+      for (let i = 0; i < 4; i++) {
+        const up = i % 2 === 0;
+        this._playFormantSyllable({
+          fStart: up ? 660 : 790,
+          fEnd: up ? 810 : 640,
+          dur: 0.062,
+          delay: i * 0.058,
+          f1Start: 620,
+          f1End: 880,
+          f2Start: 1950,
+          f2End: 2450,
+          gainVal: 0.036 * gainScale,
+          sparkleHz: 2900 + i * 220,
+          pan: up ? -0.14 : 0.14,
+        });
+        this._waterDrop(this._vary(620 + i * 110, 0.1), 0.075, 0.022, i * 0.065, up ? -0.18 : 0.18, true);
+      }
+      this._noiseBurst(0.28, 0.028 * gainScale, 'highpass', 3000, 2200, 0.9, 0.01, 0, true, false);
+      return true;
+    }
+
+    if (raw === 'hurt' || raw === 'bump') {
+      if (!this._canPlay('gv_hurt', 0.32)) return false;
+      this._playFormantSyllable({
+        fStart: this._vary(659, 0.04),
+        fEnd: this._vary(440, 0.04),
+        dur: 0.18,
+        f1Start: 680,
+        f1End: 520,
+        f2Start: 1650,
+        f2End: 1420,
+        gainVal: 0.048 * gainScale,
+        vibRate: 14,
+        vibDepthHz: 5,
+        sparkleHz: 0,
+      });
+      return true;
+    }
+
+    if (raw === 'whee' || raw === 'bounce' || raw === 'spring') {
+      if (!this._canPlay('gv_whee', 0.35)) return false;
+      this._playFormantSyllable({
+        fStart: this._vary(698, 0.04),
+        fEnd: this._vary(1480, 0.04),
+        dur: 0.25,
+        f1Start: 680,
+        f1End: 1120,
+        f2Start: 1950,
+        f2End: 2850,
+        gainVal: 0.048 * gainScale,
+        vibRate: 19,
+        vibDepthHz: 11,
+        sparkleHz: 3300,
+      });
+      return true;
+    }
+
+    if (raw === 'trick' || raw === 'wave' || raw === 'hop' || raw === 'titlehop') {
+      if (!this._canPlay('gv_trick', 0.24)) return false;
+      this._playFormantSyllable({
+        fStart: this._vary(880, 0.04),
+        fEnd: this._vary(1046, 0.04),
+        dur: 0.085,
+        f1Start: 720,
+        f1End: 960,
+        f2Start: 2050,
+        f2End: 2600,
+        gainVal: 0.044 * gainScale,
+        sparkleHz: 3000,
+        pan: -0.06,
+      });
+      this._playFormantSyllable({
+        fStart: this._vary(1046, 0.04),
+        fEnd: this._vary(1318, 0.04),
+        dur: 0.115,
+        delay: 0.075,
+        f1Start: 820,
+        f1End: 1080,
+        f2Start: 2250,
+        f2End: 2850,
+        gainVal: 0.048 * gainScale,
+        vibRate: 19,
+        vibDepthHz: 8,
+        sparkleHz: 3450,
+        pan: 0.06,
+      });
+      return true;
+    }
+
+    if (raw === 'victory' || raw === 'celebrate') {
+      if (!this._canPlay('gv_victory', 0.45)) return false;
+      const degs = [0, 2, 4, 7];
+      degs.forEach((d, idx) => {
+        const hz = clamp(this._scaleFreq(d, 1), 520, 1760);
+        const isLast = idx === degs.length - 1;
+        this._playFormantSyllable({
+          fStart: hz * 0.96,
+          fEnd: hz * (isLast ? 1.02 : 1.0),
+          dur: isLast ? 0.28 : 0.11,
+          delay: 0.04 + idx * 0.11,
+          f1Start: 760,
+          f1End: 1060,
+          f2Start: 2150,
+          f2End: 2800,
+          gainVal: (isLast ? 0.052 : 0.042) * gainScale,
+          vibRate: isLast ? 18 : 14,
+          vibDepthHz: isLast ? 12 : 5,
+          sparkleHz: 3300,
+          pan: (idx - 1.5) * 0.1,
+        });
+      });
+      return true;
+    }
+
+    return false;
+  }
+
+  // Named convenience aliases for Gateway 2.0 voice cues
+  gatewayJump(doubleJump = false) { return this.playGatewayVoice(doubleJump ? 'doubleJump' : 'jump'); }
+  gatewayWhipYip(overcharged = false) { return this.playGatewayVoice('whip', { overcharged }); }
+  gatewayTeeterGasp() { return this.playGatewayVoice('teeter'); }
+  gatewayWhee() { return this.playGatewayVoice('whee'); }
+  gatewayBounceWhee() { return this.playGatewayVoice('whee'); }
+  gatewayTrickChirp() { return this.playGatewayVoice('trick'); }
+  gatewayWaveChirp() { return this.playGatewayVoice('wave'); }
+  gatewayWetShake() { return this.playGatewayVoice('wetShake'); }
+  gatewayHurt() { return this.playGatewayVoice('hurt'); }
+  gatewayOops() { return this.playGatewayVoice('teeter'); }
+  gatewayRescueTrill() { return this.playGatewayVoice('rescue'); }
+  gatewayVictorySong() { return this.playGatewayVoice('victory'); }
+  gatewayCelebrate() { return this.playGatewayVoice('victory'); }
+
+  // --- All 7 Enemy Personality Foley Cues (`playEnemySfx(kind, event)` + Named Aliases) ---
+
+  /**
+   * Plays comical, readable WebAudio foley for all 7 enemy archetypes.
+   * Accepts either `playEnemySfx('crab_clack')` OR `playEnemySfx('snap_crab', 'clack')`.
+   */
+  playEnemySfx(kindOrCue = '', event = '') {
+    if (!this.ctx || !this.sfxGain) return false;
+    const rawKind = String(kindOrCue || '').trim().toLowerCase();
+    const rawEvent = String(event || '').trim().toLowerCase();
+    const combined = rawEvent ? `${rawKind}_${rawEvent}` : rawKind;
+
+    // 1. SNAP-CRAB (`crab_clack`, `crab_aggro`, `crab_flip`, `crab_boing`, `crab_bonk`, `crab_punt`)
+    if (combined.includes('crab') || combined.includes('clack') || combined.includes('punt')) {
+      if (combined.includes('punt') || combined.includes('shell')) {
+        if (!this._canPlay('en_crab_punt', 0.08)) return false;
+        this._warmBodyTone(185, 92, 0.14, 0.085, 0, 'triangle', 680, true);
+        this._noiseBurst(0.16, 0.048, 'bandpass', 1800, 900, 2.4, 0.01, 0, true, true);
+        this._kalimbaChime(this._vary(980, 0.06), 0.16, 0.036, 0.01, 0, true);
+        return true;
+      }
+      if (combined.includes('boing') || combined.includes('bounce') || combined.includes('spring')) {
+        if (!this._canPlay('en_crab_boing', 0.08)) return false;
+        this._warmBodyTone(180, 620, 0.13, 0.075, 0, 'triangle', 1400, true);
+        this._warmBodyTone(620, 310, 0.16, 0.056, 0.11, 'sine', 1200, true);
+        this._waterDrop(this._vary(720, 0.08), 0.11, 0.032, 0.03, 0, true);
+        return true;
+      }
+      if (combined.includes('flip')) {
+        if (!this._canPlay('en_crab_flip', 0.07)) return false;
+        this._warmBodyTone(150, 480, 0.11, 0.072, 0, 'triangle', 1200, true, -0.06);
+        this._warmBodyTone(460, 260, 0.14, 0.048, 0.09, 'sine', 920, true, 0.06);
+        this._noiseBurst(0.08, 0.028, 'bandpass', 1650, 1200, 3.8, 0.04, 0, false, true);
+        return true;
+      }
+      if (combined.includes('bonk') || combined.includes('huff')) {
+        if (!this._canPlay('en_crab_bonk', 0.12)) return false;
+        this._warmBodyTone(260, 96, 0.14, 0.078, 0, 'triangle', 620, true);
+        this._noiseBurst(0.18, 0.036, 'highpass', 2400, 1200, 1.4, 0.07, 0, true, false);
+        return true;
+      }
+      if (combined.includes('aggro') || combined.includes('bark') || combined.includes('charge')) {
+        if (!this._canPlay('en_crab_aggro', 0.14)) return false;
+        this._warmBodyTone(240, 420, 0.09, 0.058, 0, 'sawtooth', 1100, false);
+        this._noiseBurst(0.036, 0.046, 'bandpass', 1550, 2100, 5.5, 0.05, -0.08, false, true);
+        this._noiseBurst(0.036, 0.046, 'bandpass', 1950, 2400, 5.5, 0.095, 0.08, false, true);
+        return true;
+      }
+      // Default crab_clack: twin crisp ceramic-shell pincer snaps 42ms apart!
+      if (!this._canPlay('en_crab_clack', 0.11)) return false;
+      this._noiseBurst(0.028, 0.046, 'bandpass', this._vary(1450, 0.05), 1100, 6.2, 0, -0.06, false, true);
+      this._warmBodyTone(this._vary(1450, 0.05), 980, 0.028, 0.03, 0, 'triangle', 2600, false, -0.06);
+      this._noiseBurst(0.028, 0.046, 'bandpass', this._vary(2100, 0.05), 1650, 6.2, 0.042, 0.06, false, true);
+      this._warmBodyTone(this._vary(2100, 0.05), 1420, 0.028, 0.028, 0.042, 'triangle', 3200, false, 0.06);
+      return true;
+    }
+
+    // 2. GULP-HOPPER (`frog_gulp`, `frog_croak`, `frog_boing`, `frog_slam`, `frog_pop`)
+    if (combined.includes('frog') || combined.includes('hopper') || combined.includes('gulp')) {
+      if (combined.includes('pop') || combined.includes('belly')) {
+        if (!this._canPlay('en_frog_pop', 0.09)) return false;
+        this._warmBodyTone(340, 88, 0.14, 0.088, 0, 'sine', 900, true);
+        this._noiseBurst(0.14, 0.062, 'bandpass', 1800, 480, 1.4, 0.008, 0, true, true);
+        this._waterDrop(680, 0.11, 0.038, 0.02, -0.14, true);
+        this._waterDrop(920, 0.095, 0.034, 0.06, 0.14, true);
+        return true;
+      }
+      if (combined.includes('slam') || combined.includes('land')) {
+        if (!this._canPlay('en_frog_slam', 0.11)) return false;
+        this._warmBodyTone(88, 36, 0.24, 0.11, 0, 'sine', 220, true);
+        this._warmBodyTone(195, 118, 0.18, 0.054, 0.015, 'triangle', 520, true);
+        this._noiseBurst(0.16, 0.046, 'bandpass', 620, 220, 1.5, 0.01, 0, true, true);
+        return true;
+      }
+      if (combined.includes('boing') || combined.includes('leap')) {
+        if (!this._canPlay('en_frog_boing', 0.1)) return false;
+        this._warmBodyTone(135, 390, 0.16, 0.072, 0, 'sine', 960, true);
+        this._waterDrop(480, 0.1, 0.03, 0.02, 0, true);
+        return true;
+      }
+      if (combined.includes('croak')) {
+        if (!this._canPlay('en_frog_croak', 0.16)) return false;
+        this._warmBodyTone(122, 168, 0.11, 0.062, 0, 'sawtooth', 480, true);
+        this._warmBodyTone(158, 108, 0.14, 0.052, 0.095, 'sawtooth', 420, true);
+        return true;
+      }
+      // Default frog_gulp: swelling bubbly throat-sac sweep
+      if (!this._canPlay('en_frog_gulp', 0.14)) return false;
+      this._warmBodyTone(140, 340, 0.19, 0.066, 0, 'sine', 820, true);
+      this._waterDrop(this._vary(340, 0.08), 0.12, 0.036, 0.06, 0, true);
+      return true;
+    }
+
+    // 3. VOLT-EEL (`eel_hum`, `eel_zap`, `eel_short`)
+    if (combined.includes('eel') || combined.includes('volt') || combined.includes('zap')) {
+      if (combined.includes('short') || combined.includes('exhaust') || combined.includes('down')) {
+        if (!this._canPlay('en_eel_short', 0.14)) return false;
+        this._warmBodyTone(760, 120, 0.28, 0.056, 0, 'sawtooth', 1600, true);
+        this._noiseBurst(0.16, 0.032, 'bandpass', 2800, 620, 2.5, 0.04, 0, true, true);
+        return true;
+      }
+      if (combined.includes('hum') || combined.includes('charge') || combined.includes('coil')) {
+        if (!this._canPlay('en_eel_hum', 0.15)) return false;
+        this._warmBodyTone(185, 420, 0.24, 0.046, 0, 'sawtooth', 1400, true);
+        this._noiseBurst(0.05, 0.026, 'bandpass', 3600, 5200, 4.0, 0.04, -0.08, false, true);
+        this._noiseBurst(0.05, 0.026, 'bandpass', 4200, 5800, 4.0, 0.14, 0.08, false, true);
+        return true;
+      }
+      // Default eel_zap: FM-style electric arc discharge
+      if (!this._canPlay('en_eel_zap', 0.1)) return false;
+      this._warmBodyTone(220, 310, 0.18, 0.062, 0, 'sawtooth', 2400, true);
+      this._warmBodyTone(298, 170, 0.16, 0.048, 0.02, 'triangle', 2800, true);
+      this._noiseBurst(0.14, 0.052, 'bandpass', 3400, 5800, 2.8, 0, 0, true, true);
+      return true;
+    }
+
+    // 4. RAIL-SKATER (`skater_rev`, `skater_brake`, `skater_windup`, `skater_crash`)
+    if (combined.includes('skater') || combined.includes('rail')) {
+      if (combined.includes('brake') || combined.includes('screech') || combined.includes('skid')) {
+        if (!this._canPlay('en_skater_brake', 0.14)) return false;
+        this._noiseBurst(0.24, 0.048, 'bandpass', 2400, 1450, 5.0, 0, 0, true, true);
+        this._warmBodyTone(1180, 640, 0.18, 0.026, 0.01, 'triangle', 2600, true);
+        return true;
+      }
+      if (combined.includes('wind') || combined.includes('ratchet')) {
+        if (!this._canPlay('en_skater_wind', 0.14)) return false;
+        for (let i = 0; i < 4; i++) {
+          this._noiseBurst(0.022, 0.036, 'bandpass', 1800 + i * 260, 2200 + i * 240, 6.5, i * 0.048, (i - 1.5) * 0.06, false, true);
+        }
+        this._kalimbaChime(1320, 0.2, 0.032, 0.2, 0, true);
+        return true;
+      }
+      if (combined.includes('crash') || combined.includes('tumble')) {
+        if (!this._canPlay('en_skater_crash', 0.1)) return false;
+        this._warmBodyTone(520, 210, 0.18, 0.062, 0, 'triangle', 2200, true);
+        this._warmBodyTone(910, 380, 0.14, 0.034, 0.02, 'sine', 3000, true);
+        this._noiseBurst(0.14, 0.042, 'bandpass', 2200, 900, 2.2, 0, 0, true, true);
+        return true;
+      }
+      // Default skater_rev: turbo spin-up whirr
+      if (!this._canPlay('en_skater_rev', 0.14)) return false;
+      this._warmBodyTone(260, 620, 0.22, 0.044, 0, 'triangle', 1800, true);
+      this._noiseBurst(0.22, 0.036, 'bandpass', 1200, 3100, 3.2, 0, 0, true, false);
+      return true;
+    }
+
+    // 5. BARNACLE MORTAR (`mortar_charge`, `mortar_pop`, `mortar_hide`, `mortar_reflect`)
+    if (combined.includes('mortar') || combined.includes('barnacle') || combined.includes('reflect')) {
+      if (combined.includes('reflect') || combined.includes('bat') || combined.includes('homerun')) {
+        if (!this._canPlay('en_mortar_reflect', 0.07)) return false;
+        // Crunchy aluminum-bat home-run PING-CRACK!
+        this._warmBodyTone(1680, 1620, 0.26, 0.056, 0, 'sine', 4200, true, -0.06);
+        this._warmBodyTone(2890, 2790, 0.2, 0.036, 0.004, 'sine', 5200, true, 0.06);
+        this._warmBodyTone(240, 88, 0.09, 0.088, 0, 'triangle', 680, false);
+        this._noiseBurst(0.05, 0.055, 'bandpass', 2600, 1400, 2.2, 0, 0, true, true);
+        return true;
+      }
+      if (combined.includes('hide') || combined.includes('clang') || combined.includes('shut')) {
+        if (!this._canPlay('en_mortar_hide', 0.12)) return false;
+        this._warmBodyTone(340, 180, 0.11, 0.07, 0, 'triangle', 1200, true);
+        this._warmBodyTone(595, 520, 0.14, 0.032, 0.006, 'sine', 2200, true);
+        return true;
+      }
+      if (combined.includes('charge') || combined.includes('swell') || combined.includes('whistle')) {
+        if (!this._canPlay('en_mortar_charge', 0.14)) return false;
+        this._warmBodyTone(180, 520, 0.24, 0.044, 0, 'sine', 1200, true);
+        this._noiseBurst(0.22, 0.026, 'bandpass', 600, 1900, 4.2, 0, 0, true, false);
+        return true;
+      }
+      // Default mortar_pop: hollow pressurized cork-cannon POP-THOOMP!
+      if (!this._canPlay('en_mortar_pop', 0.1)) return false;
+      this._warmBodyTone(120, 285, 0.14, 0.086, 0, 'sine', 680, true);
+      this._waterDrop(480, 0.12, 0.038, 0.025, 0, true);
+      this._noiseBurst(0.085, 0.044, 'bandpass', 920, 360, 2.0, 0.004, 0, true, true);
+      return true;
+    }
+
+    // 6. VENT-STALKER (`stalker_whistle`, `stalker_hiss`, `stalker_erupt`, `stalker_pant`)
+    if (combined.includes('stalker') || combined.includes('vent') || combined.includes('kettle')) {
+      if (combined.includes('erupt') || combined.includes('geyser')) {
+        if (!this._canPlay('en_stalker_erupt', 0.12)) return false;
+        this._warmBodyTone(165, 62, 0.26, 0.088, 0, 'sine', 380, true);
+        this._noiseBurst(0.38, 0.068, 'bandpass', 1800, 740, 1.2, 0.01, 0, true, true);
+        return true;
+      }
+      if (combined.includes('pant') || combined.includes('cool')) {
+        if (!this._canPlay('en_stalker_pant', 0.18)) return false;
+        this._noiseBurst(0.11, 0.03, 'bandpass', 1400, 720, 2.4, 0, 0, true, false);
+        this._noiseBurst(0.11, 0.026, 'bandpass', 1250, 620, 2.4, 0.14, 0, true, false);
+        return true;
+      }
+      // Default stalker_hiss / kettle whistle: rising bronze tea-kettle whistle!
+      if (!this._canPlay('en_stalker_hiss', 0.14)) return false;
+      this._warmBodyTone(920, 1980, 0.3, 0.032, 0, 'sine', 3200, true);
+      this._noiseBurst(0.32, 0.046, 'highpass', 1400, 4600, 2.2, 0, 0, true, false);
+      return true;
+    }
+
+    // 7. SIPHON WARDEN (`warden_horn`, `warden_crack`, `warden_beam`, `warden_slam`, `warden_defeat`)
+    if (combined.includes('warden') || combined.includes('boss')) {
+      if (combined.includes('crack') || combined.includes('shield')) {
+        if (!this._canPlay('en_warden_crack', 0.1)) return false;
+        this._warmBodyTone(1420, 980, 0.24, 0.052, 0, 'triangle', 3800, true, -0.1);
+        this._warmBodyTone(2180, 1640, 0.2, 0.038, 0.02, 'sine', 4600, true, 0.1);
+        this._warmBodyTone(136, 52, 0.22, 0.095, 0, 'sine', 320, true);
+        this._noiseBurst(0.18, 0.06, 'highpass', 2400, 4800, 1.4, 0.005, 0, true, true);
+        return true;
+      }
+      if (combined.includes('beam') || combined.includes('roar')) {
+        if (!this._canPlay('en_warden_beam', 0.15)) return false;
+        this._warmBodyTone(110, 240, 0.38, 0.072, 0, 'sawtooth', 780, true);
+        this._noiseBurst(0.42, 0.062, 'bandpass', 960, 2400, 1.8, 0.02, 0, true, true);
+        return true;
+      }
+      if (combined.includes('slam') || combined.includes('tentacle')) {
+        if (!this._canPlay('en_warden_slam', 0.14)) return false;
+        this._warmBodyTone(76, 30, 0.34, 0.125, 0, 'sine', 190, true);
+        this._noiseBurst(0.24, 0.066, 'bandpass', 520, 140, 1.3, 0.01, 0, true, true);
+        return true;
+      }
+      if (combined.includes('defeat') || combined.includes('collapse')) {
+        if (!this._canPlay('en_warden_defeat', 0.25)) return false;
+        this._warmBodyTone(260, 42, 0.65, 0.11, 0, 'sawtooth', 620, true);
+        this._noiseBurst(0.55, 0.065, 'bandpass', 1400, 260, 1.2, 0.04, 0, true, true);
+        this.playGatewayVoice('victory', { gainScale: 0.9 });
+        return true;
+      }
+      // Default warden_horn: deep theatrical Pelagian brass foghorn BWOOOOM!
+      if (!this._canPlay('en_warden_horn', 0.25)) return false;
+      this._warmBodyTone(92, 86, 0.68, 0.095, 0, 'sawtooth', 420, true, -0.08);
+      this._warmBodyTone(138, 130, 0.64, 0.068, 0.02, 'sawtooth', 580, true, 0.08);
+      this._warmBodyTone(46, 44, 0.72, 0.085, 0, 'sine', 160, true, 0);
+      return true;
+    }
+
+    return false;
+  }
+
+  // Named convenience aliases for all 7 Enemy Personality cues
+  crabClack() { return this.playEnemySfx('snap_crab', 'clack'); }
+  crabAggroBark() { return this.playEnemySfx('snap_crab', 'aggro'); }
+  crabBonk() { return this.playEnemySfx('snap_crab', 'bonk'); }
+  crabBoing() { return this.playEnemySfx('snap_crab', 'boing'); }
+  crabPunt() { return this.playEnemySfx('snap_crab', 'punt'); }
+  hopperInflate() { return this.playEnemySfx('gulp_hopper', 'gulp'); }
+  hopperCroak() { return this.playEnemySfx('gulp_hopper', 'croak'); }
+  hopperBoing() { return this.playEnemySfx('gulp_hopper', 'boing'); }
+  hopperSlam() { return this.playEnemySfx('gulp_hopper', 'slam'); }
+  hopperBellyPop() { return this.playEnemySfx('gulp_hopper', 'pop'); }
+  eelChargeHum() { return this.playEnemySfx('volt_eel', 'hum'); }
+  eelZapDischarge() { return this.playEnemySfx('volt_eel', 'zap'); }
+  eelShortCircuit() { return this.playEnemySfx('volt_eel', 'short'); }
+  skaterZoom() { return this.playEnemySfx('rail_skater', 'rev'); }
+  skaterBrakeScreech() { return this.playEnemySfx('rail_skater', 'brake'); }
+  skaterRatchetWindup() { return this.playEnemySfx('rail_skater', 'windup'); }
+  mortarChargeWhistle() { return this.playEnemySfx('barnacle_mortar', 'charge'); }
+  mortarThoomp() { return this.playEnemySfx('barnacle_mortar', 'pop'); }
+  mortarClangHide() { return this.playEnemySfx('barnacle_mortar', 'hide'); }
+  baseballReflectCrack() { return this.playEnemySfx('barnacle_mortar', 'reflect'); }
+  stalkerKettleWhistle() { return this.playEnemySfx('vent_stalker', 'hiss'); }
+  stalkerSteamErupt() { return this.playEnemySfx('vent_stalker', 'erupt'); }
+  stalkerPantCooldown() { return this.playEnemySfx('vent_stalker', 'pant'); }
+  wardenHornIntro() { return this.playEnemySfx('siphon_warden', 'horn'); }
+  wardenShieldCrack() { return this.playEnemySfx('siphon_warden', 'crack'); }
+  wardenBeamCharge() { return this.playEnemySfx('siphon_warden', 'beam'); }
+  wardenBeamRoar() { return this.playEnemySfx('siphon_warden', 'beam'); }
+  wardenTentacleSlam() { return this.playEnemySfx('siphon_warden', 'slam'); }
+  wardenDefeatCollapse() { return this.playEnemySfx('siphon_warden', 'defeat'); }
+
+  // --- Cohesive World Transitions, Hydro-Rings, Floodgate Surge & Sonar Bloom ---
+
+  pulseSonarMusicBloom() {
+    if (!this.ctx || !this.musicLPF || this.miniGameMode !== 'reef_swim') return;
+    const now = this.ctx.currentTime;
+    try {
+      this.musicLPF.frequency.cancelScheduledValues(now);
+      this.musicLPF.frequency.setTargetAtTime(7500, now, 0.14);
+      this.musicLPF.frequency.setTargetAtTime(2400, now + 1.35, 0.65);
+    } catch {
+      // Ignore
+    }
+  }
+
+  hydroRingChime(combo = 0) {
+    if (!this._canPlay('hydroRing', 0.03)) return;
+    const step = clamp(Math.floor(Number(combo) || 0), 0, 8);
+    const f = this._scaleFreq(step, 0);
+    this._kalimbaChime(f, 0.42, 0.052, 0, -0.08, true);
+    this._kalimbaChime(Math.min(2800, f * 1.498), 0.36, 0.036, 0.04, 0.1, true);
+    this._waterDrop(Math.min(2400, f * 2.0), 0.11, 0.024, 0.015, 0, true);
+    this._silkyWhoosh(0.18, 0.032, 420, 1480, 1.3, 0, 0, true, false);
+  }
+
+  playFloodgateSurge() {
+    if (!this._canPlay('floodgateSurge', 0.25)) return;
+    // Deep hydraulic WHOOSH-CLANK + pressurized water-jet surge + rising marimba restoration chord!
+    this._warmBodyTone(92, 44, 0.46, 0.11, 0, 'sine', 260, true);
+    this._warmBodyTone(340, 185, 0.14, 0.068, 0.04, 'triangle', 1200, true);
+    this._silkyWhoosh(0.92, 0.085, 240, 1420, 1.05, 0.05, 0, true, true);
+    [0, 2, 4, 5, 7].forEach((d, idx) => {
+      this._kalimbaChime(this._scaleFreq(d, 0), 0.55, 0.048, 0.12 + idx * 0.075, (idx - 2) * 0.12, true);
+    });
+    this.playGatewayVoice('victory', { gainScale: 0.78 });
+  }
+
+  playTransitionRipple() {
+    if (!this._canPlay('transitionRipple', 0.14)) return;
+    this._silkyWhoosh(0.32, 0.038, 320, 1340, 1.35, 0, 0, true, false);
+    this._waterDrop(this._scaleFreq(3, 0), 0.12, 0.026, 0.03, -0.1, true);
+    this._kalimbaChime(this._scaleFreq(5, 0), 0.28, 0.032, 0.07, 0.1, true);
   }
 
   coreSeed() {
@@ -2795,6 +3743,8 @@ export class SoundEngine {
       modeBed: this._modeBedNodes?.mode || null,
       windActive: Boolean(this._glideWindNodes),
       ambienceCutoffHz: this.ambienceLPF ? Math.round(this.ambienceLPF.frequency.value) : 0,
+      musicCutoffHz: this.musicLPF ? Math.round(this.musicLPF.frequency.value) : 0,
+      musicPlaybackRate: this._musicDeck?.playbackRate ?? 1.0,
       lastBellPitchHz: this._lastBellPitchHz,
       lastBellIndex: this._lastBellIndex,
       bellPentatonicHz: TEMPLE_BELL_PENTATONIC_HZ,
