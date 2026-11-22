@@ -281,7 +281,7 @@ describe('Round 5 Deliverable 1: Solid Stationary Unpowered Elevator Cabs', () =
     game.update(FIXED_STEP);
     expect(p.onElevator).toBeNull();
     expect(p.onGround).toBe(false);
-    expect(p.vy).toBeGreaterThan(8.5);
+    expect(p.vy).toBeGreaterThan(8.0);
     inp.resetState();
     for (let step = 0; step < 100; step++) game.update(FIXED_STEP);
     expect(p.onGround).toBe(true);
@@ -812,6 +812,8 @@ describe('Round 5 Deliverable 5: All 8 Game Modes End-to-End Loops', () => {
       game.vaultReturnState = { col: vaultDoor.col + 0.5, floor: vaultDoor.floor, doorId: vaultDoor.id };
       game.startMiniGame('vault', false);
       for (let ringIdx = 0; ringIdx < game.vault.rings.length; ringIdx++) {
+        // Respect 0.22s anti-double-tap debounce between consecutive ring locks (#648/#650)
+        for (let w = 0; w < 30; w++) game.update(FIXED_STEP);
         game.vault.rings[ringIdx].angle = game.vault.rings[ringIdx].targetAngle;
         inp.press('fire');
         game.update(FIXED_STEP);
@@ -1073,10 +1075,10 @@ describe('Round 5 Addendum (#573): Exhaustive Soft-Lock & Edge-Case Guards', () 
     inp.release('whip');
     expect(game.switchStates.red).toBe(true);
 
-    // Walk across col 2.5 within ~0.55s -> stays true!
+    // Walk across col 2.5 within ~0.75s (deliberate 2.55 cols/s pace) -> stays true!
     inp.state.right = true;
     inp.state.analogX = 1.0;
-    for (let step = 0; step < 68; step++) game.update(FIXED_STEP);
+    for (let step = 0; step < 96; step++) game.update(FIXED_STEP);
     inp.resetState();
     expect(game.gateway.col).toBeGreaterThan(2.7);
     expect(game.switchStates.red).toBe(true);
@@ -1085,7 +1087,7 @@ describe('Round 5 Addendum (#573): Exhaustive Soft-Lock & Edge-Case Guards', () 
     for (let step = 0; step < 160; step++) game.update(FIXED_STEP);
     inp.state.left = true;
     inp.state.analogX = -1.0;
-    for (let step = 0; step < 68; step++) game.update(FIXED_STEP);
+    for (let step = 0; step < 96; step++) game.update(FIXED_STEP);
     inp.resetState();
     expect(game.switchStates.red).toBe(false);
   });

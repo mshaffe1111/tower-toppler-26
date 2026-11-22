@@ -146,46 +146,46 @@ function colDistSigned(a, b) {
 }
 
 describe('Deliverable 1: Calibrated 120Hz Hydro-Lizard Locomotion & Jump Kinematics', () => {
-  it('exposes exact Nintendo/Celeste 120Hz mathematical constants with buoyant apex hang', () => {
+  it('exposes exact deliberate Tower Toppler 120Hz mathematical constants with buoyant apex hang', () => {
     expect(FIXED_STEP).toBeCloseTo(1 / 120, 8);
-    expect(BASE_WALK_SPEED).toBe(3.55);
-    expect(GROUND_ACCEL).toBe(38.0);
-    expect(GROUND_FRICTION).toBe(44.0);
-    expect(GROUND_SKID_DECEL).toBe(52.0);
+    expect(BASE_WALK_SPEED).toBe(2.55);
+    expect(GROUND_ACCEL).toBe(30.0);
+    expect(GROUND_FRICTION).toBe(38.0);
+    expect(GROUND_SKID_DECEL).toBe(42.0);
     expect(JUMP_HORIZ_IMPULSE).toBe(1.04);
-    expect(AIR_ACCEL).toBe(26.0);
+    expect(AIR_ACCEL).toBe(22.0);
     expect(AIR_DRAG).toBe(8.5);
-    expect(BASE_JUMP_VY).toBe(9.40);
-    expect(GRAV_RISE).toBe(28.5);
-    expect(GRAV_APEX).toBe(16.5);
+    expect(BASE_JUMP_VY).toBe(8.45);
+    expect(GRAV_RISE).toBe(22.8);
+    expect(GRAV_APEX).toBe(12.8);
     expect(GRAV_APEX).toBeLessThan(GRAV_RISE);
-    expect(GRAV_FALL).toBe(45.0);
-    expect(GRAV_JUMP_CUT).toBe(78.0);
+    expect(GRAV_FALL).toBe(36.0);
+    expect(GRAV_JUMP_CUT).toBe(64.0);
     expect(SPRING_LAUNCH_VY).toBe(12.50);
   });
 
-  it('reaches 3.55 cols/s full run, supports precision slow-walk, and stops within <= 0.19 cols on release', () => {
+  it('reaches 2.55 cols/s deliberate run, supports precision slow-walk, and stops within <= 0.14 cols on release', () => {
     const inp = createMockInput();
     const game = new ToweringWatersGame(null, inp, {}, createSilentProgression());
     game.mode = 'tower';
     game.loadTower(createFlatTestTower());
 
-    // 1. Analog precision slow-walk (analogX = 0.35 -> ~1.2425 cols/s)
+    // 1. Analog precision slow-walk (analogX = 0.35 -> ~0.8925 cols/s)
     inp.state.analogX = 0.35;
     for (let i = 0; i < 45; i++) game.update(FIXED_STEP);
-    expect(game.gateway.vx).toBeCloseTo(3.55 * 0.35, 2);
+    expect(game.gateway.vx).toBeCloseTo(2.55 * 0.35, 2);
     expect(game.gateway.anim).toBe('Walk');
 
-    // 2. Full grounded sprint -> 3.55 cols/s
+    // 2. Full grounded deliberate run -> 2.55 cols/s
     inp.state.analogX = 1.0;
     inp.state.right = true;
     for (let i = 0; i < 60; i++) game.update(FIXED_STEP);
-    expect(game.gateway.vx).toBeGreaterThanOrEqual(3.50);
-    expect(game.gateway.vx).toBeLessThanOrEqual(3.60);
-    expect(game.gateway.vx).toBeCloseTo(3.55, 3);
+    expect(game.gateway.vx).toBeGreaterThanOrEqual(2.50);
+    expect(game.gateway.vx).toBeLessThanOrEqual(2.60);
+    expect(game.gateway.vx).toBeCloseTo(2.55, 3);
     expect(game.gateway.anim).toBe('FluidRun');
 
-    // 3. Release input -> crisp Mario/Celeste heel-stop (~0.143 cols in ~0.081s!)
+    // 3. Release input -> crisp planted heel-stop (<= 0.14 cols in <= 0.105s!)
     const releaseCol = game.gateway.col;
     inp.state.analogX = 0;
     inp.state.right = false;
@@ -195,24 +195,24 @@ describe('Deliverable 1: Calibrated 120Hz Hydro-Lizard Locomotion & Jump Kinemat
       stopSteps++;
     }
     const stopDist = Math.abs(colDistSigned(releaseCol, game.gateway.col));
-    expect(stopDist).toBeGreaterThan(0.10);
-    expect(stopDist).toBeLessThanOrEqual(0.19);
+    expect(stopDist).toBeGreaterThan(0.05);
+    expect(stopDist).toBeLessThanOrEqual(0.14);
     expect(stopSteps * FIXED_STEP).toBeLessThanOrEqual(0.105);
 
-    // 4. Counter-steer braced turnaround skid (GROUND_SKID_DECEL = 52.0)
+    // 4. Counter-steer braced turnaround skid (GROUND_SKID_DECEL = 42.0)
     inp.state.right = true;
     inp.state.analogX = 1.0;
     for (let i = 0; i < 40; i++) game.update(FIXED_STEP);
-    expect(game.gateway.vx).toBeCloseTo(3.55, 2);
+    expect(game.gateway.vx).toBeCloseTo(2.55, 2);
     inp.state.right = false;
     inp.state.left = true;
     inp.state.analogX = -1.0;
     game.update(FIXED_STEP);
     expect(game.gateway.skidTimer).toBeGreaterThan(0.15);
-    expect(game.gateway.vx).toBeCloseTo(3.55 - 52.0 * FIXED_STEP, 3);
+    expect(game.gateway.vx).toBeCloseTo(2.55 - 42.0 * FIXED_STEP, 3);
   });
 
-  it('produces +1.53F expressive Celeste/Mario apex in ~0.67s on full jump, ~0.82F on 0.08s short-hop, and ZERO FrillGlide frames on tower jumps', () => {
+  it('produces +1.56F expressive Celeste/Tower Toppler apex in ~0.78s on full jump, ~0.80F on 0.08s short-hop, and ZERO FrillGlide frames on tower jumps', () => {
     const inp = createMockInput();
     const game = new ToweringWatersGame(null, inp, {}, createSilentProgression());
     game.mode = 'tower';
@@ -232,7 +232,7 @@ describe('Deliverable 1: Calibrated 120Hz Hydro-Lizard Locomotion & Jump Kinemat
     let frillGlideFrames = 0;
     let maxFrillFlare = 0;
 
-    for (let step = 0; step < 120; step++) {
+    for (let step = 0; step < 140; step++) {
       game.update(FIXED_STEP);
       const p = game.gateway;
       if (!p.onGround) {
@@ -251,13 +251,13 @@ describe('Deliverable 1: Calibrated 120Hz Hydro-Lizard Locomotion & Jump Kinemat
     const airTimeSec = airSteps * FIXED_STEP;
     const spanCols = Math.abs(colDistSigned(startCol, game.gateway.col));
 
-    expect(maxHorizVx).toBeCloseTo(3.55 * 1.04, 2);
+    expect(maxHorizVx).toBeCloseTo(2.55 * 1.04, 2);
     expect(maxFloor).toBeGreaterThanOrEqual(1.48);
     expect(maxFloor).toBeLessThanOrEqual(1.62);
-    expect(airTimeSec).toBeGreaterThanOrEqual(0.61);
-    expect(airTimeSec).toBeLessThanOrEqual(0.74);
-    expect(spanCols).toBeGreaterThan(2.0);
-    expect(spanCols).toBeLessThan(2.7);
+    expect(airTimeSec).toBeGreaterThanOrEqual(0.72);
+    expect(airTimeSec).toBeLessThanOrEqual(0.84);
+    expect(spanCols).toBeGreaterThan(1.95);
+    expect(spanCols).toBeLessThan(2.5);
     expect(frillGlideFrames).toBe(0);
     expect(maxFrillFlare).toBe(0);
 
@@ -266,7 +266,7 @@ describe('Deliverable 1: Calibrated 120Hz Hydro-Lizard Locomotion & Jump Kinemat
     for (let i = 0; i < 30; i++) game.update(FIXED_STEP);
     inp.press('jump');
     let shortApex = 0;
-    for (let step = 0; step < 100; step++) {
+    for (let step = 0; step < 110; step++) {
       if (step === 10) inp.release('jump');
       game.update(FIXED_STEP);
       if (game.gateway.floor > shortApex) shortApex = game.gateway.floor;
@@ -373,7 +373,7 @@ describe('Deliverable 2: Physical World Weight & Momentum', () => {
     const mortar = game.enemies[0];
     mortar.fireTimer = 0.01;
     let launchVy = 0;
-    for (let i = 0; i < 130; i++) {
+    for (let i = 0; i < 165; i++) {
       game.update(FIXED_STEP);
       if (game.enemyProjectiles.length > 0 && launchVy === 0) {
         launchVy = game.enemyProjectiles[0].vy;
@@ -382,13 +382,13 @@ describe('Deliverable 2: Physical World Weight & Momentum', () => {
     }
     expect(game.enemyProjectiles.length).toBeGreaterThan(0);
     const proj = game.enemyProjectiles[0];
-    expect(proj.grav).toBe(10.5);
+    expect(proj.grav).toBe(8.0);
     expect(launchVy).toBeCloseTo(3.8 + (0 - 0.55) * 0.6, 2);
     // Verify real parabolic upward-then-downward gravity integration
     const launchFloor = proj.floor;
     for (let i = 0; i < 20; i++) game.update(FIXED_STEP);
     expect(proj.floor).toBeGreaterThan(launchFloor + 0.3);
-    expect(proj.vy).toBeLessThan(launchVy - 1.5);
+    expect(proj.vy).toBeLessThan(launchVy - 1.1);
 
     // Position projectile in whip range and deflect it right back (55ms home-run hit-stop #602)!
     proj.col = 6.2;
@@ -403,7 +403,7 @@ describe('Deliverable 2: Physical World Weight & Momentum', () => {
     for (let i = 0; i < 90; i++) game.update(FIXED_STEP);
     expect(mortar.dead).toBe(true);
 
-    // 4. Purified water Archimedes dip & splash droplets
+    // 4. Falling into tower water (even waterPurified) cleanly splashes & respawns — ZERO endless flopping (#643)!
     game.waterPurified = true;
     game.waterFloor = 0.5;
     game.targetWaterFloor = 0.5;
@@ -412,16 +412,14 @@ describe('Deliverable 2: Physical World Weight & Momentum', () => {
     game.gateway.vy = -9.0;
     game.gateway.onGround = false;
     game.gateway.isSwimming = false;
-    let minWaterDip = 0;
+    const livesBefore = game.lives;
     for (let i = 0; i < 60; i++) {
       game.update(FIXED_STEP);
-      if (game.gateway.waterDipOffset < minWaterDip) minWaterDip = game.gateway.waterDipOffset;
     }
-    expect(game.gateway.isSwimming).toBe(true);
-    expect(minWaterDip).toBeLessThan(-0.15);
-    // Settles back toward surface via Archimedes buoyancy
-    for (let i = 0; i < 120; i++) game.update(FIXED_STEP);
-    expect(Math.abs(game.gateway.waterDipOffset)).toBeLessThan(0.06);
+    expect(game.gateway.isSwimming).toBe(false);
+    expect(game.lives).toBe(livesBefore - 1);
+    expect(game.gateway.onGround).toBe(true);
+    expect(game.gateway.wetShakeTimer).toBeGreaterThan(0.1);
   });
 });
 
@@ -483,13 +481,13 @@ describe('Deliverable 3: All 7 Distinct Enemy Personalities, Speeds, Tells & Cou
     game.gateway.col = 0.5;
     game.gateway.floor = 0;
     game.update(FIXED_STEP);
-    expect(Math.abs(crab.velCol)).toBeCloseTo(0.88, 2);
+    expect(Math.abs(crab.velCol)).toBeCloseTo(0.62, 2);
     expect(hopper.aiState).toBe('sit_watch');
     expect(hopper.velCol).toBe(0);
-    expect(Math.abs(eel.velCol)).toBeCloseTo(1.15, 2);
-    expect(Math.abs(skater.velCol)).toBeCloseTo(2.35, 2);
+    expect(Math.abs(eel.velCol)).toBeCloseTo(0.82, 2);
+    expect(Math.abs(skater.velCol)).toBeCloseTo(1.65, 2);
     expect(mortar.velCol).toBe(0);
-    expect(Math.abs(stalker.velFloor)).toBeCloseTo(0.78, 2);
+    expect(Math.abs(stalker.velFloor)).toBeCloseTo(0.56, 2);
     expect(warden.actSignature).toBe('bulldozer_mortar');
 
     // Track visited states over 6.0s (720 substeps)
@@ -595,7 +593,7 @@ describe('Deliverable 4: 120Hz Kinematic Reachability & Zero-Bypass Audit Across
     inp.state.analogX = 1.0;
     let jumped = false;
     let landedOnTarget = false;
-    for (let step = 0; step < 120; step++) {
+    for (let step = 0; step < 195; step++) {
       if (!jumped && game.gateway.col >= 5.88) {
         inp.press('jump');
         jumped = true;
@@ -683,8 +681,10 @@ describe('Deliverable 4: 120Hz Kinematic Reachability & Zero-Bypass Audit Across
       const dir = Math.sign(dc) || 1;
       game.mode = 'tower';
       game.loadTower(tower);
-      // Enable all switch/pipe bridges in case jump lands on or launches from a phaseBlock
-      for (const k of Object.keys(game.switchStates)) game.switchStates[k] = true;
+      // Enable switch/pipe bridges (without flipping conveyors backwards on towers with no conveyorFlip switch!)
+      for (const k of Object.keys(game.switchStates)) {
+        if (k !== 'conv') game.switchStates[k] = true;
+      }
       for (const k of Object.keys(game.pipeStates)) game.pipeStates[k] = true;
       game._syncDynamicLedges(0, true);
       game.enemies = []; // Pure architectural jump reachability check

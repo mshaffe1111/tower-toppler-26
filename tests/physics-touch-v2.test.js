@@ -336,19 +336,19 @@ function setupTouchDomEnv() {
 
 describe('1. Expressive Nintendo/Celeste Jump Arc, Anti-Bypass, Corner-Correction & Continuous Stairs (#603)', () => {
   it('1.1 & 1.2: Full jump hits 1.48..1.62F with asymmetric rise/fall (t_fall < t_rise) and 0.08s short-hop hits 0.68..0.86F', () => {
-    expect(BASE_WALK_SPEED).toBe(3.55);
-    expect(GROUND_ACCEL).toBe(38.0);
-    expect(GROUND_FRICTION).toBe(44.0);
-    expect(GROUND_SKID_DECEL).toBe(52.0);
+    expect(BASE_WALK_SPEED).toBe(2.55);
+    expect(GROUND_ACCEL).toBe(30.0);
+    expect(GROUND_FRICTION).toBe(38.0);
+    expect(GROUND_SKID_DECEL).toBe(42.0);
     expect(JUMP_HORIZ_IMPULSE).toBe(1.04);
-    expect(AIR_ACCEL).toBe(26.0);
+    expect(AIR_ACCEL).toBe(22.0);
     expect(AIR_DRAG).toBe(8.5);
-    expect(BASE_JUMP_VY).toBe(9.40);
-    expect(GRAV_RISE).toBe(28.5);
-    expect(GRAV_APEX).toBe(16.5);
+    expect(BASE_JUMP_VY).toBe(8.45);
+    expect(GRAV_RISE).toBe(22.8);
+    expect(GRAV_APEX).toBe(12.8);
     expect(GRAV_APEX).toBeLessThan(GRAV_RISE);
-    expect(GRAV_FALL).toBe(45.0);
-    expect(GRAV_JUMP_CUT).toBe(78.0);
+    expect(GRAV_FALL).toBe(36.0);
+    expect(GRAV_JUMP_CUT).toBe(64.0);
     expect(MANTLE_MAX_GAP).toBe(0.30);
 
     const inp = createMockInput();
@@ -381,10 +381,10 @@ describe('1. Expressive Nintendo/Celeste Jump Arc, Anti-Bypass, Corner-Correctio
     const tFall = (airSteps - riseSteps) * FIXED_STEP;
     expect(peak).toBeGreaterThanOrEqual(1.48);
     expect(peak).toBeLessThanOrEqual(1.62);
-    expect(tRise).toBeGreaterThanOrEqual(0.33);
-    expect(tRise).toBeLessThanOrEqual(0.39);
-    expect(tFall).toBeGreaterThanOrEqual(0.28);
-    expect(tFall).toBeLessThanOrEqual(0.35);
+    expect(tRise).toBeGreaterThanOrEqual(0.38);
+    expect(tRise).toBeLessThanOrEqual(0.45);
+    expect(tFall).toBeGreaterThanOrEqual(0.32);
+    expect(tFall).toBeLessThanOrEqual(0.41);
     expect(tFall).toBeLessThan(tRise);
 
     // 0.08s short-hop
@@ -668,12 +668,13 @@ describe('3. Reactive Enemy Combat & Counter-Play (#602)', () => {
     const hopper = game.enemies[1];
     const crate = game.ledges.find((l) => l.type === 'box');
 
-    // First whip flips the crab; second whip punts the shell right at 8.5 cols/s!
+    // First whip flips the crab; wait past 0.45s anti-double-whip grace, then second whip punts the shell right at 8.5 cols/s!
     game.gateway.facing = 1;
     game._applyAttackToEnemy(crab, 'whip');
     expect(crab.flipped).toBe(true);
     expect(crab.shellPunted).toBe(false);
 
+    for (let s = 0; s < 60; s++) game.update(FIXED_STEP);
     game._applyAttackToEnemy(crab, 'whip');
     expect(crab.shellPunted).toBe(true);
     expect(Math.abs(crab.velCol)).toBeCloseTo(8.5, 1);
@@ -733,7 +734,7 @@ describe('3. Reactive Enemy Combat & Counter-Play (#602)', () => {
     const skater = game.enemies[1];
     mortar.fireTimer = 0.01;
     let sawArc = false;
-    for (let s = 0; s < 120; s++) {
+    for (let s = 0; s < 165; s++) {
       game.update(FIXED_STEP);
       if (
         mortar.aiState === 'swell_tell' &&
