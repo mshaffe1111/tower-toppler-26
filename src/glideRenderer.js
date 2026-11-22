@@ -1702,20 +1702,6 @@ export class GlideRenderer {
       this.ringInst.setColorAt(rCnt, this._col);
       this.ringInst.setMatrixAt(rCnt++, dm.matrix);
     }
-    // Render incoming right-edge `stage.warnings` telegraph pulse halos (gulls & gusts)
-    const warnings = stage.warnings || [];
-    for (let i = 0; i < warnings.length && rCnt < MAX_RINGS; i++) {
-      const w = warnings[i];
-      const wp = this._screenToWorld(this.width * 0.94, w.y, 0.35);
-      const pulse = 0.32 + Math.abs(Math.sin(time * 12 + i)) * 0.24;
-      dm.position.set(wp.x, wp.y, 0.35);
-      dm.rotation.set(0, 0, 0);
-      dm.scale.setScalar(pulse);
-      dm.updateMatrix();
-      this._col.set(w.kind === 'gull' ? '#fb7185' : '#fde047');
-      this.ringInst.setColorAt(rCnt, this._col);
-      this.ringInst.setMatrixAt(rCnt++, dm.matrix);
-    }
     this.ringInst.count = rCnt;
     if (rCnt > 0) {
       this.ringInst.instanceMatrix.needsUpdate = true;
@@ -1724,6 +1710,20 @@ export class GlideRenderer {
 
     const extParts = opts.particles || [];
     let ptCnt = 0;
+    // Soft feathered glowing right-edge telegraph beacons for incoming `stage.warnings` (zero hard wireframe rings!)
+    const warnings = stage.warnings || [];
+    for (let i = 0; i < warnings.length && ptCnt < MAX_PARTICLES; i++) {
+      const w = warnings[i];
+      const wp = this._screenToWorld(this.width * 0.94, w.y, 0.35);
+      const pulse = 1.6 + Math.abs(Math.sin(time * 10 + i)) * 0.9;
+      dm.position.set(wp.x, wp.y, 0.35);
+      dm.rotation.set(0, 0, time * 1.4 + i);
+      dm.scale.setScalar(pulse);
+      dm.updateMatrix();
+      this._col.set(w.kind === 'gull' ? '#fb7185' : '#fde047');
+      this.partInst.setColorAt(ptCnt, this._col);
+      this.partInst.setMatrixAt(ptCnt++, dm.matrix);
+    }
     for (let i = 0; i < 32 && ptCnt < MAX_PARTICLES; i++) {
       const age = (time * 2.2 + i * 0.13) % 1;
       dm.position.set(heroX - 0.72 - age * 3.8, heroY + Math.sin(time * 6.5 + i * 1.4) * (0.12 + age * 0.32), 0.45);

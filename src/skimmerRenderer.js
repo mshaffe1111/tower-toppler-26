@@ -323,6 +323,74 @@ const RAPIDS_WATER_FRAG = /* glsl */ `
   }
 `;
 
+// --- TRANSLUCENT TURQUOISE-JADE CURLING WAVE-CREST RAMP SHADER (ZERO OPAQUE WHITE BLOB!) ---
+const RAPIDS_RAMP_VERT = /* glsl */ `
+  varying vec2 vUv;
+  varying vec3 vWorldPos;
+  varying vec3 vWorldNormal;
+  void main() {
+    vUv = uv;
+    vec4 wp = vec4(position, 1.0);
+    #ifdef USE_INSTANCING
+      wp = instanceMatrix * wp;
+    #endif
+    wp = modelMatrix * wp;
+    vWorldPos = wp.xyz;
+    vec3 wn = normal;
+    #ifdef USE_INSTANCING
+      wn = mat3(instanceMatrix) * wn;
+    #endif
+    vWorldNormal = normalize(mat3(modelMatrix) * wn);
+    gl_Position = projectionMatrix * viewMatrix * wp;
+  }
+`;
+
+const RAPIDS_RAMP_FRAG = /* glsl */ `
+  uniform float uTime;
+  uniform vec3 uDeepColor;
+  uniform vec3 uShallowColor;
+  uniform vec3 uSunColor;
+  uniform vec3 uSunDir;
+  varying vec2 vUv;
+  varying vec3 vWorldPos;
+  varying vec3 vWorldNormal;
+
+  void main() {
+    // vUv.y runs 0 (rear base) -> 1 (curling launch lip); vUv.x runs 0..1 across width
+    float uLat = abs(vUv.x - 0.5) * 2.0;
+    float vRun = vUv.y;
+
+    // Smooth edge feathering so the wave melts seamlessly into the turquoise river on ALL sides!
+    float edgeAlpha = smoothstep(1.0, 0.56, uLat) * smoothstep(0.0, 0.24, vRun) * smoothstep(1.0, 0.86, vRun);
+    if (edgeAlpha < 0.01) discard;
+
+    vec3 N = normalize(vWorldNormal);
+    vec3 V = normalize(cameraPosition - vWorldPos);
+    vec3 L = normalize(uSunDir);
+
+    // Rich sunlit emerald-turquoise liquid body (deep jade at trough -> glowing aqua-teal rising crest)
+    float flow = sin(vUv.x * 16.0 + vRun * 14.0 - uTime * 7.5) * 0.5 + 0.5;
+    float streak = sin(vUv.x * 28.0 - vRun * 18.0 + uTime * 9.0) * 0.5 + 0.5;
+    float rip = flow * 0.6 + streak * 0.4;
+
+    vec3 bodyCol = mix(uDeepColor, uShallowColor, smoothstep(0.08, 0.78, vRun) * 0.85 + rip * 0.15);
+    // Crisp sunlight specular sparkle + subtle translucent turquoise rim
+    vec3 H = normalize(L + V);
+    float spec = pow(max(dot(N, H), 0.0), 48.0);
+    float fres = pow(1.0 - max(dot(N, V), 0.0), 2.8);
+    bodyCol += uSunColor * spec * 0.85 + vec3(0.18, 0.78, 0.84) * fres * 0.35;
+
+    // Lacy breaking whitewater foam ONLY along the curled crest lip (vRun > 0.72) — NEVER a milky blob!
+    float crestBand = smoothstep(0.66, 0.90, vRun + (rip - 0.5) * 0.16);
+    float laceNoise = smoothstep(0.32, 0.78, rip);
+    float foamMask = crestBand * (0.45 + 0.55 * laceNoise) * smoothstep(0.95, 0.35, uLat);
+    vec3 col = mix(bodyCol, vec3(0.94, 0.99, 1.0), foamMask * 0.82);
+
+    float alpha = edgeAlpha * clamp(0.42 + vRun * 0.32 + foamMask * 0.24, 0.0, 0.84);
+    gl_FragColor = vec4(col, alpha);
+  }
+`;
+
 // --- SHARED GLB CACHE & MULTI-PRIMITIVE INSTANCED POOL (60FPS D3D11) ---
 const _glbCache = new Map();
 function loadCachedGlb(url) {
@@ -407,6 +475,11 @@ function normalizeGlbMaterial(mat) {
     if (typeof out.emissiveIntensity === 'number' && out.emissiveIntensity > 1.55) {
       out.emissiveIntensity = 1.55;
     }
+  }
+  if (String(out.name || '').toLowerCase().includes('foliage')) {
+    // Soften cliff ledge moss pads to warm earthy canyon-sage so they nestle organically into red Sedona rock!
+    out.color.multiply(new THREE.Color('#96a07c'));
+    out.roughness = 0.88;
   }
   return out;
 }
@@ -821,21 +894,24 @@ export class SkimmerRenderer {
     this.heroRoot.add(this.trickHaloMesh);
     this.scene.add(this.heroRoot);
 
-    // Sculpted Translucent Foaming River Wave-Crest Ramps (`sk.ramps`)
-    this.rampMat = new THREE.MeshStandardMaterial({
-      color: '#ffffff',
-      vertexColors: true,
-      emissive: '#0e7c92',
-      emissiveIntensity: 0.24,
-      roughness: 0.14,
-      metalness: 0.12,
+    // Sculpted Translucent Turquoise-Jade GLSL Curling Wave-Crest Ramps (`sk.ramps`) — ZERO milky-white blobs!
+    this.rampMat = new THREE.ShaderMaterial({
+      vertexShader: RAPIDS_RAMP_VERT,
+      fragmentShader: RAPIDS_RAMP_FRAG,
+      uniforms: {
+        uTime: { value: 0 },
+        uDeepColor: { value: new THREE.Color('#07697e') },
+        uShallowColor: { value: new THREE.Color('#18cad0') },
+        uSunColor: { value: new THREE.Color('#fff2d4') },
+        uSunDir: { value: new THREE.Vector3(0.38, 0.42, -0.82).normalize() },
+      },
       transparent: true,
-      opacity: 0.90,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
     this.rampInst = new THREE.InstancedMesh(buildWaveCrestRampGeo(), this.rampMat, MAX_RAMPS);
     this.rampInst.frustumCulled = false;
+    this.rampInst.renderOrder = 2;
     this.scene.add(this.rampInst);
 
     // Soft Glowing Boost Gate Shimmer Curtains (paired with Blender `SlalomGate_Arch`)
@@ -1113,11 +1189,17 @@ export class SkimmerRenderer {
       : clamp((sk.vy || 0) * 0.045, -0.24, 0.28);
     this._pitchSmooth += (wantPitch - this._pitchSmooth) * (1 - Math.exp(-10.5 * dt));
 
-    // Update GLSL reflective whitewater rapids uniforms
+    // Update GLSL reflective whitewater rapids & translucent wave-ramp uniforms
     const wu = this.riverMat.uniforms;
     wu.uTime.value = time;
     wu.uDist.value = dist;
     wu.uHeroXZ.value.set(laneX, 0);
+    if (this.rampMat?.uniforms) {
+      this.rampMat.uniforms.uTime.value = time;
+      this.rampMat.uniforms.uDeepColor.value.copy(wu.uDeepColor.value);
+      this.rampMat.uniforms.uShallowColor.value.copy(wu.uShallowColor.value);
+      this.rampMat.uniforms.uSunColor.value.copy(wu.uSunColor.value);
+    }
 
     const dm = this._dummy;
 

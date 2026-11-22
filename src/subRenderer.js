@@ -293,22 +293,20 @@ function injectUnderwaterCaustics(mat, causticUniforms, strength = 0.62) {
          varying vec3 vCausticWorldNormal;
 
          float reefCausticWeb(vec2 p, float t) {
-           vec2 a = p * 0.78 + vec2(t * 0.42, -t * 0.28);
-           vec2 b = p * 1.12 + vec2(-t * 0.34, t * 0.38);
-           float w1 = sin(a.x + sin(a.y * 1.35 + t * 1.1)) * cos(a.y + cos(a.x * 1.25 - t * 0.9));
-           float w2 = sin(b.x * 1.25 - b.y + t * 0.95) * cos(b.y * 1.30 + b.x - t * 1.05);
+           vec2 a = p * 0.85 + vec2(t * 0.42, -t * 0.28);
+           vec2 b = p * 1.18 + vec2(-t * 0.34, t * 0.38);
+           float w1 = sin(a.x + cos(a.y * 1.15 + t * 0.9)) * cos(a.y - sin(a.x * 1.10 - t * 0.8));
+           float w2 = sin(b.x * 1.2 - b.y + t) * cos(b.y * 1.25 + b.x - t * 0.95);
            float web = 1.0 - clamp(abs(w1 + w2) * 0.72, 0.0, 1.0);
-           return pow(web, 3.2);
+           return web * web * web;
          }`
       )
       .replace(
         '#include <dithering_fragment>',
-        `float upMask = smoothstep(0.05, 0.78, vCausticWorldNormal.y);
+        `float upMask = smoothstep(0.08, 0.78, vCausticWorldNormal.y);
          float distFade = exp(-max(0.0, -vCausticWorldPos.z - 2.0) * 0.055);
          vec2 cp = vec2(vCausticWorldPos.x + uCausticScroll * 0.022, vCausticWorldPos.z) + vCausticWorldPos.y * vec2(0.18, 0.12);
-         float c1 = reefCausticWeb(cp, uCausticTime);
-         float c2 = reefCausticWeb(cp * 1.45 + vec2(4.2, -2.7), -uCausticTime * 0.82);
-         float cVal = clamp(c1 * 0.78 + c2 * 0.52, 0.0, 1.25) * upMask * distFade * uCausticStrength;
+         float cVal = clamp(reefCausticWeb(cp, uCausticTime) * 1.22, 0.0, 1.20) * upMask * distFade * uCausticStrength;
          gl_FragColor.rgb += uCausticColor * cVal;
          #include <dithering_fragment>`
       );
@@ -1151,14 +1149,26 @@ export class SubRenderer {
       this._glbPools.columnA = new GlbInstancedAsset(this.reefScene, getNode('SunkenColumn_A'), 8, cu, 0.50);
       this._glbPools.columnB = new GlbInstancedAsset(this.reefScene, getNode('SunkenColumn_B'), 8, cu, 0.50);
       this._glbPools.outcrop = new GlbInstancedAsset(this.reefScene, getNode('ReefOutcrop_Rock'), 14, cu, 0.58);
-      this._glbPools.amphora = new GlbInstancedAsset(this.reefScene, getNode('SunkenAmphora'), 8, cu, 0.35);
+      this._glbPools.amphora = new GlbInstancedAsset(this.reefScene, getNode('SunkenAmphora'), 8, null, 0.0);
 
-      // Chunky real 3D sculpted corals & swaying ribbon kelp (subtle top caustics too!)
-      this._glbPools.coralStaghorn = new GlbInstancedAsset(this.reefScene, getNode('Coral_Staghorn'), 14, cu, 0.25);
-      this._glbPools.coralTable = new GlbInstancedAsset(this.reefScene, getNode('Coral_Table'), 14, cu, 0.25);
-      this._glbPools.coralBrain = new GlbInstancedAsset(this.reefScene, getNode('Coral_BrainDome'), 14, cu, 0.32);
-      this._glbPools.coralAnemone = new GlbInstancedAsset(this.reefScene, getNode('Coral_Anemone'), 14, cu, 0.20);
-      this._glbPools.kelp = new GlbInstancedAsset(this.reefScene, getNode('Kelp_Cluster'), 18, cu, 0.18);
+      // Upgrade hydrothermal vent chimneys with real sculpted limestone PBR grain from `ReefOutcrop_Rock`!
+      const outcropMat = this._glbPools.outcrop?.meshes?.[0]?.material;
+      if (outcropMat && this.ventInst) {
+        const ventPbr = outcropMat.clone();
+        ventPbr.vertexColors = false;
+        ventPbr.color = new THREE.Color('#6ca29e');
+        ventPbr.emissive = new THREE.Color('#0d9488');
+        ventPbr.emissiveIntensity = 0.16;
+        this.ventInst.material?.dispose?.();
+        this.ventInst.material = ventPbr;
+      }
+
+      // Chunky real 3D sculpted corals & swaying ribbon kelp (fast PBR shading -> locked 60fps D3D11!)
+      this._glbPools.coralStaghorn = new GlbInstancedAsset(this.reefScene, getNode('Coral_Staghorn'), 14, null, 0.0);
+      this._glbPools.coralTable = new GlbInstancedAsset(this.reefScene, getNode('Coral_Table'), 14, null, 0.0);
+      this._glbPools.coralBrain = new GlbInstancedAsset(this.reefScene, getNode('Coral_BrainDome'), 14, null, 0.0);
+      this._glbPools.coralAnemone = new GlbInstancedAsset(this.reefScene, getNode('Coral_Anemone'), 14, null, 0.0);
+      this._glbPools.kelp = new GlbInstancedAsset(this.reefScene, getNode('Kelp_Cluster'), 18, null, 0.0);
 
       // Chunky 3D antique-bronze & crystal glowing hydro-rings (replaces wireframe hoops!)
       this._glbPools.hydroRing = new GlbInstancedAsset(this.reefScene, getNode('HydroRing_Reef'), 14, null, 0.0);
