@@ -795,11 +795,19 @@ export class GameRenderer {
     this._isIntegratedGpu = false;
     this.maxDpr = Math.min((typeof window !== 'undefined' && window.devicePixelRatio) || 1, 1.25);
     this.currentDpr = this.maxDpr;
-    this.usePostFX = false; // Single-pass direct hardware ACESFilmic rendering by default!
+    this.usePostFX = true; // Shared CinematicPostFX (auto-bypasses cleanly to ACES at low DPR / high frame time!)
+    this.postfxActive = false;
     this._frameEmaMs = 12.0;
     this._slowFrameCount = 0;
     this._lastPerfNow = 0;
     this._shadowTick = 0;
+
+    // Interactive Title Screen Star Showcase state (pointer gaze, greeting wave, tap-to-hop!)
+    this._titlePointerGaze = { x: 0, y: 0, tx: 0, ty: 0 };
+    this._titleWaveTimer = 1.65;
+    this._titleHopTimer = 0;
+    this._titleHopDuration = 0.72;
+    this._coreDescentCtx = null;
 
     // Delegated specialist stage renderers (`core_descent`, `reef_swim`, `rapids_surf`, `frill_glide`, `aqueduct_sanctum`)
     this.subRenderer = null;
@@ -895,10 +903,42 @@ export class GameRenderer {
     this.setWardrobePreview({ yaw, zoom, anim });
   }
 
-  _getBiomeEnvMap(_biomeKey) {
-    if (this._sharedEnvTex) return this._sharedEnvTex;
-    this._sharedEnvTex = buildBiomePmremTexture(this.webgl, BIOME_LIGHT_RIGS.canyon_river);
-    return this._sharedEnvTex;
+  /**
+   * Interactive Title Screen Star Showcase hooks:
+   * - `setTitlePointerGaze(nx, ny)`: smooth cursor/touch eye & head tracking in [-1..+1].
+   * - `triggerTitleHeroHop()`: joyful elastic hop + spin + sparkle burst when player taps Gateway!
+   * - `triggerTitleHeroWave()`: warm boot/idle camera wave!
+   */
+  setTitlePointerGaze(nx = 0, ny = 0) {
+    this._titlePointerGaze.tx = clamp(Number(nx) || 0, -1, 1);
+    this._titlePointerGaze.ty = clamp(Number(ny) || 0, -1, 1);
+  }
+
+  triggerTitleHeroHop() {
+    this._titleHopTimer = this._titleHopDuration;
+    this._titleWaveTimer = Math.max(this._titleWaveTimer, 0.9);
+    this.gatewayRig?.triggerTitleHop?.();
+    this.gatewayRig?.setMood?.('joyful');
+  }
+
+  triggerTitleHeroWave() {
+    this._titleWaveTimer = 1.65;
+    this.gatewayRig?.triggerTitleWave?.();
+  }
+
+  _getBiomeEnvMap(biomeKey = 'canyon_river') {
+    const resolved = resolvePostFxBiome(biomeKey || this.biome || 'canyon_river');
+    if (this._biomeEnvMaps.has(resolved)) {
+      return this._biomeEnvMaps.get(resolved);
+    }
+    const rig = BIOME_LIGHT_RIGS[resolved] || BIOME_LIGHT_RIGS.canyon_river;
+    const tex = buildBiomePmremTexture(this.webgl, rig);
+    if (tex) {
+      this._biomeEnvMaps.set(resolved, tex);
+      if (!this._sharedEnvTex) this._sharedEnvTex = tex;
+      return tex;
+    }
+    return this._sharedEnvTex || null;
   }
 
   _initEnvironment() {
@@ -913,6 +953,8 @@ export class GameRenderer {
       softDotTex: this.glowDotTex,
       skinId: this.skinId,
       blasterFxId: this.blasterFxId,
+      envMap: this._getBiomeEnvMap(this.biome),
+      postfx: this.postfx,
       showHud: false,
     });
     this.subRenderer.resize?.(this.width, this.height);
@@ -930,6 +972,8 @@ export class GameRenderer {
       dpr: this.currentDpr,
       softDotTex: this.glowDotTex,
       skinId: this.skinId,
+      envMap: this._getBiomeEnvMap(this.biome),
+      postfx: this.postfx,
     });
     this.glideRenderer.resize?.(this.width, this.height, this.currentDpr);
     this.glideRenderer.setSkin?.(this.skinId);
@@ -945,6 +989,8 @@ export class GameRenderer {
       dpr: this.currentDpr,
       softDotTex: this.glowDotTex,
       skinId: this.skinId,
+      envMap: this._getBiomeEnvMap(this.biome),
+      postfx: this.postfx,
     });
     this.puzzleRenderer.resize?.(this.width, this.height, this.currentDpr);
     this.puzzleRenderer.setSkin?.(this.skinId);
@@ -960,7 +1006,8 @@ export class GameRenderer {
       dpr: this.currentDpr,
       skinId: this.skinId,
       blasterFxId: this.blasterFxId,
-      envMap: this.envTex,
+      envMap: this._getBiomeEnvMap(this.biome),
+      postfx: this.postfx,
       softDotTex: this.glowDotTex,
     });
     this.skimmerRenderer.resize?.(this.width, this.height, this.currentDpr);
@@ -976,10 +1023,13 @@ export class GameRenderer {
       width: this.width,
       height: this.height,
       dpr: this.currentDpr,
-      envMap: this.envTex,
+      skinId: this.skinId,
+      envMap: this._getBiomeEnvMap(this.biome),
+      postfx: this.postfx,
       softDotTex: this.glowDotTex,
     });
     this.vaultRenderer.resize?.(this.width, this.height, this.currentDpr);
+    this.vaultRenderer.setSkin?.(this.skinId);
     this.vaultRenderer.prewarm?.();
     return this.vaultRenderer;
   }
@@ -1480,14 +1530,17 @@ export class GameRenderer {
   }
 
   _renderWithComposer(scene, camera, opts) {
-    if (this.usePostFX && this.postfx && !this.postfx.isBypassed) {
+    if (this.usePostFX && this.postfx && this.postfx.enabled) {
       try {
+        this.postfxActive = true;
         this.postfx.render(scene, camera, opts);
         return;
       } catch {
         this.postfx = null;
+        this.postfxActive = false;
       }
     }
+    this.postfxActive = false;
     this.webgl.setRenderTarget(null);
     this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
     this.webgl.toneMappingExposure = 1.08 + (opts?.purification ? opts.purification * 0.05 : 0) + (opts?.flash ? opts.flash * 0.14 : 0);
@@ -1521,10 +1574,12 @@ export class GameRenderer {
     if (!skinId || this.skinId === skinId) return;
     this.skinId = skinId;
     this.gatewayRig?.setSkin?.(skinId);
+    this._coreDescentCtx?.gatewayRig?.setSkin?.(skinId);
     this.subRenderer?.setSkin?.(skinId);
     this.glideRenderer?.setSkin?.(skinId);
     this.puzzleRenderer?.setSkin?.(skinId);
     this.skimmerRenderer?.setSkin?.(skinId);
+    this.vaultRenderer?.setSkin?.(skinId);
   }
 
   setBlasterFx(fxId) {
@@ -1620,6 +1675,10 @@ export class GameRenderer {
       this.towerCam.aspect = aspect;
       this.towerCam.updateProjectionMatrix();
     }
+    if (this._coreDescentCtx?.camera) {
+      this._coreDescentCtx.camera.aspect = aspect;
+      this._coreDescentCtx.camera.updateProjectionMatrix();
+    }
   }
 
   renderScene(state) {
@@ -1675,13 +1734,13 @@ export class GameRenderer {
     this.keyLight = new THREE.DirectionalLight('#fff3d1', 2.52);
     this.keyLight.position.set(11.2, 14.5, 11.4);
     this.keyLight.castShadow = true;
-    this.keyLight.shadow.mapSize.set(512, 512);
+    this.keyLight.shadow.mapSize.set(1024, 1024);
     this.keyLight.shadow.camera.near = 3.0;
-    this.keyLight.shadow.camera.far = 24.0;
-    this.keyLight.shadow.camera.left = -3.75;
-    this.keyLight.shadow.camera.right = 3.75;
-    this.keyLight.shadow.camera.top = 3.75;
-    this.keyLight.shadow.camera.bottom = -3.75;
+    this.keyLight.shadow.camera.far = 28.0;
+    this.keyLight.shadow.camera.left = -5.2;
+    this.keyLight.shadow.camera.right = 5.2;
+    this.keyLight.shadow.camera.top = 5.2;
+    this.keyLight.shadow.camera.bottom = -5.2;
     this.keyLight.shadow.bias = -0.00055;
     this.keyLight.shadow.normalBias = 0.022;
     this.towerScene.add(this.keyLight);
@@ -1807,8 +1866,260 @@ export class GameRenderer {
     this._initWildlifeLagoon();
     this.towerScene.add(this.wildlifeLagoonGroup);
 
+    // Round 6: Title Screen Carved Sun-Stone Pedestal, Hydro-Overcharge Aura, Hydro-Ring Speed Gates & Exterior Floodgate Surge FX
+    this.titlePedestalGroup = this._buildTitlePedestal();
+    this.towerScene.add(this.titlePedestalGroup);
+
+    this.overchargeAuraGroup = this._buildOverchargeAura();
+    this.towerScene.add(this.overchargeAuraGroup);
+
+    this.hydroRingGroup = new THREE.Group();
+    this.hydroRingPool = [];
+    this.towerScene.add(this.hydroRingGroup);
+
+    this.floodgateSurgeGroup = this._buildFloodgateSurge();
+    this.towerScene.add(this.floodgateSurgeGroup);
+
     // Round 4: Pooled 7-Enemy Personality Visual Tells & Mortar Trailing Droplets (ZERO PointLights, <= 2 draw calls!)
     this._initEnemyTellVfxPools();
+  }
+
+  _buildTitlePedestal() {
+    const g = new THREE.Group();
+    g.visible = false;
+    const stoneMat = new THREE.MeshStandardMaterial({
+      color: '#d4a373',
+      roughness: 0.52,
+      metalness: 0.14,
+    });
+    const goldMat = new THREE.MeshStandardMaterial({
+      color: '#f5b83d',
+      emissive: '#78440e',
+      emissiveIntensity: 0.24,
+      roughness: 0.26,
+      metalness: 0.84,
+    });
+    const inlayMat = new THREE.MeshBasicMaterial({
+      color: '#5efce8',
+      transparent: true,
+      opacity: 0.72,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    const plinth = new THREE.Mesh(new THREE.CylinderGeometry(0.86, 1.02, 0.22, 24), stoneMat);
+    plinth.position.y = -0.11;
+    plinth.receiveShadow = true;
+
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.87, 0.036, 10, 32), goldMat);
+    rim.rotation.x = Math.PI * 0.5;
+    rim.position.y = -0.015;
+
+    const glowRing = new THREE.Mesh(new THREE.RingGeometry(0.56, 0.78, 32), inlayMat);
+    glowRing.rotation.x = -Math.PI * 0.5;
+    glowRing.position.y = 0.008;
+
+    const hopBurstRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.62, 0.04, 10, 28),
+      new THREE.MeshBasicMaterial({
+        color: '#fde047',
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    hopBurstRing.rotation.x = Math.PI * 0.5;
+    hopBurstRing.position.y = 0.22;
+
+    g.add(plinth, rim, glowRing, hopBurstRing);
+    g.userData = { glowRing, hopBurstRing };
+    return g;
+  }
+
+  _buildOverchargeAura() {
+    const g = new THREE.Group();
+    g.visible = false;
+    const matA = new THREE.MeshBasicMaterial({
+      color: '#22f5e6',
+      transparent: true,
+      opacity: 0.62,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const matB = new THREE.MeshBasicMaterial({
+      color: '#fde047',
+      transparent: true,
+      opacity: 0.48,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const ringA = new THREE.Mesh(new THREE.TorusGeometry(0.66, 0.032, 8, 28), matA);
+    ringA.rotation.x = Math.PI * 0.42;
+    const ringB = new THREE.Mesh(new THREE.TorusGeometry(0.54, 0.024, 8, 24), matB);
+    ringB.rotation.x = -Math.PI * 0.36;
+    g.add(ringA, ringB);
+    g.userData = { ringA, ringB, matA, matB };
+    return g;
+  }
+
+  _buildHydroRingNode() {
+    const g = new THREE.Group();
+    g.visible = false;
+    const outerMat = new THREE.MeshStandardMaterial({
+      color: '#f5b83d',
+      emissive: '#0ea5e9',
+      emissiveIntensity: 0.48,
+      roughness: 0.22,
+      metalness: 0.84,
+    });
+    const innerMat = new THREE.MeshBasicMaterial({
+      color: '#5efce8',
+      transparent: true,
+      opacity: 0.78,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const outer = new THREE.Mesh(new THREE.TorusGeometry(0.52, 0.048, 10, 26), outerMat);
+    const inner = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.022, 8, 24), innerMat);
+    const halo = new THREE.Sprite(this.sharedHaloSpriteMat);
+    halo.scale.set(1.28, 1.28, 1);
+    g.add(outer, inner, halo);
+    g.userData = { outer, inner, halo };
+    return g;
+  }
+
+  _buildFloodgateSurge() {
+    const g = new THREE.Group();
+    g.visible = false;
+    const colMat = new THREE.MeshBasicMaterial({
+      map: this.glowDotTex,
+      color: '#38bdf8',
+      transparent: true,
+      opacity: 0.72,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const coreMat = new THREE.MeshBasicMaterial({
+      map: this.glowDotTex,
+      color: '#ccfbf1',
+      transparent: true,
+      opacity: 0.82,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: '#5efce8',
+      transparent: true,
+      opacity: 0.84,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    const columns = [];
+    for (let i = 0; i < 3; i++) {
+      const ang = (i - 1) * 0.42;
+      const r = TOWER_RADIUS + 0.78;
+      const colMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.56, 14, 14, 1, true), colMat);
+      colMesh.position.set(Math.sin(ang) * r, 7, Math.cos(ang) * r);
+      const innerMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.28, 14, 10, 1, true), coreMat);
+      innerMesh.position.copy(colMesh.position);
+      g.add(colMesh, innerMesh);
+      columns.push({ colMesh, innerMesh, baseAng: ang });
+    }
+
+    const waveRings = [];
+    for (let k = 0; k < 3; k++) {
+      const wr = new THREE.Mesh(new THREE.TorusGeometry(TOWER_RADIUS + 0.96, 0.08, 10, 40), ringMat);
+      wr.rotation.x = Math.PI * 0.5;
+      g.add(wr);
+      waveRings.push(wr);
+    }
+
+    g.userData = { columns, waveRings, colMat, coreMat, ringMat };
+    return g;
+  }
+
+  _syncHydroRings(rings, effCamCol, focusFloor, fh, time, dropY, hidden, archHasRings) {
+    if (!this.hydroRingGroup) return;
+    const list = !hidden && Array.isArray(rings) ? rings : [];
+    while (this.hydroRingPool.length < list.length) {
+      const node = this._buildHydroRingNode();
+      this.hydroRingGroup.add(node);
+      this.hydroRingPool.push(node);
+    }
+    for (let i = 0; i < this.hydroRingPool.length; i++) {
+      const node = this.hydroRingPool[i];
+      if (i >= list.length || list[i].collected) {
+        node.visible = false;
+        continue;
+      }
+      const rg = list[i];
+      const theta = wrapAngle(((rg.col ?? 0) + 0.5 - effCamCol) * COL_ANGLE);
+      if (Math.cos(theta) < -0.08 || Math.abs((rg.floor ?? 0) - focusFloor) > 5.0) {
+        node.visible = false;
+        continue;
+      }
+      node.visible = true;
+      const r = TOWER_RADIUS + LEDGE_STAND_OFFSET;
+      node.position.set(
+        r * Math.sin(theta),
+        (rg.floor ?? 0) * fh + 0.72 + Math.sin(time * 3.4 + i) * 0.07 + dropY,
+        r * Math.cos(theta)
+      );
+      node.rotation.set(0, theta + Math.PI * 0.5, 0);
+      // If towerArchitecture already draws the bronze outer torus, show only our radiant inner shimmer & halo!
+      node.userData.outer.visible = !archHasRings;
+      node.userData.inner.rotation.z = time * 3.2 + i;
+      const pulse = 0.94 + Math.sin(time * 5.2 + i) * 0.08;
+      node.scale.setScalar(pulse);
+    }
+  }
+
+  _syncFloodgateSurge(state, focusFloor, fh, time, dropY, hidden) {
+    if (!this.floodgateSurgeGroup) return 0;
+    const fx = state?.spireFloodgateSurgeFx;
+    const timer = Math.max(
+      Number(state?.floodgateSurgeTimer) || 0,
+      fx?.active ? Math.max(0, (fx.duration || 1.85) - (fx.timer || 0)) : 0
+    );
+    const dur = Math.max(0.5, Number(fx?.duration) || 1.85);
+    if (hidden || timer <= 0.001) {
+      this.floodgateSurgeGroup.visible = false;
+      return 0;
+    }
+
+    const progress = clamp(1 - timer / dur, 0, 1);
+    const env = Math.sin(progress * Math.PI);
+    this.floodgateSurgeGroup.visible = true;
+    const baseY = Math.max(0, (focusFloor - 2.2) * fh) + dropY;
+    this.floodgateSurgeGroup.position.set(0, baseY, 0);
+
+    const ud = this.floodgateSurgeGroup.userData;
+    ud.colMat.opacity = 0.16 + env * 0.62;
+    ud.coreMat.opacity = 0.22 + env * 0.68;
+    ud.ringMat.opacity = 0.20 + env * 0.74;
+
+    for (let i = 0; i < ud.columns.length; i++) {
+      const c = ud.columns[i];
+      const hScale = 0.35 + env * 1.15;
+      c.colMesh.scale.set(0.85 + env * 0.45, hScale, 0.85 + env * 0.45);
+      c.innerMesh.scale.set(0.75 + env * 0.4, hScale * 1.08, 0.75 + env * 0.4);
+      c.colMesh.rotation.y = time * 3.8 * (i % 2 === 0 ? 1 : -1);
+    }
+    for (let k = 0; k < ud.waveRings.length; k++) {
+      const wr = ud.waveRings[k];
+      const u = (progress * 1.8 + k * 0.33) % 1;
+      wr.position.y = u * 11.5;
+      const sc = 0.96 + u * 0.26;
+      wr.scale.set(sc, sc, 1);
+    }
+    return env;
   }
 
   _initEnemyTellVfxPools() {
@@ -2354,16 +2665,21 @@ export class GameRenderer {
       this.wildlifeLagoonGroup.visible = false;
       return;
     }
-    const rawCount = Number(
-      state.rescuedCritterCount ??
-        state.critterCount ??
-        state.prog?.getCritterCount?.() ??
-        state.progression?.getCritterCount?.() ??
-        0
-    ) || 0;
+    const escorts = state.rescuedCritterEscorts || state.watershedFlow?.rescuedThisStage || null;
+    const escortCount = Array.isArray(escorts) ? escorts.length : 0;
+    const rawCount = Math.max(
+      escortCount,
+      Number(
+        state.rescuedCritterCount ??
+          state.critterCount ??
+          state.prog?.getCritterCount?.() ??
+          state.progression?.getCritterCount?.() ??
+          0
+      ) || 0
+    );
     const purify = Number(state.purificationProgress ?? state.tower?.healing ?? 0) || 0;
     const activeCount =
-      rawCount > 0 ? clamp(Math.ceil((rawCount / 30) * 12) + 1, 2, 12) : purify > 0.12 ? 2 : 0;
+      rawCount > 0 ? clamp(Math.max(escortCount, Math.ceil((rawCount / 30) * 12) + 1), 2, 12) : purify > 0.12 ? 2 : 0;
 
     this.wildlifeLagoonGroup.visible = activeCount > 0;
     if (activeCount <= 0) return;
@@ -3300,33 +3616,59 @@ export class GameRenderer {
       ? pBaseCol + Math.sin(time * 0.30) * (0.42 - landBlend * 0.12)
       : camCol;
 
-    // CLOSE-UP ACTION CAMERA (`TOWER_RADIUS = 3.75`, hero stands at `z = 4.21m`):
-    //   - Desktop / Landscape (`aspect >= 1.0`): `fov = 45°`, `camZ = 9.85m` (~5.64m from Gateway)
-    //   - Portrait Phone (`aspect < 1.0`):       `fov = 48°`, `camZ = 11.5m` (~7.29m from Gateway)
+    // Smooth Title Screen pointer gaze, boot greeting wave, and tap-to-hop celebratory bounce timers
+    const gaze = this._titlePointerGaze;
+    gaze.x += (gaze.tx - gaze.x) * Math.min(1, dt * 8.5);
+    gaze.y += (gaze.ty - gaze.y) * Math.min(1, dt * 8.5);
+    if (isTitleShowcase) {
+      if (this._titleWaveTimer > 0) this._titleWaveTimer = Math.max(0, this._titleWaveTimer - dt);
+      if (this._titleHopTimer > 0) this._titleHopTimer = Math.max(0, this._titleHopTimer - dt);
+    }
+
+    // Exterior Spire Floodgate Water-Surge intensity (0..1) for smooth +2.35u camera reveal & hydraulic light sweep
+    const surgeFx = state.spireFloodgateSurgeFx;
+    const surgeRem = Math.max(
+      Number(state.floodgateSurgeTimer) || 0,
+      surgeFx?.active ? Math.max(0, (surgeFx.duration || 1.85) - (surgeFx.timer || 0)) : 0
+    );
+    const surgeDur = Math.max(0.5, Number(surgeFx?.duration) || 1.85);
+    const surgeEnv = !isWardrobe && !isBestiary && !isTitleShowcase && surgeRem > 0.001
+      ? Math.sin(clamp(1 - surgeRem / surgeDur, 0, 1) * Math.PI)
+      : 0;
+
+    // Continuous Aspect-Calibrated Cylindrical Camera Framing (#603 — Single Source of Truth from state.camFloor, ZERO camera snaps!)
+    // Desktop 1920x1080 -> fov 46°, camZ 13.80m (5.43F visible, 15% hero height, full cylinder silhouette!)
+    // Portrait 412x915  -> fov 52°, camZ 15.60m (7.41F visible, 4.05 cols wide, feet at 64% down safely above thumbs!)
     const isPortrait = aspect < 1.0;
-    const gameplayFov = isPortrait ? 48 : 45;
-    const wantFov = isWardrobe || isBestiary ? 44 : isCutscene ? (isPortrait ? 48 : 45) : gameplayFov;
-    if (this.towerCam.fov !== wantFov) {
+    const tallBlend = clamp((0.95 - aspect) / 0.50, 0, 1);
+    const shortLandBlend = clamp((aspect - 1.85) / 0.45, 0, 1) * (this.height < 520 ? 1 : 0);
+    const gameplayFov = 46.0 + tallBlend * 6.0;
+    const wantFov = isWardrobe || isBestiary
+      ? 44
+      : isTitleShowcase
+      ? 42
+      : isCutscene
+      ? (isPortrait ? 47 : 44)
+      : gameplayFov;
+    if (Math.abs(this.towerCam.fov - wantFov) > 0.01) {
       this.towerCam.fov = wantFov;
       this.towerCam.updateProjectionMatrix();
     }
 
-    let camZ = isPortrait ? 11.5 : 9.85;
+    let camZ = 13.80 + tallBlend * 1.80 - shortLandBlend * 1.10 + surgeEnv * 2.35;
 
-    // Anchor gameplay camera vertically directly to Gateway's floor (`hero.floor * fh`) so her soles
-    // always sit cleanly at ~72-75% of viewport height (ZERO bottom clipping on 1080p OR 412x915 portrait!)
-    const rawHeroY = hero ? hero.floor * fh : camFloor * fh;
-    if (this._smoothHeroY === undefined || Math.abs(rawHeroY - this._smoothHeroY) > 4.2) {
-      this._smoothHeroY = rawHeroY;
-    } else {
-      this._smoothHeroY += (rawHeroY - this._smoothHeroY) * Math.min(1, dt * 11.0);
-    }
-    const lookYPlay = this._smoothHeroY + (isPortrait ? 1.24 : 0.93);
-    let camY = this._smoothHeroY + (isPortrait ? 1.40 : 1.09);
+    // Single Source of Truth: drive vertical framing directly from `state.camFloor` (hero-feet floor coords!)
+    const resolvedCamFloor = state.camFloor != null ? state.camFloor : (hero ? hero.floor : 0);
+    const baseY = resolvedCamFloor * fh;
+    const distToHero = Math.max(2.0, camZ - (TOWER_RADIUS + LEDGE_STAND_OFFSET));
+    const visH = 2 * distToHero * Math.tan(THREE.MathUtils.degToRad(gameplayFov * 0.5));
+    // Anchor grounded soles at 64% down from top (0.14 * visH below viewport center -> clear above mobile thumb zone!)
+    const lookYPlay = baseY + visH * 0.14 + surgeEnv * 0.85;
+    let camY = lookYPlay + (isPortrait ? 0.42 : 0.36);
     const shake = writeShakeOffset(state.shake, time, this._shakeVec);
 
     if (isBestiary) {
-      // Interactive 3D Bestiary Turntable Camera (extra zoom-out headroom for wide enemies on 412x915 Portrait & towering boss!)
+      // Interactive 3D Bestiary Turntable Camera
       const pFloorY = (hero?.floor || 2) * fh;
       const bFamily = String(bestiarySpec.family || bestiarySpec.type || 'snap_crab').toLowerCase();
       const isBoss = bFamily.includes('warden') || bFamily.includes('boss');
@@ -3342,44 +3684,45 @@ export class GameRenderer {
       const pFloorY = (hero.floor || 0) * fh;
       const wardLand = Math.max(0, Math.min(1, (aspect - 1.05) / 1.0));
       const wZoom = clamp(Number(state.wardrobeZoom ?? this.wardrobePreview.zoom) || 1.0, 0.6, 1.85);
-      // On Portrait (`aspect < 1`), pull camera back & lower lookAt so 100% of Gateway head-to-toe +
-      // turntable halo sits cleanly in upper-center `16%–64%` Y (completely clear above bottom UI cards!)
-      const portDist = isPortrait ? 3.92 : 2.85 + wardLand * 0.50;
-      const wardLookY = pFloorY + (isPortrait ? 0.22 : 0.62);
-      const wardY = pFloorY + (isPortrait ? 0.58 : 0.78 + wardLand * 0.08);
+      const portDist = isPortrait ? 3.88 : 2.82 + wardLand * 0.48;
+      const wardLookY = pFloorY + (isPortrait ? 0.24 : 0.58);
+      const wardY = pFloorY + (isPortrait ? 0.58 : 0.76 + wardLand * 0.08);
       const wardZ = TOWER_RADIUS + LEDGE_STAND_OFFSET + portDist / wZoom;
       this.towerCam.position.set(0, wardY, wardZ);
       this.towerCam.lookAt(0, wardLookY, TOWER_RADIUS + LEDGE_STAND_OFFSET);
     } else if (isTitleShowcase) {
-      // Close-Up Heroic Title Screen Camera (`~9.6m` desktop / `~11.0m` portrait) framing Gateway squarely in center!
+      // Interactive Title Screen Star Showcase: Gateway 2.0 proudly fills ~39–43% of viewport height
+      // on BOTH 1920x1080 desktop AND 412x915 portrait, centered cleanly between Title Crest & Play Medallion!
       const pFloorY = (hero?.floor || 0) * fh;
-      const showcaseZ = isPortrait ? 11.0 : 9.6;
-      const showcaseX = Math.sin(time * 0.30) * 0.34;
-      camY = pFloorY + (isPortrait ? 1.24 : 0.96) + Math.sin(time * 0.55) * 0.04;
-      const lookY = pFloorY + (isPortrait ? 1.08 : 0.84);
+      const starDist = isPortrait ? 4.52 : 4.28;
+      const showcaseZ = TOWER_RADIUS + LEDGE_STAND_OFFSET + starDist;
+      const showcaseX = Math.sin(time * 0.36) * 0.22 + gaze.x * 0.18;
+      const lookY = pFloorY + (isPortrait ? 0.56 : 0.62);
+      camY = lookY + 0.16 + Math.sin(time * 0.65) * 0.03 - gaze.y * 0.08;
       camZ = showcaseZ;
       this.towerCam.position.set(showcaseX, camY, showcaseZ);
-      this.towerCam.lookAt(0, lookY, TOWER_RADIUS + LEDGE_STAND_OFFSET);
+      this.towerCam.lookAt(gaze.x * 0.06, lookY, TOWER_RADIUS + LEDGE_STAND_OFFSET);
     } else if (isCutscene) {
+      // Hero-First Cutscene Cinematography: Gateway 2.0 stars in crisp 3/4 foreground!
       const pFloorY = (hero?.floor || 0) * fh;
       const towerTopY = Math.max(18, tower.floors * fh);
-      const heroCloseZ = isPortrait ? 10.6 : 9.0;
-      const breatheY = Math.sin(time * 0.85) * 0.06;
+      const heroCloseZ = TOWER_RADIUS + LEDGE_STAND_OFFSET + (isPortrait ? 4.85 : 4.15);
+      const breatheY = Math.sin(time * 0.85) * 0.05;
 
       if (csKind.includes('purif') || csKind === 'epilogue') {
-        const pull = csKind.includes('purif') ? Math.max(0.25, csEase) : Math.max(0, (csEase - 0.35) / 0.65);
-        const cz = lerp(heroCloseZ, camZ * 1.18, pull);
-        const cx = Math.sin(time * 0.62) * (1.6 * pull + 0.4);
-        camY = lerp(pFloorY + 1.0, towerTopY * 0.48, pull) + breatheY;
+        const pull = csKind.includes('purif') ? Math.max(0.18, csEase) : Math.max(0, (csEase - 0.35) / 0.65);
+        const cz = lerp(heroCloseZ, camZ * 1.05, pull);
+        const cx = Math.sin(time * 0.62) * (1.35 * pull + 0.35);
+        camY = lerp(pFloorY + 0.92, towerTopY * 0.44, pull) + breatheY;
         this.towerCam.position.set(cx, camY, cz);
-        this.towerCam.lookAt(0, lerp(pFloorY + 0.72, towerTopY * 0.36, pull), 0);
+        this.towerCam.lookAt(0, lerp(pFloorY + 0.64, towerTopY * 0.34, pull), (TOWER_RADIUS + LEDGE_STAND_OFFSET) * (1 - pull * 0.65));
       } else {
-        const startY = Math.min(towerTopY * 0.55, pFloorY + 6.5);
-        camY = lerp(startY, pFloorY + 0.92, csEase) + breatheY;
-        const cz = lerp(camZ * 1.08, heroCloseZ, csEase);
-        const lookY = lerp(startY - 1.2, pFloorY + 0.68, csEase);
-        this.towerCam.position.set(Math.sin(time * 0.45) * 0.65 * (1 - csEase), camY, cz);
-        this.towerCam.lookAt(0, lookY, (TOWER_RADIUS + LEDGE_STAND_OFFSET) * csEase);
+        const startY = Math.min(towerTopY * 0.36, pFloorY + 3.4);
+        camY = lerp(startY, pFloorY + 0.82, csEase) + breatheY;
+        const cz = lerp(heroCloseZ + 2.4, heroCloseZ, csEase);
+        const lookY = lerp(pFloorY + 1.45, pFloorY + 0.62, csEase);
+        this.towerCam.position.set(Math.sin(time * 0.45) * 0.48 * (1 - csEase) + 0.38, camY, cz);
+        this.towerCam.lookAt(0, lookY, TOWER_RADIUS + LEDGE_STAND_OFFSET);
       }
     } else {
       this.towerCam.position.set(shake.x, camY + shake.y, camZ);
@@ -3555,8 +3898,8 @@ export class GameRenderer {
         this.collectibleGroup.add(slot.mesh);
       }
       const ct = wrapAngle((colItem.col + 0.5 - effCamCol) * COL_ANGLE);
-      const focusFloor = hero?.floor != null ? hero.floor : camFloor;
-      if (Math.cos(ct) < 0.16 || Math.abs(colItem.floor - focusFloor) > 2.6) {
+      const focusFloor = resolvedCamFloor;
+      if (Math.cos(ct) < -0.08 || Math.abs(colItem.floor - focusFloor) > 5.0) {
         slot.mesh.visible = false;
         continue;
       }
@@ -3574,11 +3917,33 @@ export class GameRenderer {
       }
     }
 
-    // Update 39-Bone `GatewayRig`, Tail-Whip Slash, Tail-Grapple Tether, Shield & Landing Ring
+    // Round 6: Hydro-Ring Speed Gates & 1.85s Exterior Spire Floodgate Water-Surge VFX
+    this._syncHydroRings(
+      tower?.hydroRings || state.hydroRings,
+      effCamCol,
+      resolvedCamFloor,
+      fh,
+      time,
+      topple.active ? tg.position.y : 0,
+      isWardrobe || isBestiary || isTitleShowcase,
+      Boolean(cached?.hasHydroRings)
+    );
+    this._syncFloodgateSurge(
+      state,
+      resolvedCamFloor,
+      fh,
+      time,
+      topple.active ? tg.position.y : 0,
+      isWardrobe || isBestiary || isTitleShowcase
+    );
+
+    // Update Gateway 2.0 `GatewayRig`, Tail-Whip Slash, Tail-Grapple Tether, Tidal Aegis Shield, Overcharge Aura & Title Pedestal
     this.muzzleFlashGroup.visible = false;
     this.wardrobeFxOrb.visible = false;
     this.tailWhipVfxGroup.visible = false;
     this.grappleBeam.visible = false;
+    if (this.titlePedestalGroup) this.titlePedestalGroup.visible = false;
+    if (this.overchargeAuraGroup) this.overchargeAuraGroup.visible = false;
 
     if (hero) {
       const pTheta = wrapAngle((hero.col - effCamCol) * COL_ANGLE);
@@ -3586,14 +3951,18 @@ export class GameRenderer {
       const pr = TOWER_RADIUS + standOff;
       const px = pr * Math.sin(pTheta);
       const pz = pr * Math.cos(pTheta);
-      // Plant Gateway's soles 0.00m FLUSH on stone treads & elevator decks (accounts for bevel top & IdleBreathe foot bone offset!)
-      const footFlushBias = hero.onGround ? -0.044 : 0;
-      const py = hero.floor * fh + footFlushBias + (topple.active ? tg.position.y : 0);
+      // Plant Gateway's soles 0.00m FLUSH on stone treads & elevator decks (Gateway 2.0 has exact min_y === 0.000m!)
+      const isGatewayV2 = typeof this.gatewayRig?.setTargetHeight === 'function';
+      const footFlushBias = hero.onGround ? (isGatewayV2 ? 0 : -0.044) : 0;
+      const hopU = isTitleShowcase && this._titleHopTimer > 0
+        ? 1 - this._titleHopTimer / Math.max(0.01, this._titleHopDuration)
+        : 0;
+      const titleHopY = hopU > 0 ? Math.sin(hopU * Math.PI) * 0.46 : 0;
+      const py = hero.floor * fh + footFlushBias + titleHopY + (topple.active ? tg.position.y : 0);
 
       const inTunnel = Boolean(hero.hidden && hero.tunnelTimer > 0 && !topple.active);
       this.tunnelVortexGroup.visible = inTunnel;
       if (inTunnel) {
-        // Tuck subtly recessed against spire stonework (NOT floating out in mid-air!)
         const vr = TOWER_RADIUS + 0.16;
         this.tunnelVortexGroup.position.set(vr * Math.sin(pTheta), py + 0.64, vr * Math.cos(pTheta));
         this.tunnelVortexGroup.rotation.y = pTheta;
@@ -3606,7 +3975,55 @@ export class GameRenderer {
       const heroVisible = !hero.hidden && !topple.active && !isBestiary;
       this.gatewayRig.group.visible = heroVisible;
       this.landingRingGroup.visible = heroVisible && !isWardrobe && !isCutscene && !isTitleShowcase;
-      this.shieldBubble.visible = Boolean(heroVisible && hero.shield);
+
+      // Active Tidal Aegis / Bubble Shield visibility
+      const hasAegis = Boolean(
+        hero.shield ||
+        state.activeSpirePerks?.tidalAegis === true ||
+        state.activeSpirePerks?.tidalAegis?.active ||
+        state.activeFlowPerks?.tidalAegis?.active ||
+        state.activePowerUp === 'bubble_shield' ||
+        state.activePowerUp?.kind === 'bubble_shield' ||
+        state.activePowerUp?.type === 'bubble_shield'
+      );
+      this.shieldBubble.visible = Boolean(heroVisible && hasAegis && !isTitleShowcase && !isWardrobe);
+
+      // Hydro-Overcharge / Turbo Current / Hydro-Magnet swirling aura rings around Gateway
+      const overchargeOn = Boolean(
+        state.activeSpirePerks?.hydroOvercharge === true ||
+        state.activeSpirePerks?.hydroOvercharge?.active ||
+        state.activeFlowPerks?.hydroOvercharge?.active ||
+        state.activePowerUp === 'turbo_current' ||
+        state.activePowerUp?.kind === 'turbo_current' ||
+        state.activePowerUp?.type === 'turbo_current' ||
+        state.activePowerUp === 'hydro_magnet' ||
+        state.activePowerUp?.kind === 'hydro_magnet' ||
+        state.activePowerUp?.type === 'hydro_magnet'
+      );
+      if (this.overchargeAuraGroup && heroVisible && overchargeOn && !isTitleShowcase && !isWardrobe) {
+        this.overchargeAuraGroup.visible = true;
+        this.overchargeAuraGroup.position.set(px, py + 0.58, pz);
+        this.overchargeAuraGroup.userData.ringA.rotation.y = time * 3.8;
+        this.overchargeAuraGroup.userData.ringA.rotation.z = time * 2.1;
+        this.overchargeAuraGroup.userData.ringB.rotation.y = -time * 4.4;
+        this.overchargeAuraGroup.userData.ringB.rotation.z = -time * 1.9;
+      }
+
+      // Carved Sun-Stone Balcony Pedestal underneath Gateway 2.0 on the Title Screen Star Showcase!
+      if (this.titlePedestalGroup && heroVisible && isTitleShowcase) {
+        this.titlePedestalGroup.visible = true;
+        this.titlePedestalGroup.position.set(px, hero.floor * fh, pz);
+        this.titlePedestalGroup.userData.glowRing.rotation.z = time * 0.55;
+        const burst = this.titlePedestalGroup.userData.hopBurstRing;
+        if (hopU > 0) {
+          burst.material.opacity = Math.sin(hopU * Math.PI) * 0.85;
+          const bScale = 0.85 + hopU * 1.15;
+          burst.scale.set(bScale, bScale, 1);
+          burst.position.y = 0.12 + hopU * 0.72;
+        } else {
+          burst.material.opacity = 0;
+        }
+      }
 
       // Show illuminated Pelagian Turntable Halo FLUSH right on top of the stone deck underneath Gateway / Bestiary!
       if (this.turntableHalo) {
@@ -3621,19 +4038,25 @@ export class GameRenderer {
       }
 
       if (heroVisible) {
-        // 1.28x Hero Visual Stature (`1.185 * 1.28 = 1.517u`, cleanly clearing `1.66u` elevator hoist yokes!)
-        const heroScale = isWardrobe ? 1.12 : 1.28;
+        // Gateway 2.0 (#611): auto-normalized internally to 1.22m when scale === 1.0 (0.97 Wardrobe, 1.12 Title Showcase).
+        // Legacy fallback before Gateway 2.0 merges: 1.04 gameplay (1.232m), 1.00 Wardrobe, 1.15 Title Showcase.
+        const heroScale = isGatewayV2
+          ? (isWardrobe ? 0.97 : isTitleShowcase ? 1.12 : 1.0)
+          : (isWardrobe ? 1.0 : isTitleShowcase ? 1.15 : 1.04);
         this.gatewayRig.group.scale.setScalar(heroScale);
         this.gatewayRig.group.position.set(px, py, pz);
 
-        // Interactive 360° Sanctuary Turntable Orbit (`state.wardrobeOrbitYaw` / `setWardrobePreview`)
+        // Interactive 360° Sanctuary Turntable Orbit & Title Star Gaze/Hop Twirl!
         const reqWardYaw = state.wardrobeOrbitYaw ?? this.wardrobePreview.yaw;
         if (isWardrobe) {
           const targetYaw = reqWardYaw != null ? Number(reqWardYaw) : Math.sin(time * 0.85) * 0.55;
           this._wardrobeYawSmooth += (targetYaw - this._wardrobeYawSmooth) * Math.min(1, dt * 14);
           this.gatewayRig.group.rotation.y = pTheta + this._wardrobeYawSmooth;
+        } else if (isTitleShowcase) {
+          const hopSpin = hopU > 0 ? hopU * TWO_PI : 0;
+          this.gatewayRig.group.rotation.y = pTheta + gaze.x * 0.34 + Math.sin(time * 0.75) * 0.14 + hopSpin;
         } else {
-          this.gatewayRig.group.rotation.y = pTheta + (isTitleShowcase ? Math.sin(time * 0.65) * 0.22 : 0);
+          this.gatewayRig.group.rotation.y = pTheta;
         }
 
         const mf = Math.max(0, Number(hero.muzzleFlash || hero.hydroFlash) || 0);
@@ -3645,6 +4068,13 @@ export class GameRenderer {
         const animClipMap = {
           idle: 'IdleBreathe',
           idlebreathe: 'IdleBreathe',
+          idlecurious: 'IdleCurious',
+          curious: 'IdleCurious',
+          edgeteeter: 'EdgeTeeter',
+          teeter: 'EdgeTeeter',
+          springsomersault: 'SpringSomersault',
+          somersault: 'SpringSomersault',
+          wetshake: 'WetShake',
           run: 'FluidRun',
           fluidrun: 'FluidRun',
           tailwhip: 'TailWhip',
@@ -3656,6 +4086,7 @@ export class GameRenderer {
           coredive: 'CoreDive',
           dive: 'CoreDive',
           celebrate: 'Celebrate',
+          herocelebrate: 'Celebrate',
           victory: 'Celebrate',
           hydrocast: 'HydroCast',
           cast: 'HydroCast',
@@ -3663,13 +4094,20 @@ export class GameRenderer {
           wallscamper: 'WallScamper',
         };
         const finalAnim = resolvedAnim ? (animClipMap[resolvedAnim] || rawWardAnim || hero.anim || null) : null;
+        const heroMood = isTitleShowcase
+          ? (this._titleHopTimer > 0 ? 'joyful' : this._titleWaveTimer > 0 ? 'curious' : 'happy')
+          : (hero.mood || state.gatewayMood || (hero.hurtTimer > 0 ? 'hurt' : whipT > 0.02 ? 'determined' : 'happy'));
 
         this.gatewayRig.update(dt, {
           time,
           vx: isWardrobe && finalAnim === 'FluidRun' ? 3.2 : hero.vx || 0,
-          vy: hero.vy || 0,
+          vy: isTitleShowcase && hopU > 0 ? Math.cos(hopU * Math.PI) * 5.2 : hero.vy || 0,
           facing: hero.facing || 1,
-          onGround: isWardrobe && (finalAnim === 'FrillGlide' || finalAnim === 'FreeSwim' || finalAnim === 'CoreDive') ? false : Boolean(hero.onGround),
+          onGround: isTitleShowcase
+            ? hopU <= 0
+            : isWardrobe && (finalAnim === 'FrillGlide' || finalAnim === 'FreeSwim' || finalAnim === 'CoreDive')
+            ? false
+            : Boolean(hero.onGround),
           onElevator: hero.onElevator,
           onStairs: Boolean(hero.onStairs),
           stairSlope: hero.stairSlope ?? hero.stairDir ?? 0,
@@ -3677,7 +4115,7 @@ export class GameRenderer {
           isSwimming: Boolean(hero.isSwimming || finalAnim === 'FreeSwim'),
           coreDive: Boolean(finalAnim === 'CoreDive'),
           tailWhipTimer: isWardrobe && finalAnim === 'TailWhip' ? 0.3 : whipT,
-          frillFlare: isWardrobe && finalAnim === 'FrillGlide' ? 1.0 : hero.frillFlare || 0,
+          frillFlare: isWardrobe && finalAnim === 'FrillGlide' ? 1.0 : hero.frillFlare || (overchargeOn ? 0.35 : 0),
           squashX: hero.squashX || 1,
           squashY: hero.squashY || 1,
           landImpact: hero.landImpact || 0,
@@ -3689,6 +4127,15 @@ export class GameRenderer {
           invuln: isWardrobe || isCutscene || isTitleShowcase || state.mode === 'title' ? 0 : hero.invuln || 0,
           enteringDoor: hero.enteringDoor || 0,
           anim: finalAnim,
+          mood: heroMood,
+          edgeTeeter: Number(hero.edgeTeeter) || 0,
+          wetShakeTimer: Number(hero.wetShakeTimer) || 0,
+          springSomersault: Boolean(hero.springSomersault || (hero.steamBoostActive && !hero.onGround && hero.vy > -1.0)),
+          lookTarget: hero.lookTarget || null,
+          pointerGaze: isTitleShowcase ? { x: gaze.x, y: gaze.y } : null,
+          titleShowcase: isTitleShowcase,
+          titleWave: isTitleShowcase && this._titleWaveTimer > 0,
+          titleHop: isTitleShowcase && this._titleHopTimer > 0,
           cutscene: isCutscene && !csKind.includes('epilogue'),
           victory: state.mode === 'victory' || (isCutscene && (csKind === 'epilogue' || csKind.includes('purif'))),
         });
@@ -3849,8 +4296,8 @@ export class GameRenderer {
       } else {
         this.enemyVisuals.setBestiaryShowcase?.({ active: false });
         this._enemyExtraOpts.enemyProjectiles = state.enemyProjectiles || null;
-        this._enemyExtraOpts.heroFloor = hero?.floor != null ? hero.floor : camFloor;
-        this._enemyExtraOpts.camFloor = this._enemyExtraOpts.heroFloor;
+        this._enemyExtraOpts.heroFloor = hero?.floor != null ? hero.floor : resolvedCamFloor;
+        this._enemyExtraOpts.camFloor = resolvedCamFloor;
         this.enemyVisuals.syncEnemies(
           state.enemies,
           effCamCol,
@@ -3871,7 +4318,7 @@ export class GameRenderer {
       fh,
       time,
       topple.active ? tg.position.y : 0,
-      hero?.floor != null ? hero.floor : camFloor,
+      resolvedCamFloor,
       isWardrobe || isBestiary
     );
 
@@ -3914,7 +4361,11 @@ export class GameRenderer {
           }
         }
       }
-      if (bestDist < 12.0) {
+      if (surgeEnv > 0.04) {
+        this.archAccentLight.color.set('#5efce8');
+        this.archAccentLight.intensity = (2.4 + surgeEnv * 3.2) * lightMult;
+        this.archAccentLight.position.set(0, Math.max(0.8, resolvedCamFloor * fh + surgeEnv * 4.5), TOWER_RADIUS + 1.4);
+      } else if (bestDist < 12.0) {
         this.archAccentLight.color.set(poolHex);
         this.archAccentLight.intensity = 1.65 * lightMult;
         this.archAccentLight.position.set(poolX, poolY, poolZ);
@@ -3999,12 +4450,13 @@ export class GameRenderer {
       }
     }
 
-    // Wave 4: Joyful Rescued Sea Turtles & River Otters swimming & leaping in the Title Sanctuary Lagoon!
+    // Living Rescued Sea Turtles & River Otters swimming & cheering in the Title Lagoon AND at the Spire Spawn Quay!
+    const nearSpireDock = !isWardrobe && !isBestiary && !topple.active && resolvedCamFloor <= 3.6;
     this._updateWildlifeLagoon(
       state,
       time,
       waterY,
-      Boolean(isTitleShowcase && !isWardrobe && !isBestiary && !topple.active)
+      Boolean((isTitleShowcase || nearSpireDock) && !isWardrobe && !isBestiary && !topple.active)
     );
 
     this._syncParticles(
@@ -4053,18 +4505,622 @@ export class GameRenderer {
     });
   }
 
+  _ensureCoreDescentScene() {
+    if (this._coreDescentCtx) return this._coreDescentCtx;
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#0c3858');
+    scene.fog = new THREE.Fog('#0e4469', 14, 74);
+    const env = this._getBiomeEnvMap(this.biome);
+    if (env) {
+      scene.environment = env;
+      scene.environmentIntensity = 0.95;
+    }
+
+    const aspect = Math.max(0.38, this.width / Math.max(1, this.height));
+    const camera = new THREE.PerspectiveCamera(56, aspect, 0.12, 110);
+    camera.position.set(0, 0.35, 5.2);
+    camera.lookAt(0, 0, -18);
+
+    // Brilliantly Lit 3-Zone Lighting Rig (ZERO pitch-black tunnel!)
+    const hemi = new THREE.HemisphereLight('#7dd3fc', '#c26d2a', 1.38);
+    const sunIntake = new THREE.DirectionalLight('#fff3c4', 2.25);
+    sunIntake.position.set(4.5, 6.5, 10.5);
+    const rimBronze = new THREE.DirectionalLight('#38bdf8', 1.45);
+    rimBronze.position.set(-6.0, -4.0, 4.0);
+    const heroKey = new THREE.PointLight('#5efce8', 2.6, 12.0, 1.4);
+    heroKey.position.set(0, 1.1, 2.2);
+    const bedrockGlow = new THREE.PointLight('#fde047', 1.8, 34.0, 1.3);
+    bedrockGlow.position.set(0, 0, -26);
+    scene.add(hemi, sunIntake, rimBronze, heroKey, bedrockGlow);
+
+    const SHAFT_R = 4.55;
+
+    // 1. Ribbed Mechanical Hydro-Shaft Wall (Open cylinder + glowing copper rings + 8 thick bioluminescent conduits)
+    const shaftGroup = new THREE.Group();
+    const wallMat = new THREE.MeshStandardMaterial({
+      color: '#1b5d7a',
+      emissive: '#0c3b59',
+      emissiveIntensity: 0.45,
+      roughness: 0.38,
+      metalness: 0.56,
+      side: THREE.BackSide,
+    });
+    const wallCyl = new THREE.Mesh(new THREE.CylinderGeometry(SHAFT_R, SHAFT_R, 96, 28, 1, true), wallMat);
+    wallCyl.rotation.x = Math.PI * 0.5;
+    wallCyl.position.z = -36;
+    shaftGroup.add(wallCyl);
+
+    const bronzeRingMat = new THREE.MeshStandardMaterial({
+      color: '#d99a45',
+      emissive: '#6e3b10',
+      emissiveIntensity: 0.32,
+      roughness: 0.28,
+      metalness: 0.84,
+    });
+    const conduitGlowMat = new THREE.MeshStandardMaterial({
+      color: '#5efce8',
+      emissive: '#22f5e6',
+      emissiveIntensity: 1.65,
+      roughness: 0.14,
+      metalness: 0.25,
+    });
+    const hexArchMat = new THREE.MeshStandardMaterial({
+      color: '#38bdf8',
+      emissive: '#0ea5e9',
+      emissiveIntensity: 0.95,
+      roughness: 0.22,
+      metalness: 0.65,
+    });
+
+    const shaftRings = [];
+    const ringGeo = new THREE.TorusGeometry(SHAFT_R - 0.18, 0.18, 10, 28);
+    const hexGeo = new THREE.TorusGeometry(SHAFT_R - 0.38, 0.08, 6, 6);
+    for (let i = 0; i < 16; i++) {
+      const rg = new THREE.Group();
+      const mainR = new THREE.Mesh(ringGeo, bronzeRingMat);
+      const innerHex = new THREE.Mesh(hexGeo, hexArchMat);
+      innerHex.rotation.z = (i % 2) * (Math.PI / 6);
+      rg.add(mainR, innerHex);
+      rg.position.z = 8 - i * 5.6;
+      shaftGroup.add(rg);
+      shaftRings.push(rg);
+    }
+
+    // 8 Thick Bioluminescent Energy Conduits running full length of the hydro-shaft
+    const conduitGeo = new THREE.CylinderGeometry(0.11, 0.11, 96, 10);
+    conduitGeo.rotateX(Math.PI * 0.5);
+    const conduits = [];
+    for (let c = 0; c < 8; c++) {
+      const ang = (c / 8) * TWO_PI;
+      const pipe = new THREE.Mesh(conduitGeo, conduitGlowMat);
+      pipe.position.set(Math.cos(ang) * (SHAFT_R - 0.26), Math.sin(ang) * (SHAFT_R - 0.26), -36);
+      shaftGroup.add(pipe);
+      conduits.push(pipe);
+    }
+
+    // Zone 1 Upper Sunlit Intake God-Ray Beams streaming down from breached Crown Valve!
+    const intakeBeams = new THREE.Group();
+    const beamMat = new THREE.MeshBasicMaterial({
+      map: this.glowDotTex,
+      color: '#bae6fd',
+      transparent: true,
+      opacity: 0.38,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    for (let b = 0; b < 5; b++) {
+      const bAng = (b / 5) * TWO_PI + 0.3;
+      const bm = new THREE.Mesh(new THREE.PlaneGeometry(1.85, 22), beamMat);
+      bm.position.set(Math.cos(bAng) * 1.9, Math.sin(bAng) * 1.9, -4);
+      bm.rotation.set(Math.PI * 0.44, 0, bAng);
+      intakeBeams.add(bm);
+    }
+    shaftGroup.add(intakeBeams);
+    scene.add(shaftGroup);
+
+    // 2. Pooled Spinning 5-Blade Copper-Bronze Hydro-Turbines (7 slots)
+    const turbineGroup = new THREE.Group();
+    const turbinePool = [];
+    const bladeGeo = new THREE.BoxGeometry(3.45, 0.44, 0.28);
+    bladeGeo.translate(1.85, 0, 0);
+    const hubGeo = new THREE.CylinderGeometry(0.55, 0.65, 0.65, 16);
+    hubGeo.rotateX(Math.PI * 0.5);
+    const turbineMat = new THREE.MeshStandardMaterial({
+      color: '#e2a346',
+      emissive: '#78350f',
+      emissiveIntensity: 0.36,
+      roughness: 0.24,
+      metalness: 0.86,
+    });
+    const bladeTipMat = new THREE.MeshBasicMaterial({
+      color: '#fb7185',
+      transparent: true,
+      opacity: 0.85,
+    });
+    const tipGeo = new THREE.BoxGeometry(0.45, 0.48, 0.32);
+    tipGeo.translate(3.42, 0, 0);
+
+    for (let i = 0; i < 8; i++) {
+      const tg = new THREE.Group();
+      tg.visible = false;
+      const hub = new THREE.Mesh(hubGeo, turbineMat);
+      tg.add(hub);
+      for (let b = 0; b < 5; b++) {
+        const bg = new THREE.Group();
+        bg.rotation.z = (b / 5) * TWO_PI;
+        const blade = new THREE.Mesh(bladeGeo, turbineMat);
+        blade.rotation.x = 0.24;
+        const tip = new THREE.Mesh(tipGeo, bladeTipMat);
+        tip.rotation.x = 0.24;
+        bg.add(blade, tip);
+        tg.add(bg);
+      }
+      turbineGroup.add(tg);
+      turbinePool.push(tg);
+    }
+    scene.add(turbineGroup);
+
+    // 3. Pooled Siphon Crystal Locks (Coral-Magenta & Sunlit-Gold Faceted Cores + Warning Halos)
+    const crystalGroup = new THREE.Group();
+    const crystalPool = [];
+    const crystalGeo = new THREE.OctahedronGeometry(0.76, 0);
+    crystalGeo.scale(0.88, 1.48, 0.88);
+    const crystalHaloGeo = new THREE.TorusGeometry(1.12, 0.06, 10, 28);
+    for (let i = 0; i < 6; i++) {
+      const cg = new THREE.Group();
+      cg.visible = false;
+      const cMat = new THREE.MeshStandardMaterial({
+        color: i % 2 === 0 ? '#f472b6' : '#fbbf24',
+        emissive: i % 2 === 0 ? '#ec4899' : '#f59e0b',
+        emissiveIntensity: 1.45,
+        roughness: 0.12,
+        metalness: 0.32,
+        flatShading: true,
+      });
+      const coreMesh = new THREE.Mesh(crystalGeo, cMat);
+      const haloMesh = new THREE.Mesh(
+        crystalHaloGeo,
+        new THREE.MeshBasicMaterial({
+          color: i % 2 === 0 ? '#fbcfe8' : '#fef08a',
+          transparent: true,
+          opacity: 0.78,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        })
+      );
+      cg.add(coreMesh, haloMesh);
+      crystalGroup.add(cg);
+      crystalPool.push({ group: cg, coreMesh, haloMesh, cMat });
+    }
+    scene.add(crystalGroup);
+
+    // 4. Exploding Crystal Shatter Quartz Shards & Expanding Harmonic Shockwave Rings
+    const shatterGroup = new THREE.Group();
+    const shockwavePool = [];
+    const shockGeo = new THREE.TorusGeometry(1.0, 0.11, 10, 32);
+    for (let s = 0; s < 4; s++) {
+      const swMat = new THREE.MeshBasicMaterial({
+        color: '#5efce8',
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const sw = new THREE.Mesh(shockGeo, swMat);
+      sw.visible = false;
+      const shards = [];
+      for (let k = 0; k < 16; k++) {
+        const ang = (k / 16) * TWO_PI;
+        const sh = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.16, 0),
+          new THREE.MeshBasicMaterial({ color: k % 2 === 0 ? '#f472b6' : '#fde047', transparent: true, opacity: 0 })
+        );
+        sh.visible = false;
+        shatterGroup.add(sh);
+        shards.push({ mesh: sh, vx: Math.cos(ang) * (2.6 + (k % 3) * 0.95), vy: Math.sin(ang) * (2.6 + (k % 3) * 0.95), vz: (k % 4 - 1.5) * 1.6 });
+      }
+      shatterGroup.add(sw);
+      shockwavePool.push({ sw, swMat, shards });
+    }
+    scene.add(shatterGroup);
+
+    // 5. Pooled Bioluminescent Hydro-Speed Rings (12 slots) & Downward Hydro-Pulses (12 slots)
+    const ringGroup = new THREE.Group();
+    const ringPool = [];
+    const speedRingGeo = new THREE.TorusGeometry(0.86, 0.085, 10, 26);
+    const speedRingMat = new THREE.MeshStandardMaterial({
+      color: '#5efce8',
+      emissive: '#06b6d4',
+      emissiveIntensity: 1.35,
+      roughness: 0.16,
+      metalness: 0.55,
+    });
+    for (let r = 0; r < 12; r++) {
+      const rm = new THREE.Mesh(speedRingGeo, speedRingMat);
+      rm.visible = false;
+      ringGroup.add(rm);
+      ringPool.push(rm);
+    }
+    scene.add(ringGroup);
+
+    const pulseGroup = new THREE.Group();
+    const pulsePool = [];
+    const pulseGeo = new THREE.SphereGeometry(0.24, 12, 10);
+    const pulseMat = new THREE.MeshBasicMaterial({ color: '#7dd3fc' });
+    for (let p = 0; p < 12; p++) {
+      const pm = new THREE.Mesh(pulseGeo, pulseMat);
+      pm.visible = false;
+      pulseGroup.add(pm);
+      pulsePool.push(pm);
+    }
+    scene.add(pulseGroup);
+
+    // 6. Zone 3 Bedrock Glowing Harmonic Lotus Chamber (rises into view & erupts into purification wave!)
+    const lotusGroup = new THREE.Group();
+    const lotusCoreMat = new THREE.MeshStandardMaterial({
+      color: '#fef08a',
+      emissive: '#22f5e6',
+      emissiveIntensity: 1.85,
+      roughness: 0.12,
+      metalness: 0.45,
+    });
+    const lotusCore = new THREE.Mesh(new THREE.IcosahedronGeometry(1.55, 1), lotusCoreMat);
+    lotusGroup.add(lotusCore);
+    const petalGeo = new THREE.ConeGeometry(0.95, 2.8, 5);
+    const petalMat = new THREE.MeshStandardMaterial({
+      color: '#34d399',
+      emissive: '#f59e0b',
+      emissiveIntensity: 0.92,
+      roughness: 0.22,
+      metalness: 0.62,
+    });
+    const lotusPetals = [];
+    for (let p = 0; p < 8; p++) {
+      const ang = (p / 8) * TWO_PI;
+      const pet = new THREE.Mesh(petalGeo, petalMat);
+      pet.position.set(Math.cos(ang) * 2.1, Math.sin(ang) * 2.1, 0.35);
+      pet.rotation.z = ang - Math.PI * 0.5;
+      pet.rotation.x = 0.58;
+      lotusGroup.add(pet);
+      lotusPetals.push(pet);
+    }
+    const purifySphereMat = new THREE.MeshBasicMaterial({
+      color: '#5efce8',
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const purifySphere = new THREE.Mesh(new THREE.SphereGeometry(1.0, 24, 18), purifySphereMat);
+    lotusGroup.add(purifySphere);
+    scene.add(lotusGroup);
+
+    // 7. Radial Speed-Streak Lines (dynamic opacity on boost / corkscrew drill-spin!)
+    const streakGroup = new THREE.Group();
+    const streakMat = new THREE.MeshBasicMaterial({
+      color: '#e0f7ff',
+      transparent: true,
+      opacity: 0.25,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const streakGeo = new THREE.CylinderGeometry(0.015, 0.032, 3.8, 6);
+    streakGeo.rotateX(Math.PI * 0.5);
+    const streaks = [];
+    for (let st = 0; st < 28; st++) {
+      const ang = (st / 28) * TWO_PI + (st % 3) * 0.12;
+      const rad = 2.4 + (st % 4) * 0.45;
+      const sm = new THREE.Mesh(streakGeo, streakMat);
+      sm.position.set(Math.cos(ang) * rad, Math.sin(ang) * rad, -((st * 3.7) % 34));
+      streakGroup.add(sm);
+      streaks.push({ mesh: sm, ang, rad, offset: (st * 3.7) % 34 });
+    }
+    scene.add(streakGroup);
+
+    // 8. Hero-Lit Gateway 2.0 Dive Rig + Aqua Corkscrew Drill-Vortex Cone
+    const gatewayRig = new GatewayRig(this.skinId);
+    const heroMount = new THREE.Group();
+    heroMount.add(gatewayRig.group);
+    const drillMat = new THREE.MeshBasicMaterial({
+      map: this.hydroWakeTex,
+      color: '#5efce8',
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const drillCone = new THREE.Mesh(new THREE.ConeGeometry(0.92, 2.35, 18, 1, true), drillMat);
+    drillCone.rotation.x = -Math.PI * 0.5;
+    drillCone.position.z = -0.35;
+    heroMount.add(drillCone);
+    scene.add(heroMount);
+
+    this._coreDescentCtx = {
+      scene,
+      camera,
+      hemi,
+      sunIntake,
+      heroKey,
+      bedrockGlow,
+      wallMat,
+      bronzeRingMat,
+      conduitGlowMat,
+      intakeBeams,
+      beamMat,
+      shaftRings,
+      turbinePool,
+      crystalPool,
+      shockwavePool,
+      ringPool,
+      pulsePool,
+      lotusGroup,
+      lotusCore,
+      lotusPetals,
+      purifySphere,
+      purifySphereMat,
+      streaks,
+      streakMat,
+      gatewayRig,
+      heroMount,
+      drillCone,
+      drillMat,
+      smoothFov: 56,
+      lastTime: 0,
+      zoneBgA: new THREE.Color('#0e4a73'), // Zone 1: Sunlit Intake Cerulean
+      zoneBgB: new THREE.Color('#0c3658'), // Zone 2: Bioluminescent Copper Depth
+      zoneBgC: new THREE.Color('#0d5866'), // Zone 3: Golden-Turquoise Bedrock Lotus
+      tmpCol: new THREE.Color(),
+    };
+    return this._coreDescentCtx;
+  }
+
   renderCoreDescentScene(state) {
-    const hero = state.gateway || state.player;
-    const nextSkin = hero?.skinId || state.skinId;
+    const cd = state?.coreDescent || state?.descent;
+    const hero = state?.gateway || state?.player;
+    const nextSkin = hero?.skinId || state?.skinId;
     if (nextSkin && nextSkin !== this.skinId) this.setSkin(nextSkin);
-    const sr = this._ensureSubRenderer();
-    if (!sr) return;
-    const time = state.time ?? state.coreDescent?.timer ?? 0;
+    const ctx = this._ensureCoreDescentScene();
+    if (!ctx) return;
+
+    const time = state?.time ?? cd?.timer ?? 0;
+    const dt = Math.min(0.05, Math.max(0.001, time - (ctx.lastTime || 0) || 0.016));
+    ctx.lastTime = time;
     this._lastTime = time;
-    sr.renderCoreDescent(state, {
+
+    const progress = clamp(Number(cd?.progress) || 0, 0, 1);
+    const depth = Number(cd?.depth) || 0;
+    const totalDepth = Math.max(100, Number(cd?.totalDepth) || 360);
+    const speed = Number(cd?.speed) || 22;
+    const isBoost = (cd?.boostTimer || 0) > 0.02;
+    const isSpin = (cd?.spinTimer || 0) > 0.02 || (cd?.whipTimer || 0) > 0.02;
+
+    // Update camera aspect & dynamic FOV speed-rush (56° cruising -> 68° boost / corkscrew drill-spin!)
+    const aspect = Math.max(0.38, this.width / Math.max(1, this.height));
+    const targetFov = 56 + (isBoost ? 7.5 : 0) + (isSpin ? 4.5 : 0) + progress * 2.5;
+    ctx.smoothFov += (targetFov - ctx.smoothFov) * Math.min(1, dt * 8.0);
+    if (Math.abs(ctx.camera.fov - ctx.smoothFov) > 0.04 || Math.abs(ctx.camera.aspect - aspect) > 0.002) {
+      ctx.camera.fov = ctx.smoothFov;
+      ctx.camera.aspect = aspect;
+      ctx.camera.updateProjectionMatrix();
+    }
+
+    // 3-Zone Architectural Color & Lighting Morph (0-35% Sunlit Intake -> 35-75% Biolume Copper -> 75-100% Bedrock Lotus)
+    if (progress < 0.4) {
+      const t = progress / 0.4;
+      ctx.tmpCol.copy(ctx.zoneBgA).lerp(ctx.zoneBgB, t);
+    } else {
+      const t = clamp((progress - 0.4) / 0.6, 0, 1);
+      ctx.tmpCol.copy(ctx.zoneBgB).lerp(ctx.zoneBgC, t);
+    }
+    ctx.scene.background.copy(ctx.tmpCol);
+    ctx.scene.fog.color.copy(ctx.tmpCol);
+    const env = this._getBiomeEnvMap(this.biome);
+    if (env && ctx.scene.environment !== env) ctx.scene.environment = env;
+
+    // Zone 1 sunlit intake rays fade smoothly as Gateway plunges past 42% depth
+    const intakeAlpha = clamp(1 - progress / 0.45, 0, 1);
+    ctx.intakeBeams.visible = intakeAlpha > 0.02;
+    ctx.beamMat.opacity = intakeAlpha * 0.42;
+    ctx.intakeBeams.rotation.z = time * 0.22;
+    ctx.sunIntake.intensity = 1.65 + intakeAlpha * 1.1;
+    ctx.conduitGlowMat.emissiveIntensity = 1.35 + Math.sin(time * 5.2) * 0.35 + (isBoost ? 0.55 : 0);
+
+    // Scroll shaft copper rings smoothly with dive depth
+    const ringSpacing = 5.6;
+    const scrollZ = (depth * 0.85) % ringSpacing;
+    for (let i = 0; i < ctx.shaftRings.length; i++) {
+      const rg = ctx.shaftRings[i];
+      rg.position.z = 8 + scrollZ - i * ringSpacing;
+      rg.rotation.z = (i % 2 === 0 ? 1 : -1) * time * 0.14;
+    }
+
+    // Hero-Lit Gateway 2.0 at center tube coordinates
+    const tubeScale = 2.75;
+    const gx = (cd?.x || 0) * tubeScale;
+    const gy = -(cd?.y || 0) * tubeScale;
+    const isV2 = typeof ctx.gatewayRig?.setTargetHeight === 'function';
+    ctx.gatewayRig.group.scale.setScalar(isV2 ? 1.05 : 1.08);
+    ctx.heroMount.position.set(gx, gy, -0.4);
+    // Heroic dynamic skydiver bank-and-tuck (nose pointed boldly down the illuminated reactor shaft!)
+    const spinRoll = isSpin ? time * 24 : 0;
+    const bankZ = clamp(-(cd?.vx || 0) * 0.26, -0.58, 0.58) + spinRoll;
+    const pitchX = -Math.PI * 0.42 + clamp((cd?.vy || 0) * 0.14, -0.32, 0.32);
+    ctx.heroMount.rotation.set(pitchX, 0, bankZ);
+
+    ctx.gatewayRig.update(dt, {
       time,
-      shake: state.shake,
-      skinId: this.skinId,
+      vx: cd?.vx || 0,
+      vy: cd?.vy || 0,
+      facing: 1,
+      onGround: false,
+      coreDive: true,
+      tailWhipTimer: cd?.spinTimer || cd?.whipTimer || 0,
+      frillFlare: isBoost ? 0.85 : 0.42,
+      mood: isSpin ? 'determined' : isBoost ? 'joyful' : 'determined',
+      anim: 'CoreDive',
+      invuln: cd?.invuln || 0,
+    });
+
+    // Aqua Corkscrew Hydro-Drill Vortex Cone during spin-attack!
+    ctx.drillCone.visible = isSpin || isBoost;
+    ctx.drillMat.opacity = isSpin ? 0.72 : isBoost ? 0.32 : 0;
+    ctx.drillCone.rotation.y = time * 16;
+    ctx.heroKey.position.set(gx * 0.65, gy * 0.65 + 0.9, 2.2);
+    ctx.heroKey.intensity = isSpin ? 3.8 : 2.6;
+
+    // Camera gently follows Gateway's tube coordinates with micro-shake
+    const shake = writeShakeOffset(state?.shake, time, this._shakeVec);
+    ctx.camera.position.set(gx * 0.36 + shake.x * 0.45, gy * 0.36 + 0.35 + shake.y * 0.45, 5.2);
+    ctx.camera.lookAt(gx * 0.68, gy * 0.68, -16);
+
+    const depthToZ = (targetDepth) => -0.4 - (targetDepth - depth) * 0.72;
+
+    // Sync Spinning 5-Blade Copper Hydro-Turbines
+    const turbines = cd?.turbines || [];
+    for (let i = 0; i < ctx.turbinePool.length; i++) {
+      const tg = ctx.turbinePool[i];
+      if (i >= turbines.length) {
+        tg.visible = false;
+        continue;
+      }
+      const tb = turbines[i];
+      const tz = depthToZ(tb.depth);
+      if (tz > 4.5 || tz < -68) {
+        tg.visible = false;
+        continue;
+      }
+      tg.visible = true;
+      tg.position.set(0, 0, tz);
+      tg.rotation.z = -(tb.rotAngle || 0);
+    }
+
+    // Sync Faceted Glowing Siphon Crystal Locks + Shatter Shards & Expanding Shockwave Rings!
+    const crystals = cd?.crystalLocks || [];
+    let shockIdx = 0;
+    for (let i = 0; i < ctx.crystalPool.length; i++) {
+      const slot = ctx.crystalPool[i];
+      if (i >= crystals.length) {
+        slot.group.visible = false;
+        continue;
+      }
+      const cl = crystals[i];
+      const cz = depthToZ(cl.depth);
+      if (cl.shattered) {
+        slot.group.visible = false;
+        if ((cl.shatterTimer || 0) > 0.01 && shockIdx < ctx.shockwavePool.length) {
+          const pool = ctx.shockwavePool[shockIdx++];
+          const sProg = clamp(1 - cl.shatterTimer / 0.5, 0, 1);
+          const sx = (cl.x || 0) * tubeScale;
+          const sy = -(cl.y || 0) * tubeScale;
+          pool.sw.visible = true;
+          pool.sw.position.set(sx, sy, Math.max(-24, cz));
+          const swScale = 0.8 + sProg * 5.2;
+          pool.sw.scale.set(swScale, swScale, 1);
+          pool.swMat.opacity = (1 - sProg) * 0.92;
+          for (let k = 0; k < pool.shards.length; k++) {
+            const sh = pool.shards[k];
+            sh.mesh.visible = true;
+            sh.mesh.position.set(sx + sh.vx * sProg, sy + sh.vy * sProg, Math.max(-24, cz) + sh.vz * sProg);
+            sh.mesh.rotation.set(time * 9 + k, time * 11, k);
+            sh.mesh.material.opacity = 1 - sProg;
+          }
+        }
+        continue;
+      }
+      if (cz > 4.5 || cz < -68) {
+        slot.group.visible = false;
+        continue;
+      }
+      slot.group.visible = true;
+      slot.group.position.set((cl.x || 0) * tubeScale, -(cl.y || 0) * tubeScale, cz);
+      slot.coreMesh.rotation.set(time * 1.8 + i, time * 2.4, 0);
+      slot.haloMesh.rotation.z = -time * 3.2;
+      const pulse = 1.0 + Math.sin(time * 7 + i) * 0.1;
+      slot.group.scale.setScalar(pulse);
+    }
+    for (let s = shockIdx; s < ctx.shockwavePool.length; s++) {
+      ctx.shockwavePool[s].sw.visible = false;
+      for (let k = 0; k < ctx.shockwavePool[s].shards.length; k++) {
+        ctx.shockwavePool[s].shards[k].mesh.visible = false;
+      }
+    }
+
+    // Sync Bioluminescent Hydro-Speed Rings
+    const rings = cd?.rings || [];
+    for (let i = 0; i < ctx.ringPool.length; i++) {
+      const rm = ctx.ringPool[i];
+      if (i >= rings.length || rings[i].collected) {
+        rm.visible = false;
+        continue;
+      }
+      const rg = rings[i];
+      const rz = depthToZ(rg.depth);
+      if (rz > 4.5 || rz < -66) {
+        rm.visible = false;
+        continue;
+      }
+      rm.visible = true;
+      rm.position.set((rg.x || 0) * tubeScale, -(rg.y || 0) * tubeScale, rz);
+      rm.rotation.z = time * 2.4 + i;
+    }
+
+    // Sync Downward Hydro-Pulses
+    const pulses = cd?.pulses || [];
+    for (let i = 0; i < ctx.pulsePool.length; i++) {
+      const pm = ctx.pulsePool[i];
+      if (i >= pulses.length) {
+        pm.visible = false;
+        continue;
+      }
+      const pl = pulses[i];
+      const pz = depthToZ(pl.depth);
+      if (pz > 4.5 || pz < -68) {
+        pm.visible = false;
+        continue;
+      }
+      pm.visible = true;
+      pm.position.set((pl.x || 0) * tubeScale, -(pl.y || 0) * tubeScale, pz);
+    }
+
+    // Zone 3 Bedrock Harmonic Lotus Chamber & Explosive Purification Wave
+    const lotusZ = Math.max(-52, depthToZ(totalDepth));
+    ctx.lotusGroup.visible = progress > 0.42 || cd?.phase === 'seed_plant';
+    ctx.lotusGroup.position.set(0, 0, lotusZ);
+    ctx.lotusGroup.rotation.z = time * 0.55;
+    const bloomOpen = clamp((progress - 0.55) / 0.45, 0, 1);
+    for (let p = 0; p < ctx.lotusPetals.length; p++) {
+      ctx.lotusPetals[p].rotation.x = 0.35 + bloomOpen * 0.72;
+    }
+    const pWave = Number(cd?.purificationWave) || 0;
+    if (pWave > 0.005) {
+      ctx.purifySphere.visible = true;
+      ctx.purifySphere.scale.setScalar(1.8 + pWave * 22.0);
+      ctx.purifySphereMat.opacity = clamp((1 - pWave * 0.6) * 0.85, 0, 0.85);
+    } else {
+      ctx.purifySphere.visible = false;
+    }
+    ctx.bedrockGlow.position.set(0, 0, Math.min(-6, lotusZ + 4));
+    ctx.bedrockGlow.intensity = 1.6 + bloomOpen * 4.5 + pWave * 6.0;
+
+    // Radial Speed Streaks streaming past camera
+    ctx.streakMat.opacity = isSpin ? 0.58 : isBoost ? 0.46 : 0.22;
+    for (let st = 0; st < ctx.streaks.length; st++) {
+      const s = ctx.streaks[st];
+      const zPos = 6 - ((s.offset - depth * (isBoost ? 1.45 : 1.05)) % 34 + 34) % 34;
+      s.mesh.position.set(Math.cos(s.ang) * s.rad, Math.sin(s.ang) * s.rad, zPos);
+      s.mesh.scale.z = isBoost || isSpin ? 1.65 : 1.0;
+    }
+
+    this._renderWithComposer(ctx.scene, ctx.camera, {
+      biome: 'storm_ocean',
+      purification: Math.max(this.purificationProgress, pWave),
+      bloomThreshold: 0.68,
+      bloomStrength: isSpin ? 0.56 : 0.42,
+      flash: pWave * 0.85,
+      exposure: 1.14,
     });
   }
 
@@ -4082,14 +5138,24 @@ export class GameRenderer {
       sr.showHud = state.showSubHud;
     }
     const time = state.time ?? state.reefSwim?.t ?? state.subStage?.t ?? state.sub?.timer ?? 0;
+    const dt = Math.min(0.05, Math.max(0.001, time - this._lastTime || 0.016));
     this._lastTime = time;
+    const biomeKey = resolvePostFxBiome(state.tower?.theme || this.biome || 'coral_sea');
+    const envMap = this._getBiomeEnvMap(biomeKey);
+    if (sr.scene && envMap && !sr.scene.environment) sr.scene.environment = envMap;
+    this.postfxActive = Boolean(this.usePostFX && this.postfx?.enabled);
     sr.render(state, {
       time,
+      dt,
       particles: state.particles,
       popups: state.popups,
       shake: state.shake,
       skinId: this.skinId,
       blasterFxId: this.blasterFxId,
+      postfx: this.usePostFX ? this.postfx : null,
+      envMap,
+      biomeKey,
+      biomeId: biomeKey,
     });
   }
 
@@ -4103,7 +5169,21 @@ export class GameRenderer {
 
     const sr = this._ensureSkimmerRenderer();
     if (!sr) return;
-    sr.render(state, { postfx: this.postfx });
+    const time = state.time || 0;
+    const dt = Math.min(0.05, Math.max(0.001, time - this._lastTime || 0.016));
+    this._lastTime = time;
+    const biomeKey = resolvePostFxBiome(state.tower?.theme || this.biome || 'canyon_river');
+    const envMap = this._getBiomeEnvMap(biomeKey);
+    if (sr.scene && envMap && !sr.scene.environment) sr.scene.environment = envMap;
+    this.postfxActive = Boolean(this.usePostFX && this.postfx?.enabled);
+    sr.render(state, {
+      time,
+      dt,
+      postfx: this.usePostFX ? this.postfx : null,
+      envMap,
+      biomeKey,
+      biomeId: biomeKey,
+    });
   }
 
   renderGlideScene(state) {
@@ -4118,6 +5198,10 @@ export class GameRenderer {
     const time = state.time || 0;
     const dt = Math.min(0.05, Math.max(0.001, time - this._lastTime || 0.016));
     this._lastTime = time;
+    const biomeKey = resolvePostFxBiome(state.tower?.theme || this.biome || 'alpine_lake');
+    const envMap = this._getBiomeEnvMap(biomeKey);
+    if (gr.scene && envMap && !gr.scene.environment) gr.scene.environment = envMap;
+    this.postfxActive = Boolean(this.usePostFX && this.postfx?.enabled);
 
     const prevAutoClear = this.webgl.autoClear;
     const prevToneMapping = this.webgl.toneMapping;
@@ -4132,6 +5216,10 @@ export class GameRenderer {
         shake: state.shake,
         skinId: this.skinId,
         player: hero,
+        postfx: this.usePostFX ? this.postfx : null,
+        envMap,
+        biomeKey,
+        biomeId: biomeKey,
       });
     } finally {
       this.webgl.setRenderTarget(null);
@@ -4153,6 +5241,10 @@ export class GameRenderer {
     const time = state.time || 0;
     const dt = Math.min(0.05, Math.max(0.001, time - this._lastTime || 0.016));
     this._lastTime = time;
+    const biomeKey = resolvePostFxBiome(state.tower?.theme || this.biome || 'canyon_river');
+    const envMap = this._getBiomeEnvMap(biomeKey);
+    if (pr.scene && envMap && !pr.scene.environment) pr.scene.environment = envMap;
+    this.postfxActive = Boolean(this.usePostFX && this.postfx?.enabled);
 
     const prevAutoClear = this.webgl.autoClear;
     const prevToneMapping = this.webgl.toneMapping;
@@ -4170,6 +5262,10 @@ export class GameRenderer {
         shake: state.shake,
         skinId: this.skinId,
         player: hero,
+        postfx: this.usePostFX ? this.postfx : null,
+        envMap,
+        biomeKey,
+        biomeId: biomeKey,
       });
     } finally {
       this.webgl.setRenderTarget(null);
@@ -4182,9 +5278,27 @@ export class GameRenderer {
 
   renderVaultScene(state) {
     if (!state?.vault && !state?.sanctumVault) return;
+    const hero = state.gateway || state.player;
+    const nextSkin = hero?.skinId || state.skinId;
+    if (nextSkin && nextSkin !== this.skinId) this.setSkin(nextSkin);
     const vr = this._ensureVaultRenderer();
     if (!vr) return;
-    vr.render(state, { postfx: this.postfx });
+    const time = state.time || 0;
+    const dt = Math.min(0.05, Math.max(0.001, time - this._lastTime || 0.016));
+    this._lastTime = time;
+    const biomeKey = resolvePostFxBiome(state.tower?.theme || this.biome || 'canyon_river');
+    const envMap = this._getBiomeEnvMap(biomeKey);
+    if (vr.scene && envMap && !vr.scene.environment) vr.scene.environment = envMap;
+    this.postfxActive = Boolean(this.usePostFX && this.postfx?.enabled);
+    vr.render(state, {
+      time,
+      dt,
+      skinId: this.skinId,
+      postfx: this.usePostFX ? this.postfx : null,
+      envMap,
+      biomeKey,
+      biomeId: biomeKey,
+    });
   }
 
   dispose() {
@@ -4240,6 +5354,19 @@ export class GameRenderer {
     this._disposeCollectibleMesh(this.purificationEruptionGroup, true);
     this._disposeCollectibleMesh(this.landingRingGroup, true);
     this._disposeCollectibleMesh(this.tunnelVortexGroup, true);
+    this._disposeCollectibleMesh(this.titlePedestalGroup, true);
+    this._disposeCollectibleMesh(this.overchargeAuraGroup, true);
+    this._disposeCollectibleMesh(this.floodgateSurgeGroup, true);
+    if (this.hydroRingPool) {
+      for (let i = 0; i < this.hydroRingPool.length; i++) {
+        this._disposeCollectibleMesh(this.hydroRingPool[i], true);
+      }
+      this.hydroRingPool.length = 0;
+    }
+    if (this._coreDescentCtx) {
+      this._coreDescentCtx.gatewayRig?.dispose?.();
+      this._coreDescentCtx = null;
+    }
 
     this.sharedParticleGeo?.dispose();
     this.sharedPulseGeo?.dispose();
