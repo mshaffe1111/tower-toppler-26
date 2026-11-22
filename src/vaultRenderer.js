@@ -972,6 +972,10 @@ export class VaultRenderer {
           m.metalness = Math.min(0.80, m.metalness ?? 0.76);
           m.envMapIntensity = 0.68;
         }
+        if (mn.includes('Basalt')) {
+          m.metalness = Math.min(0.06, m.metalness ?? 0.05);
+          m.roughness = Math.max(0.68, m.roughness ?? 0.74);
+        }
         // Dial back far-left/right rotunda lancet cyan tracery into serene recessed stained-glass glow (Visual QC Gate #641!)
         if (calmLancets && mn.includes('AquaCrystal')) {
           m.emissiveIntensity = 0.36;

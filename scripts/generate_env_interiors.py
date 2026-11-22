@@ -170,9 +170,9 @@ def bake_hammered_bronze_bundle(name="hammered_bronze", base_hex="#dfa64c", dark
     alb = c_dark * (1.0 - t) + c_base * t
     alb = alb * (1.0 - patina[..., None]) + c_pat * patina[..., None]
 
-    hmap = 0.5 + n1 * 0.18 + n2 * 0.08 + brush * 0.03
-    dx = (np.roll(hmap, -1, axis=1) - np.roll(hmap, 1, axis=1)) * 1.4
-    dy = (np.roll(hmap, -1, axis=0) - np.roll(hmap, 1, axis=0)) * 1.4
+    hmap = 0.5 + n1 * 0.24 + n2 * 0.14 + _fbm(sz, 18, 2, 739) * 0.10 + brush * 0.06
+    dx = (np.roll(hmap, -1, axis=1) - np.roll(hmap, 1, axis=1)) * 13.5
+    dy = (np.roll(hmap, -1, axis=0) - np.roll(hmap, 1, axis=0)) * 13.5
     inv = 1.0 / np.sqrt(dx * dx + dy * dy + 1.0)
     nrm = np.stack([0.5 - 0.5 * dx * inv, 0.5 + 0.5 * dy * inv, 0.5 + 0.5 * inv], axis=-1)
 
@@ -186,6 +186,30 @@ def bake_hammered_bronze_bundle(name="hammered_bronze", base_hex="#dfa64c", dark
         "normal": _rgb_to_packed_image(f"{name}_normal", np.clip(nrm, 0.0, 1.0), non_color=True),
         "orm": _rgb_to_packed_image(f"{name}_orm", orm, non_color=True),
     }
+
+
+def _get_gltf_occlusion_group():
+    """Creates/reuses the standard Blender glTF Material Output node group so ORM Red binds `occlusionTexture`."""
+    grp = bpy.data.node_groups.get("glTF Material Output")
+    if grp is None:
+        grp = bpy.data.node_groups.new("glTF Material Output", "ShaderNodeTree")
+        if hasattr(grp, "interface"):
+            grp.interface.new_socket(name="Occlusion", in_out="INPUT", socket_type="NodeSocketFloat")
+        else:
+            grp.inputs.new("NodeSocketFloat", "Occlusion")
+    return grp
+
+
+def _sanitize_stone_orm(orm_img, name, is_basalt=False):
+    """Clamps stone ORM metallic (Blue) to matte stone <= 0.04 (kills metallic basalt P0!) while keeping real cavity AO & roughness."""
+    w, h = orm_img.size[0], orm_img.size[1]
+    arr = np.array(orm_img.pixels[:], dtype=np.float32).reshape((h, w, 4))
+    rgb = np.empty((h, w, 3), dtype=np.float32)
+    rgb[:, :, 0] = np.clip(arr[:, :, 0], 0.45, 1.0)
+    rgb[:, :, 1] = np.clip(arr[:, :, 1], 0.64 if is_basalt else 0.52, 0.95)
+    rgb[:, :, 2] = 0.04  # True matte stone (ZERO chrome basalt!)
+    # _rgb_to_packed_image flips Y ([::-1]) when writing pixels; pass flipped so orientation stays 1:1 with source ORM!
+    return _rgb_to_packed_image(name, rgb[::-1, :, :], non_color=True)
 
 
 def make_arch_pbr_mat(
@@ -205,7 +229,7 @@ def make_arch_pbr_mat(
     nrm_dim=320,
     orm_dim=192,
 ):
-    """Creates a glTF-2.0-compliant Principled PBR material with arch_* maps + Vertex Color AO."""
+    """Creates a glTF-2.0-compliant Principled PBR material with arch_* maps, ORM Occlusion + Vertex Color AO."""
     mat = bpy.data.materials.new(name=name)
     mat.use_nodes = True
     mat.use_backface_culling = not double_sided
@@ -215,6 +239,7 @@ def make_arch_pbr_mat(
     alb_img = None
     nrm_img = None
     orm_img = None
+    is_stone_prefix = prefix is not None and any(k in prefix for k in ("basalt", "sandstone", "travertine", "granite", "limestone"))
     if prefix is not None:
         alb_img = load_arch_image(f"{prefix}_albedo.webp", non_color=False, max_dim=alb_dim)
         nrm_path = os.path.join(ASSETS_TEX_DIR, f"{prefix}_normal.webp")
@@ -222,7 +247,11 @@ def make_arch_pbr_mat(
         if os.path.isfile(nrm_path):
             nrm_img = load_arch_image(f"{prefix}_normal.webp", non_color=True, max_dim=nrm_dim)
         if os.path.isfile(orm_path):
-            orm_img = load_arch_image(f"{prefix}_orm.webp", non_color=True, max_dim=orm_dim)
+            raw_orm = load_arch_image(f"{prefix}_orm.webp", non_color=True, max_dim=orm_dim)
+            if is_stone_prefix:
+                orm_img = _sanitize_stone_orm(raw_orm, f"{name}_stone_orm", is_basalt=("basalt" in prefix))
+            else:
+                orm_img = raw_orm
     elif tex_bundle is not None:
         alb_img = tex_bundle.get("albedo")
         nrm_img = tex_bundle.get("normal")
@@ -277,6 +306,10 @@ def make_arch_pbr_mat(
         if hasattr(sep, "mode"):
             sep.mode = "RGB"
         nt.links.new(to.outputs["Color"], sep.inputs["Color"])
+        # Bind packed ORM Red -> glTF Material Output Occlusion so Three.js receives real aoMap!
+        gltf_occ = nt.nodes.new("ShaderNodeGroup")
+        gltf_occ.node_tree = _get_gltf_occlusion_group()
+        nt.links.new(sep.outputs["Red"], gltf_occ.inputs["Occlusion"])
         if abs(roughness_mul - 1.0) > 0.01:
             math_r = nt.nodes.new("ShaderNodeMath")
             math_r.operation = "MULTIPLY"
@@ -1319,9 +1352,9 @@ def bake_warm_travertine_bundle(name="warm_travertine", light_hex="#f2e1be", war
     alb = c_mid * (1.0 - t) + c_hi * t
     alb = alb * (1.0 - pores[..., None]) + c_vein * pores[..., None]
 
-    hmap = 0.5 + n1 * 0.22 + strata * 0.12 - pores * 0.32
-    dx = (np.roll(hmap, -1, axis=1) - np.roll(hmap, 1, axis=1)) * 2.1
-    dy = (np.roll(hmap, -1, axis=0) - np.roll(hmap, 1, axis=0)) * 2.1
+    hmap = 0.5 + n1 * 0.24 + _fbm(sz, 20, 2, 829) * 0.14 + strata * 0.14 - pores * 0.42
+    dx = (np.roll(hmap, -1, axis=1) - np.roll(hmap, 1, axis=1)) * 13.5
+    dy = (np.roll(hmap, -1, axis=0) - np.roll(hmap, 1, axis=0)) * 13.5
     inv = 1.0 / np.sqrt(dx * dx + dy * dy + 1.0)
     nrm = np.stack([0.5 - 0.5 * dx * inv, 0.5 + 0.5 * dy * inv, 0.5 + 0.5 * inv], axis=-1)
 
