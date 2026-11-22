@@ -3,8 +3,8 @@
 // 6 Hydro-Pulse Styles & 8 Gateway Skins (Created by Matt Shaffer)
 // Pure leaf module (zero internal imports)
 
-const DEFAULT_SETTINGS = Object.freeze({
-  controlMode: 'gesture',           // 'gesture' | 'joystick' | 'dpad' | 'tilt'
+export const DEFAULT_SETTINGS = Object.freeze({
+  controlMode: 'joystick',          // 'joystick' | 'gesture' | 'dpad' | 'tilt'
   zenMode: false,                   // Peaceful / Assist modifier
   muted: false,                     // Master audio mute
   musicEnabled: true,               // Music bus toggle
@@ -1398,6 +1398,7 @@ function createFreshState() {
     collectedCurios: [],
     rescuedCritters: [],
     sanctumSpireClears: [],
+    rescuedCompanions: [],
     skillRanks: {},
     unlockedTrophies: [],
     playedMiniGames: [],
@@ -1528,6 +1529,17 @@ export class ProgressionManager {
           if (CRITTER_BY_ID.has(id)) crSet.add(id);
         }
         fresh.rescuedCritters = Array.from(crSet);
+      }
+
+      if (Array.isArray(parsed.rescuedCompanions)) {
+        fresh.rescuedCompanions = parsed.rescuedCompanions
+          .filter((c) => c && typeof c === 'object' && c.species)
+          .slice(-6)
+          .map((c) => ({
+            species: String(c.species),
+            color: String(c.color || '#5efce8'),
+            name: String(c.name || c.species),
+          }));
       }
 
       if (Array.isArray(parsed.sanctumSpireClears)) {
@@ -2169,6 +2181,31 @@ export class ProgressionManager {
 
   getCritterCount() {
     return this.state.rescuedCritters.length;
+  }
+
+  recordRescuedCompanion(spec = {}) {
+    if (!spec || typeof spec !== 'object') return this.getRescuedCompanions();
+    const species = String(spec.species || 'otter').toLowerCase();
+    const entry = {
+      species,
+      color: String(spec.color || '#5efce8'),
+      name: String(spec.name || species),
+    };
+    if (!Array.isArray(this.state.rescuedCompanions)) {
+      this.state.rescuedCompanions = [];
+    }
+    this.state.rescuedCompanions.push(entry);
+    if (this.state.rescuedCompanions.length > 6) {
+      this.state.rescuedCompanions = this.state.rescuedCompanions.slice(-6);
+    }
+    this._save();
+    return this.getRescuedCompanions();
+  }
+
+  getRescuedCompanions() {
+    return Array.isArray(this.state.rescuedCompanions)
+      ? this.state.rescuedCompanions.map((c) => ({ ...c }))
+      : [];
   }
 
   getCritterStats() {
