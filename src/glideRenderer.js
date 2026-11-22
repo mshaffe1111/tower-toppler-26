@@ -571,11 +571,11 @@ class AdaptiveFrillGliderHero {
     this.liveRig = new GatewayRig(this.skinId);
     this._liveMount = new THREE.Group();
     this._liveMount.rotation.order = 'YXZ';
-    // Sleek aerodynamic horizontal soaring pose (`FrillGlide` already pitches Pelvis +0.48 rad;
-    // +0.54 rad X tilt aligns Gateway horizontally nose-forward +X with tail & scarf streaming cleanly -X!)
-    this._liveMount.rotation.set(0.54, Math.PI * 0.5, 0);
+    // Sleek aerodynamic horizontal soaring pose (`FrillGlide` pelvis + 0.94 rad X tilt aligns Gateway
+    // horizontally nose-forward +X with flared frills, tucked legs & tail streaming horizontally -X!)
+    this._liveMount.rotation.set(0.94, Math.PI * 0.5, 0);
     this._liveMount.scale.setScalar(1.22);
-    this._liveMount.position.set(-0.08, -0.34, 0);
+    this._liveMount.position.set(-0.08, -0.26, 0);
     this.frillWingsGroup.scale.setScalar(1.18);
     this._liveMount.add(this.liveRig.group);
     this.bodyCarrier.add(this._liveMount);
@@ -683,11 +683,11 @@ class AdaptiveFrillGliderHero {
 
     if (this.liveRig?.update) {
       if (this._liveMount) {
-        const diveLean = diveVal * 0.16;
+        const diveLean = diveVal * 0.22;
         this._liveMount.rotation.set(
-          landed ? 0 : 0.54 + diveLean - (gliderState.flare || 0) * 0.24 - liftVal * 0.12 + buffetFlutter * 0.14,
+          landed ? 0 : 0.94 + diveLean - (gliderState.flare || 0) * 0.22 - liftVal * 0.12 + buffetFlutter * 0.12,
           Math.PI * 0.5,
-          landed ? 0 : buffetFlutter * 0.18
+          landed ? 0 : buffetFlutter * 0.14
         );
       }
       try {
@@ -710,6 +710,16 @@ class AdaptiveFrillGliderHero {
               : 'happy',
           frillFlare: landed ? 0.25 : clamp(0.96 + liftVal * 0.32 + buffet * 0.25, 0.65, 1.45),
         });
+        // Stream Gateway 2.0's tail smoothly aft along her horizontal slipstream (eliminates vertical scorpion curl!)
+        if (!landed && this.liveRig.bones) {
+          const b = this.liveRig.bones;
+          const flutter = Math.sin(time * 9.0) * 0.06;
+          if (b.Tail1) b.Tail1.rotateX(-0.92 + flutter * 0.6);
+          if (b.Tail2) b.Tail2.rotateX(-0.28 + Math.sin(time * 9.0 - 0.7) * 0.06);
+          if (b.Tail3) b.Tail3.rotateX(-0.18 + Math.sin(time * 9.0 - 1.4) * 0.05);
+          if (b.Tail4) b.Tail4.rotateX(-0.08 + Math.sin(time * 9.0 - 2.1) * 0.05);
+          if (b.Head) b.Head.rotateX(-0.34); // Lift adorable chin slightly forward to gaze ahead down the canyon!
+        }
         return;
       } catch {
         // Fallback

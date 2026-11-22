@@ -1481,19 +1481,74 @@ export class SubRenderer {
     this.reefBackdrop.position.set(0, 0, -28);
     this.reefScene.add(this.reefBackdrop);
 
-    // Overhead Shimmering Sunlit Snell's-Window Water Surface casting sunlit aqua radiance downward!
+function createFeatheredSnellTex(size = 256) {
+  if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+    const d = new Uint8Array([140, 240, 255, 64]);
+    const t = new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat);
+    t.needsUpdate = true;
+    return t;
+  }
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, size, size);
+  // Soft rippled sunlit zenith radiance that smoothly feathers to alpha=0 on ALL 4 edges (ZERO hard horizon line!)
+  for (let i = 0; i < 28; i++) {
+    const x = ((i * 73 + 31) % 210) + 23;
+    const y = ((i * 53 + 29) % 140) + 55;
+    const rx = 28 + (i % 5) * 14;
+    const ry = 10 + (i % 4) * 6;
+    const g = ctx.createRadialGradient(x, y, 2, x, y, rx);
+    g.addColorStop(0.0, 'rgba(210, 252, 255, 0.36)');
+    g.addColorStop(0.55, 'rgba(94, 240, 255, 0.14)');
+    g.addColorStop(1.0, 'rgba(56, 189, 248, 0.0)');
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(1, ry / rx);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, rx, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+  // Smooth vertical & horizontal edge feather mask guaranteeing 0.00 alpha at every border
+  ctx.globalCompositeOperation = 'destination-in';
+  const vMask = ctx.createLinearGradient(0, 0, 0, size);
+  vMask.addColorStop(0.0, 'rgba(255,255,255,0.0)');
+  vMask.addColorStop(0.28, 'rgba(255,255,255,0.92)');
+  vMask.addColorStop(0.58, 'rgba(255,255,255,0.75)');
+  vMask.addColorStop(1.0, 'rgba(255,255,255,0.0)');
+  ctx.fillStyle = vMask;
+  ctx.fillRect(0, 0, size, size);
+
+  const hMask = ctx.createLinearGradient(0, 0, size, 0);
+  hMask.addColorStop(0.0, 'rgba(255,255,255,0.0)');
+  hMask.addColorStop(0.14, 'rgba(255,255,255,1.0)');
+  hMask.addColorStop(0.86, 'rgba(255,255,255,1.0)');
+  hMask.addColorStop(1.0, 'rgba(255,255,255,0.0)');
+  ctx.fillStyle = hMask;
+  ctx.fillRect(0, 0, size, size);
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+    // Overhead Shimmering Sunlit Snell's-Window Water Surface (edge-feathered -> ZERO horizontal backdrop seam!)
+    this.snellSurfaceTex = createFeatheredSnellTex(256);
     this.snellSurfaceMat = new THREE.MeshBasicMaterial({
-      map: this.causticTex,
-      color: '#b8f8ff',
+      map: this.snellSurfaceTex,
+      color: '#c8fbff',
       transparent: true,
-      opacity: 0.56,
+      opacity: 0.36,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
-    this.snellSurfaceMesh = new THREE.Mesh(new THREE.PlaneGeometry(78, 22), this.snellSurfaceMat);
+    this.snellSurfaceMesh = new THREE.Mesh(new THREE.PlaneGeometry(88, 26), this.snellSurfaceMat);
     this.snellSurfaceMesh.rotation.x = Math.PI * 0.5;
-    this.snellSurfaceMesh.position.set(0, 4.2, -3.5);
+    this.snellSurfaceMesh.position.set(0, 5.2, -5.0);
     this.reefScene.add(this.snellSurfaceMesh);
 
     // Soft Gaussian-feathered sunlit volumetric caustic god-ray shafts (brighter & richer!)
@@ -2798,8 +2853,8 @@ export class SubRenderer {
     const playHalfH = bedW.halfH;
     this.seabedMesh.position.y = bedWorldY - 0.55;
     if (this.snellSurfaceMesh) {
-      this.snellSurfaceMesh.position.y = surfWorldY + 0.55;
-      this.snellSurfaceMat.opacity = 0.50 + Math.sin(time * 2.1) * 0.08;
+      this.snellSurfaceMesh.position.y = surfWorldY + 1.15;
+      this.snellSurfaceMat.opacity = 0.34 + Math.sin(time * 2.1) * 0.05;
     }
 
     const dm = this._dummy;
@@ -2998,6 +3053,14 @@ export class SubRenderer {
       mood: (sw.stun || 0) > 0 ? 'hurt' : dashActive || sonarP > 0.3 ? 'joyful' : 'happy',
       frillFlare: 0.46 + sonarP * 0.50 + (dashActive ? 0.42 : 0) + (stage.ventBoostTimer > 0 ? 0.30 : 0),
     });
+    // Stream Gateway 2.0's tail gracefully aft in a horizontal dolphin-kick wave (never curling upright!)
+    const swimBones = this.reefHero.bones;
+    if (swimBones) {
+      if (swimBones.Tail1) swimBones.Tail1.rotateX(-0.56 + Math.sin(swimPhase) * 0.14);
+      if (swimBones.Tail2) swimBones.Tail2.rotateX(-0.18 + Math.sin(swimPhase - 0.65) * 0.12);
+      if (swimBones.Tail3) swimBones.Tail3.rotateX(-0.12 + Math.sin(swimPhase - 1.3) * 0.10);
+      if (swimBones.Tail4) swimBones.Tail4.rotateX(Math.sin(swimPhase - 1.9) * 0.09);
+    }
 
     // Shimmering Underwater Current Stream Boost Rings (`stage.boostRings`)
     const bRings = stage.boostRings || [];
@@ -3839,6 +3902,7 @@ export class SubRenderer {
     this.coreHero?.dispose();
     if (this._ownDotTex) this.softDotTex?.dispose();
     this.causticTex?.dispose();
+    this.snellSurfaceTex?.dispose();
     this.godRayTex?.dispose();
     this.backdropTex?.dispose();
     this.reefStoneTex?.dispose();
