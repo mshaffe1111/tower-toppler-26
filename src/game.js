@@ -8409,6 +8409,8 @@ export class ToweringWatersGame {
       if (cd.purificationWave >= 1) {
         cd.phase = 'purified';
         if (this.standaloneMiniGame) {
+          sound?.setMiniGameMode?.(null);
+          sound?.spirePurify?.();
           this.mode = 'victory';
           this._syncHud();
           this.cb.onGameOver?.(true, this.score, this.hiScore, this._buildGameOverSummary(true));
@@ -8557,8 +8559,7 @@ export class ToweringWatersGame {
         this.addScore(seedBonus);
         this.addFlowCharge(20, { combo: true });
         this.addShake(11);
-        if (typeof sound?.coreSeedPlant === 'function') sound.coreSeedPlant();
-        else sound?.victory?.();
+        sound?.vaultUnlock?.();
         this.input?.haptic?.([30, 40, 65]);
         this.cb.onBanner?.('HARMONIC WATER SEED PLANTED!', `BEDROCK ANCHOR PURIFIED • +${seedBonus}`);
         this._emitProgEvent('core_descent_complete', {
