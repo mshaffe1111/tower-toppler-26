@@ -11,11 +11,21 @@ import {
   generateProceduralTower,
   verifyTowerSolvable,
   isCanonicalStairStep,
+  PROCEDURAL_SET_PIECE_CHUNKS,
 } from '../src/levels.js';
 import { ToweringWatersGame, FIXED_STEP } from '../src/game.js';
 import { InputController } from '../src/input.js';
 
 vi.mock('three', () => import('../vendor/three/build/three.module.min.js'));
+vi.mock('three/addons/geometries/RoundedBoxGeometry.js', () =>
+  import('../vendor/three/examples/jsm/geometries/RoundedBoxGeometry.js')
+);
+vi.mock('three/addons/loaders/GLTFLoader.js', () =>
+  import('../vendor/three/examples/jsm/loaders/GLTFLoader.js')
+);
+vi.mock('three/addons/utils/BufferGeometryUtils.js', () =>
+  import('../vendor/three/examples/jsm/utils/BufferGeometryUtils.js')
+);
 
 function createMockInput() {
   const state = {
@@ -209,10 +219,10 @@ describe('Round 5 Deliverable 1: Canonical 1:1 Staircase Invariant & isCanonical
     sanctums.forEach((t) => assertCanonicalStairInvariants(t, t.key));
     gauntlets.forEach((t) => assertCanonicalStairInvariants(t, t.key));
 
-    // Specifically verify Campaign Spire 4's (5,2)->(6,3) jump step and Spire 1..10 bonus perches have stairDir === 0
+    // Specifically verify Campaign Spire 4's (5,2)->(6,3) jump step and Spire 1's (5,13)->(6,14) bonus perch have stairDir === 0
     const s4Step = campaign[3].ledges.find((l) => l.col === 5 && l.floor === 2);
     expect(s4Step?.stairDir).toBe(0);
-    const s1PerchEdge = campaign[0].ledges.find((l) => l.col === 12 && l.floor === 16);
+    const s1PerchEdge = campaign[0].ledges.find((l) => l.col === 5 && l.floor === 13);
     expect(s1PerchEdge?.stairDir).toBe(0);
 
     // 30 UTC Daily Tide dates including 2026-11-19
@@ -381,19 +391,23 @@ describe('Round 5 Deliverable 4: Sanctum 6/9/12 Fixes & 100% Solvability Across 
   });
 
   it('verifies 100% solvability across Campaign (1-10), Purist, Master Watershed, Sanctum Trials (1-15 + proc), Warden Gauntlet (1-5 + 120Hz stairs), Daily Tide (30d), Expedition (20), and Flood Rush (20)', () => {
-    // 1-3. Campaign / Purist / Master Watershed share the 10 Crown-Sealed Watershed Spires
+    // 1-3. Campaign / Purist / Master Watershed share the 10 Varied Anti-Repetition Watershed Spires
+    const expectedSealsBySpire = [1, 2, 2, 3, 2, 2, 2, 3, 3, 3];
     for (const mode of ['campaign', 'purist', 'master_watershed']) {
       const towers = createTowers(mode);
       expect(towers).toHaveLength(10);
-      for (const spire of towers) {
+      towers.forEach((spire, idx) => {
         expect(spire.spawnDir).toBe(1);
         const solved = verifyTowerSolvable(spire, { enforceSeals: true, allowSanctumSolve: true });
         expect(solved.solvable, `${mode} ${spire.key} solvable`).toBe(true);
-        expect(solved.crownSealsTotal).toBe(3);
+        expect(solved.crownSealsTotal, `${mode} ${spire.key} seal count`).toBe(expectedSealsBySpire[idx]);
 
-        const bypass = verifyTowerSolvable(spire, { enforceSeals: true, allowSanctumSolve: false });
-        expect(bypass.solvable, `${mode} ${spire.key} zero Sanctum bypass`).toBe(false);
-      }
+        const hasMandatorySanctum = spire.crownSeals.some((s) => s.kind === 'sanctum');
+        if (hasMandatorySanctum) {
+          const bypass = verifyTowerSolvable(spire, { enforceSeals: true, allowSanctumSolve: false });
+          expect(bypass.solvable, `${mode} ${spire.key} zero Sanctum bypass`).toBe(false);
+        }
+      });
     }
 
     // 4. Sanctum Trials (15 handcrafted + 10 procedural)
@@ -717,5 +731,208 @@ describe('Round 5 Deliverable 5 (#575/#576): sparkArch VFX Zero-Crash & Tilt Mod
     }
 
     ctrl.resetState();
+  });
+});
+
+describe('Wave 2 World Variety, Hydro-Rings, Siphon Supply Crates, 18+ Procedural Chunks & Widened 3D Spire Architecture', () => {
+  it('abolishes the uniform 3-seal mold: 10 Campaign Spires span 15F-27F with distinct seals (1-3), varied boss cadence, Hydro-Ring speed lines, glowing Supply Crates & 100% reachable items', () => {
+    const campaign = createCampaignTowers();
+    expect(campaign).toHaveLength(10);
+
+    // Distinct heights spanning 14..28F (no cookie-cutter 20-24F copy-paste!)
+    const heights = campaign.map((t) => t.floors);
+    expect(Math.min(...heights)).toBeGreaterThanOrEqual(14);
+    expect(Math.min(...heights)).toBeLessThanOrEqual(16);
+    expect(Math.max(...heights)).toBeGreaterThanOrEqual(26);
+    expect(Math.max(...heights)).toBeLessThanOrEqual(28);
+    expect(new Set(heights).size).toBeGreaterThanOrEqual(6);
+
+    // Distinct seal counts (1, 2, and 3 seals across the 10 spires)
+    const sealCounts = campaign.map((t) => t.crownSealsTotal);
+    expect(sealCounts[0]).toBe(1); // Spire 1 breezy 1-seal onboarding!
+    expect(new Set(sealCounts)).toEqual(new Set([1, 2, 3]));
+
+    // Boss cadence: Act Bosses on Spires 2, 4, 6, 8, Polar Lock-Keeper on 9, Grand Finale on 10; NO boss on Spires 1, 3, 5, 7!
+    const hasBoss = campaign.map((t) => t.enemies.some((e) => e.type === 'siphon_warden'));
+    expect(hasBoss).toEqual([false, true, false, true, false, true, false, true, true, true]);
+    expect(campaign[9].enemies.find((e) => e.type === 'siphon_warden')?.hp).toBe(4);
+
+    // Every Campaign Spire has >= 6 Hydro-Rings & >= 2 Supply Crates covering all 3 power-up types across the campaign
+    const seenPowerUps = new Set();
+    for (const t of campaign) {
+      expect(Array.isArray(t.hydroRings)).toBe(true);
+      expect(t.hydroRings.length, `${t.key} hydroRings`).toBeGreaterThanOrEqual(6);
+      const supplyCrates = t.ledges.filter((l) => l.type === 'box' && l.powerUp);
+      expect(supplyCrates.length, `${t.key} Supply Crates`).toBeGreaterThanOrEqual(2);
+      for (const sc of supplyCrates) {
+        expect(['turbo_current', 'bubble_shield', 'hydro_magnet']).toContain(sc.powerUp);
+        seenPowerUps.add(sc.powerUp);
+      }
+
+      // Every door, switch, and collectible on every Campaign Spire is 100% reachable
+      const targets = [
+        ...t.doors.map((d) => ({ col: d.col, floor: d.floor, id: d.id })),
+        ...t.switches.map((s) => ({ col: s.col, floor: s.floor, id: s.id })),
+        ...t.collectibles.map((c) => ({ col: c.col, floor: Math.round(c.floor), id: c.id })),
+      ];
+      for (const tgt of targets) {
+        const probe = {
+          ...t,
+          crownSeals: [],
+          doors: [
+            ...t.doors.map((d) => ({ ...d, isExit: false })),
+            { id: '__reach__', col: tgt.col, floor: tgt.floor, isExit: true },
+          ],
+        };
+        expect(
+          verifyTowerSolvable(probe, { enforceSeals: false, allowSanctumSolve: true }).solvable,
+          `${t.key} item ${tgt.id} at (${tgt.col},${tgt.floor}) reachable`
+        ).toBe(true);
+      }
+    }
+    expect(seenPowerUps).toEqual(new Set(['turbo_current', 'bubble_shield', 'hydro_magnet']));
+  });
+
+  it('expands procedural composer to >= 18 distinct architectural set-piece chunks with Hydro-Rings, Supply Crates, 100% solvability & 0 stair mismatches across 90 spires', () => {
+    expect(PROCEDURAL_SET_PIECE_CHUNKS.length).toBeGreaterThanOrEqual(18);
+
+    const seenChunks = new Set();
+    const seenPowerUps = new Set();
+    for (let i = 0; i < 30; i++) {
+      const towers = [
+        createDailyTower(new Date(Date.UTC(2026, 8, 1 + i))),
+        generateProceduralTower({ seed: 120000 + i * 137, index: (i % 10) + 1, difficulty: 1.5, modeHint: 'expedition' }),
+        generateProceduralTower({ seed: 240000 + i * 149, index: (i % 10) + 1, difficulty: 1.5, modeHint: 'flood_rush' }),
+      ];
+      for (const t of towers) {
+        expect(verifyTowerSolvable(t).solvable, `${t.key} solvable`).toBe(true);
+        assertCanonicalStairInvariants(t, t.key);
+        expect(t.hydroRings.length, `${t.key} hydroRings`).toBeGreaterThanOrEqual(4);
+        const crates = t.ledges.filter((l) => l.type === 'box' && l.powerUp);
+        expect(crates.length, `${t.key} Supply Crates`).toBeGreaterThanOrEqual(1);
+        crates.forEach((c) => seenPowerUps.add(c.powerUp));
+        (t.proceduralChunks || []).forEach((ch) => seenChunks.add(ch));
+      }
+    }
+    expect(seenChunks.size).toBeGreaterThanOrEqual(18);
+    expect(seenPowerUps).toEqual(new Set(['turbo_current', 'bubble_shield', 'hydro_magnet']));
+  });
+
+  it('widens VIS_ALT_WINDOW >= 7.0, builds 1:1 visual stairs, 3D Hydro-Rings, glowing Supply Crates & Floodgate Water-Surge Cascade in < 35ms', async () => {
+    const {
+      VIS_ALT_WINDOW,
+      buildDetailedTowerGroup,
+      prewarmArchSurfaces,
+      updateTowerArchitecture,
+      disposeTowerArchitecture,
+      buildArchShaderWarmupGroup,
+    } = await import('../src/towerArchitecture.js');
+
+    expect(VIS_ALT_WINDOW).toBeGreaterThanOrEqual(7.0);
+    expect(VIS_ALT_WINDOW).toBeCloseTo(7.2, 2);
+
+    const gradStub = { addColorStop: () => {} };
+    const ctxProxy = new Proxy(
+      {
+        createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+        getImageData: (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+        createRadialGradient: () => gradStub,
+        createLinearGradient: () => gradStub,
+      },
+      { get: (target, prop) => (prop in target ? target[prop] : () => {}) }
+    );
+    globalThis.document = {
+      createElement: () => ({
+        width: 128,
+        height: 128,
+        getContext: () => ctxProxy,
+      }),
+    };
+
+    prewarmArchSurfaces();
+    const warmGrp = buildArchShaderWarmupGroup();
+    expect(warmGrp.children.length).toBeGreaterThan(10);
+
+    const campaign = createCampaignTowers();
+    // Warm up shared geometry & V8 JIT once (matches startup prewarm)
+    const warmSpire = buildDetailedTowerGroup(campaign[0]);
+    disposeTowerArchitecture(warmSpire);
+
+    let totalBuildMs = 0;
+    for (const spire of campaign) {
+      const t0 = performance.now();
+      const cached = buildDetailedTowerGroup(spire);
+      totalBuildMs += performance.now() - t0;
+
+      // 1:1:1 Canonical Visual Stair Parity against isCanonicalStairStep
+      const canonicalStairs = spire.ledges.filter(
+        (l) =>
+          isCanonicalStairStep(spire.ledges, spire.elevators, l.col, l.floor, 1) ||
+          isCanonicalStairStep(spire.ledges, spire.elevators, l.col, l.floor, -1)
+      );
+      expect(cached.visualStairCount, `${spire.key} 1:1 visual stair parity`).toBe(canonicalStairs.length);
+
+      // 3D Hydro-Rings built 1:1
+      expect(cached.hasEmbeddedHydroRings).toBe(true);
+      expect(cached.hydroRingNodes).toHaveLength(spire.hydroRings.length);
+
+      // Glowing Siphon Supply Crates built for every `l.powerUp` box
+      const expectedCrates = spire.ledges.filter((l) => l.type === 'box' && l.powerUp).length;
+      const builtCrates = cached.ledgeMeshes.filter((m) => m?.userData?.isSupplyCrate).length;
+      expect(builtCrates, `${spire.key} 3D Supply Crates`).toBe(expectedCrates);
+
+      // Exterior Spire Floodgate Water-Surge Cascade hook responds to `state.floodgateSurgeTimer`
+      expect(cached.hasFloodgateSurgeMesh).toBe(true);
+      expect(cached.floodgateSurgeFx.group.visible).toBe(false);
+
+      const liveRings = spire.hydroRings.map((r) => ({ ...r, collected: false }));
+      const liveLedges = spire.ledges.map((l) => ({ ...l, gone: false, visualSlideCol: 0 }));
+
+      // Idle frame: surge hidden, rings visible in front frustum
+      updateTowerArchitecture(
+        cached,
+        {
+          tower: spire,
+          camFloor: 2,
+          camCol: 2.5,
+          ledges: liveLedges,
+          hydroRings: liveRings,
+          floodgateSurgeTimer: 0,
+        },
+        1.0,
+        0.016
+      );
+      expect(cached.floodgateSurgeFx.group.visible).toBe(false);
+
+      // Active Exterior Floodgate Water-Surge frame (`floodgateSurgeTimer > 0`) + collected ring + smashed crate
+      liveRings[0].collected = true;
+      const firstCrateIdx = liveLedges.findIndex((l) => l.type === 'box' && l.powerUp);
+      if (firstCrateIdx >= 0) liveLedges[firstCrateIdx].gone = true;
+      updateTowerArchitecture(
+        cached,
+        {
+          tower: spire,
+          camFloor: 4,
+          camCol: 2.5,
+          ledges: liveLedges,
+          hydroRings: liveRings,
+          floodgateSurgeTimer: 1.25,
+        },
+        1.5,
+        0.016
+      );
+      expect(cached.floodgateSurgeFx.group.visible).toBe(true);
+      expect(cached.floodgateSurgeFx.cascadeMat.uniforms.uIntensity.value).toBeGreaterThan(0.2);
+      expect(cached.floodgateSurgeFx.collarMat.opacity).toBeGreaterThan(0.15);
+      expect(cached.hydroRingNodes[0].group.visible).toBe(false);
+      if (firstCrateIdx >= 0) {
+        expect(cached.ledgeMeshes[firstCrateIdx].visible).toBe(false);
+      }
+
+      disposeTowerArchitecture(cached);
+    }
+
+    const avgBuildMs = totalBuildMs / campaign.length;
+    expect(avgBuildMs).toBeLessThan(35.0);
   });
 });

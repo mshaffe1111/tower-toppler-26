@@ -70,7 +70,7 @@ const BRICK_PROUD = 0.068;
 const CROWN_RIBS = 10;
 const PROP_SPAN_Y = 9.0;
 const TINY_PROP_SPAN_Y = 9.0;
-const VIS_ALT_WINDOW = 3.1;
+export const VIS_ALT_WINDOW = 7.2;
 
 // Zero-allocation scratch math objects for per-frame updates & instancing
 const _m4 = new THREE.Matrix4();
@@ -1172,6 +1172,9 @@ export function prewarmArchSurfaces() {
     const k = kinds[i];
     getSurfaceMaps1024(k, k === 'antique_bronze' ? 1.35 : 0.58);
   }
+  for (const themeKey of Object.keys(BIOME_SPECS)) {
+    getOrBuildWallBlockGeo(themeKey, FLOOR_HEIGHT);
+  }
 }
 
 // ============================================================================
@@ -2065,6 +2068,61 @@ function createHydroBarrierMaterial(isCrimson = true) {
   mat.userData.shared = true;
   HYDRO_BARRIER_MAT_CACHE.set(key, mat);
   return mat;
+}
+
+function createFloodgateSurgeCascadeMaterial() {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uIntensity: { value: 0 },
+      uSurgeFrac: { value: 0.5 },
+    },
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      varying float vAngle;
+      void main() {
+        vUv = uv;
+        vAngle = atan(position.x, position.z);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform float uIntensity;
+      uniform float uSurgeFrac;
+      varying vec2 vUv;
+      varying float vAngle;
+
+      void main() {
+        if (uIntensity <= 0.005) discard;
+        // 6 sculpted exterior aqueduct waterfall channels pouring down the spire!
+        float channels = pow(max(0.0, 0.5 + 0.5 * cos(vAngle * 6.0)), 2.6);
+        float ribbonA = 0.5 + 0.5 * sin(vUv.y * 42.0 + uTime * 14.0 + sin(vAngle * 12.0) * 1.4);
+        float ribbonB = 0.5 + 0.5 * sin(vUv.y * 68.0 + uTime * 21.0 - vAngle * 18.0);
+        float foam = pow(ribbonA * 0.55 + ribbonB * 0.45, 2.0);
+        // Crest boost near the rising hydraulic surge wavefront
+        float waveBand = exp(-pow((vUv.y - uSurgeFrac) / 0.16, 2.0));
+        float belowWave = smoothstep(uSurgeFrac + 0.14, uSurgeFrac - 0.08, vUv.y);
+        float endFade = smoothstep(0.0, 0.06, vUv.y) * smoothstep(1.0, 0.92, vUv.y);
+
+        vec3 aquaCore = vec3(0.08, 0.72, 0.90);
+        vec3 foamWhite = vec3(0.76, 0.98, 1.0);
+        vec3 goldSpark = vec3(0.99, 0.88, 0.42);
+        vec3 col = mix(aquaCore, foamWhite, clamp(foam * 0.65 + waveBand * 0.55, 0.0, 1.0));
+        col = mix(col, goldSpark, waveBand * foam * 0.35);
+
+        float mask = (channels * (0.35 + 0.65 * belowWave) + waveBand * 0.52) * endFade;
+        float alpha = clamp(mask * (0.38 + 0.52 * foam) * uIntensity, 0.0, 0.88);
+        gl_FragColor = vec4(col, alpha);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  });
 }
 
 function createCrownPortalAuraMaterial() {
@@ -3465,6 +3523,51 @@ function getSharedArchGeometries() {
     elevSheave: new THREE.CylinderGeometry(0.22, 0.22, 0.06, 16),
     elevCwtBlock: new RoundedBoxGeometry(0.46, 0.68, 0.14, 1, 0.015),
     elevCwtCap: new THREE.BoxGeometry(0.48, 0.1, 0.16),
+
+    // 3D Hydro-Ring Speed Gate geometries (golden-aqua sculpted Pelagian hoop + inner vortex halo)
+    hydroRingOuter: (() => {
+      const parts = [new THREE.TorusGeometry(0.46, 0.056, 8, 24)];
+      for (let k = 0; k < 4; k++) {
+        const ang = (k / 4) * TWO_PI;
+        const fin = new THREE.OctahedronGeometry(0.088, 0);
+        fin.scale(0.65, 1.35, 0.65);
+        fin.rotateZ(ang);
+        fin.translate(Math.cos(ang) * 0.52, Math.sin(ang) * 0.52, 0);
+        parts.push(fin);
+      }
+      return mergeGeometries(parts);
+    })(),
+    hydroRingInner: new THREE.TorusGeometry(0.35, 0.028, 6, 22),
+    hydroRingVeil: new THREE.RingGeometry(0.14, 0.35, 18),
+
+    // Glowing Siphon Supply Crate Sea-Glass Power-Up Emblem & Floating Crest Beacon
+    supplyCrateEmblem: (() => {
+      const parts = [];
+      const band = new RoundedBoxGeometry(1.015, 0.125, 0.795, 1, 0.014);
+      parts.push(band);
+      for (const sz of [-0.41, 0.41]) {
+        const gem = new THREE.OctahedronGeometry(0.145, 0);
+        gem.scale(1.0, 1.0, 0.42);
+        gem.translate(0, 0, sz);
+        parts.push(gem);
+      }
+      return mergeGeometries(parts);
+    })(),
+    supplyCrateBeacon: (() => {
+      const crystal = new THREE.OctahedronGeometry(0.115, 0);
+      crystal.scale(0.85, 1.25, 0.85);
+      const halo = new THREE.TorusGeometry(0.17, 0.02, 6, 16);
+      halo.rotateX(Math.PI * 0.42);
+      return mergeGeometries([crystal, halo]);
+    })(),
+
+    // Exterior Spire Floodgate Water-Surge Cascade unit geometries (zero per-spire geometry allocation!)
+    surgeCascadeUnit: new THREE.CylinderGeometry(R + 0.3, R + 0.44, 1.0, 32, 1, true),
+    surgeCollarRing: (() => {
+      const g = new THREE.TorusGeometry(R + 0.56, 0.125, 8, 36);
+      g.rotateX(Math.PI * 0.5);
+      return g;
+    })(),
   };
 
   for (const g of Object.values(ARCH_GEOS)) {
@@ -3474,6 +3577,37 @@ function getSharedArchGeometries() {
 }
 
 const WALL_BLOCK_GEO_CACHE = new Map();
+
+function getOrBuildWallBlockGeo(rbTheme, fh) {
+  const spec = BIOME_SPECS[rbTheme] || BIOME_SPECS.canyon_river;
+  const R = TOWER_RADIUS;
+  const N = spec.around;
+  const blockA = TWO_PI / N;
+  const courseUnit = fh * 0.145;
+  const baseH = spec.rows[0] * courseUnit;
+  const bev = spec.bevel;
+  const blockHt = Math.max(0.1, baseH - spec.joint * 0.55);
+  const r1 = R + BRICK_PROUD - bev;
+  const rf = R + BRICK_PROUD;
+  const capA = Math.max(0.04, (blockA * rf - spec.joint - 2 * bev) / r1);
+  const isHex = spec.shape === 'hexBasalt';
+  const blockCacheKey = `${rbTheme}_${fh.toFixed(3)}`;
+  let blockGeo = WALL_BLOCK_GEO_CACHE.get(blockCacheKey);
+  if (!blockGeo) {
+    if (isHex) {
+      const hexR = blockA * rf * 0.54;
+      blockGeo = buildHexBasaltGeo(hexR, baseH - 0.016, rf, bev);
+    } else {
+      blockGeo = arcSlab(R - 0.06, r1, capA, blockHt, bev, 2, 1, 0, R - 0.015);
+      blockGeo.translate(0, blockHt, 0);
+    }
+    blockGeo.userData = blockGeo.userData || {};
+    blockGeo.userData.shared = true;
+    WALL_BLOCK_GEO_CACHE.set(blockCacheKey, blockGeo);
+  }
+  return blockGeo;
+}
+
 let SHARED_ARCH_MATS = null;
 
 function getSharedArchMaterials() {
@@ -3538,6 +3672,58 @@ function getSharedArchMaterials() {
       opacity: 0.24,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
+    }),
+    hydroRingGoldMat: new THREE.MeshStandardMaterial({
+      color: '#fef08a',
+      emissive: '#06b6d4',
+      emissiveIntensity: 0.95,
+      metalness: 0.78,
+      roughness: 0.18,
+    }),
+    hydroRingAquaMat: new THREE.MeshStandardMaterial({
+      color: '#67e8f9',
+      emissive: '#22d3ee',
+      emissiveIntensity: 1.55,
+      metalness: 0.22,
+      roughness: 0.12,
+      transparent: true,
+      opacity: 0.92,
+    }),
+    hydroRingVeilMat: new THREE.MeshBasicMaterial({
+      color: '#5efce8',
+      transparent: true,
+      opacity: 0.22,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+    supplyCrateBodyMat: new THREE.MeshStandardMaterial({
+      color: '#8f5d38',
+      emissive: '#1e3a4c',
+      emissiveIntensity: 0.28,
+      roughness: 0.42,
+      metalness: 0.36,
+    }),
+    supplyCrateTurboMat: new THREE.MeshStandardMaterial({
+      color: '#5efce8',
+      emissive: '#06b6d4',
+      emissiveIntensity: 1.45,
+      roughness: 0.14,
+      metalness: 0.24,
+    }),
+    supplyCrateShieldMat: new THREE.MeshStandardMaterial({
+      color: '#93c5fd',
+      emissive: '#38bdf8',
+      emissiveIntensity: 1.45,
+      roughness: 0.14,
+      metalness: 0.24,
+    }),
+    supplyCrateMagnetMat: new THREE.MeshStandardMaterial({
+      color: '#fef08a',
+      emissive: '#f59e0b',
+      emissiveIntensity: 1.45,
+      roughness: 0.14,
+      metalness: 0.32,
     }),
   };
   for (const m of Object.values(SHARED_ARCH_MATS)) {
@@ -3874,29 +4060,8 @@ function buildTowerMasonryAndAccents(
   const capA = Math.max(0.04, (blockA * rf - spec.joint - 2 * bev) / r1);
   const isHex = spec.shape === 'hexBasalt';
 
-  let blockGeo;
-  let hexHalfA = 0;
-  const blockCacheKey = `${rbTheme}_${fh.toFixed(3)}`;
-  if (isHex) {
-    const hexR = blockA * rf * 0.54;
-    hexHalfA = hexR / rf;
-    blockGeo = WALL_BLOCK_GEO_CACHE.get(blockCacheKey);
-    if (!blockGeo) {
-      blockGeo = buildHexBasaltGeo(hexR, baseH - 0.016, rf, bev);
-      blockGeo.userData = blockGeo.userData || {};
-      blockGeo.userData.shared = true;
-      WALL_BLOCK_GEO_CACHE.set(blockCacheKey, blockGeo);
-    }
-  } else {
-    blockGeo = WALL_BLOCK_GEO_CACHE.get(blockCacheKey);
-    if (!blockGeo) {
-      blockGeo = arcSlab(R - 0.06, r1, capA, blockHt, bev, 2, 1, 0, R - 0.015);
-      blockGeo.translate(0, blockHt, 0);
-      blockGeo.userData = blockGeo.userData || {};
-      blockGeo.userData.shared = true;
-      WALL_BLOCK_GEO_CACHE.set(blockCacheKey, blockGeo);
-    }
-  }
+  const hexHalfA = isHex ? (blockA * rf * 0.54) / rf : 0;
+  const blockGeo = getOrBuildWallBlockGeo(rbTheme, fh);
 
   const blockMat = createBlockMaterial({
     color: '#ffffff',
@@ -4257,8 +4422,11 @@ function buildTowerMasonryAndAccents(
   });
 
   // 4. Solid Opaque Weathered Antique-Bronze Fluted Aqueduct Downspouts (ZERO translucent plastic tubes!)
-  const conduitMat = trimMetalMat.clone();
+  // NOTE: Construct via createTrimMetalMaterial instead of trimMetalMat.clone() so Three.js Material.copy never
+  // JSON-serializes `userData._surfaceSubEntry` DataTextures (~30ms saved per spire build + clean WebP swap!).
+  const conduitMat = createTrimMetalMaterial(rbTheme, spec);
   conduitMat.color.set('#8f6942');
+  conduitMat.userData.baseColor = new THREE.Color('#8f6942');
   conduitMat.roughness = 0.34;
   conduitMat.metalness = 0.76;
   conduitMat.transparent = false;
@@ -6967,6 +7135,44 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
       const lx = ledgeR * Math.sin(phi);
       const lz = ledgeR * Math.cos(phi);
       const sy = blockH / 0.78;
+      if (l.powerUp) {
+        // Visually unmistakable glowing Pelagian Siphon Supply Crate (`turbo_current` | `bubble_shield` | `hydro_magnet`)
+        const supplyNode = new THREE.Group();
+        supplyNode.position.set(lx, y, lz);
+        supplyNode.rotation.y = phi;
+        const emblemMat =
+          l.powerUp === 'bubble_shield'
+            ? SM.supplyCrateShieldMat
+            : l.powerUp === 'hydro_magnet'
+            ? SM.supplyCrateMagnetMat
+            : SM.supplyCrateTurboMat;
+        const bodyMesh = new THREE.Mesh(G.energyBox, SM.supplyCrateBodyMat);
+        bodyMesh.scale.set(1, sy, 1);
+        bodyMesh.receiveShadow = true;
+        const strapMesh = new THREE.Mesh(G.energyCore, trimMetalMat);
+        strapMesh.scale.set(1, sy, 1);
+        const emblemMesh = new THREE.Mesh(G.supplyCrateEmblem, emblemMat);
+        emblemMesh.scale.set(1, sy, 1);
+        const beaconMesh = new THREE.Mesh(G.supplyCrateBeacon, emblemMat);
+        beaconMesh.position.set(0, blockH * 0.5 + 0.24, 0);
+        supplyNode.add(bodyMesh, strapMesh, emblemMesh, beaconMesh);
+        supplyNode.userData = {
+          baseR: ledgeR,
+          baseY: y,
+          phi,
+          baseCol: l.col,
+          type: 'box',
+          powerUp: l.powerUp,
+          isSupplyCrate: true,
+          beaconMesh,
+          beaconBaseY: blockH * 0.5 + 0.24,
+          emblemMat,
+          lastGone: false,
+        };
+        group.add(supplyNode);
+        ledgeMeshes.push(supplyNode);
+        continue;
+      }
       const b1 = pushInstance(boxCrateBatch, lx, y, lz, 0, phi, 0, 1, sy, 1);
       const b2 = pushInstance(boxCoreBatch, lx, y, lz, 0, phi, 0, 1, sy, 1);
       ledgeMeshes.push(makeStaticProxy(phi, y, l.type, [boxCrateBatch[b1], boxCoreBatch[b2]]));
@@ -7367,6 +7573,72 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     });
   }
 
+  // 6c. 3D Golden-Aqua Hydro-Ring Speed Gates (`tower.hydroRings`)
+  const hydroRingNodes = [];
+  const rawHydroRings = tower?.hydroRings || [];
+  const hrRad = R + LEDGE_OFFSET + 0.04;
+  for (let i = 0; i < rawHydroRings.length; i++) {
+    const hr = rawHydroRings[i];
+    const hrCol = Number(hr.col) || 0;
+    const hrFloor = Number(hr.floor) || 0;
+    const hrPhi = hrCol * COL_ANGLE;
+    const hy = hrFloor * fh;
+
+    const hrGrp = new THREE.Group();
+    hrGrp.position.set(hrRad * Math.sin(hrPhi), hy, hrRad * Math.cos(hrPhi));
+    hrGrp.rotation.y = hrPhi;
+
+    // Sculpted 3/4 canted golden-aqua hoop so Gateway clearly threads through while staying vibrant from the chase camera!
+    const spinPivot = new THREE.Group();
+    spinPivot.rotation.y = 0.76;
+    const outerMesh = new THREE.Mesh(G.hydroRingOuter, SM.hydroRingGoldMat);
+    const innerMesh = new THREE.Mesh(G.hydroRingInner, SM.hydroRingAquaMat);
+    const veilMesh = new THREE.Mesh(G.hydroRingVeil, SM.hydroRingVeilMat);
+    spinPivot.add(outerMesh, innerMesh, veilMesh);
+    hrGrp.add(spinPivot);
+    group.add(hrGrp);
+
+    hydroRingNodes.push({
+      id: hr.id || `hring_${i + 1}`,
+      col: hrCol,
+      floor: hrFloor,
+      phi: hrPhi,
+      y: hy,
+      group: hrGrp,
+      spinPivot,
+      innerMesh,
+      veilMesh,
+      phase: i * 0.85,
+      collectedPop: 0,
+    });
+  }
+
+  // 6d. Exterior Spire Floodgate Water-Surge Waterfall Cascade (activated when `state.floodgateSurgeTimer > 0`!)
+  const floodgateSurgeGroup = new THREE.Group();
+  floodgateSurgeGroup.name = 'floodgate_surge_cascade';
+  floodgateSurgeGroup.visible = false;
+  const surgeCascadeMat = createFloodgateSurgeCascadeMaterial();
+  const surgeCascadeMesh = new THREE.Mesh(G.surgeCascadeUnit, surgeCascadeMat);
+  surgeCascadeMesh.scale.y = bodyInfo.totalH + 1.5;
+  surgeCascadeMesh.position.y = bodyInfo.totalH * 0.5;
+  const surgeCollarMat = new THREE.MeshBasicMaterial({
+    color: '#67e8f9',
+    transparent: true,
+    opacity: 0.0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const surgeCollarMesh = new THREE.Mesh(G.surgeCollarRing, surgeCollarMat);
+  floodgateSurgeGroup.add(surgeCascadeMesh, surgeCollarMesh);
+  group.add(floodgateSurgeGroup);
+  const floodgateSurgeFx = {
+    group: floodgateSurgeGroup,
+    cascadeMat: surgeCascadeMat,
+    collarMesh: surgeCollarMesh,
+    collarMat: surgeCollarMat,
+    totalH: bodyInfo.totalH,
+  };
+
   // 7. Interactive Wall Pipe-Valves (`pipe_valve.glb`) & Hydro-Switches (`tower.switches`)
   const switchNodes = [];
   for (const sw of tower?.switches || []) {
@@ -7612,6 +7884,10 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     conveyorRollers,
     wallStripNodes,
     grappleNodes,
+    hydroRingNodes,
+    floodgateSurgeFx,
+    hasEmbeddedHydroRings: true,
+    hasFloodgateSurgeMesh: true,
     critterAlcoveNodes,
     mistSprites,
     sparkEmitters,
@@ -7708,8 +7984,8 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
       state?.mode === 'title' ||
       purify > 0.01
   );
-  const camFloor = hero?.floor != null ? hero.floor : state?.camFloor != null ? state.camFloor : 1;
-  const camY = camFloor * fh + 0.95;
+  const camFloor = state?.camFloor != null ? state.camFloor : hero?.floor != null ? hero.floor : 1;
+  const camY = camFloor * fh + 1.25;
   const effCamAngle =
     cachedTower.group.rotation.y !== 0
       ? -cachedTower.group.rotation.y
@@ -7717,7 +7993,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
       ? state.camCol * COL_ANGLE
       : 0;
 
-  // 0. Strict Front-Hemisphere & Vertical Band Frustum Culling (`VIS_ALT_WINDOW = 4.8u`!)
+  // 0. Widened Front-Hemisphere & Vertical Band Frustum Culling (`VIS_ALT_WINDOW = 7.2u`, `cos >= -0.08`)
   const banded = cachedTower.bandedMeshes;
   if (banded) {
     const minVisY = camY - VIS_ALT_WINDOW;
@@ -7737,7 +8013,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
       const cn = cullNodes[i];
       cn.node.visible =
         fullTowerView ||
-        (Math.cos(cn.phi - effCamAngle) >= 0.16 && Math.abs(cn.y - camY) <= VIS_ALT_WINDOW);
+        (Math.cos(cn.phi - effCamAngle) >= -0.08 && Math.abs(cn.y - camY) <= VIS_ALT_WINDOW);
     }
   }
 
@@ -7764,13 +8040,41 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
     }
   }
 
+  // 1b. Exterior Spire Floodgate Water-Surge Waterfall Cascade (`state.floodgateSurgeTimer > 0`!)
+  const surgeDuration = Math.max(0.5, Number(state?.spireFloodgateSurgeFx?.duration) || 1.85);
+  const surgeTimer = Math.max(
+    Number(state?.floodgateSurgeTimer) || 0,
+    state?.spireFloodgateSurgeFx?.active
+      ? Math.max(0.01, surgeDuration - (Number(state.spireFloodgateSurgeFx.timer) || 0))
+      : 0
+  );
+  if (cachedTower.floodgateSurgeFx) {
+    const fsx = cachedTower.floodgateSurgeFx;
+    const active = surgeTimer > 0.005;
+    fsx.group.visible = active;
+    if (active) {
+      const progress = Math.max(0, Math.min(1, 1 - surgeTimer / surgeDuration));
+      const env = Math.sin(progress * Math.PI);
+      const u = fsx.cascadeMat.uniforms;
+      u.uTime.value = time;
+      u.uIntensity.value = Math.min(1, env * 1.25);
+      u.uSurgeFrac.value = 0.08 + progress * 0.88;
+
+      const waveY = (0.06 + progress * 0.90) * Math.max(6, fsx.totalH);
+      fsx.collarMesh.position.y = waveY;
+      const ringPulse = 1.0 + 0.07 * Math.sin(time * 18.0) + progress * 0.06;
+      fsx.collarMesh.scale.set(ringPulse, 1.0 + env * 0.5, ringPulse);
+      fsx.collarMat.opacity = Math.min(0.86, env * 0.92);
+    }
+  }
+
   if (cachedTower.conduitMat) {
     if (cachedTower.conduitMat.uniforms) {
       const u = cachedTower.conduitMat.uniforms;
       u.uTime.value = time;
-      u.uPurify.value = purify;
-      let anyPipeActive = false;
-      if (state?.pipeStates) {
+      u.uPurify.value = Math.max(purify, surgeTimer > 0.005 ? 0.72 : 0);
+      let anyPipeActive = surgeTimer > 0.005;
+      if (!anyPipeActive && state?.pipeStates) {
         for (const k in state.pipeStates) {
           if (state.pipeStates[k]) {
             anyPipeActive = true;
@@ -7778,22 +8082,23 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
           }
         }
       }
-      u.uFlowDir.value = anyPipeActive ? 1.45 : -1.0;
+      u.uFlowDir.value = surgeTimer > 0.005 ? 2.6 : anyPipeActive ? 1.45 : -1.0;
     } else if (cachedTower.conduitMat.isMeshStandardMaterial) {
-      // Subtle recessed patina rune glow ONLY when Spire purification > 0.5
-      cachedTower.conduitMat.emissiveIntensity =
-        purify > 0.5 ? (purify - 0.5) * 0.45 * (0.65 + 0.35 * Math.sin(time * 3.2)) : 0;
+      // Subtle recessed patina rune glow when Spire purification > 0.5 OR during Exterior Floodgate Water-Surge!
+      const surgeGlow = surgeTimer > 0.005 ? 0.75 * Math.min(1, surgeTimer / 0.4) : 0;
+      const purGlow = purify > 0.5 ? (purify - 0.5) * 0.45 * (0.65 + 0.35 * Math.sin(time * 3.2)) : 0;
+      cachedTower.conduitMat.emissiveIntensity = Math.max(purGlow, surgeGlow);
     }
   }
 
   // 2. Spin 3D Pelton Hydro-Turbines / Waterwheels!
   if (cachedTower.turbineRotors) {
-    const speedBoost = 1 + purify * 2.2;
+    const speedBoost = 1 + purify * 2.2 + (surgeTimer > 0.005 ? 1.8 : 0);
     for (let i = 0; i < cachedTower.turbineRotors.length; i++) {
       const tr = cachedTower.turbineRotors[i];
       const inView =
         fullTowerView ||
-        (Math.cos(tr.phi - effCamAngle) >= 0.16 && Math.abs(tr.y - camY) <= VIS_ALT_WINDOW);
+        (Math.cos(tr.phi - effCamAngle) >= -0.08 && Math.abs(tr.y - camY) <= VIS_ALT_WINDOW);
       tr.holder.visible = inView;
       if (!inView) continue;
       if (tr.wheel) {
@@ -8037,13 +8342,13 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
     }
   }
 
-  // 6. Gecko Wall-Scamper Strips & Tail-Swing Grapple Rings Animation
+  // 6. Gecko Wall-Scamper Strips, Tail-Swing Grapple Rings & 3D Hydro-Ring Speed Gates Animation
   if (cachedTower.wallStripNodes) {
     for (let i = 0; i < cachedTower.wallStripNodes.length; i++) {
       const ws = cachedTower.wallStripNodes[i];
       ws.group.visible =
         fullTowerView ||
-        (Math.cos(ws.phi - effCamAngle) >= 0.16 && ws.maxY >= camY - VIS_ALT_WINDOW && ws.minY <= camY + VIS_ALT_WINDOW);
+        (Math.cos(ws.phi - effCamAngle) >= -0.08 && ws.maxY >= camY - VIS_ALT_WINDOW && ws.minY <= camY + VIS_ALT_WINDOW);
       if (ws.group.visible && i === 0) {
         ws.padMat.emissiveIntensity = 0.52 + 0.22 * Math.sin(time * 3.6);
       }
@@ -8056,7 +8361,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
       const gr = cachedTower.grappleNodes[i];
       const vis =
         fullTowerView ||
-        (Math.cos(gr.phi - effCamAngle) >= 0.16 && Math.abs(gr.y - camY) <= VIS_ALT_WINDOW);
+        (Math.cos(gr.phi - effCamAngle) >= -0.08 && Math.abs(gr.y - camY) <= VIS_ALT_WINDOW);
       gr.group.visible = vis;
       if (!vis) continue;
       const isTargeted =
@@ -8068,6 +8373,42 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
     }
   }
 
+  if (cachedTower.hydroRingNodes?.length > 0) {
+    const liveRings = state?.hydroRings || tower?.hydroRings || [];
+    const smShared = getSharedArchMaterials();
+    smShared.hydroRingGoldMat.emissiveIntensity = 0.92 + 0.32 * Math.sin(time * 4.2);
+    smShared.hydroRingAquaMat.emissiveIntensity = 1.48 + 0.38 * Math.cos(time * 5.0);
+    for (let i = 0; i < cachedTower.hydroRingNodes.length; i++) {
+      const hr = cachedTower.hydroRingNodes[i];
+      let collected = false;
+      const liveItem = liveRings[i];
+      if (liveItem && (liveItem.id === hr.id || !liveItem.id)) {
+        collected = Boolean(liveItem.collected || liveItem.gone);
+      } else {
+        for (let j = 0; j < liveRings.length; j++) {
+          if (liveRings[j]?.id === hr.id) {
+            collected = Boolean(liveRings[j].collected || liveRings[j].gone);
+            break;
+          }
+        }
+      }
+      if (collected) {
+        hr.group.visible = false;
+        continue;
+      }
+      const vis =
+        fullTowerView ||
+        (Math.cos(hr.phi - effCamAngle) >= -0.08 && Math.abs(hr.y - camY) <= VIS_ALT_WINDOW);
+      hr.group.visible = vis;
+      if (!vis) continue;
+      hr.group.position.y = hr.y + Math.sin(time * 3.0 + hr.phase) * 0.075;
+      hr.spinPivot.rotation.z = time * 1.45 + hr.phase;
+      hr.innerMesh.rotation.z = -time * 2.8 + hr.phase;
+      const sPulse = 1.0 + 0.045 * Math.sin(time * 4.5 + hr.phase);
+      hr.spinPivot.scale.setScalar(sPulse);
+    }
+  }
+
   // 6b. Rescued Critter Alcove Lanterns & Bioluminescent Pelagian Fireflies
   if (cachedTower.critterAlcoveNodes?.length > 0) {
     const livePods = state?.critterPods || state?.collectibles || tower?.collectibles || [];
@@ -8075,7 +8416,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
       const al = cachedTower.critterAlcoveNodes[i];
       const vis =
         fullTowerView ||
-        (Math.cos(al.phi - effCamAngle) >= 0.16 && Math.abs(al.y - camY) <= VIS_ALT_WINDOW);
+        (Math.cos(al.phi - effCamAngle) >= -0.08 && Math.abs(al.y - camY) <= VIS_ALT_WINDOW);
       al.group.visible = vis;
       if (!vis) continue;
 
@@ -8151,13 +8492,28 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
       continue;
     }
 
+    const curPhi =
+      ud.isSupplyCrate && l.type === 'box'
+        ? (l.col + 0.5 + (Number(l.visualSlideCol) || 0)) * COL_ANGLE
+        : ud.phi;
     const inView =
       fullTowerView ||
-      (Math.cos(ud.phi - effCamAngle) >= 0.16 && Math.abs(ud.baseY - camY) <= VIS_ALT_WINDOW);
+      (Math.cos(curPhi - effCamAngle) >= -0.08 && Math.abs(ud.baseY - camY) <= VIS_ALT_WINDOW);
     node.visible = inView;
     if (!inView) continue;
 
-    if (l.type === 'crumble' && ud.pieceMesh) {
+    if (ud.isSupplyCrate && l.type === 'box') {
+      node.position.x = ud.baseR * Math.sin(curPhi);
+      node.position.z = ud.baseR * Math.cos(curPhi);
+      node.rotation.y = curPhi;
+      if (ud.beaconMesh) {
+        ud.beaconMesh.rotation.y = time * 2.6 + i * 0.7;
+        ud.beaconMesh.position.y = ud.beaconBaseY + Math.sin(time * 3.8 + i) * 0.055;
+      }
+      if (ud.emblemMat) {
+        ud.emblemMat.emissiveIntensity = 1.25 + 0.42 * Math.sin(time * 4.4);
+      }
+    } else if (l.type === 'crumble' && ud.pieceMesh) {
       const wantMat = l.crumbling ? ud.activeMat : ud.idleMat;
       if (ud.pieceMesh.material !== wantMat) ud.pieceMesh.material = wantMat;
       node.position.y = ud.baseY + (l.shake ? Math.sin(time * 55) * 0.055 : 0);
@@ -8206,7 +8562,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
     const podY = elFloor * fh + (pUd.podOffsetY || 0);
     pod.position.y = podY;
 
-    const onFront = fullTowerView || Math.cos(pUd.phi - effCamAngle) >= 0.16;
+    const onFront = fullTowerView || Math.cos(pUd.phi - effCamAngle) >= -0.08;
     const shaftInAlt = fullTowerView || (pUd.minY <= camY + VIS_ALT_WINDOW && pUd.maxY >= camY - VIS_ALT_WINDOW);
     const podInAlt = fullTowerView || Math.abs(podY + 0.8 - camY) <= VIS_ALT_WINDOW;
 
@@ -8274,7 +8630,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
     const sy = sw.floor * fh;
     const swInView =
       fullTowerView ||
-      (Math.cos(sPhi - effCamAngle) >= 0.16 && Math.abs(sy - camY) <= VIS_ALT_WINDOW);
+      (Math.cos(sPhi - effCamAngle) >= -0.08 && Math.abs(sy - camY) <= VIS_ALT_WINDOW);
     sm.visible = swInView;
     if (!swInView) continue;
 
@@ -8313,7 +8669,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
     const wy = wb.floor * fh;
     const wbVis =
       fullTowerView ||
-      (Math.cos(wPhi - effCamAngle) >= -0.05 && Math.abs(wy - camY) <= VIS_ALT_WINDOW);
+      (Math.cos(wPhi - effCamAngle) >= -0.08 && Math.abs(wy - camY) <= VIS_ALT_WINDOW);
     wbProp.visible = wbVis;
     if (wbVis) {
       wbProp.position.set(ledgeR * Math.sin(wPhi), wy, ledgeR * Math.cos(wPhi));
@@ -8339,7 +8695,7 @@ export function updateTowerArchitecture(cachedTower, state = {}, time = 0, dtArg
     const cy = chest.floor * fh;
     const chestVis =
       fullTowerView ||
-      (Math.cos(cPhi - effCamAngle) >= -0.05 && Math.abs(cy - camY) <= VIS_ALT_WINDOW);
+      (Math.cos(cPhi - effCamAngle) >= -0.08 && Math.abs(cy - camY) <= VIS_ALT_WINDOW);
     chestProp.visible = chestVis;
     if (chestVis) {
       chestProp.position.set(ledgeR * Math.sin(cPhi), cy, ledgeR * Math.cos(cPhi));
@@ -8422,8 +8778,14 @@ export function buildArchShaderWarmupGroup() {
     SM.convMatR,
     SM.phaseRuneMatCyan,
     SM.phaseGhostMatCyan,
+    SM.hydroRingGoldMat,
+    SM.hydroRingAquaMat,
+    SM.hydroRingVeilMat,
+    SM.supplyCrateBodyMat,
+    SM.supplyCrateTurboMat,
     createHydroBarrierMaterial(true),
     createHydroBarrierMaterial(false),
+    createFloodgateSurgeCascadeMaterial(),
     createPortalMaterial('#0a2e38', '#5efce8', 1.0, false),
     createPortalMaterial('#0a2e38', '#5efce8', 1.0, true),
     createCrownPortalAuraMaterial(),
