@@ -51,6 +51,8 @@ export const GLIDE_THEMES = [
   { key: 'dawn', label: 'GOLDEN GORGE FLIGHT', storm: 0.65, gust: 0.8, gull: 1.0 },
   { key: 'day', label: 'HIGH TRADEWINDS', storm: 0.8, gust: 1.0, gull: 1.1 },
   { key: 'sunset', label: 'TWILIGHT UPDRAFT', storm: 0.9, gust: 1.0, gull: 1.15 },
+  { key: 'aurora', label: 'POLAR AURORA JETSTREAM', storm: 1.05, gust: 1.15, gull: 0.85 },
+  { key: 'storm', label: 'TEMPEST RIDGE SQUALL', storm: 1.25, gust: 1.25, gull: 0.80 },
 ];
 
 const LANTERN_POP = ['#fdba74', '#fde68a', '#7be8ff', '#f9a8d4'];
@@ -177,7 +179,7 @@ export class GlideStage {
     this.progress = 0;
     this.duration = RIDE_TIME;
     this.scroll = 0;
-    this.baseSpeed = 114 * this.s;
+    this.baseSpeed = this._computeBaseSpeed();
     this.scrollSpeed = 0;
     this.wind = 0;
     this._finished = false;
@@ -246,10 +248,41 @@ export class GlideStage {
     this._gullEvery = lerp(6.2, 3.2, d) / th.gull;
     this._gustEvery = lerp(7.5, 4.1, d) / th.gust;
     this._strikeCharge = lerp(1.35, 1.0, d);
+
+    // Pre-seed welcoming opening flight line across the screen so 1920x1080 desktop has zero empty-sky dead-zone!
+    const wide = this.width / Math.max(1, this.height) > 1.15;
+    const midY = clamp(this.height * 0.44, this.top + 36 * this.s, this.bottom - 52 * this.s);
+    const gateY = clamp(this.height * 0.40, this.top + 42 * this.s, this.bottom - 62 * this.s);
+    this._pattern('arc', this.width * (wide ? 0.44 : 0.62), midY);
+    this.thermals.push({
+      x: this.width * (wide ? 0.68 : 0.84),
+      w: 52 * this.s,
+      str: 0.9,
+      fade: 0,
+      age: 0,
+      seed: 1.2,
+    });
+    this.gates.push({
+      x: this.width * (wide ? 0.80 : 0.94),
+      y: gateY,
+      r: 34 * this.s,
+      state: 'open',
+      t: 0,
+      age: 0,
+      side: -1,
+      seed: 0.7,
+    });
+    this.gatesTotal++;
   }
 
   _scaleFor(w, h) {
     return clamp(Math.sqrt((w * h) / (390 * 620)), 0.8, 1.6);
+  }
+
+  _computeBaseSpeed() {
+    // Keep horizontal flight traverse crisp (~3.8s) on both 412x915 mobile & 1920x1080 desktop!
+    const widthRatio = Math.max(1.0, this.width / Math.max(1, 420 * this.s));
+    return 114 * this.s * Math.min(2.45, 0.52 + 0.48 * widthRatio);
   }
 
   _towerRadius() {
@@ -333,7 +366,7 @@ export class GlideStage {
     for (const w of this.warnings) w.y *= ky;
     this.rings.length = 0;
     this.vfx.length = 0;
-    this.baseSpeed = 114 * this.s;
+    this.baseSpeed = this._computeBaseSpeed();
     const t = this.tower;
     t.r = this._towerRadius();
     t.targetX = this.width - t.r * 0.7;
@@ -511,14 +544,18 @@ export class GlideStage {
     }
     const arriveSub = this.standalone
       ? 'DESTINATION REACHED'
-      : `SECTOR ${Math.min(4, this.worldIndex + 2)} LANDFALL`;
+      : `ACT ${Math.min(5, this.worldIndex + 1)} LANDFALL`;
     fx.banner?.(arriveSub, `ARRIVING: ${this.nextWorldName}`);
   }
 
-  _addFlow(fx, amount, reason = '') {
+  _addFlow(fx, amount, opts = '') {
     if (!amount) return;
     this.flowCharge = clamp((this.flowCharge || 0) + amount, 0, 100);
-    fx?.addFlowCharge?.(amount, reason);
+    const payload =
+      opts && typeof opts === 'object'
+        ? { combo: true, ...opts }
+        : { reason: String(opts || ''), combo: true };
+    fx?.addFlowCharge?.(amount, payload);
   }
 
   _score(fx, pts) {
@@ -835,7 +872,7 @@ export class GlideStage {
     g.flaps++;
     g.vy = Math.min(g.vy - 210 * s, -182 * s);
     g.vx += 48 * s;
-    g.invuln = Math.max(g.invuln || 0, 0.24);
+    g.invuln = Math.max(g.invuln || 0, 0.12);
     this._vfx('flap', g.x - g.rx * 0.4, g.y + g.ry * 0.5, { life: 0.5, size: g.rx * 1.6 });
     (sound?.glideFlap || sound?.jump)?.call(sound);
   }
