@@ -33,14 +33,14 @@ const GORGE_SPAN_Z = 108;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
 
-// Unified S-gorge canyon spline: 0 at Gateway (wz >= 0) so steering lanes match game.js 1:1,
-// curving dramatically ahead downriver through sculpted cliffs, arches, and waterfalls!
+// Unified S-gorge canyon spline: strictly 0 at camera & Gateway (wz >= -6) so foreground lanes
+// and sightlines stay 100% open & unobstructed, then sweeps into a dramatic S-gorge ahead downriver!
 function gorgeCurveX(wz, dist) {
-  const dAhead = wz < 0 ? -wz : 0;
+  const dAhead = wz < -6.0 ? -(wz + 6.0) : 0;
   if (dAhead <= 0.001) return 0;
-  const f = dAhead < 15.0 ? dAhead / 15.0 : 1.0;
+  const f = dAhead < 18.0 ? dAhead / 18.0 : 1.0;
   const f2 = f * f * (3.0 - 2.0 * f);
-  return (Math.sin(dAhead * 0.048 + dist * 0.030) * 3.8 + Math.cos(dAhead * 0.025 - dist * 0.017) * 1.45) * f2;
+  return (Math.sin(dAhead * 0.044 + dist * 0.028) * 3.1 + Math.cos(dAhead * 0.024 - dist * 0.016) * 1.15) * f2;
 }
 
 function gorgeCurveYaw(wz, dist) {
@@ -148,9 +148,9 @@ const RAPIDS_WATER_VERT = /* glsl */ `
   varying float vCamDist;
 
   float gorgeCurveX(float wz, float dist) {
-    float dAhead = max(0.0, -wz);
-    float f = smoothstep(0.0, 15.0, dAhead);
-    return (sin(dAhead * 0.048 + dist * 0.030) * 3.8 + cos(dAhead * 0.025 - dist * 0.017) * 1.45) * f;
+    float dAhead = max(0.0, -(wz + 6.0));
+    float f = smoothstep(0.0, 18.0, dAhead);
+    return (sin(dAhead * 0.044 + dist * 0.028) * 3.1 + cos(dAhead * 0.024 - dist * 0.016) * 1.15) * f;
   }
 
   void main() {
@@ -1170,9 +1170,9 @@ function buildCanyonStoneArchParts() {
   const stoneParts = [];
   const bronzeParts = [];
 
-  // Towering sandstone abutments gripping both curved gorge walls
+  // Towering sandstone abutments gripping both curved gorge walls with wide river clearance!
   for (const sx of [-1, 1]) {
-    const col = new THREE.CylinderGeometry(1.65, 2.55, 11.4, 9, 4);
+    const col = new THREE.CylinderGeometry(1.45, 2.15, 11.4, 9, 4);
     const pos = col.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
@@ -1182,15 +1182,15 @@ function buildCanyonStoneArchParts() {
       pos.setXYZ(i, x * crag, y, z * crag);
     }
     col.computeVertexNormals();
-    col.translate(sx * 8.4, 5.2, 0);
+    col.translate(sx * 9.8, 5.2, 0);
     stoneParts.push(col);
   }
 
-  // Sweeping overhanging natural rock & carved voussoir bridge vault (17u wide, 9.6u high clearance!)
+  // Sweeping overhanging natural rock & carved voussoir bridge vault (19.6u wide, 10u high clearance!)
   const archSegs = 13;
-  const spanX = 8.4;
-  const springY = 5.4;
-  const riseY = 4.6;
+  const spanX = 9.8;
+  const springY = 5.6;
+  const riseY = 4.8;
   for (let i = 0; i < archSegs; i++) {
     const t = (i + 0.5) / archSegs;
     const ang = t * Math.PI;
@@ -1527,7 +1527,7 @@ function buildSpikedSiphonMineGeo() {
 }
 
 function buildSteppedCliffGeo(seed = 1) {
-  const geo = new THREE.CylinderGeometry(3.4, 5.2, 13.5, 12, 10);
+  const geo = new THREE.CylinderGeometry(2.9, 4.1, 13.5, 11, 8);
   const pos = geo.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     let x = pos.getX(i);
@@ -1537,10 +1537,10 @@ function buildSteppedCliffGeo(seed = 1) {
     const terrace =
       1.0 -
       yn * 0.22 +
-      0.14 * Math.sin(yn * 16.0 + seed) +
-      0.09 * Math.cos(Math.atan2(z, x) * 4 + seed);
+      0.12 * Math.sin(yn * 16.0 + seed) +
+      0.08 * Math.cos(Math.atan2(z, x) * 4 + seed);
     x *= terrace;
-    z *= terrace * 1.15;
+    z *= terrace * 1.12;
     pos.setXYZ(i, x, y, z);
   }
   geo.computeVertexNormals();
@@ -1747,20 +1747,10 @@ export class SkimmerRenderer {
     this.hemiLight = new THREE.HemisphereLight('#7cc8f0', '#28455c', 1.42);
     this.scene.add(this.hemiLight);
 
-    this.sunLight = new THREE.DirectionalLight('#fff1d6', 2.45);
+    this.sunLight = new THREE.DirectionalLight('#fff1d6', 2.48);
     this.sunLight.position.set(14, 24, 16);
-    if (this.webgl?.shadowMap?.enabled) {
-      this.sunLight.castShadow = true;
-      this.sunLight.shadow.mapSize.set(1024, 1024);
-      this.sunLight.shadow.camera.near = 2;
-      this.sunLight.shadow.camera.far = 70;
-      this.sunLight.shadow.camera.left = -14;
-      this.sunLight.shadow.camera.right = 14;
-      this.sunLight.shadow.camera.top = 14;
-      this.sunLight.shadow.camera.bottom = -14;
-      this.sunLight.shadow.bias = -0.0006;
-      this.sunLight.shadow.normalBias = 0.024;
-    }
+    // Keep 60fps silky smooth on D3D11 over translucent rushing rapids (hero wake + rim glow ground Gateway cleanly)
+    this.sunLight.castShadow = false;
     this.scene.add(this.sunLight);
     this.scene.add(this.sunLight.target);
 
@@ -1826,8 +1816,8 @@ export class SkimmerRenderer {
     this.destSpireGroup.position.set(0, -1.5, -96);
     this.scene.add(this.destSpireGroup);
 
-    // Real Animated GLSL Multi-Wave Fresnel Specular Curved S-Gorge Whitewater Canyon River (48x84 mesh!)
-    const riverGeo = new THREE.PlaneGeometry(36, 142, 48, 84);
+    // Real Animated GLSL Multi-Wave Fresnel Specular Curved S-Gorge Whitewater Canyon River (36x64 mesh -> 60fps!)
+    const riverGeo = new THREE.PlaneGeometry(36, 142, 36, 64);
     riverGeo.rotateX(-Math.PI * 0.5);
     this.riverGeo = riverGeo;
     this.riverMat = new THREE.ShaderMaterial({
@@ -2476,29 +2466,31 @@ export class SkimmerRenderer {
 
     for (let i = 0; i < MAX_GORGE_SEGS; i++) {
       const wrappedZ = (((i * gorgeStep + dist) % GORGE_SPAN_Z) + GORGE_SPAN_Z) % GORGE_SPAN_Z;
-      const segZ = 8 - wrappedZ;
+      // Keep every cliff, shelf & waterfall strictly AHEAD of Gateway/camera (segZ <= -2.5) so zero rock ever clips the lens!
+      const segZ = -2.5 - wrappedZ;
       const curveX = gorgeCurveX(segZ, dist);
       const curveYaw = gorgeCurveYaw(segZ, dist);
+      const nearWiden = segZ > -16 ? clamp((segZ + 16) / 13.5, 0, 1) * 3.0 : 0;
 
       for (const side of [-1, 1]) {
-        // Stepped Stratified Sandstone Cliff Wall hugging the curved S-gorge
-        dm.position.set(curveX + side * (11.4 + (i % 2) * 0.9), 5.6, segZ);
+        // Stepped Stratified Sandstone Cliff Wall hugging the curved S-gorge with generous bank clearance
+        dm.position.set(curveX + side * (13.6 + nearWiden + (i % 2) * 0.9), 5.6, segZ);
         dm.rotation.set(0, curveYaw + i * 0.65 + (side > 0 ? 1.2 : 0), 0);
-        dm.scale.set(1.18, 1.0 + (i % 3) * 0.20, 1.22);
+        dm.scale.set(1.12, 1.0 + (i % 3) * 0.20, 1.16);
         dm.updateMatrix();
         this.gorgeCliffInst.setMatrixAt(cIdx, dm.matrix);
 
         // Angular Stratified Riverbank Sandstone Ledge
-        const shelfX = curveX + side * (7.5 + (i % 2) * 0.45);
-        dm.position.set(shelfX, 0.32, segZ + 1.1);
+        const shelfX = curveX + side * (9.4 + nearWiden * 0.72 + (i % 2) * 0.45);
+        dm.position.set(shelfX, 0.32, segZ + 0.8);
         dm.rotation.set(0, curveYaw + i * 0.55 + side * 0.4, 0);
-        dm.scale.set(1.08, 0.74, 1.25);
+        dm.scale.set(1.02, 0.72, 1.18);
         dm.updateMatrix();
         this.gorgeShelfInst.setMatrixAt(cIdx++, dm.matrix);
 
         // Real 3D Sculpted Conifers crowning upper curved gorge cliff rims
         for (let k = 0; k < 2; k++) {
-          dm.position.set(curveX + side * (9.1 + k * 1.45), 11.4 + ((i + k) % 3) * 0.9, segZ + (k - 0.5) * 2.4);
+          dm.position.set(curveX + side * (11.2 + nearWiden + k * 1.45), 11.4 + ((i + k) % 3) * 0.9, segZ + (k - 0.5) * 2.4);
           dm.rotation.set(0, i * 0.8 + k * 1.6, 0);
           dm.scale.setScalar(0.92 + ((i + k) % 3) * 0.16);
           dm.updateMatrix();
@@ -2507,8 +2499,8 @@ export class SkimmerRenderer {
 
         // Real 3D Sculpted Mossy Canyon Rocks nestled on lower ledges
         for (let k = 0; k < 2; k++) {
-          const rx = shelfX - side * (0.45 + k * 0.65);
-          const rz = segZ + (k === 0 ? 0.4 : 2.5);
+          const rx = shelfX - side * (0.35 + k * 0.55);
+          const rz = segZ + (k === 0 ? 0.3 : 2.1);
           dm.position.set(rx, 0.82 + k * 0.22, rz);
           dm.rotation.set(0, i * 1.1 + k * 1.7, 0);
           dm.scale.setScalar(0.76 + ((i + k) % 3) * 0.18);
@@ -2518,7 +2510,8 @@ export class SkimmerRenderer {
 
         // Sunlit Side-Waterfalls plunging down curved gorge cliffs + Mist Plumes
         if ((i + (side > 0 ? 1 : 0)) % 2 === 0) {
-          dm.position.set(curveX + side * 6.95, 5.4, segZ);
+          const fallsX = curveX + side * (8.9 + nearWiden * 0.65);
+          dm.position.set(fallsX, 5.4, segZ);
           dm.rotation.set(0, curveYaw - side * 0.24, 0);
           dm.scale.setScalar(1);
           dm.updateMatrix();
@@ -2527,7 +2520,7 @@ export class SkimmerRenderer {
           for (let m = 0; m < 2; m++) {
             const driftPhase = (time * 0.68 + i * 0.31 + m * 0.5) % 1;
             const my = 0.85 + driftPhase * 2.45;
-            const mx = curveX + side * (6.85 - driftPhase * 0.72);
+            const mx = fallsX - side * (0.1 + driftPhase * 0.65);
             const ms = 0.90 + Math.sin(driftPhase * Math.PI) * 0.52;
             dm.position.set(mx, my, segZ + (m - 0.5) * 1.25);
             dm.rotation.set(0, -side * 0.28, Math.sin(time * 0.9 + m) * 0.12);
@@ -2551,12 +2544,12 @@ export class SkimmerRenderer {
     this.gorgeFallsInst.instanceMatrix.needsUpdate = true;
     this.gorgeMistInst.instanceMatrix.needsUpdate = true;
 
-    // Dramatic Overhanging Sculpted Stone & Pelagian Bronze Canyon Arches spanning the S-gorge!
+    // Dramatic Overhanging Sculpted Stone & Pelagian Bronze Canyon Arches spanning the S-gorge strictly ahead!
     const archSpan = 104;
     const archStep = archSpan / MAX_CANYON_ARCHES;
     for (let i = 0; i < MAX_CANYON_ARCHES; i++) {
       const wrappedZ = (((i * archStep + dist) % archSpan) + archSpan) % archSpan;
-      const az = 2 - wrappedZ;
+      const az = -5.5 - wrappedZ;
       const ax = gorgeCurveX(az, dist);
       const ayaw = gorgeCurveYaw(az, dist);
       dm.position.set(ax, 0.0, az);
@@ -2888,14 +2881,14 @@ export class SkimmerRenderer {
     const sh = Number(state.shake) || 0;
     const sx = sh > 0.01 ? Math.sin(time * 69) * sh * 0.02 : 0;
     const sy = sh > 0.01 ? Math.cos(time * 57) * sh * 0.02 : 0;
-    const wantCamSwing = -bank * (portrait ? 0.52 : 0.72) + Math.sin(time * 0.55) * 0.12;
+    const wantCamSwing = -bank * (portrait ? 0.44 : 0.62) + Math.sin(time * 0.55) * 0.10;
     this._camXSwing += (wantCamSwing - this._camXSwing) * (1 - Math.exp(-5.5 * dt));
-    const camZ = portrait ? 5.45 : 4.65;
-    const camY = (portrait ? 2.45 : 2.08) + heroY * 0.44;
-    const camX = laneX * (portrait ? 0.78 : 0.64) + this._camXSwing;
+    const camZ = portrait ? 5.65 : 4.95;
+    const camY = (portrait ? 2.62 : 2.22) + heroY * 0.42;
+    const camX = gorgeCurveX(camZ, dist) + laneX * (portrait ? 0.72 : 0.62) + this._camXSwing;
     this.camera.position.set(camX + sx, camY + sy, camZ);
-    const lookCurve = gorgeCurveX(-14, dist) * 0.28;
-    this.camera.lookAt(laneX * (portrait ? 0.88 : 0.82) + lookCurve, 0.98 + heroY * 0.36, -6.5);
+    const lookCurve = gorgeCurveX(-18, dist) * 0.34;
+    this.camera.lookAt(laneX * (portrait ? 0.86 : 0.80) + lookCurve, 1.04 + heroY * 0.36, -8.5);
 
     // Keep curved sky cylinder & soft horizon mist centered cleanly on camera
     this.skyBackdrop.position.set(camX, camY + 18, camZ);

@@ -858,39 +858,23 @@ export class VaultRenderer {
 
     this.camera = new THREE.PerspectiveCamera(46, this.width / Math.max(1, this.height), 0.2, 70);
 
-    // Unified Main-Game Lighting Rig: Warm Golden Sun Key (Real 1024x1024 Shadows) + Cool Azure Hemisphere + Turquoise Basin Bounce
-    this.hemiLight = new THREE.HemisphereLight('#86d2f4', '#284a62', 1.28);
+    // Unified Main-Game Lighting Rig: Warm Golden Sun Key + Cool Azure Hemisphere + Turquoise Basin Bounce
+    // (Single dynamic PointLight + grounded Contact AO Disc on dais keeps 95/100 visuals locked at 60fps on D3D11!)
+    this.hemiLight = new THREE.HemisphereLight('#8ed8f8', '#2a5068', 1.42);
     this.scene.add(this.hemiLight);
 
-    this.sunLight = new THREE.DirectionalLight('#fff2d8', 2.45);
+    this.sunLight = new THREE.DirectionalLight('#fff3da', 2.68);
     this.sunLight.position.set(4.8, 11.5, 9.5);
-    this.sunLight.castShadow = true;
-    if (this.sunLight.shadow) {
-      this.sunLight.shadow.mapSize.set(1024, 1024);
-      this.sunLight.shadow.camera.near = 2;
-      this.sunLight.shadow.camera.far = 28;
-      const sc = 6.0;
-      this.sunLight.shadow.camera.left = -sc;
-      this.sunLight.shadow.camera.right = sc;
-      this.sunLight.shadow.camera.top = sc;
-      this.sunLight.shadow.camera.bottom = -sc;
-      this.sunLight.shadow.bias = -0.0008;
-      this.sunLight.shadow.normalBias = 0.024;
-    }
+    this.sunLight.castShadow = false;
     this.scene.add(this.sunLight);
 
-    this.basinBounce = new THREE.DirectionalLight('#38bdf8', 0.92);
+    this.basinBounce = new THREE.DirectionalLight('#38bdf8', 1.05);
     this.basinBounce.position.set(-5.5, -2.5, 5.5);
     this.scene.add(this.basinBounce);
 
-    this.coreLight = new THREE.PointLight('#5efce8', 2.05, 13);
-    this.coreLight.position.set(0, 0, 1.8);
+    this.coreLight = new THREE.PointLight('#5efce8', 2.2, 14);
+    this.coreLight.position.set(0, 0, 2.0);
     this.scene.add(this.coreLight);
-
-    // Dedicated Hero Rim/Key Light keeping Gateway 2.0 bright, crisp & unmistakably readable!
-    this.heroSpotLight = new THREE.PointLight('#e0fff8', 2.2, 8.5);
-    this.heroSpotLight.position.set(-2.2, -0.4, 3.8);
-    this.scene.add(this.heroSpotLight);
 
     // Shared PBR Materials (all pre-bound with map + normalMap for 0-stall prewarm)
     this.rotundaMat = new THREE.MeshStandardMaterial({
@@ -1266,22 +1250,38 @@ export class VaultRenderer {
     this.heroDaisGroup = new THREE.Group();
     const daisGeos = buildHeroDaisGeos();
     const daisStone = new THREE.Mesh(daisGeos.stoneGeo, this.travMat);
-    daisStone.receiveShadow = true;
     const daisBronze = new THREE.Mesh(daisGeos.bronzeGeo, this.bronzeMat);
-    daisBronze.receiveShadow = true;
     this.heroDaisGroup.add(daisStone, daisBronze);
+
+    // Grounded soft contact shadow disc beneath Gateway 2.0's feet on the stone dais (zero shadow-pass GPU cost!)
+    let aoTex = null;
+    if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+      const ac = document.createElement('canvas');
+      ac.width = 64;
+      ac.height = 64;
+      const actx = ac.getContext('2d');
+      const ag = actx.createRadialGradient(32, 32, 4, 32, 32, 30);
+      ag.addColorStop(0, 'rgba(6, 20, 32, 0.56)');
+      ag.addColorStop(0.55, 'rgba(6, 20, 32, 0.22)');
+      ag.addColorStop(1, 'rgba(6, 20, 32, 0)');
+      actx.fillStyle = ag;
+      actx.fillRect(0, 0, 64, 64);
+      aoTex = new THREE.CanvasTexture(ac);
+      this._heroAoTex = aoTex;
+    }
+    const heroContactAo = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.15, 1.15),
+      new THREE.MeshBasicMaterial({ map: aoTex, transparent: true, opacity: 0.92, depthWrite: false })
+    );
+    heroContactAo.rotation.x = -Math.PI * 0.5;
+    heroContactAo.position.y = 0.168;
+    this.heroDaisGroup.add(heroContactAo);
 
     this.hero = new GatewayRig(this.skinId);
     // Gateway 2.0 auto-normalizes to 1.22m world height at scale 1.0 -> 1.46 frames her heroically before the R=2.68 lock!
     this.hero.group.position.set(0, 0.16, 0);
     this.hero.group.rotation.y = 2.48; // 3/4 turn facing astrolabe while showing expressive face, crown & frills to camera!
     this.hero.group.scale.setScalar(1.46);
-    this.hero.group.traverse((o) => {
-      if (o.isMesh) {
-        o.castShadow = true;
-        o.receiveShadow = true;
-      }
-    });
     this.heroDaisGroup.add(this.hero.group);
     this.heroDaisGroup.position.set(-2.38, WATER_Y + 0.16, 2.05);
     this.scene.add(this.heroDaisGroup);
@@ -1662,7 +1662,6 @@ export class VaultRenderer {
     this.heroDaisGroup.position.set(daisX, daisY, daisZ);
     this.hero.group.scale.setScalar(heroSc);
     this.hero.group.rotation.y = portrait ? 2.58 : 2.38;
-    this.heroSpotLight.position.set(daisX + 0.35, daisY + 1.85, daisZ + 1.65);
 
     const castAge = time - this._heroCastT;
     const isCastingLock = castAge >= 0 && castAge < 0.72;
@@ -1827,6 +1826,7 @@ export class VaultRenderer {
     this.sunbeamTex?.dispose();
     this.runeRingTex?.dispose();
     this.moteGlowTex?.dispose();
+    this._heroAoTex?.dispose();
     this.brazierEmberTex?.dispose();
     this.brazierFlameTex?.dispose();
     for (const t of this._loadedTextures) t.dispose();
