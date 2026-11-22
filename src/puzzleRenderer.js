@@ -14,13 +14,15 @@
 
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { GatewayRig } from './gateway.js';
 import { BELL_COLORS } from './puzzleRoom.js';
+import { createWaterNormalTexture } from './water.js';
 
 const TAU = Math.PI * 2;
 const INTRO_T = 1.05;
 const BEAM_Y = 0.78;
-const WATER_Y = -0.28;
+const WATER_Y = -0.34;
 
 const MAX_TILES = 64;
 const MAX_BELLS = 6;
@@ -1255,6 +1257,214 @@ function buildDynamicHydroStreamGeo(segs = 18) {
   return geo;
 }
 
+function cloneSubtreeWithMaterials(srcObj) {
+  const clone = srcObj.clone(true);
+  clone.traverse((o) => {
+    if (!o.isMesh || !o.material) return;
+    if (Array.isArray(o.material)) {
+      o.material = o.material.map((m) => m.clone());
+    } else {
+      o.material = o.material.clone();
+    }
+  });
+  return clone;
+}
+
+function createSanctumWaterMaterial(normalTex) {
+  const uniforms = THREE.UniformsUtils.merge([
+    THREE.UniformsLib.fog,
+    {
+      uTime: { value: 0 },
+      uNormalMap: { value: normalTex },
+      uDeepColor: { value: new THREE.Color('#06546e') },
+      uShallowColor: { value: new THREE.Color('#14c4b2') },
+      uSkyColor: { value: new THREE.Color('#56b6e4') },
+      uHorizonColor: { value: new THREE.Color('#edd09c') },
+      uTempleReflColor: { value: new THREE.Color('#d8ac6a') },
+      uSunColor: { value: new THREE.Color('#ffefc4') },
+      uSunDir: { value: new THREE.Vector3(0.42, 0.56, -0.71).normalize() },
+      uTerraceHalf: { value: new THREE.Vector2(3.55, 3.55) },
+      uRotundaZ: { value: 1.55 },
+      uSolvedBoost: { value: 0 },
+    },
+  ]);
+
+  return new THREE.ShaderMaterial({
+    uniforms,
+    fog: true,
+    transparent: false,
+    depthWrite: true,
+    vertexShader: /* glsl */ `
+      uniform float uTime;
+      varying vec3 vWorld;
+      #include <fog_pars_vertex>
+      void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        float swell = sin(wp.x * 0.42 + uTime * 1.15) * 0.022
+                    + cos(wp.z * 0.48 - uTime * 0.95) * 0.020;
+        float nearCalm = smoothstep(3.0, 9.5, length(wp.xz));
+        wp.y += swell * (0.28 + 0.72 * nearCalm);
+        vWorld = wp.xyz;
+        vec4 mvPosition = viewMatrix * wp;
+        gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform sampler2D uNormalMap;
+      uniform vec3 uDeepColor;
+      uniform vec3 uShallowColor;
+      uniform vec3 uSkyColor;
+      uniform vec3 uHorizonColor;
+      uniform vec3 uTempleReflColor;
+      uniform vec3 uSunColor;
+      uniform vec3 uSunDir;
+      uniform vec2 uTerraceHalf;
+      uniform float uRotundaZ;
+      uniform float uSolvedBoost;
+
+      varying vec3 vWorld;
+      #include <fog_pars_fragment>
+
+      vec3 sampleN(vec2 uv) { return texture2D(uNormalMap, uv).xyz * 2.0 - 1.0; }
+
+      float sdRoundBox(vec2 p, vec2 b, float r) {
+        vec2 q = abs(p) - b + r;
+        return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+      }
+
+      void main() {
+        vec2 p = vWorld.xz;
+        mat2 rotA = mat2(0.80, -0.60, 0.60, 0.80);
+        mat2 rotB = mat2(-0.55, 0.835, -0.835, -0.55);
+
+        // Ultra-fast 3-tap hardware-filtered multi-scale ripples + organic warp (ZERO procedural fbm ALU, ZERO polka dots!)
+        vec3 n1 = sampleN(p * 0.13 + vec2(uTime * 0.024, uTime * 0.017));
+        vec2 pw = p + n1.xy * 0.42;
+        vec3 n2 = sampleN((rotA * pw) * 0.27 + vec2(-uTime * 0.021, uTime * 0.028));
+        vec3 n3 = sampleN((rotB * pw) * 0.50 + vec2(uTime * 0.032, -uTime * 0.023));
+        vec2 rip = n1.xy + n2.xy * 0.72 + n3.xy * 0.30;
+
+        // 4 Sculpted Axolotl waterfall impact zones in the lagoon ahead of the curved rotunda!
+        vec2 wf0 = vec2(-3.75, uRotundaZ - 3.35);
+        vec2 wf1 = vec2(-1.82, uRotundaZ - 4.95);
+        vec2 wf2 = vec2( 1.82, uRotundaZ - 4.95);
+        vec2 wf3 = vec2( 3.75, uRotundaZ - 3.35);
+        float dWf = min(min(length(p - wf0), length(p - wf1)), min(length(p - wf2), length(p - wf3)));
+        float wfRipple = exp(-dWf * 0.90) * sin(dWf * 9.0 - uTime * 7.4);
+        rip += normalize(p - wf1 + 0.001) * wfRipple * 0.26;
+
+        vec3 V = normalize(cameraPosition - vWorld);
+        float camDist = length(cameraPosition - vWorld);
+        float detail = mix(1.0, 0.25, smoothstep(14.0, 62.0, camDist));
+        vec3 N = normalize(vec3(rip.x * 0.15 * detail, 1.0, rip.y * 0.15 * detail));
+
+        // Signed distance to Sanctum travertine terrace + curved rotunda quay arc
+        float dTerrace = max(0.0, sdRoundBox(p, uTerraceHalf, 0.55));
+        float rRot = length(p - vec2(0.0, uRotundaZ + 0.45));
+        float dRotQuay = p.y < (uRotundaZ + 0.25) ? abs(rRot - 6.75) : 99.0;
+        float shoreD = min(dTerrace, dRotQuay);
+
+        // Rich Main-Spire crystal emerald-turquoise shallow water -> deep cerulean lagoon depth gradient
+        float shallowMask = exp(-shoreD * 0.38) * 0.76 + exp(-length(p) * 0.085) * 0.24;
+        vec3 waterBody = mix(uDeepColor, uShallowColor, clamp(shallowMask, 0.0, 1.0));
+
+        // Shimmering sunlit underwater caustic filigree computed directly from rotated normal-map interference (0 extra fetches!)
+        float ca1 = pow(clamp(1.0 - abs(n1.x - n2.y) * 3.8, 0.0, 1.0), 3.4);
+        float ca2 = pow(clamp(1.0 - abs(n2.x + n3.y) * 3.5, 0.0, 1.0), 3.8);
+        float caust = clamp(ca1 * 0.65 + ca2 * 0.50, 0.0, 1.0);
+        waterBody += vec3(0.24, 0.88, 0.90) * caust * (0.12 + 0.36 * shallowMask + 0.18 * uSolvedBoost);
+
+        // Schlick Fresnel sky + warm golden colonnade reflection + sunlit horizon mist
+        float cosT = clamp(dot(N, V), 0.0, 1.0);
+        float fres = clamp(0.024 + 0.976 * pow(1.0 - cosT, 4.4), 0.0, 0.84);
+        vec3 R = reflect(-V, N);
+        float reflUp = clamp(R.y, 0.0, 1.0);
+        vec3 skyGrad = mix(uHorizonColor * 0.88, uSkyColor * 0.96, smoothstep(0.0, 0.38, reflUp));
+        float templeReflMask = smoothstep(2.5, -4.5, p.y) * exp(-abs(p.x) * 0.14) * (1.0 - smoothstep(0.15, 0.65, reflUp));
+        vec3 envRefl = mix(skyGrad, uTempleReflColor, templeReflMask * 0.50);
+
+        vec3 col = mix(waterBody, envRefl, fres * 0.68);
+
+        // Controlled sparkling golden sunlight glitter (clamped so right lagoon NEVER clips to white!)
+        vec3 H = normalize(uSunDir + V);
+        float specSharp = pow(max(dot(N, H), 0.0), 170.0) * 0.88;
+        float specSoft = pow(max(dot(N, H), 0.0), 28.0) * 0.15;
+        col += uSunColor * (specSharp + specSoft) * detail;
+
+        // Organic lacy shoreline whitewater foam lapping around terrace, boulders, rotunda quay & waterfalls!
+        float lace = smoothstep(-0.18, 0.58, n2.x * 0.55 + n3.y * 0.65);
+        float lapWave = smoothstep(0.58, 1.0, sin(shoreD * 6.5 - uTime * 2.8 + lace * 2.2));
+        float shoreFoam = exp(-shoreD * 2.65) * (0.24 + 0.62 * lace) + exp(-shoreD * 1.35) * lapWave * 0.20 * lace;
+        float wfFoam = exp(-dWf * 1.85) * (0.64 + 0.36 * lace)
+                     + smoothstep(0.62, 1.0, sin(dWf * 9.5 - uTime * 7.4)) * exp(-dWf * 1.15) * 0.44 * lace;
+        float foam = clamp(shoreFoam * 0.74 + wfFoam, 0.0, 0.88);
+        col = mix(col, vec3(0.90, 0.98, 1.0), foam);
+
+        gl_FragColor = vec4(col, 1.0);
+        #include <fog_fragment>
+      }
+    `,
+  });
+}
+
+function createSanctumWaterfallMaterial(waterY, normalTex) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uWaterY: { value: waterY },
+      uNormalMap: { value: normalTex },
+      uTopColor: { value: new THREE.Color('#42cce0') },
+      uFoamColor: { value: new THREE.Color('#f4feff') },
+    },
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      varying vec3 vWorld;
+      varying vec3 vNormalW;
+      void main() {
+        vUv = uv;
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorld = wp.xyz;
+        vNormalW = normalize(mat3(modelMatrix) * normal);
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform float uWaterY;
+      uniform sampler2D uNormalMap;
+      uniform vec3 uTopColor;
+      uniform vec3 uFoamColor;
+      varying vec2 vUv;
+      varying vec3 vWorld;
+      varying vec3 vNormalW;
+
+      void main() {
+        // Airy translucent sunlit rushing water ribbons using fast hardware texture lookups + soft silhouette feathering!
+        vec2 uv1 = vec2(vUv.x * 1.8, vWorld.y * 0.36 + uTime * 1.65);
+        vec2 uv2 = vec2(vUv.x * 3.2 + 0.35, vWorld.y * 0.62 + uTime * 2.45);
+        float s1 = texture2D(uNormalMap, uv1).x;
+        float s2 = texture2D(uNormalMap, uv2).y;
+        float streak = s1 * 0.56 + s2 * 0.44;
+        float foam = smoothstep(0.46, 0.78, streak);
+        float boil = smoothstep(uWaterY + 0.85, uWaterY - 0.02, vWorld.y);
+        float submergeFade = smoothstep(uWaterY - 0.16, uWaterY + 0.06, vWorld.y);
+
+        vec3 V = normalize(cameraPosition - vWorld);
+        float facing = abs(dot(normalize(vNormalW), V));
+        float softEdge = smoothstep(0.06, 0.58, facing);
+        vec3 col = mix(uTopColor, uFoamColor, clamp(foam * 0.85 + boil * 0.78 + (1.0 - facing) * 0.25, 0.0, 1.0));
+        float alpha = clamp((0.36 + foam * 0.38 + boil * 0.32) * (0.35 + 0.65 * softEdge) * submergeFade, 0.0, 0.86);
+        gl_FragColor = vec4(col, alpha);
+      }
+    `,
+  });
+}
+
 // ------------------------------------------------------------------------------------ PuzzleRenderer
 export class PuzzleRenderer {
   constructor(webgl, opts = {}) {
@@ -1271,6 +1481,11 @@ export class PuzzleRenderer {
     this.postfxActive = false;
     this._envRt = null;
     this._envBuilt = false;
+    this._glbLoaded = false;
+    this._glbTileInsts = [];
+    this._glbBrazierInsts = [];
+    this._glbBrazierSlots = [];
+    this._glbBrazierEmberMats = [];
     this._lastRoom = null;
     this._lastRenderMs = -1e9;
     this._lastGridOx = 2;
@@ -1279,21 +1494,22 @@ export class PuzzleRenderer {
     this._ndc = new THREE.Vector2();
     this._pickPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.1);
     this._pickHit = new THREE.Vector3();
+    this._pickBox = new THREE.Box3();
+    this._pickTmp = new THREE.Vector3();
     this._lookVec = new THREE.Vector3();
 
     // Pre-bound placeholder textures ensure prewarm() compiles final normal-mapped PBR shaders with 0 recompile hitch!
     this._flatNormalTex = makeFlatNormalTex();
-    this._stonePlaceholder = makeSolidAlbedoTex(222, 212, 194);
-    this._limestonePlaceholder = makeSolidAlbedoTex(188, 180, 162);
+    this._stonePlaceholder = makeSolidAlbedoTex(232, 218, 190);
+    this._limestonePlaceholder = makeSolidAlbedoTex(212, 192, 160);
     this._basaltPlaceholder = makeSolidAlbedoTex(58, 72, 80);
-    this._bronzePlaceholder = makeSolidAlbedoTex(194, 146, 72);
+    this._bronzePlaceholder = makeSolidAlbedoTex(204, 156, 78);
 
     this.causticWaterTex = createSanctumCausticTex(256);
     this.causticWaterTex.repeat.set(7, 7);
     this.floorCausticTex = createSanctumCausticTex(256);
     this.floorCausticTex.repeat.set(2.4, 2.4);
-    this.waterNormalTex = createWaterRippleNormalTex(256);
-    this.waterNormalTex.repeat.set(8, 8);
+    this.waterNormalTex = createWaterNormalTexture(128);
     this.waterfallTex = createWaterfallRibbonTex(128);
     this.waterfallTex.repeat.set(1, 2.4);
     this.sunShaftTex = createSanctumSunShaftTex(128);
@@ -1310,6 +1526,7 @@ export class PuzzleRenderer {
 
     this._initScene();
     this._loadPbrTextures();
+    this._loadSanctumTempleGlb();
     this._bindTapListener();
   }
 
@@ -1329,8 +1546,9 @@ export class PuzzleRenderer {
   }
 
   /**
-   * Raycasts screen coordinates `(clientX, clientY)` onto the 3D sanctum board plane (`y = 0.10`)
-   * and returns `{ col, row, wx, wz }` or `null` if outside the interactive board bounds.
+   * Raycasts screen coordinates `(clientX, clientY)` against live 3D interactive puzzle volumes FIRST
+   * (`tide_locks`, `bells`, `blocks`, `beam`, `pipes`, `lights`) to eliminate vertical parallax misses
+   * on tall 3D bells/columns/monoliths, then falls back cleanly to the `y = 0.10` courtyard floor plane!
    */
   pickTile(clientX, clientY) {
     const el = this.webgl?.domElement;
@@ -1342,11 +1560,75 @@ export class PuzzleRenderer {
       -((clientY - rect.top) / rect.height) * 2 + 1
     );
     this._raycaster.setFromCamera(this._ndc, this.camera);
-    if (!this._raycaster.ray.intersectPlane(this._pickPlane, this._pickHit)) return null;
-    const col = Math.round(this._pickHit.x + this._lastGridOx);
-    const row = Math.round(this._pickHit.z + this._lastGridOz);
-    const cols = this._lastRoom.cols || 5;
-    const rows = this._lastRoom.rows || 5;
+
+    const room = this._lastRoom;
+    const ox = this._lastGridOx;
+    const oz = this._lastGridOz;
+    const ray = this._raycaster.ray;
+    const origin = ray.origin;
+    const box = this._pickBox;
+    const tmp = this._pickTmp;
+    const pType = room.type || room.puzzle?.type;
+
+    let bestHit = null;
+    let bestDistSq = Infinity;
+    const testVol = (col, row, cx, cz, hx, yMin, yMax, hz) => {
+      box.min.set(cx - hx, yMin, cz - hz);
+      box.max.set(cx + hx, yMax, cz + hz);
+      if (ray.intersectBox(box, tmp)) {
+        const dSq = origin.distanceToSquared(tmp);
+        if (dSq < bestDistSq) {
+          bestDistSq = dSq;
+          bestHit = { col, row, wx: tmp.x, wz: tmp.z };
+        }
+      }
+    };
+
+    if (pType === 'tide_locks' && room.chambers) {
+      for (let i = 0; i < room.chambers.length; i++) {
+        const ch = room.chambers[i];
+        testVol(ch.x, ch.y, ch.x - ox, ch.y - oz, 0.42, 0.0, 1.94, 0.42);
+      }
+    } else if (pType === 'bells' && room.bells) {
+      for (let i = 0; i < room.bells.length; i++) {
+        const b = room.bells[i];
+        testVol(b.x, b.y, b.x - ox, b.y - oz, 0.48, 0.0, 1.66, 0.34);
+      }
+    } else if (pType === 'blocks' && room.blocks) {
+      for (let i = 0; i < room.blocks.length; i++) {
+        const bl = room.blocks[i];
+        const bx = (bl.px ?? bl.x) - ox;
+        const bz = (bl.py ?? bl.y) - oz;
+        testVol(Math.round(bl.x), Math.round(bl.y), bx, bz, 0.42, 0.0, 0.86, 0.42);
+      }
+    } else if (pType === 'beam' && room.mirrors) {
+      for (let i = 0; i < room.mirrors.length; i++) {
+        const m = room.mirrors[i];
+        testVol(m.x, m.y, m.x - ox, m.y - oz, 0.38, 0.0, 0.96, 0.38);
+      }
+    } else if (pType === 'pipes' && room.pipes) {
+      for (let i = 0; i < room.pipes.length; i++) {
+        const pp = room.pipes[i];
+        testVol(pp.x, pp.y, pp.x - ox, pp.y - oz, 0.46, 0.0, 0.42, 0.46);
+      }
+    } else if (pType === 'lights' && room.lit) {
+      const n = room.n || room.puzzle?.n || 3;
+      const gx0 = room.puzzle?.gx ?? 1;
+      const gy0 = room.puzzle?.gy ?? 1;
+      for (let i = 0; i < n * n; i++) {
+        const c = gx0 + (i % n);
+        const r = gy0 + ((i / n) | 0);
+        testVol(c, r, c - ox, r - oz, 0.46, 0.0, 0.18, 0.46);
+      }
+    }
+    if (bestHit) return bestHit;
+
+    // Fallback to courtyard floor plane (`y = 0.10`) for open navigation tiles & entrance threshold
+    if (!ray.intersectPlane(this._pickPlane, this._pickHit)) return null;
+    const col = Math.round(this._pickHit.x + ox);
+    const row = Math.round(this._pickHit.z + oz);
+    const cols = room.cols || 5;
+    const rows = room.rows || 5;
     if (col < -1 || col > cols || row < -1 || row > rows + 1) return null;
     return { col, row, wx: this._pickHit.x, wz: this._pickHit.z };
   }
@@ -1393,57 +1675,56 @@ export class PuzzleRenderer {
 
   _initScene() {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#6ec6eb');
-    // Unified Main-Game Atmospheric Fog matching sunlit cerulean-turquoise sanctum sky
-    this.scene.fog = new THREE.FogExp2('#88cce8', 0.0155);
+    this.scene.background = new THREE.Color('#78c8ea');
+    // Warm sunlit coastal horizon atmospheric fog blending smoothly into the open-air sky dome
+    this.scene.fog = new THREE.FogExp2('#c4e1ec', 0.0115);
 
-    this.camera = new THREE.PerspectiveCamera(42, this.width / Math.max(1, this.height), 0.2, 95);
+    this.camera = new THREE.PerspectiveCamera(40, this.width / Math.max(1, this.height), 0.2, 110);
 
-    // Unified Main-Game Lighting Rig: Warm Golden Sun Key (Real 1024x1024 Hero Shadows) + Cool Azure Hemisphere + Turquoise Basin Bounce
-    this.hemiLight = new THREE.HemisphereLight('#84d2f6', '#284a62', 1.28);
+    // Open-air sunlit coastal sky dome (seamless horizon behind the curved amphitheater, ZERO flat wall void!)
+    this.skyDomeMat = new THREE.MeshBasicMaterial({
+      color: '#a8dff5',
+      side: THREE.BackSide,
+      fog: false,
+      depthWrite: false,
+    });
+    this.skyDome = new THREE.Mesh(new THREE.SphereGeometry(72, 24, 14), this.skyDomeMat);
+    this.skyDome.position.set(0, 6, 0);
+    this.scene.add(this.skyDome);
+
+    // Main-Spire Balanced Golden Sunlight + Azure Sky Hemisphere + Turquoise Lagoon Bounce (ZERO overexposure, 0 shadow pass -> 60fps!)
+    this.hemiLight = new THREE.HemisphereLight('#94d2f2', '#5c4632', 0.80);
     this.scene.add(this.hemiLight);
 
-    this.sunLight = new THREE.DirectionalLight('#fff2d8', 2.42);
-    this.sunLight.position.set(6.5, 13.5, 7.5);
-    this.sunLight.castShadow = true;
-    if (this.sunLight.shadow) {
-      this.sunLight.shadow.mapSize.set(1024, 1024);
-      this.sunLight.shadow.camera.near = 2;
-      this.sunLight.shadow.camera.far = 30;
-      const sc = 6.5;
-      this.sunLight.shadow.camera.left = -sc;
-      this.sunLight.shadow.camera.right = sc;
-      this.sunLight.shadow.camera.top = sc;
-      this.sunLight.shadow.camera.bottom = -sc;
-      this.sunLight.shadow.bias = -0.0008;
-      this.sunLight.shadow.normalBias = 0.025;
-    }
+    this.sunLight = new THREE.DirectionalLight('#ffe8be', 1.76);
+    this.sunLight.position.set(7.5, 13.5, 8.5);
+    this.sunLight.castShadow = false;
     this.scene.add(this.sunLight);
 
-    this.waterBounce = new THREE.DirectionalLight('#22d3ee', 0.88);
-    this.waterBounce.position.set(-6, 2.8, -5);
+    this.waterBounce = new THREE.DirectionalLight('#22bfd4', 0.56);
+    this.waterBounce.position.set(-6.5, 2.5, -5.5);
     this.scene.add(this.waterBounce);
 
-    this.solveLight = new THREE.PointLight('#5efce8', 1.45, 15);
-    this.solveLight.position.set(0, 1.8, 0);
+    this.solveLight = new THREE.PointLight('#5efce8', 1.05, 16);
+    this.solveLight.position.set(0, 1.9, 0);
     this.scene.add(this.solveLight);
 
-    // Shared PBR Materials (all pre-bound with map + normalMap for 0ms prewarm!)
+    // Shared PBR Materials for the 6 solvable puzzle archetypes (all pre-bound for 0ms prewarm!)
     this.masonryMat = new THREE.MeshStandardMaterial({
-      color: '#eee2ce',
+      color: '#f0dec0',
       map: this._stonePlaceholder,
       normalMap: this._flatNormalTex,
-      normalScale: new THREE.Vector2(1.25, 1.25),
-      roughness: 0.66,
+      normalScale: new THREE.Vector2(1.15, 1.15),
+      roughness: 0.64,
       metalness: 0.05,
     });
 
     this.travMat = new THREE.MeshStandardMaterial({
-      color: '#ece1cd',
+      color: '#f2e2c4',
       map: this._stonePlaceholder,
       normalMap: this._flatNormalTex,
-      normalScale: new THREE.Vector2(1.1, 1.1),
-      roughness: 0.58,
+      normalScale: new THREE.Vector2(1.05, 1.05),
+      roughness: 0.56,
       metalness: 0.05,
     });
 
@@ -1451,17 +1732,17 @@ export class PuzzleRenderer {
       color: '#ffffff',
       map: this._stonePlaceholder,
       normalMap: this._flatNormalTex,
-      normalScale: new THREE.Vector2(0.9, 0.9),
-      roughness: 0.54,
+      normalScale: new THREE.Vector2(0.85, 0.85),
+      roughness: 0.52,
       metalness: 0.06,
     });
 
     this.limestoneMat = new THREE.MeshStandardMaterial({
-      color: '#ded6c4',
+      color: '#e5d4b6',
       map: this._limestonePlaceholder,
       normalMap: this._flatNormalTex,
-      normalScale: new THREE.Vector2(1.2, 1.2),
-      roughness: 0.64,
+      normalScale: new THREE.Vector2(1.15, 1.15),
+      roughness: 0.62,
       metalness: 0.06,
     });
 
@@ -1469,29 +1750,29 @@ export class PuzzleRenderer {
       color: '#4c626d',
       map: this._basaltPlaceholder,
       normalMap: this._flatNormalTex,
-      normalScale: new THREE.Vector2(1.3, 1.3),
+      normalScale: new THREE.Vector2(1.25, 1.25),
       roughness: 0.52,
       metalness: 0.16,
     });
 
     this.brassMat = new THREE.MeshStandardMaterial({
-      color: '#e5b35a',
+      color: '#eab85e',
       map: this._bronzePlaceholder,
       normalMap: this._flatNormalTex,
-      normalScale: new THREE.Vector2(1.05, 1.05),
+      normalScale: new THREE.Vector2(1.0, 1.0),
       emissive: '#382208',
-      emissiveIntensity: 0.16,
+      emissiveIntensity: 0.14,
       roughness: 0.28,
-      metalness: 0.72,
+      metalness: 0.74,
     });
 
     this.darkBronzeMat = new THREE.MeshStandardMaterial({
-      color: '#a87d45',
+      color: '#b08244',
       map: this._bronzePlaceholder,
       normalMap: this._flatNormalTex,
-      normalScale: new THREE.Vector2(1.15, 1.15),
+      normalScale: new THREE.Vector2(1.1, 1.1),
       emissive: '#261405',
-      emissiveIntensity: 0.14,
+      emissiveIntensity: 0.12,
       roughness: 0.36,
       metalness: 0.68,
     });
@@ -1500,7 +1781,7 @@ export class PuzzleRenderer {
       color: '#19a7bd',
       map: this.causticWaterTex,
       normalMap: this.waterNormalTex,
-      normalScale: new THREE.Vector2(0.7, 0.7),
+      normalScale: new THREE.Vector2(0.6, 0.6),
       emissive: '#06667a',
       emissiveMap: this.causticWaterTex,
       emissiveIntensity: 0.45,
@@ -1508,150 +1789,92 @@ export class PuzzleRenderer {
       metalness: 0.22,
     });
 
-    // 1. Deep Subtle Reflective Dark-Emerald Ocean Pool (NO bright cartoon squiggly lines!)
-    this.waterMat = new THREE.MeshStandardMaterial({
-      color: '#09384a',
-      map: this.causticWaterTex,
-      normalMap: this.waterNormalTex,
-      normalScale: new THREE.Vector2(1.15, 1.15),
-      emissive: '#042230',
-      emissiveIntensity: 0.14,
-      roughness: 0.16,
-      metalness: 0.38,
-    });
-    this.waterMesh = new THREE.Mesh(new THREE.PlaneGeometry(140, 140, 24, 24), this.waterMat);
+    // 1. REAL GLSL Crystal-Clear Reflective Turquoise Sanctum Lagoon (ZERO gray polka dots!)
+    this.waterMat = createSanctumWaterMaterial(this.waterNormalTex);
+    this.waterMesh = new THREE.Mesh(new THREE.PlaneGeometry(140, 140, 42, 42), this.waterMat);
     this.waterMesh.rotation.x = -Math.PI * 0.5;
     this.waterMesh.position.y = WATER_Y;
     this.scene.add(this.waterMesh);
 
-    // 2. North Aqueduct Sanctuary Wall, Fluted Columns, Ornate Recessed Temple Portal & Pouring Spouts
+    // Shared GLSL Foaming Waterfall Shader (applied to `Sanctum_Waterfalls` on GLB load)
+    this.waterfallMat = createSanctumWaterfallMaterial(WATER_Y, this.waterNormalTex);
+
+    // 2. Curved Pelagian Water-Temple Rotunda Frame (`env_sanctum_temple.glb` mounts cleanly inside!)
     this.sanctumFrame = new THREE.Group();
-
-    const backWall = new THREE.Mesh(new THREE.BoxGeometry(9.6, 3.8, 0.75), this.masonryMat);
-    backWall.position.set(0, 1.5, -4.60);
-    const trough = new THREE.Mesh(new THREE.BoxGeometry(9.8, 0.36, 0.96), this.brassMat);
-    trough.position.set(0, 3.48, -4.45);
-    const troughStream = new THREE.Mesh(new THREE.BoxGeometry(9.5, 0.14, 0.72), this.troughWaterMat);
-    troughStream.position.set(0, 3.60, -4.45);
-    this.sanctumFrame.add(backWall, trough, troughStream);
-
-    // 4 Fluted Travertine Columns + Carved Capitals + Antique Bronze Collars (2 merged draw calls!)
-    const colGeos = buildSanctumColonadeGeos();
-    this.sanctumFrame.add(
-      new THREE.Mesh(colGeos.stoneGeo, this.travMat),
-      new THREE.Mesh(colGeos.bronzeGeo, this.brassMat)
-    );
-
-    // Twin pouring waterfall spouts (animated translucent foam ribbons) + spinning antique-bronze rotary valves
+    this.glbRotundaGroup = new THREE.Group();
+    this.sanctumFrame.add(this.glbRotundaGroup);
     this.rotaryValves = [];
-    const cascadeMat = new THREE.MeshBasicMaterial({
-      color: '#7dd3fc',
-      map: this.waterfallTex,
+
+    // Animated Translucent Mist Plumes where all 4 Axolotl Waterfalls Plunge into the Lagoon!
+    this.wfSplashMistMat = new THREE.MeshBasicMaterial({
+      color: '#dcfbff',
+      map: this.moteGlowTex,
       transparent: true,
-      opacity: 0.54,
+      opacity: 0.44,
       blending: THREE.AdditiveBlending,
-      side: THREE.DoubleSide,
       depthWrite: false,
     });
-    const spoutParts = [];
-    for (const sx of [-3.32, 3.32]) {
-      const sp = new THREE.CylinderGeometry(0.15, 0.17, 0.68, 12);
-      sp.rotateX(Math.PI * 0.5);
-      sp.translate(sx, 2.82, -3.94);
-      spoutParts.push(sp);
-
-      const lip = new THREE.TorusGeometry(0.16, 0.036, 8, 16);
-      lip.translate(sx, 2.82, -3.60);
-      spoutParts.push(lip);
-
-      const stream = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.20, 3.15, 12, 1, true), cascadeMat);
-      stream.position.set(sx, 1.24, -3.62);
-      this.sanctumFrame.add(stream);
-
-      // Merged rotary bronze valve wheel (1 draw call each!)
-      const vwParts = [new THREE.TorusGeometry(0.32, 0.045, 8, 20)];
-      for (let k = 0; k < 4; k++) {
-        const spoke = new THREE.BoxGeometry(0.62, 0.045, 0.04);
-        spoke.rotateZ((k * Math.PI) / 4);
-        vwParts.push(spoke);
-      }
-      const vwHub = new THREE.CylinderGeometry(0.08, 0.08, 0.10, 10);
-      vwHub.rotateX(Math.PI * 0.5);
-      vwParts.push(vwHub);
-      const valveWheel = new THREE.Mesh(mergeNorm(vwParts), this.brassMat);
-      valveWheel.position.set(sx * 0.86, 1.46, -4.14);
-      this.rotaryValves.push(valveWheel);
-      this.sanctumFrame.add(valveWheel);
+    this.wfSplashMists = [];
+    for (const [wx, wz] of [
+      [-3.75, -3.35],
+      [-1.82, -4.95],
+      [1.82, -4.95],
+      [3.75, -3.35],
+    ]) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(1.35, 0.92), this.wfSplashMistMat);
+      m.position.set(wx, WATER_Y + 0.30, wz);
+      this.sanctumFrame.add(m);
+      this.wfSplashMists.push(m);
     }
-    this.sanctumFrame.add(new THREE.Mesh(mergeNorm(spoutParts), this.brassMat));
 
-    // Ornate Recessed Bronze-Framed Temple Portal (KILLS flat dark-green doorway rectangle!)
-    const portalGeos = buildTemplePortalGeos();
-    this.sanctumFrame.add(
-      new THREE.Mesh(portalGeos.stoneGeo, this.travMat),
-      new THREE.Mesh(portalGeos.bronzeGeo, this.brassMat)
-    );
-
-    // Recessed mystical inner sanctum threshold backdrop IN FRONT of backWall (revealed dramatically when doors open!)
+    // Glowing mystical inner sanctum threshold backdrop revealed dramatically when Sanctum Gate doors swing open!
     this.portalInnerMat = new THREE.MeshBasicMaterial({
       color: '#5efce8',
       map: this.portalInnerGlowTex,
       transparent: true,
       opacity: 0.96,
     });
-    const portalInner = new THREE.Mesh(new THREE.PlaneGeometry(2.14, 2.46), this.portalInnerMat);
-    portalInner.position.set(0, 1.24, -4.19);
+    const portalInner = new THREE.Mesh(new THREE.PlaneGeometry(2.16, 2.52), this.portalInnerMat);
+    portalInner.position.set(0, 1.40, -6.48);
     this.sanctumFrame.add(portalInner);
 
-    // Twin Dark Relief Stone-and-Bronze Doors with Glowing Etched Aqua Seal Runes
+    // Gate Door Anchor Pivots (populated w/ Blender `Sanctum_GateDoorL` & `Sanctum_GateDoorR` on GLB load!)
     this.portalRuneMat = new THREE.MeshBasicMaterial({
       color: '#5efce8',
       map: this.portalRuneTex,
       transparent: true,
-      opacity: 0.86,
+      opacity: 0.62,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
-    const buildDoorLeaf = (sideSign) => {
-      const leafGrp = new THREE.Group();
-      const dGeos = buildPortalDoorLeafGeos(sideSign);
-      leafGrp.add(
-        new THREE.Mesh(dGeos.stoneGeo, this.basaltMat),
-        new THREE.Mesh(dGeos.bronzeGeo, this.brassMat)
-      );
-      const runePlane = new THREE.Mesh(new THREE.PlaneGeometry(0.92, 2.15), this.portalRuneMat);
-      runePlane.position.set(0, 1.22, 0.135);
-      leafGrp.add(runePlane);
-      return leafGrp;
-    };
-    this.gateDoorL = buildDoorLeaf(-1);
-    this.gateDoorR = buildDoorLeaf(1);
-    this.gateDoorL.position.set(-0.51, 0.04, -4.06);
-    this.gateDoorR.position.set(0.51, 0.04, -4.06);
+    this.gateDoorL = new THREE.Group();
+    this.gateDoorR = new THREE.Group();
+    this.gateDoorL.position.set(-0.51, 0.16, -6.16);
+    this.gateDoorR.position.set(0.51, 0.16, -6.16);
     this.sanctumFrame.add(this.gateDoorL, this.gateDoorR);
 
-    // Recessed Carved Stone Frieze Tablet above Portal Lintel holding 3D Faceted Crystal Cabochons in Bronze Bezels
-    // (KILLS flat dark-blue PowerPoint signboard!)
+    // Carved Stone & Dark Basalt Target Clue Frieze Tablet nested cleanly into the pediment lintel above `Sanctum_GateFrame`!
     this.clueFriezeGroup = new THREE.Group();
-    this.clueFriezeGroup.position.set(0, 2.66, -3.72);
-    const friezeSlab = new THREE.Mesh(new THREE.BoxGeometry(2.58, 0.92, 0.24), this.masonryMat);
+    this.clueFriezeGroup.position.set(0, 3.28, -5.74);
+    const friezeSlab = new THREE.Mesh(new THREE.BoxGeometry(2.14, 0.86, 0.20), this.masonryMat);
+    const friezeInset = new THREE.Mesh(new THREE.BoxGeometry(1.88, 0.68, 0.23), this.basaltMat);
     const friezeTrimParts = [];
-    for (const sy of [-0.46, 0.46]) {
-      const bar = new THREE.BoxGeometry(2.68, 0.08, 0.30);
+    for (const sy of [-0.43, 0.43]) {
+      const bar = new THREE.BoxGeometry(2.24, 0.08, 0.26);
       bar.translate(0, sy, 0.02);
       friezeTrimParts.push(bar);
     }
-    for (const sx of [-1.30, 1.30]) {
-      const side = new THREE.BoxGeometry(0.09, 0.98, 0.30);
+    for (const sx of [-1.08, 1.08]) {
+      const side = new THREE.BoxGeometry(0.09, 0.92, 0.26);
       side.translate(sx, 0, 0.02);
       friezeTrimParts.push(side);
     }
     const friezeBronze = new THREE.Mesh(mergeNorm(friezeTrimParts), this.brassMat);
-    const bezelGeo = new THREE.TorusGeometry(0.11, 0.024, 8, 12);
+    const bezelGeo = new THREE.TorusGeometry(0.105, 0.022, 8, 12);
     this.clueBezelInst = new THREE.InstancedMesh(bezelGeo, this.brassMat, 16);
     this.clueBezelInst.frustumCulled = false;
     this.clueBezelInst.count = 0;
-    const gemGeo = new THREE.OctahedronGeometry(0.095, 0);
+    const gemGeo = new THREE.OctahedronGeometry(0.092, 0);
     gemGeo.scale(1.0, 1.0, 0.65);
     this.clueGems = [];
     for (let i = 0; i < 16; i++) {
@@ -1668,75 +1891,33 @@ export class PuzzleRenderer {
       this.clueFriezeGroup.add(gem);
       this.clueGems.push(gem);
     }
-    this.clueFriezeGroup.add(friezeSlab, friezeBronze, this.clueBezelInst);
+    this.clueFriezeGroup.add(friezeSlab, friezeInset, friezeBronze, this.clueBezelInst);
     this.clueFriezeGroup.visible = false;
     this.sanctumFrame.add(this.clueFriezeGroup);
     this._lastClueKey = '';
     this.scene.add(this.sanctumFrame);
 
-    // 3. Stepped Submerged Stone Island Foundation Terraces + Coastal Limestone Boulders + Travertine Courtyard
-    // (KILLS floating sharp-edged board-game tabletop rectangle!)
-    this.islandBase = new THREE.Mesh(new THREE.BoxGeometry(6.5, 0.58, 6.5), this.limestoneMat);
-    this.islandBase.position.y = -0.32;
-    this.scene.add(this.islandBase);
-
+    // 3. Central Sculpted Travertine & Inlaid-Gold Puzzle Terrace (`Sanctum_Terrace` mounts cleanly inside!)
+    this.terraceGroup = new THREE.Group();
+    this.islandBase = new THREE.Mesh(new THREE.BoxGeometry(6.5, 0.56, 6.5), this.limestoneMat);
+    this.islandBase.position.y = -0.34;
+    this.terraceGroup.add(this.islandBase);
+    this.scene.add(this.terraceGroup);
     this.canalFrame = new THREE.Group();
-    const canalWater = new THREE.Mesh(new THREE.BoxGeometry(6.95, 0.14, 6.95), this.troughWaterMat);
-    canalWater.position.y = -0.15;
-    const canalRim = new THREE.Mesh(new THREE.BoxGeometry(7.38, 0.14, 7.38), this.brassMat);
-    canalRim.position.y = -0.24;
-    // Two wider stepped stone foundation terraces descending naturally into the sea!
-    const terraceMid = new THREE.Mesh(new THREE.BoxGeometry(8.55, 0.48, 8.55), this.limestoneMat);
-    terraceMid.position.y = -0.52;
-    const terraceSub = new THREE.Mesh(new THREE.BoxGeometry(10.4, 0.60, 10.4), this.basaltMat);
-    terraceSub.position.y = -0.92;
-    this.canalFrame.add(canalWater, canalRim, terraceMid, terraceSub);
     this.scene.add(this.canalFrame);
 
-    // 14 Sculpted Craggy Coastal Limestone Boulders anchoring the temple island into the water (1 draw call!)
-    const boulderGeo = new THREE.DodecahedronGeometry(0.85, 1);
-    const bPos = boulderGeo.attributes.position;
-    for (let i = 0; i < bPos.count; i++) {
-      const vx = bPos.getX(i), vy = bPos.getY(i), vz = bPos.getZ(i);
-      const n = 0.82 + 0.24 * Math.sin(vx * 3.1 + vz * 2.7) + 0.14 * Math.cos(vy * 4.2 - vx * 2.1);
-      bPos.setXYZ(i, vx * n * 1.25, vy * n * 0.68, vz * n * 1.15);
-    }
-    boulderGeo.computeVertexNormals();
-    this.shoreBoulders = new THREE.InstancedMesh(boulderGeo, this.limestoneMat, 14);
-    this.shoreBoulders.frustumCulled = false;
-    const boulderCoords = [
-      [-4.6, -0.58, -1.2, 1.15], [4.6, -0.58, -1.0, 1.20],
-      [-4.8, -0.62, 1.4, 1.05], [4.8, -0.60, 1.5, 1.10],
-      [-4.2, -0.56, 3.6, 1.28], [4.2, -0.56, 3.5, 1.22],
-      [-2.4, -0.64, 4.4, 1.08], [2.4, -0.64, 4.4, 1.12],
-      [-5.6, -0.66, -3.2, 1.38], [5.6, -0.66, -3.2, 1.34],
-      [-5.8, -0.72, 0.4, 1.42], [5.8, -0.72, 0.6, 1.36],
-      [-5.2, -0.68, 2.8, 1.18], [5.2, -0.68, 2.9, 1.24],
-    ];
-    for (let i = 0; i < boulderCoords.length; i++) {
-      const [bx, by, bz, bs] = boulderCoords[i];
-      this._dummy.position.set(bx, by, bz);
-      this._dummy.rotation.set(i * 0.3, i * 1.15, i * 0.2);
-      this._dummy.scale.set(bs, bs * (0.85 + (i % 3) * 0.15), bs);
-      this._dummy.updateMatrix();
-      this.shoreBoulders.setMatrixAt(i, this._dummy.matrix);
-    }
-    this.shoreBoulders.instanceMatrix.needsUpdate = true;
-    this.scene.add(this.shoreBoulders);
-
-    this.tileInst = new THREE.InstancedMesh(new THREE.BoxGeometry(0.94, 0.16, 0.94), this.tileMat, MAX_TILES);
+    // Fallback floor tile instancing (hidden immediately once Blender `Sanctum_TileMesh` medallions load!)
+    this.tileInst = new THREE.InstancedMesh(new THREE.BoxGeometry(0.94, 0.14, 0.94), this.tileMat, MAX_TILES);
     this.tileInst.frustumCulled = false;
-    this.tileInst.receiveShadow = true;
-    this.tileInst.setColorAt(0, this._col.set('#f0e7d6'));
+    this.tileInst.setColorAt(0, this._col.set('#f5ead6'));
     this.scene.add(this.tileInst);
-    this.islandBase.receiveShadow = true;
 
-    // Lush Shimmering Floor Caustic Light Projection Veil across the travertine sanctum courtyard
+    // Subtle Shimmering Caustic Veil across the travertine sanctum courtyard
     this.floorCausticMat = new THREE.MeshBasicMaterial({
       color: '#5efce8',
       map: this.floorCausticTex,
       transparent: true,
-      opacity: 0.22,
+      opacity: 0.14,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
@@ -1750,7 +1931,7 @@ export class PuzzleRenderer {
       color: '#fff3c4',
       map: this.sunShaftTex,
       transparent: true,
-      opacity: 0.22,
+      opacity: 0.20,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
       depthWrite: false,
@@ -1770,7 +1951,7 @@ export class PuzzleRenderer {
       this.sunShafts.push(shaft);
     }
 
-    // 4. Sculpted Antique-Bronze Tripod Braziers + Glowing Ember Beds + Layered Soft Teardrop Flame Billboards (4 draw calls for all 6!)
+    // 4. Sculpted Antique-Bronze Tripod Braziers (fallback instanced until `Sanctum_Brazier` GLB loads + flickering teardrop flames!)
     this.brazierBodyInst = new THREE.InstancedMesh(buildTripodBrazierGeo(), this.darkBronzeMat, MAX_VALVE_SCONCES);
     this.brazierBodyInst.frustumCulled = false;
     this.scene.add(this.brazierBodyInst);
@@ -1796,7 +1977,7 @@ export class PuzzleRenderer {
         color: '#ffedd5',
         map: this.flameTex,
         transparent: true,
-        opacity: 0.84,
+        opacity: 0.86,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       }),
@@ -1811,7 +1992,7 @@ export class PuzzleRenderer {
         color: '#fef9c3',
         map: this.flameTex,
         transparent: true,
-        opacity: 0.92,
+        opacity: 0.94,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       }),
@@ -1826,21 +2007,21 @@ export class PuzzleRenderer {
     this.lightStoneInst = new THREE.InstancedMesh(lotusGeos.stoneGeo, this.travMat, MAX_TILES);
     this.lightBronzeInst = new THREE.InstancedMesh(lotusGeos.bronzeGeo, this.brassMat, MAX_TILES);
     this.lightCoreLitMat = new THREE.MeshStandardMaterial({
-      color: '#5efce8',
+      color: '#72fff2',
       map: this.lotusRuneTex,
-      emissive: '#06b6d4',
+      emissive: '#14e8dc',
       emissiveMap: this.lotusRuneTex,
-      emissiveIntensity: 1.25,
-      roughness: 0.12,
-      metalness: 0.15,
+      emissiveIntensity: 1.68,
+      roughness: 0.10,
+      metalness: 0.14,
     });
     this.lightCoreOffMat = new THREE.MeshStandardMaterial({
-      color: '#1e3547',
+      color: '#203b4d',
       map: this.lotusRuneTex,
-      emissive: '#082032',
-      emissiveIntensity: 0.08,
-      roughness: 0.42,
-      metalness: 0.28,
+      emissive: '#091f2e',
+      emissiveIntensity: 0.06,
+      roughness: 0.48,
+      metalness: 0.30,
     });
     this.lightCoreLitInst = new THREE.InstancedMesh(lotusGeos.coreGeo, this.lightCoreLitMat, MAX_TILES);
     this.lightCoreOffInst = new THREE.InstancedMesh(lotusGeos.coreGeo, this.lightCoreOffMat, MAX_TILES);
@@ -2097,6 +2278,37 @@ export class PuzzleRenderer {
     this.socketCoreInst.count = 0;
     this.scene.add(this.socketBronzeInst, this.socketCoreInst);
 
+    // Sculpted Travertine & Antique-Bronze Obstacle Pillars (`room.solid` / `p.solid` — ZERO invisible walls in `blocks`!)
+    const obsStoneParts = [];
+    const obsBronzeParts = [];
+    const obsBase = new THREE.BoxGeometry(0.84, 0.16, 0.84);
+    obsBase.translate(0, 0.08, 0);
+    obsStoneParts.push(obsBase);
+    const obsShaft = new THREE.CylinderGeometry(0.32, 0.38, 0.88, 8);
+    obsShaft.translate(0, 0.58, 0);
+    obsStoneParts.push(obsShaft);
+    const obsCap = new THREE.BoxGeometry(0.76, 0.14, 0.76);
+    obsCap.translate(0, 1.08, 0);
+    obsStoneParts.push(obsCap);
+    const obsBandLow = new THREE.TorusGeometry(0.36, 0.036, 8, 12);
+    obsBandLow.rotateX(Math.PI * 0.5);
+    obsBandLow.translate(0, 0.24, 0);
+    obsBronzeParts.push(obsBandLow);
+    const obsBandTop = new THREE.TorusGeometry(0.33, 0.036, 8, 12);
+    obsBandTop.rotateX(Math.PI * 0.5);
+    obsBandTop.translate(0, 0.96, 0);
+    obsBronzeParts.push(obsBandTop);
+    const obsFinial = new THREE.OctahedronGeometry(0.14, 0);
+    obsFinial.translate(0, 1.24, 0);
+    obsBronzeParts.push(obsFinial);
+    this.solidPillarStoneInst = new THREE.InstancedMesh(mergeNorm(obsStoneParts), this.masonryMat, 16);
+    this.solidPillarBronzeInst = new THREE.InstancedMesh(mergeNorm(obsBronzeParts), this.brassMat, 16);
+    this.solidPillarStoneInst.frustumCulled = false;
+    this.solidPillarBronzeInst.frustumCulled = false;
+    this.solidPillarStoneInst.count = 0;
+    this.solidPillarBronzeInst.count = 0;
+    this.scene.add(this.solidPillarStoneInst, this.solidPillarBronzeInst);
+
     // -------------------------------------------------------------------------------- ARCHETYPE 5: `pipes`
     // Weathered Copper/Brass Flanged Aqueduct Conduits + Glowing Turquoise Glass Pressure Sight-Gauges + Flush Recessed Outflow Drain
     const buildPipeGeos = (hasS, hasW) => {
@@ -2338,12 +2550,6 @@ export class PuzzleRenderer {
     this.hero = new AdaptiveSanctumHero(this.skinId);
     // Gateway 2.0 auto-normalizes to 1.22m world height at scale 1.0 -> 1.16 reads heroically on 1m tiles!
     this.hero.group.scale.setScalar(1.16);
-    this.hero.group.traverse((o) => {
-      if (o.isMesh) {
-        o.castShadow = true;
-        o.receiveShadow = true;
-      }
-    });
     this.scene.add(this.hero.group);
 
     // Arched Glowing Hydro-Stream Ribbon & Target Ripple Burst (Gateway casts water straight to tapped tiles!)
@@ -2515,36 +2721,40 @@ export class PuzzleRenderer {
       );
     };
 
-    // Sunlit Aqueduct Sanctum Sky Backdrop
-    loadTex('assets/textures/mg_bg_sanctum_sky.webp', true, 0, 0, (t) => {
-      this.scene.background = t;
+    // Open-air sunlit Pelagian Coastal Sky Dome (replaces flat background wall!)
+    loadTex('assets/textures/biome_skybox_coral_sea.webp', true, 0, 0, (t) => {
+      if (this.skyDomeMat) {
+        this.skyDomeMat.map = t;
+        this.skyDomeMat.color.set('#ffffff');
+        this.skyDomeMat.needsUpdate = true;
+      }
     });
 
-    // Studio Weathered Ashlar Masonry for Sanctum Back Wall (replaces cartoon canvas brick!)
-    loadTex('assets/textures/mg_pbr_sanctum_masonry_albedo.webp', true, 2.8, 1.4, (t) => {
+    // Warm Sunlit Canyon Sandstone for Clue Frieze & Carved Accents (NO repeating PS1 brick wallpaper!)
+    loadTex('assets/textures/arch_canyon_sandstone_albedo.webp', true, 1.5, 1.0, (t) => {
       this.masonryMat.map = t;
       this.masonryMat.needsUpdate = true;
     });
-    loadTex('assets/textures/mg_pbr_sanctum_masonry_normal.webp', false, 2.8, 1.4, (t) => {
+    loadTex('assets/textures/arch_canyon_sandstone_normal.webp', false, 1.5, 1.0, (t) => {
       this.masonryMat.normalMap = t;
       this.masonryMat.needsUpdate = true;
     });
 
-    // Carved Coral Travertine for Columns, Portal Arch, Floor Tiles, Lotus Plates, Pedestals
-    loadTex('assets/textures/arch_coral_travertine_albedo.webp', true, 2, 2, (t) => {
+    // Warm Natural Stone for Archetype Pedestals, Lotus Plates, Pipe Bases & Fallback Tiles
+    loadTex('assets/textures/arch_alpine_granite_albedo.webp', true, 1.5, 1.5, (t) => {
       this.travMat.map = t;
       this.travMat.needsUpdate = true;
       this.tileMat.map = t;
       this.tileMat.needsUpdate = true;
     });
-    loadTex('assets/textures/arch_coral_travertine_normal.webp', false, 2, 2, (t) => {
+    loadTex('assets/textures/arch_alpine_granite_normal.webp', false, 1.5, 1.5, (t) => {
       this.travMat.normalMap = t;
       this.travMat.needsUpdate = true;
       this.tileMat.normalMap = t;
       this.tileMat.needsUpdate = true;
     });
 
-    // Hammered Antique Bronze for Portal Jambs, Braziers, Bells, Turntables, Pipes, Tide-Lock Cages
+    // Hammered Antique Bronze for Bells, Turntables, Pipes, Tide-Lock Cages & Clue Bezels
     loadTex('assets/textures/arch_antique_bronze_albedo.webp', true, 2, 2, (t) => {
       this.brassMat.map = t;
       this.brassMat.needsUpdate = true;
@@ -2562,7 +2772,7 @@ export class PuzzleRenderer {
       this.brassMat.needsUpdate = true;
       this.darkBronzeMat.normalMap = t;
       this.darkBronzeMat.needsUpdate = true;
-      this.pipeBrassMat.normalMap = t;
+      this.pipeBrassMat.map && (this.pipeBrassMat.normalMap = t);
       this.pipeBrassMat.needsUpdate = true;
       for (const s of this.tideLockSlots) {
         s.targetMat.normalMap = t;
@@ -2570,17 +2780,17 @@ export class PuzzleRenderer {
       }
     });
 
-    // Carved Bayou Limestone for Monolith Cubes & Sanctum Plinth Base
-    loadTex('assets/textures/arch_bayou_limestone_albedo.webp', true, 2, 2, (t) => {
+    // Warm Canyon Sandstone for Monolith Cubes & Fallback Plinth
+    loadTex('assets/textures/arch_canyon_sandstone_albedo.webp', true, 1.5, 1.5, (t) => {
       this.limestoneMat.map = t;
       this.limestoneMat.needsUpdate = true;
     });
-    loadTex('assets/textures/arch_bayou_limestone_normal.webp', false, 2, 2, (t) => {
+    loadTex('assets/textures/arch_canyon_sandstone_normal.webp', false, 1.5, 1.5, (t) => {
       this.limestoneMat.normalMap = t;
       this.limestoneMat.needsUpdate = true;
     });
 
-    // Storm Basalt for Dark Relief Temple Portal Doors
+    // Storm Basalt for Dark Relief Accents
     loadTex('assets/textures/arch_storm_basalt_albedo.webp', true, 1, 2, (t) => {
       this.basaltMat.map = t;
       this.basaltMat.needsUpdate = true;
@@ -2591,92 +2801,254 @@ export class PuzzleRenderer {
     });
   }
 
+  _loadSanctumTempleGlb() {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    const loader = new GLTFLoader();
+    loader.load(
+      'assets/models/env_sanctum_temple.glb',
+      (gltf) => {
+        if (this._disposed || !gltf?.scene) return;
+        this._mountSanctumTempleGlb(gltf.scene);
+      },
+      undefined,
+      () => {}
+    );
+  }
+
+  _tuneGlbMaterials(obj, envScale = 0.68) {
+    obj.traverse((child) => {
+      if (!child.isMesh || !child.material) return;
+      const mats = Array.isArray(child.material) ? child.material : [child.material];
+      for (const m of mats) {
+        if (typeof m.envMapIntensity === 'number') m.envMapIntensity = envScale;
+        const mn = m.name || '';
+        if (mn.includes('Bronze')) {
+          m.roughness = Math.max(0.26, m.roughness ?? 0.30);
+          m.metalness = Math.min(0.80, m.metalness ?? 0.75);
+          m.envMapIntensity = 0.74;
+        }
+        if (mn.includes('AquaSeal')) {
+          m.emissiveIntensity = 1.15;
+        }
+        if (mn.includes('Ember')) {
+          m.emissiveIntensity = 1.65;
+        }
+      }
+    });
+  }
+
+  _mountSanctumTempleGlb(root) {
+    const byName = (name) => root.getObjectByName(name);
+
+    // 1. Curved 7-Bay Pelagian Water-Temple Rotunda + 4 Axolotl Water-Spouts
+    const rotunda = byName('Sanctum_Rotunda');
+    if (rotunda) {
+      const rClone = cloneSubtreeWithMaterials(rotunda);
+      this._tuneGlbMaterials(rClone, 0.64);
+      this.glbRotundaGroup.add(rClone);
+    }
+
+    // 2. Sculpted 3D Volumetric Parabolic Waterfalls with Animated GLSL Foaming Shader!
+    const waterfalls = byName('Sanctum_Waterfalls');
+    if (waterfalls) {
+      const wfClone = waterfalls.clone(true);
+      wfClone.traverse((o) => {
+        if (o.isMesh) {
+          o.material = this.waterfallMat;
+          o.renderOrder = 2;
+        }
+      });
+      this.glbRotundaGroup.add(wfClone);
+    }
+
+    // 3. Monumental Carved-Stone & Antique-Bronze Sanctum Gate Frame + Animated Twin Doors
+    const gateFrame = byName('Sanctum_GateFrame');
+    if (gateFrame) {
+      const gfClone = cloneSubtreeWithMaterials(gateFrame);
+      this._tuneGlbMaterials(gfClone, 0.70);
+      gfClone.position.set(0, 0.12, -6.28);
+      this.glbRotundaGroup.add(gfClone);
+    }
+    const doorL = byName('Sanctum_GateDoorL');
+    if (doorL) {
+      const dlClone = cloneSubtreeWithMaterials(doorL);
+      this._tuneGlbMaterials(dlClone, 0.72);
+      this.gateDoorL.add(dlClone);
+    }
+    const doorR = byName('Sanctum_GateDoorR');
+    if (doorR) {
+      const drClone = cloneSubtreeWithMaterials(doorR);
+      this._tuneGlbMaterials(drClone, 0.72);
+      this.gateDoorR.add(drClone);
+    }
+
+    // 4. Ornate Beveled Travertine & Inlaid-Gold Central Puzzle Terrace + Craggy Coastal Reef Boulders!
+    const terrace = byName('Sanctum_Terrace');
+    if (terrace) {
+      const tClone = cloneSubtreeWithMaterials(terrace);
+      this._tuneGlbMaterials(tClone, 0.64);
+      this.terraceGroup.add(tClone);
+      this.islandBase.visible = false;
+    }
+
+    // 5. 6 Sculpted Antique-Bronze Tripod Temple Braziers (`Sanctum_Brazier` — INSTANCED per sub-mesh -> drops ~20 draw calls!)
+    const brazierSrc = byName('Sanctum_Brazier');
+    if (brazierSrc) {
+      this._glbBrazierInsts = [];
+      this._glbBrazierSlots = [];
+      this._glbBrazierEmberMats = [];
+      brazierSrc.traverse((o) => {
+        if (!o.isMesh || !o.geometry || !o.material) return;
+        const mat = o.material.clone();
+        const mn = mat.name || '';
+        if (typeof mat.envMapIntensity === 'number') mat.envMapIntensity = 0.62;
+        if (mn.includes('Bronze')) {
+          mat.roughness = Math.max(0.28, mat.roughness ?? 0.32);
+          mat.metalness = Math.min(0.78, mat.metalness ?? 0.72);
+          mat.envMapIntensity = 0.68;
+        }
+        if (mn.includes('Ember')) {
+          mat.emissiveIntensity = 1.15;
+          this._glbBrazierEmberMats.push(mat);
+        }
+        const inst = new THREE.InstancedMesh(o.geometry, mat, MAX_VALVE_SCONCES);
+        inst.frustumCulled = false;
+        inst.count = 0;
+        this.scene.add(inst);
+        this._glbBrazierInsts.push(inst);
+      });
+      if (this._glbBrazierInsts.length > 0) {
+        this.brazierBodyInst.visible = false;
+        this.brazierEmberInst.visible = false;
+      }
+    }
+
+    // 6. Sculpted Beveled 3D Puzzle Medallion Tile Instancing (`Sanctum_TileMesh` — ZERO stark checkerboard!)
+    const tileSrc = byName('Sanctum_TileMesh');
+    if (tileSrc) {
+      this._glbTileInsts = [];
+      tileSrc.traverse((o) => {
+        if (!o.isMesh || !o.geometry || !o.material) return;
+        const mat = o.material.clone();
+        if (typeof mat.envMapIntensity === 'number') mat.envMapIntensity = 0.65;
+        const isStone = !(mat.name || '').includes('Bronze');
+        if (!isStone) {
+          mat.roughness = Math.max(0.26, mat.roughness ?? 0.30);
+          mat.metalness = Math.min(0.80, mat.metalness ?? 0.74);
+        }
+        const inst = new THREE.InstancedMesh(o.geometry, mat, MAX_TILES);
+        inst.frustumCulled = false;
+        inst.userData.isStone = isStone;
+        inst.setColorAt(0, this._col.set('#ffffff'));
+        this.scene.add(inst);
+        this._glbTileInsts.push(inst);
+      });
+      if (this._glbTileInsts.length > 0) {
+        this.tileInst.visible = false;
+      }
+    }
+
+    this._glbLoaded = true;
+  }
+
   _updateClueBoard(room) {
     if (!this.clueFriezeGroup) return;
     const p = room.puzzle;
-    const show = Boolean(room.showTarget || room.isPeekingClue || room.solved);
-    this.clueFriezeGroup.visible = show && (p.type === 'lights' || p.type === 'bells');
+    const peekA = room.showTarget || room.solved ? 1.0 : clamp(room.peekAlpha ?? (room.isPeekingClue ? 1 : 0), 0, 1);
+    const show = (p.type === 'lights' || p.type === 'bells') && (room.showTarget || room.isPeekingClue || room.solved || peekA > 0.04);
+    this.clueFriezeGroup.visible = Boolean(show);
     if (!this.clueFriezeGroup.visible) return;
 
-    const key = `${p.type}_${p.n || ''}_${(p.target || p.order || []).join(',')}`;
-    if (this._lastClueKey === key) return;
-    this._lastClueKey = key;
+    const bellCols = (room.bells || []).map((b) => b.color).join(',');
+    const key = `${p.seed ?? ''}_${p.type}_${p.n || ''}_${(p.target || p.order || []).join(',')}_${bellCols}`;
+    if (this._lastClueKey !== key) {
+      this._lastClueKey = key;
 
-    const dm = this._dummy;
-    let cnt = 0;
-    if (p.type === 'lights' && p.target) {
-      const n = p.n || 3;
-      const step = n <= 3 ? 0.24 : 0.18;
-      const x0 = -((n - 1) * step) * 0.5;
-      const y0 = ((n - 1) * step) * 0.5;
-      for (let i = 0; i < n * n && cnt < 16; i++) {
-        const gx = i % n;
-        const gy = (i / n) | 0;
-        const px = x0 + gx * step;
-        const py = y0 - gy * step;
-        const isOn = Boolean(p.target[i]);
-        const baseSc = n <= 3 ? 0.86 : 0.68;
+      const dm = this._dummy;
+      let cnt = 0;
+      if (p.type === 'lights' && p.target) {
+        const n = p.n || 3;
+        const step = n <= 3 ? 0.24 : 0.18;
+        const x0 = -((n - 1) * step) * 0.5;
+        const y0 = ((n - 1) * step) * 0.5;
+        for (let i = 0; i < n * n && cnt < 16; i++) {
+          const gx = i % n;
+          const gy = (i / n) | 0;
+          const px = x0 + gx * step;
+          const py = y0 - gy * step;
+          const isOn = Boolean(p.target[i]);
+          const baseSc = n <= 3 ? 0.86 : 0.68;
 
-        dm.position.set(px, py, 0.14);
-        dm.rotation.set(0, 0, Math.PI * 0.25);
-        dm.scale.setScalar(baseSc);
-        dm.updateMatrix();
-        this.clueBezelInst.setMatrixAt(cnt, dm.matrix);
+          dm.position.set(px, py, 0.14);
+          dm.rotation.set(0, 0, Math.PI * 0.25);
+          dm.scale.setScalar(baseSc);
+          dm.updateMatrix();
+          this.clueBezelInst.setMatrixAt(cnt, dm.matrix);
 
-        const gem = this.clueGems[cnt];
-        gem.visible = true;
-        gem.position.set(px, py, isOn ? 0.15 : 0.11);
-        gem.rotation.set(0, 0, Math.PI * 0.25);
-        gem.scale.setScalar(isOn ? baseSc * 1.04 : baseSc * 0.64);
-        if (isOn) {
-          gem.material.color.set('#e0f7ff');
-          gem.material.emissive.set('#38bdf8');
-          gem.material.emissiveIntensity = 1.55;
-          gem.material.roughness = 0.10;
-          gem.material.metalness = 0.24;
-        } else {
-          gem.material.color.set('#0f172a');
-          gem.material.emissive.set('#000000');
-          gem.material.emissiveIntensity = 0.0;
-          gem.material.roughness = 0.88;
-          gem.material.metalness = 0.12;
+          const gem = this.clueGems[cnt];
+          gem.visible = true;
+          gem.position.set(px, py, isOn ? 0.15 : 0.11);
+          gem.rotation.set(0, 0, Math.PI * 0.25);
+          gem.scale.setScalar(isOn ? baseSc * 1.04 : baseSc * 0.64);
+          gem.userData.baseEmissive = isOn ? 1.55 : 0.0;
+          if (isOn) {
+            gem.material.color.set('#e0f7ff');
+            gem.material.emissive.set('#38bdf8');
+            gem.material.emissiveIntensity = 1.55;
+            gem.material.roughness = 0.10;
+            gem.material.metalness = 0.24;
+          } else {
+            gem.material.color.set('#0f172a');
+            gem.material.emissive.set('#000000');
+            gem.material.emissiveIntensity = 0.0;
+            gem.material.roughness = 0.88;
+            gem.material.metalness = 0.12;
+          }
+          cnt++;
         }
-        cnt++;
+      } else if (p.type === 'bells' && p.order) {
+        const order = p.order;
+        const spacing = 1.95 / Math.max(1, order.length);
+        const startX = -((order.length - 1) * spacing) * 0.5;
+        for (let i = 0; i < order.length && cnt < 16; i++) {
+          const bell = room.bells?.[order[i]];
+          const col = BELL_COLORS[bell?.color ?? order[i] % BELL_COLORS.length] || '#fde047';
+          const px = startX + i * spacing;
+
+          dm.position.set(px, 0, 0.14);
+          dm.rotation.set(0, 0, 0);
+          dm.scale.setScalar(1.38);
+          dm.updateMatrix();
+          this.clueBezelInst.setMatrixAt(cnt, dm.matrix);
+
+          const gem = this.clueGems[cnt];
+          gem.visible = true;
+          gem.position.set(px, 0, 0.155);
+          gem.rotation.set(0, 0, 0);
+          gem.scale.setScalar(1.38);
+          gem.userData.baseEmissive = 0.92;
+          gem.material.color.set(col);
+          gem.material.emissive.set(col);
+          gem.material.emissiveIntensity = 0.92;
+          gem.material.roughness = 0.14;
+          gem.material.metalness = 0.26;
+          cnt++;
+        }
       }
-    } else if (p.type === 'bells' && p.order) {
-      const order = p.order;
-      const spacing = 1.95 / Math.max(1, order.length);
-      const startX = -((order.length - 1) * spacing) * 0.5;
-      for (let i = 0; i < order.length && cnt < 16; i++) {
-        const bell = room.bells?.[order[i]];
-        const col = BELL_COLORS[bell?.color ?? order[i] % BELL_COLORS.length] || '#fde047';
-        const px = startX + i * spacing;
-
-        dm.position.set(px, 0, 0.14);
-        dm.rotation.set(0, 0, 0);
-        dm.scale.setScalar(1.38);
-        dm.updateMatrix();
-        this.clueBezelInst.setMatrixAt(cnt, dm.matrix);
-
-        const gem = this.clueGems[cnt];
-        gem.visible = true;
-        gem.position.set(px, 0, 0.155);
-        gem.rotation.set(0, 0, 0);
-        gem.scale.setScalar(1.38);
-        gem.material.color.set(col);
-        gem.material.emissive.set(col);
-        gem.material.emissiveIntensity = 0.92;
-        gem.material.roughness = 0.14;
-        gem.material.metalness = 0.26;
-        cnt++;
+      for (let i = cnt; i < this.clueGems.length; i++) {
+        this.clueGems[i].visible = false;
+      }
+      this.clueBezelInst.count = cnt;
+      if (cnt > 0) {
+        this.clueBezelInst.instanceMatrix.needsUpdate = true;
       }
     }
-    for (let i = cnt; i < this.clueGems.length; i++) {
-      this.clueGems[i].visible = false;
-    }
-    this.clueBezelInst.count = cnt;
-    if (cnt > 0) {
-      this.clueBezelInst.instanceMatrix.needsUpdate = true;
+
+    // Smoothly modulate Target Clue Frieze gem glow with `room.peekAlpha`
+    for (let i = 0; i < this.clueGems.length; i++) {
+      const gem = this.clueGems[i];
+      if (!gem.visible) continue;
+      gem.material.emissiveIntensity = (gem.userData.baseEmissive || 0) * peekA;
     }
   }
 
@@ -2708,30 +3080,31 @@ export class PuzzleRenderer {
     if (opts.envMap) {
       if (this.scene.environment !== opts.envMap) {
         this.scene.environment = opts.envMap;
-        this.scene.environmentIntensity = 0.88;
+        this.scene.environmentIntensity = 0.50;
       }
     } else if (!this._envBuilt) {
       this._envBuilt = true;
       this._envRt = buildSanctumEnvMap(this.webgl);
       if (this._envRt?.texture) {
         this.scene.environment = this._envRt.texture;
-        this.scene.environmentIntensity = 0.84;
+        this.scene.environmentIntensity = 0.52;
       }
     }
 
-    // 1. Update Camera First — guarantees 100% of puzzle pieces (including `beam` side-wall emitters/receptors
-    //    & outer `bells`) + stone architrave + 3D crystal clue frieze fit cleanly inside 16:9 & 412x915 Portrait!
+    // 1. Update Camera First — Dramatic 3/4 Sunlit Water-Temple Hero Angle showing ALL 5x5 Tiles,
+    //    Gateway 2.0, Turquoise Lagoon Moat, Complete Sanctum Gate + Glowing Target Clue Frieze Tablet,
+    //    AND Curved Fluted Amphitheater (while staying strictly INSIDE the curved arc — ZERO outer cut ends!)
     const v = room.view;
     if (v && v.eye && v.target) {
       const aspect = Math.max(0.35, this.width / Math.max(1, this.height));
       const portrait = aspect < 0.85;
       const kIn = room.phase === 'intro' ? 1 - smooth01((room.phaseT || 0) / INTRO_T) : 0;
-      const camFov = (v.fov || 30) + (portrait ? 3 : 3.5);
+      const camFov = (v.fov || 30) + (portrait ? 4.5 : 5.5);
       const tx = v.target[0];
-      const ty = v.target[1] + (portrait ? 0.42 : 0.78);
-      const tz = v.target[2] - (portrait ? 0.10 : 0.35);
+      const ty = v.target[1] + (portrait ? 0.65 : 1.18);
+      const tz = v.target[2] - (portrait ? 0.35 : 0.88);
 
-      let zoomK = portrait ? 0.78 : 0.74;
+      let zoomK = portrait ? 0.82 : 0.78;
       if (portrait) {
         const pTypeCam = room.type || room.puzzle.type;
         let maxAbsX = ox + 0.68;
@@ -2747,7 +3120,6 @@ export class PuzzleRenderer {
             maxAbsX = Math.max(maxAbsX, Math.abs(room.bells[i].x - ox) + 0.68);
           }
         }
-        // Keep clue frieze & fluted portal columns comfortably inside Portrait safe width
         maxAbsX = Math.max(maxAbsX, 2.35);
         const rawDx = v.eye[0] - tx;
         const rawDy = v.eye[1] - ty;
@@ -2759,7 +3131,7 @@ export class PuzzleRenderer {
       }
 
       const dx = (v.eye[0] - tx) * zoomK;
-      const dy = (v.eye[1] - ty) * (zoomK * 0.94);
+      const dy = (v.eye[1] - ty) * (zoomK * (portrait ? 0.76 : 0.62));
       const dz = (v.eye[2] - tz) * zoomK;
       const sh = (Number(opts.shake) || 0) * 0.018;
       const ex = tx + dx + Math.sin(time * 0.25) * 0.05 + (sh > 0 ? Math.sin(time * 67) * sh : 0);
@@ -2773,29 +3145,32 @@ export class PuzzleRenderer {
     }
     const camQ = this.camera.quaternion;
 
-    // 2. Scale Sanctum Plinth, Canal, Shimmering Floor Caustics, Sun-Shafts & Temple Portal Opening Animation
-    const plW = (cols + 0.6) / 6.4;
-    const plD = (rows + 0.8) / 6.4;
-    this.islandBase.scale.set(plW, 1, plD);
-    this.canalFrame.scale.set(plW, 1, plD);
-    this.sanctumFrame.position.z = -oz + 3.1;
+    // 2. Scale Sculpted Travertine Terrace, Align Curved Pelagian Rotunda & Animate Sanctum Gate Doors
+    const plW = (cols + 1.2) / 6.2;
+    const plD = (rows + 1.2) / 6.2;
+    this.terraceGroup.scale.set(plW, 1, plD);
+    const rotundaZ = -oz + 3.55;
+    this.sanctumFrame.position.z = rotundaZ;
+    this.waterMat.uniforms.uTerraceHalf.value.set(3.55 * plW, 3.55 * plD);
+    this.waterMat.uniforms.uRotundaZ.value = rotundaZ;
 
     const gateOpen = smooth01(room.gateOpen || 0);
     const prog = room.progressRatio || 0;
+    this.waterMat.uniforms.uSolvedBoost.value = room.solved ? 1.0 : prog * 0.55;
     if (this.floorCausticMesh) {
       this.floorCausticMesh.scale.set((cols + 0.25) / 5.8, (rows + 0.25) / 5.8, 1);
-      this.floorCausticMat.opacity = room.solved ? 0.38 + Math.sin(time * 6.5) * 0.06 : 0.16 + prog * 0.14;
+      this.floorCausticMat.opacity = room.solved ? 0.28 + Math.sin(time * 6.5) * 0.05 : 0.10 + prog * 0.10;
       this.floorCausticMat.color.set(room.solved ? '#a7fff0' : '#4ef8ee');
       this.floorCausticTex.offset.set((time * 0.055) % 1, (-time * 0.042) % 1);
     }
     if (this.sunShaftMat) {
-      this.sunShaftMat.opacity = (room.solved ? 0.28 : 0.17) + Math.sin(time * 0.85) * 0.035;
+      this.sunShaftMat.opacity = (room.solved ? 0.26 : 0.16) + Math.sin(time * 0.85) * 0.03;
     }
-    this.gateDoorL.position.set(-0.51 - gateOpen * 0.88, 0.04, -4.06 - gateOpen * 0.18);
+    this.gateDoorL.position.set(-0.51 - gateOpen * 0.90, 0.16, -6.16 - gateOpen * 0.18);
     this.gateDoorL.rotation.y = gateOpen * 0.68;
-    this.gateDoorR.position.set(0.51 + gateOpen * 0.88, 0.04, -4.06 - gateOpen * 0.18);
+    this.gateDoorR.position.set(0.51 + gateOpen * 0.90, 0.16, -6.16 - gateOpen * 0.18);
     this.gateDoorR.rotation.y = -gateOpen * 0.68;
-    this.portalRuneMat.opacity = 0.68 + prog * 0.25 + (room.solved ? 0.12 * Math.sin(time * 12) : 0.08 * Math.sin(time * 3.5));
+    this.portalRuneMat.opacity = 0.62 + prog * 0.25 + (room.solved ? 0.12 * Math.sin(time * 12) : 0.08 * Math.sin(time * 3.5));
     this.portalRuneMat.color.set(room.solved ? '#fde047' : '#5efce8');
     this.portalInnerMat.color.set(room.solved ? '#fef08a' : '#7dd3fc');
 
@@ -2804,12 +3179,16 @@ export class PuzzleRenderer {
     }
     this._updateClueBoard(room);
 
-    // 3. Position Sculpted Antique-Bronze Tripod Braziers outward (`ox + 1.38`, or `ox + 1.88` on `beam`!)
-    //    so brazier flames NEVER obstruct `beam` side-wall emitters/receptors or waterfalls!
+    // 3. Position Sculpted Antique-Bronze Tripod Braziers (`Sanctum_Brazier` INSTANCED + flickering teardrop flames!)
     const dm = this._dummy;
     const isBeamRoom = (room.type || room.puzzle.type) === 'beam';
-    const brazierOutX = ox + (isBeamRoom ? 1.88 : 1.38);
-    this.brazierEmberMat.emissiveIntensity = 1.45 + Math.sin(time * 11.5) * 0.22;
+    const brazierOutX = ox + (isBeamRoom ? 1.88 : 1.32);
+    const embI = 1.15 + Math.sin(time * 11.5) * 0.22;
+    this.brazierEmberMat.emissiveIntensity = embI;
+    for (let i = 0; i < this._glbBrazierEmberMats.length; i++) {
+      this._glbBrazierEmberMats[i].emissiveIntensity = embI;
+    }
+    const useGlbBraziers = this._glbBrazierInsts.length > 0;
     let brVis = 0;
     for (let i = 0; i < MAX_VALVE_SCONCES; i++) {
       const side = i % 2 === 0 ? -1 : 1;
@@ -2823,63 +3202,111 @@ export class PuzzleRenderer {
         if (Math.hypot(bx - srcX, bz - srcZ) < 1.15 || Math.hypot(bx - cryX, bz - cryZ) < 1.15) continue;
       }
 
-      dm.position.set(bx, 0, bz);
+      dm.position.set(bx, useGlbBraziers ? -0.05 : 0, bz);
       dm.rotation.set(0, i * 1.1, 0);
       dm.scale.setScalar(1);
       dm.updateMatrix();
-      this.brazierBodyInst.setMatrixAt(brVis, dm.matrix);
-      this.brazierEmberInst.setMatrixAt(brVis, dm.matrix);
+      if (useGlbBraziers) {
+        for (let k = 0; k < this._glbBrazierInsts.length; k++) {
+          this._glbBrazierInsts[k].setMatrixAt(brVis, dm.matrix);
+        }
+      } else {
+        this.brazierBodyInst.setMatrixAt(brVis, dm.matrix);
+        this.brazierEmberInst.setMatrixAt(brVis, dm.matrix);
+      }
 
-      // Soft organic flickering flame billboards facing camera (ZERO solid cones!)
       const flkA = Math.sin(time * 9.5 + i * 2.1) * 0.12 + Math.cos(time * 15.3 + i * 1.3) * 0.06;
       const flkB = Math.sin(time * 13.7 + i * 3.4) * 0.14;
-      dm.position.set(bx + Math.sin(time * 6.5 + i) * 0.02, 1.18 + flkA * 0.14, bz);
+      dm.position.set(bx + Math.sin(time * 6.5 + i) * 0.02, 1.16 + flkA * 0.14, bz);
       dm.quaternion.copy(camQ);
-      dm.scale.set(0.95 + flkB * 0.35, 1.0 + flkA * 0.65, 1);
+      dm.scale.set(0.94 + flkB * 0.34, 1.0 + flkA * 0.62, 1);
       dm.updateMatrix();
       this.brazierFlameOuterInst.setMatrixAt(brVis, dm.matrix);
 
-      dm.position.set(bx - Math.sin(time * 8.2 + i) * 0.015, 1.12 + flkB * 0.10, bz);
+      dm.position.set(bx - Math.sin(time * 8.2 + i) * 0.015, 1.10 + flkB * 0.10, bz);
       dm.quaternion.copy(camQ);
-      dm.scale.set(0.88 - flkA * 0.25, 0.96 + flkB * 0.55, 1);
+      dm.scale.set(0.86 - flkA * 0.24, 0.96 + flkB * 0.52, 1);
       dm.updateMatrix();
       this.brazierFlameInnerInst.setMatrixAt(brVis, dm.matrix);
       brVis++;
     }
-    this.brazierBodyInst.count = brVis;
-    this.brazierEmberInst.count = brVis;
+    if (useGlbBraziers) {
+      this.brazierBodyInst.count = 0;
+      this.brazierEmberInst.count = 0;
+      for (let k = 0; k < this._glbBrazierInsts.length; k++) {
+        this._glbBrazierInsts[k].count = brVis;
+        if (brVis > 0) this._glbBrazierInsts[k].instanceMatrix.needsUpdate = true;
+      }
+    } else {
+      this.brazierBodyInst.count = brVis;
+      this.brazierEmberInst.count = brVis;
+      if (brVis > 0) {
+        this.brazierBodyInst.instanceMatrix.needsUpdate = true;
+        this.brazierEmberInst.instanceMatrix.needsUpdate = true;
+      }
+    }
     this.brazierFlameOuterInst.count = brVis;
     this.brazierFlameInnerInst.count = brVis;
-    this.brazierBodyInst.instanceMatrix.needsUpdate = true;
-    this.brazierEmberInst.instanceMatrix.needsUpdate = true;
     this.brazierFlameOuterInst.instanceMatrix.needsUpdate = true;
     this.brazierFlameInnerInst.instanceMatrix.needsUpdate = true;
 
-    // 4. Build Travertine Floor Tile Grid + Entrance Threshold
+    // 4. Sculpted Beveled 3D Travertine Courtyard Pavers (`Sanctum_TileMesh` — warm honey-sandstone mosaic, ZERO stark checkerboard!)
     let tCnt = 0;
+    const useGlbTiles = this._glbTileInsts.length > 0;
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < cols && tCnt < MAX_TILES; x++) {
-        dm.position.set(x - ox, -0.08, y - oz);
+        dm.position.set(x - ox, useGlbTiles ? 0.0 : -0.08, y - oz);
         dm.rotation.set(0, 0, 0);
         dm.scale.setScalar(1);
         dm.updateMatrix();
-        this._col.set((x + y) % 2 === 0 ? '#f0e7d6' : '#ddd1ba');
-        this.tileInst.setColorAt(tCnt, this._col);
-        this.tileInst.setMatrixAt(tCnt++, dm.matrix);
+        const stoneHex = (x + y) % 2 === 0 ? '#f0dec0' : '#dfca9e';
+        if (useGlbTiles) {
+          for (let k = 0; k < this._glbTileInsts.length; k++) {
+            const inst = this._glbTileInsts[k];
+            this._col.set(inst.userData.isStone ? stoneHex : '#ffffff');
+            inst.setColorAt(tCnt, this._col);
+            inst.setMatrixAt(tCnt, dm.matrix);
+          }
+        } else {
+          this._col.set(stoneHex);
+          this.tileInst.setColorAt(tCnt, this._col);
+          this.tileInst.setMatrixAt(tCnt, dm.matrix);
+        }
+        tCnt++;
       }
     }
     if (tCnt < MAX_TILES) {
-      dm.position.set((room.doorX ?? 2) - ox, -0.08, rows - oz);
+      dm.position.set((room.doorX ?? 2) - ox, useGlbTiles ? 0.0 : -0.08, rows - oz);
       dm.rotation.set(0, 0, 0);
       dm.scale.setScalar(1);
       dm.updateMatrix();
-      this._col.set('#d5e3ec');
-      this.tileInst.setColorAt(tCnt, this._col);
-      this.tileInst.setMatrixAt(tCnt++, dm.matrix);
+      if (useGlbTiles) {
+        for (let k = 0; k < this._glbTileInsts.length; k++) {
+          const inst = this._glbTileInsts[k];
+          this._col.set(inst.userData.isStone ? '#e6f2f6' : '#ffffff');
+          inst.setColorAt(tCnt, this._col);
+          inst.setMatrixAt(tCnt, dm.matrix);
+        }
+      } else {
+        this._col.set('#d5e3ec');
+        this.tileInst.setColorAt(tCnt, this._col);
+        this.tileInst.setMatrixAt(tCnt, dm.matrix);
+      }
+      tCnt++;
     }
-    this.tileInst.count = tCnt;
-    this.tileInst.instanceMatrix.needsUpdate = true;
-    if (this.tileInst.instanceColor) this.tileInst.instanceColor.needsUpdate = true;
+    if (useGlbTiles) {
+      this.tileInst.count = 0;
+      for (let k = 0; k < this._glbTileInsts.length; k++) {
+        const inst = this._glbTileInsts[k];
+        inst.count = tCnt;
+        inst.instanceMatrix.needsUpdate = true;
+        if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+      }
+    } else {
+      this.tileInst.count = tCnt;
+      this.tileInst.instanceMatrix.needsUpdate = true;
+      if (this.tileInst.instanceColor) this.tileInst.instanceColor.needsUpdate = true;
+    }
 
     // 5. Reset All 6 Archetype Pools (`lights`, `bells`, `beam`, `blocks`, `pipes`, `tide_locks`)
     let lightCnt = 0;
@@ -2890,6 +3317,7 @@ export class PuzzleRenderer {
     let mirBaseCnt = 0;
     let blkCnt = 0;
     let sockCnt = 0;
+    let obsCnt = 0;
     this.beamEmitter.visible = false;
     this.beamReceptor.visible = false;
     this.pipeIntake.visible = false;
@@ -3047,6 +3475,34 @@ export class PuzzleRenderer {
         blkCnt++;
       }
       this.blockRuneMat.opacity = 0.78 + Math.sin(time * 4.2) * 0.14;
+      // Render real sculpted travertine & antique-bronze obstacle pillars on EVERY `room.solid` / `p.solid` cell (ZERO invisible walls!)
+      const solidList = room.puzzle?.solid || [];
+      const seenSolid = new Set();
+      for (let i = 0; i < solidList.length && obsCnt < 16; i++) {
+        const c = solidList[i];
+        if (seenSolid.has(c)) continue;
+        seenSolid.add(c);
+        dm.position.set((c % cols) - ox, 0, ((c / cols) | 0) - oz);
+        dm.rotation.set(0, 0, 0);
+        dm.scale.setScalar(1);
+        dm.updateMatrix();
+        this.solidPillarStoneInst.setMatrixAt(obsCnt, dm.matrix);
+        this.solidPillarBronzeInst.setMatrixAt(obsCnt, dm.matrix);
+        obsCnt++;
+      }
+      if (room.solid && room.solid.length === cols * rows) {
+        for (let c = 0; c < room.solid.length && obsCnt < 16; c++) {
+          if (!room.solid[c] || seenSolid.has(c)) continue;
+          seenSolid.add(c);
+          dm.position.set((c % cols) - ox, 0, ((c / cols) | 0) - oz);
+          dm.rotation.set(0, 0, 0);
+          dm.scale.setScalar(1);
+          dm.updateMatrix();
+          this.solidPillarStoneInst.setMatrixAt(obsCnt, dm.matrix);
+          this.solidPillarBronzeInst.setMatrixAt(obsCnt, dm.matrix);
+          obsCnt++;
+        }
+      }
     } else if (pType === 'pipes' && room.pipes) {
       if (room.pipeSource) {
         this.pipeIntake.visible = true;
@@ -3186,6 +3642,12 @@ export class PuzzleRenderer {
       this.socketCoreInst.instanceMatrix.needsUpdate = true;
       if (this.socketCoreInst.instanceColor) this.socketCoreInst.instanceColor.needsUpdate = true;
     }
+    this.solidPillarStoneInst.count = obsCnt;
+    this.solidPillarBronzeInst.count = obsCnt;
+    if (obsCnt > 0) {
+      this.solidPillarStoneInst.instanceMatrix.needsUpdate = true;
+      this.solidPillarBronzeInst.instanceMatrix.needsUpdate = true;
+    }
     if (this.pipeBubbleInst) {
       this.pipeBubbleInst.count = pipeBubCnt;
       if (pipeBubCnt > 0) this.pipeBubbleInst.instanceMatrix.needsUpdate = true;
@@ -3289,25 +3751,33 @@ export class PuzzleRenderer {
     this.moteInst.count = MAX_MOTES;
     this.moteInst.instanceMatrix.needsUpdate = true;
 
-    // 9. Animated Water Caustic, Ripple Normal, Waterfall & Fast Pressurized Pipe Flow Scroll
+    // 9. Animate GLSL Turquoise Water Lagoon + GLSL Volumetric Foaming Waterfalls + Splash Mist + Pressurized Pipe Flow
+    this.waterMat.uniforms.uTime.value = time;
+    this.waterfallMat.uniforms.uTime.value = time;
+    if (this.wfSplashMists) {
+      for (let i = 0; i < this.wfSplashMists.length; i++) {
+        const sm = this.wfSplashMists[i];
+        sm.quaternion.copy(camQ);
+        sm.scale.set(1.0 + Math.sin(time * 5.0 + i * 1.7) * 0.12, 0.92 + Math.cos(time * 4.2 + i) * 0.12, 1);
+      }
+    }
     this.causticWaterTex.offset.set((time * 0.03) % 1, (time * 0.02) % 1);
-    this.waterNormalTex.offset.set((-time * 0.038) % 1, (time * 0.026) % 1);
     this.waterfallTex.offset.y = (time * 1.48) % 1;
     this.pipeFlowTex.offset.set((-time * 1.55) % 1, (time * 0.42) % 1);
     if (this.waterWebp) {
       this.waterWebp.offset.set((time * 0.035) % 1, (time * 0.025) % 1);
     }
 
-    // 10. Shared CinematicPostFX Routing (with crisp ACES Filmic standalone fallback)
+    // 10. Shared CinematicPostFX Routing (with crisp ACES Filmic standalone fallback — Main-Spire exposure & bloom!)
     const postfx = opts.postfx || null;
     const biomeKey = opts.biomeKey || opts.biome || 'coral';
     if (postfx && postfx.enabled && !postfx._disposed && typeof postfx.render === 'function') {
       this.postfxActive = true;
       postfx.render(this.scene, this.camera, {
         biome: biomeKey,
-        exposure: room.solved ? 1.18 : 1.08,
-        bloomStrength: room.solved ? 0.56 : 0.36,
-        bloomThreshold: 0.78,
+        exposure: room.solved ? 1.04 : 0.94,
+        bloomStrength: room.solved ? 0.42 : 0.24,
+        bloomThreshold: 0.90,
       });
     } else {
       this.postfxActive = false;
@@ -3315,7 +3785,7 @@ export class PuzzleRenderer {
       const prevTM = this.webgl.toneMapping;
       const prevExp = this.webgl.toneMappingExposure;
       this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
-      this.webgl.toneMappingExposure = room.solved ? 1.16 : 1.06;
+      this.webgl.toneMappingExposure = room.solved ? 1.02 : 0.92;
       this.webgl.render(this.scene, this.camera);
       this.webgl.toneMapping = prevTM;
       this.webgl.toneMappingExposure = prevExp;
