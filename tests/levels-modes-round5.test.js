@@ -332,6 +332,8 @@ describe('Round 5 Deliverable 2 & 3: Fast (< 3ms) Single-BFS Procedural Composer
         game.update(FIXED_STEP);
         if (game.gateway.floor < -0.1) fellOffQuay = true;
         if (game.gateway.floor > maxFloorReached) maxFloorReached = game.gateway.floor;
+        // Stop once Gateway cleanly tops out onto the Floor 2 landing (don't blindly sprint off the next Floor 2 chasm!)
+        if (maxFloorReached >= 1.98 && game.gateway.onGround) break;
       }
       expect(fellOffQuay, `${daily.key}: Gateway fell walking in spawnDir ${daily.spawnDir}`).toBe(false);
       expect(maxFloorReached, `${daily.key}: Gateway failed to climb opening flight`).toBeGreaterThanOrEqual(1.98);

@@ -723,8 +723,8 @@ export class InputController {
 
     const nx = (clientX - left) / Math.max(1, vw);
     const ny = (clientY - top) / Math.max(1, vh);
-    // Middle 36% horizontally ([0.32..0.68]), middle 54% vertically ([0.24..0.78], matching closer #304 phone/tablet camera!)
-    return nx >= 0.32 && nx <= 0.68 && ny >= 0.24 && ny <= 0.78;
+    // Tight centered hero interact band ([0.36..0.64] horizontally) so right-half jumps never get swallowed!
+    return nx >= 0.36 && nx <= 0.64 && ny >= 0.24 && ny <= 0.78;
   }
 
   _resolveFlickHoldMs(dyUp) {
@@ -806,6 +806,7 @@ export class InputController {
     let jump = false;
     let fire = false;
     let whip = false;
+    let startBtn = false;
     let ax = 0;
     let ay = 0;
     let foundPad = false;
@@ -843,15 +844,37 @@ export class InputController {
       if (pressed(0)) jump = true;
       if (pressed(2) || pressed(7)) fire = true;
       if (pressed(1) || pressed(3) || pressed(5)) whip = true;
+      if (pressed(9)) startBtn = true;
     }
+
+    // Rising-edge Gamepad Start -> Pause & A/B -> Cutscene Advance/Skip callbacks
+    if (startBtn && !this._gpStartPrev) {
+      this._onGamepadPause?.();
+    }
+    this._gpStartPrev = startBtn;
+    if (jump && !this._gpAPrev) {
+      this._onGamepadCutscene?.(false);
+    }
+    this._gpAPrev = jump;
+    if (whip && !this._gpBPrev) {
+      this._onGamepadCutscene?.(true);
+    }
+    this._gpBPrev = whip;
 
     this._gamepadConnected = foundPad;
     if (!foundPad && !this._gpActive) return false;
 
+    const gmodeGp = this._activeGameMode();
     if (ax < -0.22) left = true;
     if (ax > 0.22) right = true;
-    if (ay < -0.35) up = true;
-    if (ay > 0.35) down = true;
+    // In tower mode, require deliberate upward stick angle (ay < -0.68 && |ay| > |ax|*1.15) so slight drift while running NEVER enters doors!
+    if (gmodeGp === 'tower') {
+      if (ay < -0.68 && Math.abs(ay) > Math.abs(ax) * 1.15) up = true;
+      if (ay > 0.62 && Math.abs(ay) > Math.abs(ax) * 1.1) down = true;
+    } else {
+      if (ay < -0.35) up = true;
+      if (ay > 0.35) down = true;
+    }
     if (left && !right && ax === 0) ax = -1;
     if (right && !left && ax === 0) ax = 1;
     if (up && !down && ay === 0) ay = -1;
@@ -1256,10 +1279,15 @@ export class InputController {
 
   _positionFloatingJoystickZone(zoneEl, originX, originY) {
     if (!zoneEl || !zoneEl.style) return;
+    const vw = typeof window !== 'undefined' && window.innerWidth ? window.innerWidth : 412;
+    const vh = typeof window !== 'undefined' && window.innerHeight ? window.innerHeight : 915;
     const rect = typeof zoneEl.getBoundingClientRect === 'function' ? zoneEl.getBoundingClientRect() : null;
     const halfW = rect && rect.width > 20 ? rect.width * 0.5 : 52;
     const halfH = rect && rect.height > 20 ? rect.height * 0.5 : 52;
-    zoneEl.style.transform = `translate3d(${(originX - halfW).toFixed(1)}px, ${(originY - halfH).toFixed(1)}px, 0)`;
+    // Clamp ONLY the visible DOM ring inside the viewport so logical originX stays 100% unclipped on edge reversals!
+    const visX = Math.max(halfW + 8, Math.min(vw - halfW - 8, originX));
+    const visY = Math.max(halfH + 8, Math.min(vh - halfH - 8, originY));
+    zoneEl.style.transform = `translate3d(${(visX - halfW).toFixed(1)}px, ${(visY - halfH).toFixed(1)}px, 0)`;
   }
 
   _isActionBtnVisible(btn) {
@@ -2366,7 +2394,8 @@ export class InputController {
       return;
     }
 
-    // 5C. Quick Stationary Single-Tap (100% reliable for rapid-fire Hydro-Pulse, or Context Interact at Door/Valve):
+    // 5C. Quick Stationary Single-Tap (100% reliable for rapid-fire Hydro-Pulse, or Context Interact at Door/Valve;
+    // suppressed inside Aqueduct Sanctum so 3D tile raycast tap-to-cast NEVER double-fires & undoes moves!):
     if (
       !entry.flickLatched &&
       !entry.postFlickActive &&
@@ -2376,6 +2405,9 @@ export class InputController {
       duration <= GESTURE_TAP_MAX_MS &&
       entry.maxDist <= GESTURE_TAP_MAX_MOVE_PX
     ) {
+      if (gmode === 'aqueduct_sanctum' || gmode === 'puzzle') {
+        return;
+      }
       if (
         gmode === 'tower' &&
         this._canInteract &&
@@ -2471,11 +2503,11 @@ export class InputController {
     let dy = clientY - entry.originY;
     let dist = Math.hypot(dx, dy);
 
-    // 1. Dynamic Anti-Drift Leash (origin follows smoothly when thumb exceeds 54px so reversals stay instant!)
+    // 1. Dynamic Anti-Drift Leash (wide logical [0, vw * 0.72] bounds so BOTH left & right edge drags reverse cleanly!)
     if (dist > leashR && dist > 0) {
       const pull = dist - leashR;
-      entry.originX = Math.max(maxR + 10, Math.min(vw * 0.48, entry.originX + (dx / dist) * pull));
-      entry.originY = Math.max(96 + maxR, Math.min(vh - maxR - 12, entry.originY + (dy / dist) * pull));
+      entry.originX = Math.max(0, Math.min(vw * 0.72, entry.originX + (dx / dist) * pull));
+      entry.originY = Math.max(88, Math.min(vh - 24, entry.originY + (dy / dist) * pull));
       dx = clientX - entry.originX;
       dy = clientY - entry.originY;
       dist = Math.hypot(dx, dy);
@@ -2485,13 +2517,18 @@ export class InputController {
     }
 
     // 2. Crisp Turnaround Re-Anchor (Tower & Rapids): pulling back >= 28px from peak reverses analogX in < 50ms!
+    // Logical originX uses wide [0, vw * 0.72] bounds (never clamping away from clientX ± 14) while visual DOM clamps cleanly.
     const isHorizMode =
       gmode === 'tower' || gmode === 'rapids_surf' || gmode === 'skimmer';
     if (isHorizMode) {
       if (entry.activeHorizSign > 0) {
         if (clientX > entry.extremeX) entry.extremeX = clientX;
         if (entry.extremeX - clientX >= JOYSTICK_REVERSAL_PX && dx > -maxR * JOYSTICK_TOWER_HDEAD) {
-          entry.originX = Math.max(maxR + 10, Math.min(vw * 0.48, clientX + 12));
+          let nextOriginX = Math.max(0, Math.min(vw * 0.72, clientX + 18));
+          if (nextOriginX < clientX + 14) {
+            nextOriginX = Math.min(vw - 4, clientX + 18);
+          }
+          entry.originX = nextOriginX;
           entry.extremeX = clientX;
           entry.activeHorizSign = -1;
           dx = clientX - entry.originX;
@@ -2503,7 +2540,11 @@ export class InputController {
       } else if (entry.activeHorizSign < 0) {
         if (clientX < entry.extremeX) entry.extremeX = clientX;
         if (clientX - entry.extremeX >= JOYSTICK_REVERSAL_PX && dx < maxR * JOYSTICK_TOWER_HDEAD) {
-          entry.originX = Math.max(maxR + 10, Math.min(vw * 0.48, clientX - 12));
+          let nextOriginX = Math.max(0, Math.min(vw * 0.72, clientX - 18));
+          if (nextOriginX > clientX - 14) {
+            nextOriginX = clientX - 18;
+          }
+          entry.originX = nextOriginX;
           entry.extremeX = clientX;
           entry.activeHorizSign = 1;
           dx = clientX - entry.originX;
@@ -2954,11 +2995,12 @@ export class InputController {
     const vw = typeof window !== 'undefined' && window.innerWidth ? window.innerWidth : 412;
     const inCenterDoorTap =
       this._canInteract && this._isInCenterInteractZone(x, y);
-    // Repaired 'tilt' mode (#603): touching & holding right half (outside center door interact) gives TRUE HOLDABLE VARIABLE JUMP!
+    // Repaired 'tilt' mode (#603): touching & holding right zone (x >= 0.56w, outside center door interact) gives TRUE HOLDABLE VARIABLE JUMP,
+    // leaving [0.36..0.56] cleanly free for slash-whip & center interact without forcing a jump first!
     const rightHalfJump =
       entryType === 'tiltTouch' &&
       this._activeGameMode() === 'tower' &&
-      x >= vw * 0.50 &&
+      x >= vw * 0.56 &&
       !inCenterDoorTap;
     return {
       type: entryType,
@@ -3126,6 +3168,7 @@ export class InputController {
       entry.whipDir = dxSlash < 0 ? -1 : 1;
       entry.everWhipped = true;
       entry.jumpHeld = false;
+      this.justPressed.jump = false;
       entry.vertDir = null;
       entry.analogY = 0;
       this._lastWhipSource = 'tilt_slash';
@@ -3823,11 +3866,32 @@ export class InputController {
       const target = e.target instanceof Element ? e.target : null;
       if (target && target.matches('input, textarea, select, [contenteditable="true"]')) return;
       if (
-        (e.code === 'Enter' || e.code === 'Space') &&
+        e.code === 'Enter' &&
+        typeof document !== 'undefined' &&
+        document.querySelector('.overlay:not(.hidden)')
+      ) {
+        return;
+      }
+      if (
+        e.code === 'Space' &&
         target &&
         target.closest('.overlay:not(.hidden)') &&
         target.closest('button, a, [role="button"]')
       ) {
+        return;
+      }
+
+      // Context-smart KeyE: interact when standing at a door/lift/valve in tower mode, Tail-Whip otherwise!
+      if (e.code === 'KeyE' && this._activeGameMode() === 'tower' && this._canInteract) {
+        e.preventDefault();
+        if (e.repeat) return;
+        this.triggerInteract(
+          this._interactKind === 'whip'
+            ? 'whip'
+            : this._interactKind === 'fire'
+            ? 'fire'
+            : 'up'
+        );
         return;
       }
 

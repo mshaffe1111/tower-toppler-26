@@ -688,6 +688,7 @@ describe('Deliverable 4: 120Hz Kinematic Reachability & Zero-Bypass Audit Across
       for (const k of Object.keys(game.pipeStates)) game.pipeStates[k] = true;
       game._syncDynamicLedges(0, true);
       game.enemies = []; // Pure architectural jump reachability check
+      game.hydroRings = []; // Disable speed-ring aerial boost so pure chasm reachability is verified!
       // Test against worst-case Spire headwind!
       const wf = tower.mechanics?.windForce || 0;
       game.tower.mechanics.windForce = 0;
