@@ -1482,39 +1482,36 @@ def add_axolotl_waterspout(bm, pos_t3, yaw_rad, stone_idx=0, bronze_idx=3):
     )
 
 
-def add_parabolic_waterfall(bm, spout_tip_t3, dir_xz, drop_h, r_top=0.11, r_bot=0.25, steps=7, segs=8, mat_idx=0):
-    """Sculpts a volumetric 3D curved parabolic waterfall stream + splash foam collar at waterline."""
+def add_parabolic_waterfall(bm, spout_tip_t3, dir_xz, drop_h, r_top=0.11, r_bot=0.22, steps=8, segs=10, mat_idx=0):
+    """Sculpts a smoothly tapered 3D curved parabolic waterfall stream plunging cleanly below WATER_Y."""
     sx, sy, sz = spout_tip_t3
     dx, dz = dir_xz
     dlen = max(1e-4, math.hypot(dx, dz))
     dx, dz = dx / dlen, dz / dlen
     px, pz = -dz, dx
+    full_drop = drop_h + 0.22  # Plunge cleanly below waterline so bottom edge NEVER floats!
     rings = []
     for i in range(steps + 1):
         t = i / float(steps)
-        fwd = t * 0.62
-        y = sy - (t * t) * drop_h
+        fwd = t * 0.56
+        y = sy - (t * t) * full_drop
         rad_x = r_top + (r_bot - r_top) * (t ** 0.85)
-        rad_z = rad_x * (1.0 - 0.18 * t)
+        rad_z = rad_x * (0.72 - 0.14 * t)
         cx_i = sx + dx * fwd
         cz_i = sz + dz * fwd
         ring = []
         for s in range(segs):
             a = (TAU * s) / segs
-            rip = 1.0 + 0.07 * math.sin(a * 4.0 + t * 5.0)
+            rip = 1.0 + 0.08 * math.sin(a * 4.0 + t * 6.0)
             wx = cx_i + (px * math.cos(a) * rad_x + dx * math.sin(a) * rad_z) * rip
             wz = cz_i + (pz * math.cos(a) * rad_x + dz * math.sin(a) * rad_z) * rip
             ring.append((wx, y, wz))
         rings.append(ring)
-    add_loft_rings(bm, rings, closed=True, cap_start=True, cap_end=True, mat_idx=mat_idx)
-    end_x = sx + dx * 0.62
-    end_z = sz + dz * 0.62
-    end_y = sy - drop_h
-    add_torus(bm, (end_x, end_y + 0.04, end_z), r_bot * 1.45, 0.095, segs_u=12, segs_v=4, mat_idx=mat_idx)
+    add_loft_rings(bm, rings, closed=True, cap_start=False, cap_end=False, mat_idx=mat_idx)
 
 
 def build_temple_brazier_bm(bm, stone_idx=0, bronze_idx=3, ornate_idx=2, ember_idx=5, pedestal_style="tripod"):
-    """Sculpts a rich antique-bronze Pelagian temple brazier (tripod or octagonal stone pedestal)."""
+    """Sculpts a rich antique-bronze Pelagian temple brazier with craggy hot ember coals (ZERO flat white disc!)."""
     if pedestal_style == "tripod":
         add_cylinder(bm, (0.0, 0.06, 0.0), 0.34, 0.28, 0.12, segs=10, mat_idx=stone_idx)
         for i in range(3):
@@ -1540,13 +1537,17 @@ def build_temple_brazier_bm(bm, stone_idx=0, bronze_idx=3, ornate_idx=2, ember_i
     add_loft_rings(bm, rings, closed=True, cap_start=True, cap_end=True, mat_idx=bronze_idx)
     add_torus(bm, (0.0, bowl_y + 0.32, 0.0), 0.455, 0.042, segs_u=14, segs_v=4, mat_idx=ornate_idx)
 
-    emb_rings = []
-    for lv in range(3):
-        phi = (lv / 2.0) * (math.pi * 0.48)
-        er = math.cos(phi) * 0.35
-        ey = bowl_y + 0.20 + math.sin(phi) * 0.15
-        emb_rings.append([(math.cos((TAU * s) / 10.0) * er, ey, math.sin((TAU * s) / 10.0) * er) for s in range(10)])
-    add_loft_rings(bm, emb_rings, closed=True, cap_start=False, cap_end=True, mat_idx=ember_idx)
+    # Dark charred ash bed + glowing craggy coal chunks inside bowl (NO flat glowing white pancake!)
+    add_cylinder(bm, (0.0, bowl_y + 0.22, 0.0), 0.33, 0.31, 0.06, segs=10, mat_idx=bronze_idx)
+    coal_specs = [
+        ((0.0, bowl_y + 0.28, 0.0), (0.16, 0.10, 0.15), 0.2, 1),
+        ((0.14, bowl_y + 0.26, 0.08), (0.11, 0.08, 0.10), 0.9, 2),
+        ((-0.13, bowl_y + 0.26, 0.09), (0.10, 0.08, 0.11), 1.6, 3),
+        ((0.08, bowl_y + 0.26, -0.14), (0.11, 0.07, 0.10), 2.3, 4),
+        ((-0.12, bowl_y + 0.26, -0.10), (0.10, 0.07, 0.11), 3.1, 5),
+    ]
+    for c_pos, c_rad, c_yaw, c_seed in coal_specs:
+        add_organic_boulder(bm, c_pos, c_rad, yaw_rad=c_yaw, seed=c_seed, mat_idx=ember_idx)
 
 
 # ==============================================================================
@@ -1557,23 +1558,23 @@ def build_env_sanctum_temple():
     """Builds the sunlit Pelagian Water-Temple Rotunda kit for Aqueduct Sanctum (<= 18k tris, < 2.5 MB)."""
     reset_scene()
 
-    warm_travertine = bake_warm_travertine_bundle("sanctum_travertine", "#f5e3be", "#d5af76", "#9a7342", sz=256)
-    hammered_bronze = bake_hammered_bronze_bundle("sanctum_machined_bronze", "#e4b157", "#7d501e", "#367e76", sz=192)
+    warm_travertine = bake_warm_travertine_bundle("sanctum_travertine", "#dfbe88", "#b98d56", "#78522b", sz=256)
+    hammered_bronze = bake_hammered_bronze_bundle("sanctum_machined_bronze", "#dda54c", "#744818", "#2d6f68", sz=192)
 
     mat_travertine = make_arch_pbr_mat(
         "Mat_Sanctum_Travertine",
         tex_bundle=warm_travertine,
-        tint_hex="#fff7e8",
-        roughness_mul=0.95,
-        normal_strength=1.15,
+        tint_hex="#ecd6b2",
+        roughness_mul=0.96,
+        normal_strength=1.22,
         use_vertex_ao=True,
     )
     mat_sandstone = make_arch_pbr_mat(
         "Mat_Sanctum_Sandstone",
         prefix="arch_canyon_sandstone",
-        tint_hex="#f7d8b4",
-        roughness_mul=0.92,
-        normal_strength=1.18,
+        tint_hex="#e6be8f",
+        roughness_mul=0.94,
+        normal_strength=1.20,
         use_vertex_ao=True,
         alb_dim=320,
         nrm_dim=224,
@@ -1582,8 +1583,8 @@ def build_env_sanctum_temple():
     mat_bronze_ornate = make_arch_pbr_mat(
         "Mat_Sanctum_Bronze_Ornate",
         prefix="arch_antique_bronze",
-        tint_hex="#f7ce7a",
-        roughness_mul=0.76,
+        tint_hex="#ecc06a",
+        roughness_mul=0.80,
         normal_strength=1.10,
         use_vertex_ao=True,
         alb_dim=288,
@@ -1593,17 +1594,17 @@ def build_env_sanctum_temple():
     mat_bronze_mach = make_arch_pbr_mat(
         "Mat_Sanctum_Bronze_Machined",
         tex_bundle=hammered_bronze,
-        tint_hex="#ffdf9e",
-        roughness_mul=0.90,
+        tint_hex="#f2cd86",
+        roughness_mul=0.92,
         normal_strength=1.0,
         use_vertex_ao=True,
     )
     mat_basalt = make_arch_pbr_mat(
         "Mat_Sanctum_Basalt",
         prefix="arch_storm_basalt",
-        tint_hex="#68859b",
-        roughness_mul=0.88,
-        normal_strength=1.20,
+        tint_hex="#5d788b",
+        roughness_mul=0.90,
+        normal_strength=1.18,
         use_vertex_ao=True,
         alb_dim=256,
         nrm_dim=192,
@@ -1611,11 +1612,11 @@ def build_env_sanctum_temple():
     )
     mat_ember = make_arch_pbr_mat(
         "Mat_Sanctum_Ember",
-        tint_hex="#ff9a2e",
-        roughness_val=0.45,
-        metallic_val=0.05,
-        emission_hex="#ff6e12",
-        emission_strength=2.8,
+        tint_hex="#3d1408",
+        roughness_val=0.82,
+        metallic_val=0.04,
+        emission_hex="#ff4e0c",
+        emission_strength=1.25,
         use_vertex_ao=False,
     )
     mat_aqua = make_arch_pbr_mat(
@@ -1698,27 +1699,29 @@ def build_env_sanctum_temple():
             bx, _, bz = arc_pt(am, ARC_R, 0.0)
             return (bx + tan_x * u_tan + in_x * d_in, y_val, bz + tan_z * u_tan + in_z * d_in)
 
-        # Deeply recessed backing masonry built from real 3D stepped horizontal sandstone/travertine courses
-        add_bevel_box(bm, bay_pt(0.0, 2.15, -0.58), (bay_w * 0.96, 4.15, 0.34), bevel=0.0, rot_t3=(0.0, yaw_in, 0.0), mat_idx=4)
+        # Deeply recessed backing masonry built from warm sunlit travertine & sandstone ashlar courses (NO stark black horizontal bar!)
+        add_bevel_box(bm, bay_pt(0.0, 2.15, -0.56), (bay_w * 0.96, 4.15, 0.34), bevel=0.0, rot_t3=(0.0, yaw_in, 0.0), mat_idx=0)
         for cy_b, ch_b, cd_b, m_b in (
-            (0.68, 1.05, -0.34, 1),
-            (2.05, 1.25, -0.44, 0),
-            (3.45, 1.15, -0.30, 1),
+            (0.68, 1.15, -0.34, 1),
+            (2.05, 1.38, -0.44, 0),
+            (3.48, 1.18, -0.32, 1),
         ):
             add_bevel_box(bm, bay_pt(0.0, cy_b, cd_b), (bay_w * 0.88, ch_b, 0.24), bevel=0.0, rot_t3=(0.0, yaw_in, 0.0), mat_idx=m_b)
 
-        arch_r = bay_w * 0.36
+        # Solid carved spandrel header + flush 7-block interlocking stone arch ring (ZERO detached floating blocks!)
+        arch_r = bay_w * 0.35
+        add_bevel_box(bm, bay_pt(0.0, 3.68, -0.14), (bay_w * 0.90, 0.72, 0.42), bevel=0.0, rot_t3=(0.0, yaw_in, 0.0), mat_idx=0)
         for side in (-1.0, 1.0):
-            add_bevel_box(bm, bay_pt(side * (arch_r + 0.14), 1.48, -0.06), (0.30, 2.75, 0.52), bevel=0.0, rot_t3=(0.0, yaw_in, 0.0), mat_idx=1)
-        for vi in range(5):
-            va = (vi / 4.0) * math.pi
+            add_bevel_box(bm, bay_pt(side * (arch_r + 0.16), 1.56, -0.06), (0.34, 2.95, 0.48), bevel=0.0, rot_t3=(0.0, yaw_in, 0.0), mat_idx=1)
+        for vi in range(7):
+            va = (vi / 6.0) * math.pi
             ux = math.cos(va) * arch_r
-            vy = 2.75 + math.sin(va) * (arch_r * 0.88)
-            is_key = (vi == 2)
+            vy = 2.86 + math.sin(va) * (arch_r * 0.78)
+            is_key = (vi == 3)
             add_bevel_box(
                 bm,
-                bay_pt(ux, vy, 0.04 if is_key else -0.02),
-                (0.42 if is_key else 0.44, 0.44 if is_key else 0.32, 0.58 if is_key else 0.46),
+                bay_pt(ux, vy, 0.04 if is_key else -0.04),
+                (0.42 if is_key else 0.44, 0.38 if is_key else 0.30, 0.50 if is_key else 0.44),
                 bevel=0.03 if is_key else 0.0,
                 rot_t3=(0.0, yaw_in, va - math.pi * 0.5),
                 mat_idx=2 if is_key else 0,
@@ -1726,14 +1729,15 @@ def build_env_sanctum_temple():
 
         add_bevel_box(bm, bay_pt(0.0, 0.48, 0.08), (bay_w * 0.72, 0.14, 0.36), bevel=0.0, rot_t3=(0.0, yaw_in, 0.0), mat_idx=0)
         if bi in (1, 2, 4, 5):
-            spout_pos = bay_pt(0.0, 2.68, -0.04)
+            spout_pos = bay_pt(0.0, 2.62, -0.04)
             add_axolotl_waterspout(bm, spout_pos, yaw_in, stone_idx=0, bronze_idx=3)
-            tip_pos = bay_pt(0.0, 2.58, 0.78)
-            add_parabolic_waterfall(bm_wf, tip_pos, (in_x, in_z), drop_h=2.92, r_top=0.11, r_bot=0.26, steps=7, segs=8, mat_idx=7)
-            add_bevel_box(bm, bay_pt(0.0, 3.42, -0.18), (0.34, 0.34, 0.12), bevel=0.0, rot_t3=(0.0, yaw_in, math.pi * 0.25), mat_idx=6)
+            tip_pos = bay_pt(0.0, 2.52, 0.78)
+            add_parabolic_waterfall(bm_wf, tip_pos, (in_x, in_z), drop_h=2.86, r_top=0.11, r_bot=0.24, steps=8, segs=10, mat_idx=7)
         else:
-            add_torus(bm, bay_pt(0.0, 2.05, -0.10), 0.46, 0.07, segs_u=12, segs_v=4, rot_t3=(math.pi * 0.5, yaw_in, 0.0), mat_idx=3)
-            add_bevel_box(bm, bay_pt(0.0, 2.05, -0.12), (0.22, 0.22, 0.16), bevel=0.0, rot_t3=(0.0, yaw_in, math.pi * 0.25), mat_idx=6)
+            # Flush carved bronze architectural medallion rosette seated cleanly on bay backing (ZERO wall clipping!)
+            add_cylinder(bm, bay_pt(0.0, 2.05, -0.14), 0.54, 0.58, 0.16, segs=12, rot_t3=(math.pi * 0.5, yaw_in, 0.0), mat_idx=1)
+            add_torus(bm, bay_pt(0.0, 2.05, -0.02), 0.44, 0.065, segs_u=14, segs_v=4, rot_t3=(math.pi * 0.5, yaw_in, 0.0), mat_idx=3)
+            add_bevel_box(bm, bay_pt(0.0, 2.05, 0.02), (0.24, 0.24, 0.10), bevel=0.0, rot_t3=(0.0, yaw_in, math.pi * 0.25), mat_idx=6)
 
     def rotunda_ao(pt, nrm, mat_idx):
         if mat_idx in (5, 6, 7):
@@ -1840,21 +1844,21 @@ def build_env_sanctum_temple():
     finalize_mesh("Sanctum_Brazier", bm_br, s_mats, uv_scale=0.85, ao_fn=lambda p, n, m: (1.0, 1.0, 1.0) if m == 5 else (0.93, 0.92, 0.88), smooth=False)
 
     # ------------------------------------------------------------------
-    # 5. `Sanctum_TileMesh` — Sculpted Beveled 3D Puzzle Medallion Tile
+    # 5. `Sanctum_TileMesh` — Refined Handcrafted Warm Travertine Temple Paver
+    #    (Serene warm stone mosaic w/ subtle inlaid bronze corners so active puzzle medallions POP!)
     # ------------------------------------------------------------------
     bm_t = bmesh.new()
     add_bevel_box(bm_t, (0.0, -0.08, 0.0), (0.94, 0.14, 0.94), bevel=0.036, segs=1, mat_idx=0)
-    add_torus(bm_t, (0.0, -0.008, 0.0), 0.34, 0.024, segs_u=14, segs_v=4, mat_idx=2)
-    add_torus(bm_t, (0.0, -0.006, 0.0), 0.20, 0.018, segs_u=12, segs_v=4, mat_idx=1)
-    add_bevel_box(bm_t, (0.0, -0.004, 0.0), (0.14, 0.024, 0.14), bevel=0.0, rot_t3=(0.0, math.pi * 0.25, 0.0), mat_idx=3)
-    for cx in (-0.36, 0.36):
-        for cz in (-0.36, 0.36):
-            add_bevel_box(bm_t, (cx, -0.005, cz), (0.06, 0.022, 0.06), bevel=0.0, mat_idx=3)
+    add_bevel_box(bm_t, (0.0, -0.008, 0.0), (0.76, 0.018, 0.76), bevel=0.014, segs=1, mat_idx=0)
+    add_torus(bm_t, (0.0, -0.006, 0.0), 0.26, 0.012, segs_u=14, segs_v=4, mat_idx=0)
+    for cx in (-0.37, 0.37):
+        for cz in (-0.37, 0.37):
+            add_bevel_box(bm_t, (cx, -0.006, cz), (0.065, 0.018, 0.065), bevel=0.0, mat_idx=3)
 
     def tile_ao(pt, nrm, mat_idx):
-        r = math.hypot(pt[0], pt[2])
-        ring_ao = 0.84 + 0.16 * min(1.0, abs(r - 0.34) / 0.10)
-        v = min(1.0, ring_ao * (0.95 + 0.05 * max(0.0, nrm[1])))
+        r = max(abs(pt[0]), abs(pt[2]))
+        edge_ao = 0.86 + 0.14 * min(1.0, abs(r - 0.38) / 0.10)
+        v = min(1.0, edge_ao * (0.95 + 0.05 * max(0.0, nrm[1])))
         return (v, v * 0.98, v * 0.94)
 
     finalize_mesh("Sanctum_TileMesh", bm_t, s_mats, uv_scale=1.15, ao_fn=tile_ao, smooth=False)
@@ -1870,23 +1874,23 @@ def build_env_vault_chamber():
     """Builds the Domed Pelagian Astrolabe Vault Rotunda & True 3D Astrolabe Lock (<= 18k tris, < 2.5 MB)."""
     reset_scene()
 
-    warm_travertine = bake_warm_travertine_bundle("vault_travertine", "#f3dfba", "#cfa76f", "#936c3e", sz=256)
-    hammered_bronze = bake_hammered_bronze_bundle("vault_machined_bronze", "#e6b355", "#7a4c1b", "#2d7c74", sz=192)
+    warm_travertine = bake_warm_travertine_bundle("vault_travertine", "#d9b782", "#b38750", "#724e28", sz=256)
+    hammered_bronze = bake_hammered_bronze_bundle("vault_machined_bronze", "#dea74e", "#744818", "#2d6f68", sz=192)
 
     mat_travertine = make_arch_pbr_mat(
         "Mat_Vault_Travertine",
         tex_bundle=warm_travertine,
-        tint_hex="#fff4df",
-        roughness_mul=0.92,
-        normal_strength=1.15,
+        tint_hex="#ebd4ae",
+        roughness_mul=0.94,
+        normal_strength=1.20,
         use_vertex_ao=True,
     )
     mat_sandstone = make_arch_pbr_mat(
         "Mat_Vault_Sandstone",
         prefix="arch_canyon_sandstone",
-        tint_hex="#f5d4ae",
-        roughness_mul=0.92,
-        normal_strength=1.20,
+        tint_hex="#e2b888",
+        roughness_mul=0.94,
+        normal_strength=1.18,
         use_vertex_ao=True,
         alb_dim=320,
         nrm_dim=224,
@@ -1895,8 +1899,8 @@ def build_env_vault_chamber():
     mat_bronze_ornate = make_arch_pbr_mat(
         "Mat_Vault_Bronze_Ornate",
         prefix="arch_antique_bronze",
-        tint_hex="#f7cf7c",
-        roughness_mul=0.74,
+        tint_hex="#ecc06a",
+        roughness_mul=0.78,
         normal_strength=1.12,
         use_vertex_ao=True,
         alb_dim=288,
@@ -1906,17 +1910,17 @@ def build_env_vault_chamber():
     mat_bronze_mach = make_arch_pbr_mat(
         "Mat_Vault_Bronze_Machined",
         tex_bundle=hammered_bronze,
-        tint_hex="#ffe0a0",
-        roughness_mul=0.88,
+        tint_hex="#f2cd86",
+        roughness_mul=0.90,
         normal_strength=1.0,
         use_vertex_ao=True,
     )
     mat_basalt = make_arch_pbr_mat(
         "Mat_Vault_Basalt",
         prefix="arch_storm_basalt",
-        tint_hex="#68849a",
-        roughness_mul=0.86,
-        normal_strength=1.22,
+        tint_hex="#33586b",
+        roughness_mul=0.92,
+        normal_strength=0.65,
         use_vertex_ao=True,
         alb_dim=256,
         nrm_dim=192,
@@ -1924,11 +1928,11 @@ def build_env_vault_chamber():
     )
     mat_ember = make_arch_pbr_mat(
         "Mat_Vault_Ember",
-        tint_hex="#ff9a2e",
-        roughness_val=0.45,
-        metallic_val=0.05,
-        emission_hex="#ff6e12",
-        emission_strength=2.8,
+        tint_hex="#3d1408",
+        roughness_val=0.82,
+        metallic_val=0.04,
+        emission_hex="#ff4e0c",
+        emission_strength=1.25,
         use_vertex_ao=False,
     )
     mat_aqua = make_arch_pbr_mat(
@@ -1981,8 +1985,9 @@ def build_env_vault_chamber():
     ROT_CZ = 1.65
     ROT_R = 7.15
     N_BAYS = 7
-    A_START = -math.pi * 0.90
-    A_END = -math.pi * 0.10
+    # Wrap 204 deg past hemisphere so ZERO outer cut ends ever appear even on ultrawide desktop!
+    A_START = -math.pi * 1.07
+    A_END = math.pi * 0.07
 
     def v_arc(a, r, y):
         return (math.cos(a) * r, y, ROT_CZ + math.sin(a) * r)
@@ -2028,7 +2033,7 @@ def build_env_vault_chamber():
         rib_pts = [v_arc(a_col, dr - 0.20, dy - 0.08) for (dy, dr, _) in dome_levels]
         add_curved_arch_beam(bm, rib_pts, half_w=0.18, half_h=0.14, center_xz=(0.0, ROT_CZ), mat_idx=3)
 
-    # 1d. 7 Deeply Recessed Tall Lancet Alcoves along the Curved Rotunda Wall
+    # 1d. 7 Deeply Recessed Cathedral Lancet Alcoves (mullioned sea-glass windows on flanks, serene recessed apse behind Astrolabe!)
     for bi in range(N_BAYS):
         a0, a1 = bay_angs[bi], bay_angs[bi + 1]
         am = 0.5 * (a0 + a1)
@@ -2041,9 +2046,16 @@ def build_env_vault_chamber():
             bx, _, bz = v_arc(am, ROT_R, 0.0)
             return (bx + tan_x * ut + in_x * din, yv, bz + tan_z * ut + in_z * din)
 
+        is_center_apse = (bi in (2, 3, 4))
+        # Calm deep twilight-teal apse behind the Astrolabe so the 3 rotating bronze rings POP cleanly!
         add_bevel_box(bm, bpt(0.0, 0.95, -0.58), (bay_w * 0.96, 6.75, 0.32), bevel=0.0, rot_t3=(0.0, yaw_in, 0.0), mat_idx=4)
-        for cy_s, ch_s, m_s in ((-1.10, 1.35, 1), (0.95, 1.55, 0), (2.95, 1.35, 1)):
-            add_bevel_box(bm, bpt(0.0, cy_s, -0.38), (bay_w * 0.86, ch_s, 0.24), bevel=0.0, rot_t3=(0.0, yaw_in, 0.0), mat_idx=m_s)
+        if not is_center_apse:
+            for cy_s, ch_s, m_s in ((-1.15, 1.40, 1), (0.95, 1.65, 0), (2.98, 1.40, 1)):
+                add_bevel_box(bm, bpt(0.0, cy_s, -0.38), (bay_w * 0.86, ch_s, 0.24), bevel=0.0, rot_t3=(0.0, yaw_in, 0.0), mat_idx=m_s)
+        else:
+            # Lower warm dado + upper smooth recessed stone cornice framing a calm dark sanctuary recess behind Astrolabe
+            add_bevel_box(bm, bpt(0.0, -1.65, -0.36), (bay_w * 0.88, 1.15, 0.24), bevel=0.0, rot_t3=(0.0, yaw_in, 0.0), mat_idx=0)
+            add_bevel_box(bm, bpt(0.0, 3.65, -0.36), (bay_w * 0.88, 0.88, 0.24), bevel=0.0, rot_t3=(0.0, yaw_in, 0.0), mat_idx=0)
 
         aw = bay_w * 0.34
         for side in (-1.0, 1.0):
@@ -2061,8 +2073,17 @@ def build_env_vault_chamber():
                 rot_t3=(0.0, yaw_in, va - math.pi * 0.5),
                 mat_idx=2 if is_key else 0,
             )
-        add_bevel_box(bm, bpt(0.0, 1.45, -0.22), (0.16, 3.35, 0.14), bevel=0.0, rot_t3=(0.0, yaw_in, 0.0), mat_idx=6)
-        add_bevel_box(bm, bpt(0.0, 3.20, -0.14), (0.28, 0.28, 0.16), bevel=0.0, rot_t3=(0.0, yaw_in, math.pi * 0.25), mat_idx=7)
+
+        # Flanking bays get recessed antique-bronze mullioned cathedral lancet window frames (NO flat bright cyan bars or flat yellow diamonds!)
+        if not is_center_apse:
+            for side in (-0.28, 0.28):
+                add_bevel_box(bm, bpt(side, 1.35, -0.20), (0.07, 3.25, 0.14), bevel=0.0, rot_t3=(0.0, yaw_in, 0.0), mat_idx=3)
+            for ty_m in (0.15, 1.15, 2.15, 3.05):
+                add_bevel_box(bm, bpt(0.0, ty_m, -0.20), (0.62, 0.07, 0.14), bevel=0.0, rot_t3=(0.0, yaw_in, 0.0), mat_idx=3)
+            add_bevel_box(bm, bpt(0.0, 1.55, -0.28), (0.50, 2.95, 0.06), bevel=0.0, rot_t3=(0.0, yaw_in, 0.0), mat_idx=4)
+            # Subtle recessed thin glowing aqua tracery vein tucked cleanly behind the bronze mullions
+            add_bevel_box(bm, bpt(0.0, 1.55, -0.24), (0.055, 2.85, 0.04), bevel=0.0, rot_t3=(0.0, yaw_in, 0.0), mat_idx=6)
+            add_torus(bm, bpt(0.0, 3.28, -0.18), 0.24, 0.045, segs_u=12, segs_v=4, rot_t3=(math.pi * 0.5, yaw_in, 0.0), mat_idx=2)
 
     # 1e. Twin Hero Flanking Fluted Columns & Axolotl Water-Spouts (X = +/-3.75, Z = -0.95 -> 100% CLEAR of braziers!)
     for sx in (-3.75, 3.75):
