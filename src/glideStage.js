@@ -139,6 +139,9 @@ export class GlideStage {
     this.maxGateChain = 0;
     this.hitFourGateChain = false;
     this.thermalTime = 0;
+    this.flowCharge = 0;
+    this._swoopCd = 0;
+    this._thermalFlowAccum = 0;
   }
 
   start({
@@ -230,11 +233,11 @@ export class GlideStage {
     const d = this.difficulty;
     const th = this.theme;
     this._next = {
-      pattern: 0.5,
-      thermal: 1.4,
-      gate: 1.8,
-      kite: 4.2 + Math.random() * 1.5,
-      cloud: 5.5 / th.storm,
+      pattern: 0.45,
+      thermal: 0.9,
+      gate: 1.3,
+      kite: 3.8 + Math.random() * 1.4,
+      cloud: 4.5 / th.storm,
       gull: 3.6 / th.gull,
       gust: 5.0 / th.gust,
     };
@@ -502,6 +505,7 @@ export class GlideStage {
     if (this.hits === 0) {
       this.perfect = true;
       this._score(fx, PERFECT_BONUS);
+      this._addFlow(fx, 15, 'CLEAN FLIGHT');
       fx.popup?.(g.x, g.y - 40 * this.s, `PERFECT FLIGHT +${PERFECT_BONUS}`, '#fde047');
       (sound?.collectStar || sound?.secret)?.call(sound);
     }
@@ -509,6 +513,12 @@ export class GlideStage {
       ? 'DESTINATION REACHED'
       : `SECTOR ${Math.min(4, this.worldIndex + 2)} LANDFALL`;
     fx.banner?.(arriveSub, `ARRIVING: ${this.nextWorldName}`);
+  }
+
+  _addFlow(fx, amount, reason = '') {
+    if (!amount) return;
+    this.flowCharge = clamp((this.flowCharge || 0) + amount, 0, 100);
+    fx?.addFlowCharge?.(amount, reason);
   }
 
   _score(fx, pts) {
@@ -678,39 +688,49 @@ export class GlideStage {
       g.pitch += (targetPitch - g.pitch) * (1 - Math.exp(-7.5 * dt));
 
       const sinPitch = Math.sin(g.pitch);
-      const cruiseAirspeed = 1.0 + 0.20 * ix + (g.flapT < 0.6 ? 0.22 * (1 - g.flapT / 0.6) : 0);
+      const cruiseAirspeed = 1.0 + 0.22 * ix + (g.flapT < 0.6 ? 0.24 * (1 - g.flapT / 0.6) : 0);
       if (sinPitch > 0.02) {
-        // Diving: gravity component accelerates airspeed
-        g.airspeed += sinPitch * 1.28 * dt;
+        // Exhilarating Dive-to-Accelerate: steepening dive builds high kinetic airspeed rapidly!
+        g.airspeed += sinPitch * 1.62 * dt;
       } else if (sinPitch < -0.02) {
-        // Climbing: kinetic airspeed converts into altitude (soft floor at 0.72 — forgiving stall!)
-        g.airspeed -= -sinPitch * 0.96 * dt;
+        // Pull-Up-to-Climb: converts stored kinetic airspeed into graceful soaring lift!
+        g.airspeed -= -sinPitch * 0.92 * dt;
       }
       // Aerodynamic drag relaxes airspeed gently toward cruise trim
-      g.airspeed += (cruiseAirspeed - g.airspeed) * (1 - Math.exp(-0.92 * dt));
-      g.airspeed = clamp(g.airspeed, 0.72, 1.72);
+      g.airspeed += (cruiseAirspeed - g.airspeed) * (1 - Math.exp(-0.85 * dt));
+      g.airspeed = clamp(g.airspeed, 0.72, 1.88);
 
       const excessAir = Math.max(0, g.airspeed - 0.76);
       const pullingUp = g.pitch < -0.04 || iy < -0.15 || holdLift < 0;
-      // Shallow neutral sink keeps zero-input flight gently aloft & completable (splashes <= 1)
-      const neutralSink = Math.max(5.5 * s, (11.0 - excessAir * 7.5) * s);
-      const diveSink = sinPitch > 0.02 ? sinPitch * 275 * s : 0;
-      const aeroClimb = sinPitch < -0.02 ? -(-sinPitch) * (150 + excessAir * 275) * s : 0;
-      // Gentle soft-sink near stall floor when nose pulled high with depleted airspeed
-      const softStall = g.airspeed < 0.78 && sinPitch < -0.15 ? (0.78 - g.airspeed) * 140 * s : 0;
+      const neutralSink = Math.max(5.5 * s, (10.5 - excessAir * 8.0) * s);
+      const diveSink = sinPitch > 0.02 ? sinPitch * 290 * s : 0;
+      const aeroClimb = sinPitch < -0.02 ? -(-sinPitch) * (162 + excessAir * 315) * s : 0;
+      const softStall = g.airspeed < 0.78 && sinPitch < -0.15 ? (0.78 - g.airspeed) * 130 * s : 0;
       let wantVy = neutralSink + diveSink + aeroClimb + softStall + holdLift * 0.72;
+      if (this._swoopCd > 0) this._swoopCd = Math.max(0, this._swoopCd - dt);
       if (pullingUp && g.energy > 0.02) {
-        const use = Math.min(g.energy, dt * 1.45);
+        // Reward dramatic Dive -> Pull-Up Swoop Climb with Flow Charge + soaring lift burst!
+        if (g.energy > 0.56 && g.airspeed > 1.24 && this._swoopCd <= 0) {
+          this._swoopCd = 2.6;
+          this._addFlow(fx, 14, 'SWOOP CLIMB');
+          this._score(fx, 150 * this.mult);
+          this._ring(g.x, g.y, g.rx * 0.6, g.rx * 3.0, '#fde047', 0.52);
+          fx.particles?.(g.x, g.y, '#fde047', 12, 130);
+          fx.popup?.(g.x, g.y - 26 * s, 'SWOOP CLIMB! +14% FLOW', '#fde047');
+          if (typeof sound?.gatewayTrickChirp === 'function') sound.gatewayTrickChirp();
+          else sound?.glideWhoosh?.();
+        }
+        const use = Math.min(g.energy, dt * 1.52);
         g.energy -= use;
-        wantVy -= 165 * s * (use / Math.max(dt, 1e-4));
+        wantVy -= 195 * s * (use / Math.max(dt, 1e-4));
       }
-      const ky = iy !== 0 || holdLift < 0 ? 6.0 : 2.8;
+      const ky = iy !== 0 || holdLift < 0 ? 6.4 : 2.8;
       g.vy += (wantVy - g.vy) * (1 - Math.exp(-ky * dt));
 
-      // Rising warm/bioluminescent sea thermals with turbulent wing-frill buffet
+      // Rising golden thermal updraft helices with buoyant lift & subtle Flow Charge!
       let lift = 0;
       for (const th of this.thermals) {
-        const dx = (g.x - th.x) / (th.w * 1.08);
+        const dx = (g.x - th.x) / (th.w * 1.12);
         if (dx > -1 && dx < 1 && g.y > this.top - 12 * s) {
           lift = Math.max(lift, th.str * (1 - dx * dx) * th.fade);
         }
@@ -720,19 +740,24 @@ export class GlideStage {
       g.buffet += (wantBuffet - g.buffet) * Math.min(1, dt * 9.0);
       if (lift > 0.02) {
         const turb = 1 + Math.sin(this.t * 15.0) * 0.10;
-        g.vy -= lift * 685 * turb * s * dt;
-        g.energy = Math.min(1.4, g.energy + lift * dt * 0.65);
-        g.airspeed = Math.min(1.72, g.airspeed + lift * dt * 0.14);
+        g.vy -= lift * 725 * turb * s * dt;
+        g.energy = Math.min(1.65, g.energy + lift * dt * 0.85);
+        g.airspeed = Math.min(1.88, g.airspeed + lift * dt * 0.20);
         this.thermalTime += dt;
+        this._thermalFlowAccum = (this._thermalFlowAccum || 0) + lift * dt * 9.0;
+        if (this._thermalFlowAccum >= 3.5) {
+          this._thermalFlowAccum -= 3.5;
+          this._addFlow(fx, 4, 'THERMAL UPDRAFT');
+        }
       }
-      if (g.vy < -350 * s) g.vy = -350 * s;
+      if (g.vy < -375 * s) g.vy = -375 * s;
 
       // Dive builds speed & zoom-climb kinetic energy; pull-up flares wings gracefully
-      const diving = clamp((g.vy - 55 * s) / (165 * s), 0, 1);
-      const pitchDive = clamp(g.pitch / 0.52, 0, 1);
-      g.dive += (Math.max(diving, pitchDive * 0.85) - g.dive) * Math.min(1, dt * 6.0);
-      if (g.dive > 0.05) g.energy = Math.min(1.45, g.energy + g.dive * dt * 1.25);
-      else g.energy = Math.max(0, g.energy - dt * 0.09);
+      const diving = clamp((g.vy - 50 * s) / (160 * s), 0, 1);
+      const pitchDive = clamp(g.pitch / 0.50, 0, 1);
+      g.dive += (Math.max(diving, pitchDive * 0.88) - g.dive) * Math.min(1, dt * 6.5);
+      if (g.dive > 0.05) g.energy = Math.min(1.65, g.energy + g.dive * dt * 1.48);
+      else g.energy = Math.max(0, g.energy - dt * 0.08);
 
       const targetFlare = pullingUp ? clamp(0.28 + g.energy * 0.45 + excessAir * 0.25, 0, 0.88) : 0;
       g.flare += (targetFlare - g.flare) * Math.min(1, dt * 7.5);
@@ -808,8 +833,9 @@ export class GlideStage {
     g.flapCd = FLAP_CD;
     g.flapT = 0;
     g.flaps++;
-    g.vy = Math.min(g.vy - 200 * s, -175 * s);
-    g.vx += 40 * s;
+    g.vy = Math.min(g.vy - 210 * s, -182 * s);
+    g.vx += 48 * s;
+    g.invuln = Math.max(g.invuln || 0, 0.24);
     this._vfx('flap', g.x - g.rx * 0.4, g.y + g.ry * 0.5, { life: 0.5, size: g.rx * 1.6 });
     (sound?.glideFlap || sound?.jump)?.call(sound);
   }
@@ -1171,9 +1197,10 @@ export class GlideStage {
       const pts = GOLD_POINTS * mult;
       this.goldCaught++;
       this._score(fx, pts);
+      this._addFlow(fx, 18, 'GOLDEN LANTERN');
       // Next-Gen Golden Lantern reward: +2 Golden Gears into ProgressionManager
       this._awardGears(fx, sound, 2);
-      fx.popup?.(l.x, l.y - 24 * s, `GOLDEN LANTERN +${pts} (+2 GEARS)`, '#fde047');
+      fx.popup?.(l.x, l.y - 24 * s, `GOLDEN LANTERN +18% FLOW`, '#fde047');
       fx.particles?.(l.x, l.y, '#fde047', 22, 170);
       fx.particles?.(l.x, l.y, '#ffffff', 10, 110);
       this._ring(l.x, l.y, l.r, l.r * 5, '#fde047', 0.75);
@@ -1188,6 +1215,7 @@ export class GlideStage {
       const pts = KITE_POINTS * mult;
       this.kites++;
       this._score(fx, pts);
+      this._addFlow(fx, 12, 'STAR KITE');
       fx.popup?.(
         l.x,
         l.y - 22 * s,
@@ -1206,6 +1234,7 @@ export class GlideStage {
     const pts = LANTERN_POINTS * mult;
     this.lanternsCaught++;
     this._score(fx, pts);
+    this._addFlow(fx, 2, 'SKY LANTERN');
     const col = LANTERN_POP[l.hue % LANTERN_POP.length];
     fx.particles?.(l.x, l.y, col, 7, 95);
     this._ring(l.x, l.y, l.r * 0.5, l.r * 2.6, col, 0.4);
@@ -1226,7 +1255,8 @@ export class GlideStage {
         const bonus = STRING_BONUS * mult;
         this.strings++;
         this._score(fx, bonus);
-        label = `LANTERN STRING! +${p.tally + bonus}`;
+        this._addFlow(fx, 10, 'LANTERN STRING');
+        label = `LANTERN STRING! +10% FLOW`;
         color = '#fde047';
         this._vfx('sparkle', l.x, l.y, { life: 0.75, size: 40 * s, color: '#fef3c7' });
         this._ring(l.x, l.y, l.r, l.r * 6, '#fde68a', 0.7);
@@ -1263,13 +1293,17 @@ export class GlideStage {
           const mult = this._comboHit();
           const chain = this.gateChain > 1 ? GATE_CHAIN_BONUS * (this.gateChain - 1) : 0;
           const pts = (GATE_POINTS + chain) * mult;
+          const gateFlow = this.gateChain >= 4 ? 14 : this.gateChain >= 3 ? 11 : 7;
           this._score(fx, pts);
+          this._addFlow(fx, gateFlow, 'WIND GATE');
+          g.airspeed = Math.min(1.88, g.airspeed + 0.24);
+          g.energy = Math.min(1.65, g.energy + 0.30);
 
           const isFourChain = this.gateChain > 0 && this.gateChain % 4 === 0;
           if (isFourChain) {
             this.hitFourGateChain = true;
             this._awardGears(fx, sound, 2);
-            fx.popup?.(gt.x, gt.y - gt.r - 14 * s, `GATE x${this.gateChain} +${pts} (+2 GEARS)`, '#fde047');
+            fx.popup?.(gt.x, gt.y - gt.r - 14 * s, `GATE x${this.gateChain} +${gateFlow}% FLOW (+2G)`, '#fde047');
             fx.particles?.(gt.x, gt.y, '#fde047', 20, 175);
             this._vfx('sparkle', gt.x, gt.y, { life: 0.8, size: gt.r * 1.35, color: '#fde047' });
           } else {

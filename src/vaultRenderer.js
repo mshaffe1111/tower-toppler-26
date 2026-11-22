@@ -15,6 +15,7 @@
 
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
+import { GatewayRig } from './gateway.js';
 
 const TAU = Math.PI * 2;
 const RING_RADII = [2.22, 1.64, 1.08];
@@ -22,8 +23,10 @@ const RING_Z = [0.08, 0.17, 0.26];
 const WATER_Y = -2.85;
 const MAX_MOTES = 96;
 const MAX_STRIKE_GEMS = 5;
+const MAX_LOCK_BURST = 28;
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const lerp = (a, b, t) => a + (b - a) * t;
 
 function wrapAngle(a) {
   let r = a % TAU;
@@ -664,6 +667,113 @@ function createSoftGlowSpriteTex(size = 64) {
   return tex;
 }
 
+function buildVaultEnvMap(webgl) {
+  if (!webgl || typeof THREE.PMREMGenerator !== 'function') return null;
+  try {
+    const pmrem = new THREE.PMREMGenerator(webgl);
+    const envScene = new THREE.Scene();
+    envScene.background = new THREE.Color('#184862');
+    // Warm sunlit golden oculus overhead + rich turquoise rotunda pool reflection for metallic bronze IBL
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(20, 18, 12),
+      new THREE.MeshBasicMaterial({ color: '#1b5874', side: THREE.BackSide })
+    );
+    envScene.add(dome);
+    const oculus = new THREE.Mesh(
+      new THREE.CircleGeometry(6.2, 20),
+      new THREE.MeshBasicMaterial({ color: '#ffefc4' })
+    );
+    oculus.position.set(3, 12, 6);
+    oculus.lookAt(0, 0, 0);
+    envScene.add(oculus);
+    const warmBounceL = new THREE.Mesh(
+      new THREE.CircleGeometry(4.0, 14),
+      new THREE.MeshBasicMaterial({ color: '#ffb55a' })
+    );
+    warmBounceL.position.set(-10, 1, 5);
+    warmBounceL.lookAt(0, 0, 0);
+    envScene.add(warmBounceL);
+    const warmBounceR = new THREE.Mesh(
+      new THREE.CircleGeometry(4.0, 14),
+      new THREE.MeshBasicMaterial({ color: '#5efce8' })
+    );
+    warmBounceR.position.set(10, -2, 5);
+    warmBounceR.lookAt(0, 0, 0);
+    envScene.add(warmBounceR);
+    const rt = pmrem.fromScene(envScene, 0.04);
+    dome.geometry.dispose();
+    dome.material.dispose();
+    oculus.geometry.dispose();
+    oculus.material.dispose();
+    warmBounceL.geometry.dispose();
+    warmBounceL.material.dispose();
+    warmBounceR.geometry.dispose();
+    warmBounceR.material.dispose();
+    pmrem.dispose();
+    return rt;
+  } catch {
+    return null;
+  }
+}
+
+function buildHeroDaisGeos() {
+  // Stepped circular carved travertine & bronze Pelagian sanctuary dais rising out of the vault basin
+  const stoneParts = [];
+  const bronzeParts = [];
+
+  const subPlinth = new THREE.CylinderGeometry(1.06, 1.24, 0.42, 12);
+  subPlinth.translate(0, -0.21, 0);
+  stoneParts.push(subPlinth);
+
+  const topDeck = new THREE.CylinderGeometry(0.86, 0.96, 0.16, 16);
+  topDeck.translate(0, 0.08, 0);
+  stoneParts.push(topDeck);
+
+  const outerRim = new THREE.TorusGeometry(0.90, 0.055, 8, 24);
+  outerRim.rotateX(Math.PI * 0.5);
+  outerRim.translate(0, 0.14, 0);
+  bronzeParts.push(outerRim);
+
+  const innerRing = new THREE.TorusGeometry(0.64, 0.028, 6, 20);
+  innerRing.rotateX(Math.PI * 0.5);
+  innerRing.translate(0, 0.165, 0);
+  bronzeParts.push(innerRing);
+
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * TAU;
+    const stud = new THREE.SphereGeometry(0.048, 8, 6);
+    stud.translate(Math.cos(a) * 0.92, 0.14, Math.sin(a) * 0.92);
+    bronzeParts.push(stud);
+  }
+  return { stoneGeo: mergeNorm(stoneParts), bronzeGeo: mergeNorm(bronzeParts) };
+}
+
+function buildVaultHydroRibbonGeo(segs = 18) {
+  const verts = new Float32Array((segs + 1) * 2 * 3);
+  const uvs = new Float32Array((segs + 1) * 2 * 2);
+  const idx = [];
+  for (let i = 0; i <= segs; i++) {
+    const u = i / segs;
+    uvs[i * 4 + 0] = u * 2.5;
+    uvs[i * 4 + 1] = 0;
+    uvs[i * 4 + 2] = u * 2.5;
+    uvs[i * 4 + 3] = 1;
+    if (i < segs) {
+      const a = i * 2;
+      const b = a + 1;
+      const c = a + 2;
+      const d = a + 3;
+      idx.push(a, b, c, b, d, c);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  geo.setIndex(idx);
+  geo.userData.segs = segs;
+  return geo;
+}
+
 export class VaultRenderer {
   constructor(webgl, opts = {}) {
     this.webgl = webgl;
@@ -671,10 +781,23 @@ export class VaultRenderer {
     this.height = opts.height || 620;
     this.dpr = opts.dpr || 1;
     this.envMap = opts.envMap || null;
+    this.skinId = opts.skinId || 'sea_glass_guardian';
     this._disposed = false;
     this._dummy = new THREE.Object3D();
     this._col = new THREE.Color();
+    this._lookVec = new THREE.Vector3(0, 0.4, 0.3);
     this._loadedTextures = [];
+    this.postfxActive = false;
+    this._envRt = null;
+    this._envBuilt = false;
+    this._prevLockedMask = 0;
+    this._prevStrikes = 0;
+    this._prevTime = 0;
+    this._ringDetentT = [-10, -10, -10];
+    this._lockBurstT = -10;
+    this._lockBurstRingIdx = 0;
+    this._strikeFlashT = -10;
+    this._heroCastT = -10;
 
     // Lightweight placeholder PBR maps pre-bound before prewarm() so async WebP swaps cause 0ms shader recompile!
     this._flatNormalTex = makeFlatNormalTex();
@@ -698,6 +821,12 @@ export class VaultRenderer {
   }
 
   setEra(_era) {}
+
+  setSkin(skinId) {
+    if (!skinId || this.skinId === skinId) return;
+    this.skinId = skinId;
+    this.hero?.setSkin?.(skinId);
+  }
 
   prewarm() {
     try {
@@ -729,21 +858,39 @@ export class VaultRenderer {
 
     this.camera = new THREE.PerspectiveCamera(46, this.width / Math.max(1, this.height), 0.2, 70);
 
-    // Unified Main-Game Lighting Rig: Warm Golden Sun Key + Cool Azure Hemisphere + Turquoise Basin Bounce
-    this.hemiLight = new THREE.HemisphereLight('#7cc8f0', '#28455c', 1.22);
+    // Unified Main-Game Lighting Rig: Warm Golden Sun Key (Real 1024x1024 Shadows) + Cool Azure Hemisphere + Turquoise Basin Bounce
+    this.hemiLight = new THREE.HemisphereLight('#86d2f4', '#284a62', 1.28);
     this.scene.add(this.hemiLight);
 
-    this.sunLight = new THREE.DirectionalLight('#fff1d6', 2.35);
+    this.sunLight = new THREE.DirectionalLight('#fff2d8', 2.45);
     this.sunLight.position.set(4.8, 11.5, 9.5);
+    this.sunLight.castShadow = true;
+    if (this.sunLight.shadow) {
+      this.sunLight.shadow.mapSize.set(1024, 1024);
+      this.sunLight.shadow.camera.near = 2;
+      this.sunLight.shadow.camera.far = 28;
+      const sc = 6.0;
+      this.sunLight.shadow.camera.left = -sc;
+      this.sunLight.shadow.camera.right = sc;
+      this.sunLight.shadow.camera.top = sc;
+      this.sunLight.shadow.camera.bottom = -sc;
+      this.sunLight.shadow.bias = -0.0008;
+      this.sunLight.shadow.normalBias = 0.024;
+    }
     this.scene.add(this.sunLight);
 
-    this.basinBounce = new THREE.DirectionalLight('#38bdf8', 0.85);
+    this.basinBounce = new THREE.DirectionalLight('#38bdf8', 0.92);
     this.basinBounce.position.set(-5.5, -2.5, 5.5);
     this.scene.add(this.basinBounce);
 
-    this.coreLight = new THREE.PointLight('#5efce8', 1.85, 11);
+    this.coreLight = new THREE.PointLight('#5efce8', 2.05, 13);
     this.coreLight.position.set(0, 0, 1.8);
     this.scene.add(this.coreLight);
+
+    // Dedicated Hero Rim/Key Light keeping Gateway 2.0 bright, crisp & unmistakably readable!
+    this.heroSpotLight = new THREE.PointLight('#e0fff8', 2.2, 8.5);
+    this.heroSpotLight.position.set(-2.2, -0.4, 3.8);
+    this.scene.add(this.heroSpotLight);
 
     // Shared PBR Materials (all pre-bound with map + normalMap for 0-stall prewarm)
     this.rotundaMat = new THREE.MeshStandardMaterial({
@@ -766,14 +913,14 @@ export class VaultRenderer {
     });
 
     this.bronzeMat = new THREE.MeshStandardMaterial({
-      color: '#e3b25d',
+      color: '#eab862',
       map: this._bronzePlaceholder,
       normalMap: this._flatNormalTex,
       normalScale: new THREE.Vector2(1.05, 1.05),
       emissive: '#382208',
       emissiveIntensity: 0.16,
-      roughness: 0.28,
-      metalness: 0.72,
+      roughness: 0.22,
+      metalness: 0.86,
     });
 
     this.vaultDoorMat = new THREE.MeshStandardMaterial({
@@ -996,14 +1143,14 @@ export class VaultRenderer {
       rg.position.z = RING_Z[i];
 
       const chassisMat = new THREE.MeshStandardMaterial({
-        color: '#e0aa52',
+        color: '#e8b358',
         map: this._bronzePlaceholder,
         normalMap: this._flatNormalTex,
         normalScale: new THREE.Vector2(1.0, 1.0),
-        emissive: '#301d06',
-        emissiveIntensity: 0.14,
-        roughness: 0.26,
-        metalness: 0.74,
+        emissive: '#341f06',
+        emissiveIntensity: 0.16,
+        roughness: 0.22,
+        metalness: 0.86,
       });
       this.ringChassisMats.push(chassisMat);
 
@@ -1114,6 +1261,83 @@ export class VaultRenderer {
     }
     if (this.moteInst.instanceColor) this.moteInst.instanceColor.needsUpdate = true;
     this.scene.add(this.moteInst);
+
+    // 11. Gateway 2.0 Hero Star Standing on Carved Pelagian Stone Dais Before the Astrolabe Lock!
+    this.heroDaisGroup = new THREE.Group();
+    const daisGeos = buildHeroDaisGeos();
+    const daisStone = new THREE.Mesh(daisGeos.stoneGeo, this.travMat);
+    daisStone.receiveShadow = true;
+    const daisBronze = new THREE.Mesh(daisGeos.bronzeGeo, this.bronzeMat);
+    daisBronze.receiveShadow = true;
+    this.heroDaisGroup.add(daisStone, daisBronze);
+
+    this.hero = new GatewayRig(this.skinId);
+    // Gateway 2.0 auto-normalizes to 1.22m world height at scale 1.0 -> 1.46 frames her heroically before the R=2.68 lock!
+    this.hero.group.position.set(0, 0.16, 0);
+    this.hero.group.rotation.y = 2.48; // 3/4 turn facing astrolabe while showing expressive face, crown & frills to camera!
+    this.hero.group.scale.setScalar(1.46);
+    this.hero.group.traverse((o) => {
+      if (o.isMesh) {
+        o.castShadow = true;
+        o.receiveShadow = true;
+      }
+    });
+    this.heroDaisGroup.add(this.hero.group);
+    this.heroDaisGroup.position.set(-2.38, WATER_Y + 0.16, 2.05);
+    this.scene.add(this.heroDaisGroup);
+
+    // Dual Glowing Aquamarine Hydro-Channel Ribbons streaming from Gateway's paws into the active bronze ring!
+    this.hydroRibbonGeoL = buildVaultHydroRibbonGeo(18);
+    this.hydroRibbonGeoR = buildVaultHydroRibbonGeo(18);
+    this.hydroRibbonMat = new THREE.MeshBasicMaterial({
+      color: '#5efce8',
+      map: this.waterfallTex,
+      transparent: true,
+      opacity: 0.72,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.hydroArcL = new THREE.Mesh(this.hydroRibbonGeoL, this.hydroRibbonMat);
+    this.hydroArcR = new THREE.Mesh(this.hydroRibbonGeoR, this.hydroRibbonMat);
+    this.hydroArcL.frustumCulled = false;
+    this.hydroArcR.frustumCulled = false;
+    this.scene.add(this.hydroArcL, this.hydroArcR);
+
+    // Crisp Expanding Golden-Turquoise Lock Shockwave Ring + 28 Radial Sparkle Burst Sprites on Ring Lock!
+    this.lockWaveMat = new THREE.MeshBasicMaterial({
+      color: '#fde047',
+      map: this.runeRingTex,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    this.lockWaveMesh = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 5.6), this.lockWaveMat);
+    this.lockWaveMesh.position.z = 0.42;
+    this.lockWaveMesh.visible = false;
+    this.scene.add(this.lockWaveMesh);
+
+    this.lockBurstInst = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(0.28, 0.28),
+      new THREE.MeshBasicMaterial({
+        color: '#ffffff',
+        map: this.moteGlowTex,
+        transparent: true,
+        opacity: 0.96,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+      MAX_LOCK_BURST
+    );
+    this.lockBurstInst.frustumCulled = false;
+    for (let i = 0; i < MAX_LOCK_BURST; i++) {
+      this._col.set(i % 2 === 0 ? '#fde047' : '#5efce8');
+      this.lockBurstInst.setColorAt(i, this._col);
+    }
+    if (this.lockBurstInst.instanceColor) this.lockBurstInst.instanceColor.needsUpdate = true;
+    this.lockBurstInst.count = 0;
+    this.scene.add(this.lockBurstInst);
   }
 
   _loadPbrTextures() {
@@ -1195,18 +1419,71 @@ export class VaultRenderer {
     });
   }
 
-  render(state, _opts = {}) {
+  render(state, opts = {}) {
     if (this._disposed || !this.webgl || !state) return;
     const vault = state.vault || state.sanctumVault;
     if (!vault) return;
 
+    const skin = state.player?.skinId || state.gateway?.skinId || state.skinId || opts?.skinId || this.skinId;
+    if (skin && skin !== this.skinId) this.setSkin(skin);
+
     const time = Number(state.time) || 0;
+    const dt = clamp(
+      Number(opts?.dt ?? state.dt) || (this._prevTime > 0 ? time - this._prevTime : 0.016),
+      0.001,
+      0.05
+    );
+    this._prevTime = time;
+
+    // Shared PMREM Biome IBL (accepts main GameRenderer `opts.envMap`, with lazy golden-rotunda PMREM fallback)
+    const extEnv = opts?.envMap || this.envMap;
+    if (extEnv) {
+      if (this.scene.environment !== extEnv) {
+        this.scene.environment = extEnv;
+        this.scene.environmentIntensity = 0.88;
+      }
+    } else if (!this._envBuilt) {
+      this._envBuilt = true;
+      this._envRt = buildVaultEnvMap(this.webgl);
+      if (this._envRt?.texture) {
+        this.scene.environment = this._envRt.texture;
+        this.scene.environmentIntensity = 0.92;
+      }
+    }
+
     const rings = vault.rings || [];
     const status = vault.status || 'playing';
     const activeIdx = vault.activeRing || 0;
 
     let activeInSweetSpot = false;
     let lockedCount = 0;
+    let lockedMask = 0;
+
+    // Detect fresh lock / strike transitions for tactile detent recoil, spark bursts & Gateway reactions
+    for (let i = 0; i < 3; i++) {
+      if (rings[i]?.locked) {
+        lockedMask |= 1 << i;
+        if (!(this._prevLockedMask & (1 << i))) {
+          this._ringDetentT[i] = time;
+          this._lockBurstT = time;
+          this._lockBurstRingIdx = i;
+          this._heroCastT = time;
+        }
+      }
+    }
+    if (lockedMask === 0 && this._prevLockedMask !== 0) {
+      // Fresh vault attempt started
+      this._ringDetentT[0] = -10;
+      this._ringDetentT[1] = -10;
+      this._ringDetentT[2] = -10;
+    }
+    this._prevLockedMask = lockedMask;
+
+    const strikesNow = vault.strikes || 0;
+    if (strikesNow > this._prevStrikes) {
+      this._strikeFlashT = time;
+    }
+    this._prevStrikes = strikesNow;
 
     for (let i = 0; i < this.ringObjs.length; i++) {
       const ro = this.ringObjs[i];
@@ -1214,8 +1491,16 @@ export class VaultRenderer {
       if (!rState) continue;
       if (rState.locked) lockedCount++;
 
+      // Tactile mechanical spring detent recoil on newly locked bronze ring!
+      const detAge = time - this._ringDetentT[i];
+      const hasDetent = detAge >= 0 && detAge < 0.65;
+      const detentZ = hasDetent ? -Math.sin(detAge * 34) * Math.exp(-detAge * 7.2) * 0.20 : 0;
+      const detentTwist = hasDetent ? Math.sin(detAge * 28) * Math.exp(-detAge * 8.5) * 0.08 : 0;
+      const detentGlow = hasDetent ? Math.exp(-detAge * 5.2) : 0;
+
       const delta = wrapAngle((rState.angle || 0) - (rState.targetAngle || 0));
-      ro.rotation.z = delta;
+      ro.rotation.z = delta + detentTwist;
+      ro.position.z = RING_Z[i] + detentZ;
 
       const tol = rState.tolerance || (i === 0 ? 0.42 : i === 1 ? 0.38 : 0.35);
       const ud = ro.userData;
@@ -1232,31 +1517,39 @@ export class VaultRenderer {
 
       if (status === 'failed') {
         ud.chassisMat.color.set('#a84646');
+        ud.chassisMat.emissive.set('#450a0a');
+        ud.chassisMat.emissiveIntensity = 0.25;
         ud.notchMat.color.set('#e11d48');
         ud.notchMat.emissive.set('#be123c');
         ud.notchMat.emissiveIntensity = 0.72;
         ud.notchMat.opacity = 0.78;
       } else if (rState.locked || status === 'won') {
-        ud.chassisMat.color.set('#f5cb5c');
-        ud.notchMat.color.set('#10b981');
-        ud.notchMat.emissive.set('#047857');
-        ud.notchMat.emissiveIntensity = 0.78;
-        ud.notchMat.opacity = 0.76;
+        ud.chassisMat.color.set('#fbd368');
+        ud.chassisMat.emissive.set('#a16207');
+        ud.chassisMat.emissiveIntensity = 0.22 + detentGlow * 0.95;
+        ud.notchMat.color.set('#34d399');
+        ud.notchMat.emissive.set('#059669');
+        ud.notchMat.emissiveIntensity = 0.92 + detentGlow * 1.4;
+        ud.notchMat.opacity = 0.84;
       } else if (isActive) {
-        ud.chassisMat.color.set('#f5be63');
+        ud.chassisMat.color.set('#f5c46a');
+        ud.chassisMat.emissive.set('#4a2d08');
+        ud.chassisMat.emissiveIntensity = inZone ? 0.34 : 0.16;
         if (inZone) {
-          ud.notchMat.color.set('#22d3ee');
-          ud.notchMat.emissive.set('#0891b2');
-          ud.notchMat.emissiveIntensity = 0.92 + Math.sin(time * 22) * 0.14;
-          ud.notchMat.opacity = 0.78;
+          ud.notchMat.color.set('#5efce8');
+          ud.notchMat.emissive.set('#06b6d4');
+          ud.notchMat.emissiveIntensity = 1.15 + Math.sin(time * 24) * 0.22;
+          ud.notchMat.opacity = 0.88;
         } else {
-          ud.notchMat.color.set('#0284c7');
+          ud.notchMat.color.set('#0ea5e9');
           ud.notchMat.emissive.set('#0369a1');
-          ud.notchMat.emissiveIntensity = 0.62;
-          ud.notchMat.opacity = 0.72;
+          ud.notchMat.emissiveIntensity = 0.68;
+          ud.notchMat.opacity = 0.74;
         }
       } else {
         ud.chassisMat.color.set('#bd904d');
+        ud.chassisMat.emissive.set('#281805');
+        ud.chassisMat.emissiveIntensity = 0.12;
         ud.notchMat.color.set('#164e63');
         ud.notchMat.emissive.set('#083344');
         ud.notchMat.emissiveIntensity = 0.35;
@@ -1265,20 +1558,39 @@ export class VaultRenderer {
     }
 
     // Caliper Jewel, Rune Ring & Fountain Glow Feedback
+    const strikeAge = time - this._strikeFlashT;
+    const strikeFlash = strikeAge >= 0 && strikeAge < 0.48 ? Math.exp(-strikeAge * 6.5) : 0;
+    const burstAge = time - this._lockBurstT;
+    const burstActive = burstAge >= 0 && burstAge < 0.85;
     const calCol =
-      status === 'failed' ? '#e11d48' : status === 'won' ? '#fde047' : activeInSweetSpot ? '#34d399' : '#22d3ee';
+      status === 'failed' || strikeFlash > 0.25
+        ? '#f43f5e'
+        : status === 'won'
+          ? '#fde047'
+          : activeInSweetSpot
+            ? '#34d399'
+            : '#22d3ee';
     this.caliperGemMat.emissive.set(calCol);
+    this.caliperGemMat.emissiveIntensity = activeInSweetSpot ? 1.45 : burstActive ? 1.85 : 0.75;
     this.caliperGemHalo.material.color.set(calCol);
-    this.caliperGemHalo.scale.setScalar(activeInSweetSpot || status === 'won' ? 1.25 + Math.sin(time * 14) * 0.14 : 0.92);
+    this.caliperGemHalo.scale.setScalar(
+      activeInSweetSpot || status === 'won' || burstActive ? 1.38 + Math.sin(time * 16) * 0.16 : 0.96
+    );
     const pressure = status === 'won' ? 1 : lockedCount / 3;
-    this.runeRingMesh.rotation.z = -time * (0.08 + pressure * 0.22);
-    this.runeRingMat.opacity = 0.36 + pressure * 0.28 + Math.sin(time * 3.2) * 0.06;
-    this.runeRingMat.color.set(status === 'failed' ? '#fb7185' : status === 'won' ? '#fde047' : '#5efce8');
+    this.runeRingMesh.rotation.z = -time * (0.08 + pressure * 0.24);
+    this.runeRingMat.opacity = 0.38 + pressure * 0.32 + Math.sin(time * 3.2) * 0.06;
+    this.runeRingMat.color.set(
+      status === 'failed' || strikeFlash > 0.25 ? '#fb7185' : status === 'won' ? '#fde047' : '#5efce8'
+    );
+    this.coreLight.color.set(
+      status === 'failed' || strikeFlash > 0.25 ? '#f43f5e' : status === 'won' ? '#fde047' : '#5efce8'
+    );
+    this.coreLight.intensity = 2.0 + pressure * 1.15 + (burstActive ? (1 - burstAge / 0.85) * 2.2 : 0);
 
     // Animated Water Caustic & Ripple Normal Scroll + Cascading Spouts + Breathing Shoreline Foam
     this.waterAlbedoTex.offset.set((time * 0.022) % 1, (time * 0.016) % 1);
     this.waterNormalTex.offset.set((-time * 0.036) % 1, (time * 0.028) % 1);
-    this.waterfallTex.offset.y = (time * 1.35) % 1;
+    this.waterfallTex.offset.y = (time * 1.45) % 1;
     this.basinFoamRing.material.opacity = 0.46 + Math.sin(time * 2.4) * 0.08;
     this.splashFoamMesh.material.opacity = 0.66 + Math.sin(time * 5.8) * 0.12;
 
@@ -1311,7 +1623,7 @@ export class VaultRenderer {
 
     // Strike Gems nested inside Carved Antique-Bronze Hexagonal Sockets (`maxStrikes` remaining indicator)
     const maxS = Math.min(MAX_STRIKE_GEMS, vault.maxStrikes || 3);
-    const strikes = vault.strikes || 0;
+    const strikes = strikesNow;
     for (let i = 0; i < MAX_STRIKE_GEMS; i++) {
       const slot = this.strikeGems[i];
       if (i >= maxS) {
@@ -1326,23 +1638,121 @@ export class VaultRenderer {
       slot.userData.mat.emissive.set(used ? '#9f1239' : '#0284c7');
     }
 
-    // Aspect-safe Heroic Camera Push-In as Rings Lock (`0 -> 1 -> 2 -> won`)
-    // Guarantees all 3 concentric rings (R = 2.68) stay 100% inside safe-zone on 412x915 Portrait & 1920x1080 Desktop!
+    // Aspect-safe 3/4 Heroic Framing showcasing BOTH Gateway 2.0 on her Foreground Dais AND all 3 Bronze Rings!
     const aspect = this.width / Math.max(1, this.height);
+    const portrait = aspect < 0.85;
     const halfFovTan = Math.tan(this.camera.fov * 0.5 * (Math.PI / 180));
     const needHalfW = 2.85 / 0.72;
     const portraitZ = needHalfW / Math.max(0.28, halfFovTan * aspect);
-    const baseZ = aspect < 0.85 ? clamp(portraitZ, 9.6, 12.2) : aspect < 1.15 ? 8.2 : 7.55;
-    const pushZ = baseZ - pressure * 0.55 - (status === 'won' ? 0.30 : 0);
-    const sh = (Number(state.shake) || 0) * 0.02;
+    const baseZ = portrait ? clamp(portraitZ, 10.6, 12.2) : aspect < 1.15 ? 8.6 : 8.15;
+    const pushZ = baseZ - pressure * 0.48 - (status === 'won' ? 0.28 : 0);
+    const sh = (Number(state.shake) || 0) * 0.02 + strikeFlash * 0.08;
     const sx = sh > 0.001 ? Math.sin(time * 73) * sh : 0;
     const sy = sh > 0.001 ? Math.cos(time * 61) * sh : 0;
-    this.camera.position.set(Math.sin(time * 0.35) * 0.14 + sx, 0.15 + sy, pushZ);
-    this.camera.lookAt(0, 0.05, 0);
+    const camOffX = portrait ? -0.22 : -0.58;
+    const camOffY = portrait ? -0.42 : -0.14;
+    this.camera.position.set(camOffX + Math.sin(time * 0.35) * 0.14 + sx, camOffY + sy, pushZ);
+    this.camera.lookAt(portrait ? -0.12 : -0.34, portrait ? -0.46 : -0.18, 0);
 
-    // Billboarded Soft Radial Water-Droplet & Golden Pollen Motes
+    // Position & Animate Gateway 2.0 on her Sunlit Carved Stone Dais + Dual Hydro-Channel Ribbons!
+    const daisX = portrait ? -1.16 : -2.92;
+    const daisY = portrait ? WATER_Y - 0.12 : WATER_Y + 0.16;
+    const daisZ = portrait ? 2.15 : 2.05;
+    const heroSc = portrait ? 1.30 : 1.44;
+    this.heroDaisGroup.position.set(daisX, daisY, daisZ);
+    this.hero.group.scale.setScalar(heroSc);
+    this.hero.group.rotation.y = portrait ? 2.58 : 2.38;
+    this.heroSpotLight.position.set(daisX + 0.35, daisY + 1.85, daisZ + 1.65);
+
+    const castAge = time - this._heroCastT;
+    const isCastingLock = castAge >= 0 && castAge < 0.72;
+    const targetRingR = RING_RADII[clamp(activeIdx, 0, 2)] || 1.64;
+    const aimY = status === 'won' ? 0.05 : targetRingR * 0.85;
+    this._lookVec.set(0, aimY, 0.35);
+    const heroAnim =
+      status === 'won'
+        ? 'HeroCelebrate'
+        : isCastingLock || activeInSweetSpot
+          ? 'HydroCast'
+          : 'IdleCurious';
+    const heroMood =
+      status === 'failed' || strikeFlash > 0.2
+        ? 'surprised'
+        : status === 'won' || isCastingLock
+          ? 'joyful'
+          : activeInSweetSpot
+            ? 'determined'
+            : 'curious';
+    this.hero.update(dt, {
+      time,
+      vx: 0,
+      vy: 0,
+      onGround: true,
+      anim: heroAnim,
+      mood: heroMood,
+      lookTarget: this._lookVec,
+      victory: status === 'won',
+      castHydro: isCastingLock || activeInSweetSpot || status === 'won',
+    });
+
+    // Update Dual Glowing Aquamarine Hydro-Channel Ribbons curving from Gateway's raised paws into the astrolabe!
+    const showRibbons = status !== 'failed';
+    this.hydroArcL.visible = showRibbons;
+    this.hydroArcR.visible = showRibbons;
+    if (showRibbons) {
+      const pawBaseX = daisX + 0.24 * heroSc;
+      const pawBaseY = daisY + 0.16 + (isCastingLock || status === 'won' ? 0.92 : 0.76) * heroSc;
+      const pawBaseZ = daisZ - 0.18 * heroSc;
+      const endY = status === 'won' ? 0.05 : activeInSweetSpot || isCastingLock ? 2.48 : targetRingR * 0.72;
+      const endX = status === 'won' ? 0 : -0.18;
+      const ribbonW = isCastingLock || status === 'won' ? 0.13 : activeInSweetSpot ? 0.11 : 0.068;
+      this._updateVaultHydroRibbon(this.hydroRibbonGeoL, pawBaseX - 0.14, pawBaseY, pawBaseZ, endX - 0.16, endY, 0.34, ribbonW, time, 0);
+      this._updateVaultHydroRibbon(this.hydroRibbonGeoR, pawBaseX + 0.16, pawBaseY + 0.06, pawBaseZ - 0.08, endX + 0.18, endY - 0.12, 0.34, ribbonW, time, 2.2);
+      this.hydroRibbonMat.color.set(
+        status === 'won' || isCastingLock ? '#fde047' : activeInSweetSpot ? '#34d399' : '#5efce8'
+      );
+      this.hydroRibbonMat.opacity = isCastingLock || status === 'won' ? 0.92 : activeInSweetSpot ? 0.84 : 0.56;
+    }
+
+    // Crisp Expanding Lock Shockwave Ring & 28 Radial Golden-Turquoise Particle Sparkles on Ring Lock!
     const dm = this._dummy;
     const camQ = this.camera.quaternion;
+    if (burstActive) {
+      const bt = burstAge / 0.85;
+      const easeOut = 1 - Math.pow(1 - bt, 2.4);
+      const bRad = RING_RADII[clamp(this._lockBurstRingIdx, 0, 2)] || 1.64;
+      this.lockWaveMesh.visible = true;
+      this.lockWaveMesh.scale.setScalar((bRad / 2.2) * (0.72 + easeOut * 1.15));
+      this.lockWaveMesh.rotation.z = time * 1.4;
+      this.lockWaveMat.opacity = (1 - bt) * (1 - bt) * 0.95;
+      this.lockWaveMat.color.set(status === 'won' ? '#fde047' : '#5efce8');
+
+      for (let i = 0; i < MAX_LOCK_BURST; i++) {
+        const ang = (i / MAX_LOCK_BURST) * TAU + (i % 3) * 0.14;
+        const speed = 1.15 + (i % 5) * 0.34;
+        const fromCaliper = i < 10;
+        const bx = fromCaliper
+          ? Math.cos(ang) * easeOut * 1.45 * speed
+          : Math.cos(ang) * (bRad + easeOut * 1.15 * speed);
+        const by = fromCaliper
+          ? 2.52 + Math.sin(ang) * easeOut * 1.25 * speed
+          : Math.sin(ang) * (bRad + easeOut * 1.15 * speed);
+        const bz = 0.45 + Math.sin(bt * Math.PI) * 0.65;
+        const sc = (1 - bt) * (0.75 + (i % 3) * 0.35);
+        dm.position.set(bx, by, bz);
+        dm.quaternion.copy(camQ);
+        dm.scale.setScalar(Math.max(0.01, sc));
+        dm.updateMatrix();
+        this.lockBurstInst.setMatrixAt(i, dm.matrix);
+      }
+      this.lockBurstInst.count = MAX_LOCK_BURST;
+      this.lockBurstInst.instanceMatrix.needsUpdate = true;
+    } else {
+      this.lockWaveMesh.visible = false;
+      this.lockBurstInst.count = 0;
+    }
+
+    // Billboarded Soft Radial Water-Droplet & Golden Pollen Motes
     for (let i = 0; i < MAX_MOTES; i++) {
       const mx = Math.sin(i * 2.3 + time * 0.4) * 3.7;
       const my = WATER_Y + 0.2 + ((i * 0.17 + time * 0.52) % 6.4);
@@ -1356,13 +1766,56 @@ export class VaultRenderer {
     this.moteInst.count = MAX_MOTES;
     this.moteInst.instanceMatrix.needsUpdate = true;
 
-    this.webgl.setRenderTarget(null);
-    this.webgl.render(this.scene, this.camera);
+    // Shared CinematicPostFX Routing (with crisp ACES Filmic standalone fallback)
+    const postfx = opts?.postfx || null;
+    const biomeKey = opts?.biomeKey || opts?.biome || state.biomeKey || 'coral';
+    if (postfx && postfx.enabled && !postfx._disposed && typeof postfx.render === 'function') {
+      this.postfxActive = true;
+      postfx.render(this.scene, this.camera, {
+        biome: biomeKey,
+        exposure: status === 'won' ? 1.18 : 1.08,
+        bloomStrength: status === 'won' ? 0.58 : burstActive ? 0.52 : 0.38,
+        bloomThreshold: 0.76,
+        flash: burstActive ? Math.max(0, (1 - burstAge / 0.28) * 0.14) : 0,
+      });
+    } else {
+      this.postfxActive = false;
+      this.webgl.setRenderTarget(null);
+      const prevTM = this.webgl.toneMapping;
+      const prevExp = this.webgl.toneMappingExposure;
+      this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
+      this.webgl.toneMappingExposure = status === 'won' ? 1.16 : 1.06;
+      this.webgl.render(this.scene, this.camera);
+      this.webgl.toneMapping = prevTM;
+      this.webgl.toneMappingExposure = prevExp;
+    }
+  }
+
+  _updateVaultHydroRibbon(geo, sx, sy, sz, ex, ey, ez, halfW, time, phase) {
+    const segs = geo.userData.segs || 18;
+    const pos = geo.attributes.position;
+    for (let i = 0; i <= segs; i++) {
+      const s = i / segs;
+      const arch = Math.sin(s * Math.PI);
+      const wave = Math.sin(s * TAU * 1.6 - time * 8.5 + phase) * 0.14 * arch;
+      const px = lerp(sx, ex, s) + wave * 0.7;
+      const py = lerp(sy, ey, s) + arch * 0.65 + Math.cos(s * TAU * 1.3 - time * 7.2 + phase) * 0.10 * arch;
+      const pz = lerp(sz, ez, s) + arch * 0.45;
+      const w = halfW * (0.35 + arch * 0.85);
+      pos.setXYZ(i * 2, px - w * 0.55, py + w * 0.85, pz);
+      pos.setXYZ(i * 2 + 1, px + w * 0.55, py - w * 0.85, pz);
+    }
+    pos.needsUpdate = true;
   }
 
   dispose() {
     if (this._disposed) return;
     this._disposed = true;
+    this.hero?.dispose?.();
+    this._envRt?.dispose();
+    this._envRt = null;
+    this.hydroRibbonGeoL?.dispose();
+    this.hydroRibbonGeoR?.dispose();
     this._flatNormalTex?.dispose();
     this._stonePlaceholder?.dispose();
     this._bronzePlaceholder?.dispose();
@@ -1374,6 +1827,8 @@ export class VaultRenderer {
     this.sunbeamTex?.dispose();
     this.runeRingTex?.dispose();
     this.moteGlowTex?.dispose();
+    this.brazierEmberTex?.dispose();
+    this.brazierFlameTex?.dispose();
     for (const t of this._loadedTextures) t.dispose();
     this._loadedTextures.length = 0;
   }

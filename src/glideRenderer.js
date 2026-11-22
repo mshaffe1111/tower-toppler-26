@@ -571,10 +571,12 @@ class AdaptiveFrillGliderHero {
     this.liveRig = new GatewayRig(this.skinId);
     this._liveMount = new THREE.Group();
     this._liveMount.rotation.order = 'YXZ';
-    this._liveMount.rotation.set(1.28, Math.PI * 0.5, 0);
-    this._liveMount.scale.setScalar(1.86);
-    this._liveMount.position.set(-0.24, -0.06, 0);
-    this.frillWingsGroup.scale.setScalar(1.24);
+    // Sleek aerodynamic horizontal soaring pose (`FrillGlide` already pitches Pelvis +0.48 rad;
+    // +0.54 rad X tilt aligns Gateway horizontally nose-forward +X with tail & scarf streaming cleanly -X!)
+    this._liveMount.rotation.set(0.54, Math.PI * 0.5, 0);
+    this._liveMount.scale.setScalar(1.22);
+    this._liveMount.position.set(-0.08, -0.34, 0);
+    this.frillWingsGroup.scale.setScalar(1.18);
     this._liveMount.add(this.liveRig.group);
     this.bodyCarrier.add(this._liveMount);
     this.fallback = this._buildSculptedFallback(pal);
@@ -681,22 +683,32 @@ class AdaptiveFrillGliderHero {
 
     if (this.liveRig?.update) {
       if (this._liveMount) {
+        const diveLean = diveVal * 0.16;
         this._liveMount.rotation.set(
-          landed ? 0 : 1.28 - (gliderState.flare || 0) * 0.42 - liftVal * 0.14 + buffetFlutter * 0.18,
+          landed ? 0 : 0.54 + diveLean - (gliderState.flare || 0) * 0.24 - liftVal * 0.12 + buffetFlutter * 0.14,
           Math.PI * 0.5,
-          landed ? 0 : buffetFlutter * 0.22
+          landed ? 0 : buffetFlutter * 0.18
         );
       }
       try {
         this.liveRig.update(dt, {
           time,
-          vx: landed ? gliderState.vx * 0.02 : 2.4 + airspeed * 0.8,
+          vx: landed ? gliderState.vx * 0.02 : 2.6 + airspeed * 0.9,
           vy: -(gliderState.vy || 0) * 0.01,
           facing: 1,
           onGround: landed,
           gliding: !landed,
-          anim: landed ? 'Celebrate' : 'FrillGlide',
-          frillFlare: landed ? 0.2 : clamp(0.92 + liftVal * 0.28 + buffet * 0.25, 0.6, 1.4),
+          isGliding: !landed,
+          anim: landed ? 'HeroCelebrate' : 'FrillGlide',
+          mood:
+            (gliderState.stun || 0) > 0
+              ? 'hurt'
+              : landed || liftVal > 0.25 || (gliderState.flare || 0) > 0.35
+              ? 'joyful'
+              : diveVal > 0.35
+              ? 'determined'
+              : 'happy',
+          frillFlare: landed ? 0.25 : clamp(0.96 + liftVal * 0.32 + buffet * 0.25, 0.65, 1.45),
         });
         return;
       } catch {
@@ -1209,6 +1221,133 @@ function createPopupTex(text, color) {
   return tex;
 }
 
+/**
+ * Twin-helix swirling golden thermal updraft ribbon geometry (unmistakable from 80u away!).
+ */
+function buildThermalHelixGeo() {
+  const parts = [];
+  for (let strand = 0; strand < 2; strand++) {
+    const pts = [];
+    const phaseOff = strand * Math.PI;
+    const steps = 28;
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const ang = t * TAU * 2.5 + phaseOff;
+      const rad = 0.72 + Math.sin(t * Math.PI) * 0.34;
+      pts.push(new THREE.Vector3(Math.cos(ang) * rad, (t - 0.5) * 12.6, Math.sin(ang) * rad));
+    }
+    const curve = new THREE.CatmullRomCurve3(pts);
+    parts.push(new THREE.TubeGeometry(curve, 32, 0.068, 6, false));
+  }
+  const merged = safeMergeGeos(parts);
+  for (const g of parts) g.dispose();
+  return merged;
+}
+
+/**
+ * Multi-segment jagged forked lightning bolt geometry (kills bare yellow cylinder!).
+ */
+function buildForkedLightningGeo() {
+  const parts = [];
+  const mainPts = [
+    new THREE.Vector3(0.0, 0.0, 0),
+    new THREE.Vector3(0.28, -1.8, 0.06),
+    new THREE.Vector3(-0.24, -3.7, -0.05),
+    new THREE.Vector3(0.32, -5.8, 0.04),
+    new THREE.Vector3(-0.20, -8.2, -0.04),
+    new THREE.Vector3(0.18, -10.5, 0.02),
+    new THREE.Vector3(-0.08, -12.6, 0),
+  ];
+  parts.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(mainPts), 20, 0.085, 6, false));
+  const fork1 = [
+    new THREE.Vector3(-0.24, -3.7, -0.05),
+    new THREE.Vector3(-0.82, -5.2, 0.08),
+    new THREE.Vector3(-1.18, -6.9, 0.0),
+  ];
+  parts.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(fork1), 10, 0.048, 5, false));
+  const fork2 = [
+    new THREE.Vector3(0.32, -5.8, 0.04),
+    new THREE.Vector3(0.92, -7.4, -0.06),
+    new THREE.Vector3(1.22, -9.0, 0.02),
+  ];
+  parts.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(fork2), 10, 0.044, 5, false));
+  const merged = safeMergeGeos(parts);
+  for (const g of parts) g.dispose();
+  return merged;
+}
+
+/**
+ * Rich billowing storm-cloud thunderhead geometry with dark indigo-violet underside & rim-lit crown!
+ */
+function buildStormThunderheadGeo() {
+  const puffs = [];
+  const specs = [
+    { x: 0.0, y: 0.36, z: 0.0, rx: 1.05, ry: 0.72, rz: 0.78, col: '#94a3b8' },
+    { x: -0.78, y: 0.14, z: 0.12, rx: 0.82, ry: 0.56, rz: 0.66, col: '#64748b' },
+    { x: 0.80, y: 0.16, z: -0.08, rx: 0.86, ry: 0.58, rz: 0.68, col: '#64748b' },
+    { x: -1.32, y: -0.10, z: -0.05, rx: 0.62, ry: 0.38, rz: 0.52, col: '#475569' },
+    { x: 1.34, y: -0.10, z: 0.06, rx: 0.64, ry: 0.38, rz: 0.54, col: '#475569' },
+    { x: -0.34, y: -0.24, z: 0.16, rx: 0.92, ry: 0.36, rz: 0.62, col: '#312e59' },
+    { x: 0.38, y: -0.24, z: -0.12, rx: 0.90, ry: 0.36, rz: 0.62, col: '#312e59' },
+  ];
+  for (let s = 0; s < specs.length; s++) {
+    const sp = specs[s];
+    const g = new THREE.SphereGeometry(1.0, 10, 8);
+    const gp = g.attributes.position;
+    for (let i = 0; i < gp.count; i++) {
+      const vx = gp.getX(i);
+      const vy = gp.getY(i);
+      const vz = gp.getZ(i);
+      const n = 1.0 + 0.09 * Math.sin(vx * 4.5 + s) * Math.cos(vz * 4.2);
+      gp.setXYZ(i, vx * sp.rx * n + sp.x, vy * sp.ry * n + sp.y, vz * sp.rz * n + sp.z);
+    }
+    g.computeVertexNormals();
+    paintVertexColor(g, sp.col);
+    puffs.push(g);
+  }
+  const merged = safeMergeGeos(puffs, true);
+  for (const g of puffs) g.dispose();
+  return merged;
+}
+
+function buildGlideEnvMap(webgl) {
+  if (!webgl || typeof THREE.PMREMGenerator !== 'function') return null;
+  try {
+    const pmrem = new THREE.PMREMGenerator(webgl);
+    const envScene = new THREE.Scene();
+    envScene.background = new THREE.Color('#f7d699');
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(20, 16, 12),
+      new THREE.MeshBasicMaterial({ color: '#38bdf8', side: THREE.BackSide })
+    );
+    envScene.add(dome);
+    const sunOrb = new THREE.Mesh(
+      new THREE.SphereGeometry(3.4, 12, 8),
+      new THREE.MeshBasicMaterial({ color: '#fff7d6' })
+    );
+    sunOrb.position.set(8, 12, 10);
+    envScene.add(sunOrb);
+    const sea = new THREE.Mesh(
+      new THREE.PlaneGeometry(40, 40),
+      new THREE.MeshBasicMaterial({ color: '#0f766e', side: THREE.DoubleSide })
+    );
+    sea.rotation.x = -Math.PI * 0.5;
+    sea.position.y = -6;
+    envScene.add(sea);
+    const rt = pmrem.fromScene(envScene, 0.04);
+    dome.geometry.dispose();
+    dome.material.dispose();
+    sunOrb.geometry.dispose();
+    sunOrb.material.dispose();
+    sea.geometry.dispose();
+    sea.material.dispose();
+    pmrem.dispose();
+    return { rt, texture: rt.texture };
+  } catch {
+    return null;
+  }
+}
+
 export class GlideRenderer {
   constructor(webgl, opts = {}) {
     this.webgl = webgl;
@@ -1222,6 +1361,10 @@ export class GlideRenderer {
     this._wp = { x: 0, y: 0, halfW: 5, halfH: 4 };
     this._glideFov = FOV;
     this._glideCamZ = CAM_Z;
+    this.postfxActive = false;
+    const envBuilt = opts.envMap ? null : buildGlideEnvMap(webgl);
+    this._ownEnvRt = envBuilt?.rt || null;
+    this.envMap = opts.envMap || envBuilt?.texture || null;
 
     this.skyTex = createAtmosphericSkyTexture();
     this.mesaTex = createMesaStrataTexture(256);
@@ -1295,7 +1438,7 @@ export class GlideRenderer {
     const portrait = aspect < 0.85;
     this._glideFov = portrait ? 50 : 46;
     this._glideCamZ = portrait ? 11.2 : 9.4;
-    const targetFov = this._glideFov + clamp(fovAdd, 0, 3.0);
+    const targetFov = this._glideFov + clamp(fovAdd, 0, 8.5);
     if (this.camera) {
       const aspectChanged = Math.abs(this.camera.aspect - aspect) > 1e-4;
       const fovChanged = Math.abs(this.camera.fov - targetFov) > 0.02;
@@ -1334,23 +1477,54 @@ export class GlideRenderer {
   _initScene() {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#1d70b8');
-    this.scene.fog = new THREE.FogExp2('#a5d7ed', 0.0078);
+    this.scene.fog = new THREE.FogExp2('#a5d7ed', 0.0074);
+    if (this.envMap) {
+      this.scene.environment = this.envMap;
+      this.scene.environmentIntensity = 0.88;
+    }
 
     this.camera = new THREE.PerspectiveCamera(FOV, this.width / Math.max(1, this.height), 0.2, 240);
     this._updateGlideCamMetrics();
     this.camera.position.set(0, 0, this._glideCamZ);
 
-    // Unified Main-Game Lighting: warm golden directional key + cool azure hemisphere bounce + warm rim
-    this.hemiLight = new THREE.HemisphereLight('#7cc8f0', '#28455c', 1.38);
+    // Unified Main-Game Lighting: warm golden directional key w/ hero contact shadow + cool azure hemisphere bounce + warm rim
+    this.hemiLight = new THREE.HemisphereLight('#7cc8f0', '#28455c', 1.42);
     this.scene.add(this.hemiLight);
 
-    this.sunLight = new THREE.DirectionalLight('#fff1d6', 2.25);
+    this.sunLight = new THREE.DirectionalLight('#fff1d6', 2.40);
     this.sunLight.position.set(14, 24, 18);
+    if (this.webgl?.shadowMap?.enabled) {
+      this.sunLight.castShadow = true;
+      this.sunLight.shadow.mapSize.set(1024, 1024);
+      this.sunLight.shadow.camera.near = 2;
+      this.sunLight.shadow.camera.far = 75;
+      this.sunLight.shadow.camera.left = -14;
+      this.sunLight.shadow.camera.right = 14;
+      this.sunLight.shadow.camera.top = 14;
+      this.sunLight.shadow.camera.bottom = -14;
+      this.sunLight.shadow.bias = -0.0006;
+      this.sunLight.shadow.normalBias = 0.024;
+    }
     this.scene.add(this.sunLight);
+    this.scene.add(this.sunLight.target);
 
-    this.rimLight = new THREE.DirectionalLight('#fde6b8', 0.85);
+    this.rimLight = new THREE.DirectionalLight('#fde6b8', 1.05);
     this.rimLight.position.set(-14, 12, 10);
     this.scene.add(this.rimLight);
+
+    // Volumetric Drifting 3D Cumulus Cloud Banks across 3 parallax sky-canyon depth layers!
+    const cumulusGeo = buildMergedCloudGeo();
+    this.ambientCloudMat = new THREE.MeshStandardMaterial({
+      color: '#fff8ec',
+      vertexColors: true,
+      emissive: '#f5d4aa',
+      emissiveIntensity: 0.24,
+      roughness: 0.92,
+      metalness: 0.0,
+    });
+    this.ambientCloudInst = new THREE.InstancedMesh(cumulusGeo, this.ambientCloudMat, 16);
+    this.ambientCloudInst.frustumCulled = false;
+    this.scene.add(this.ambientCloudInst);
 
     // Studio-Painted Coastal Arch & Rainbow Waterfall Panorama (`assets/textures/mg_bg_frill_glide.webp`)
     this.skyBackdropMat = new THREE.MeshBasicMaterial({ map: this.skyTex, fog: false, depthWrite: false });
@@ -1639,25 +1813,35 @@ export class GlideRenderer {
       this.gateSlots.push(g);
     }
 
-    // Soft Feathered Rising Sunlit Updraft Wind-Wisp Columns (ZERO hard vertical cylinder edge!)
+    // Swirling Golden Thermal Updraft Columns + Twin-Helix 3D Updraft Ribbons!
     this.thermalMeshes = [];
-    const thermGeo = new THREE.PlaneGeometry(2.6, 13.5);
+    const thermGeo = new THREE.PlaneGeometry(2.9, 13.8);
+    const helixGeo = buildThermalHelixGeo();
     for (let i = 0; i < MAX_THERMALS; i++) {
-      const tm = new THREE.Mesh(
-        thermGeo,
-        new THREE.MeshBasicMaterial({
-          map: this.updraftTex,
-          color: '#fde047',
-          transparent: true,
-          opacity: 0.32,
-          blending: THREE.AdditiveBlending,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-        })
-      );
-      tm.visible = false;
-      this.scene.add(tm);
-      this.thermalMeshes.push(tm);
+      const grp = new THREE.Group();
+      const sheetMat = new THREE.MeshBasicMaterial({
+        map: this.updraftTex,
+        color: '#fde047',
+        transparent: true,
+        opacity: 0.56,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      const sheet = new THREE.Mesh(thermGeo, sheetMat);
+      const helixMat = new THREE.MeshBasicMaterial({
+        color: '#fef08a',
+        transparent: true,
+        opacity: 0.72,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const helix = new THREE.Mesh(helixGeo, helixMat);
+      grp.add(sheet, helix);
+      grp.userData = { sheet, sheetMat, helix, helixMat };
+      grp.visible = false;
+      this.scene.add(grp);
+      this.thermalMeshes.push(grp);
     }
 
     // Sleek Faceted Crystalline Water-Dew Gems & Golden Harmonic Seeds (`stage.lanterns`)
@@ -1666,7 +1850,7 @@ export class GlideRenderer {
       new THREE.MeshStandardMaterial({
         color: '#ffffff',
         emissive: '#38bdf8',
-        emissiveIntensity: 0.85,
+        emissiveIntensity: 1.05,
         metalness: 0.45,
         roughness: 0.12,
       }),
@@ -1675,29 +1859,52 @@ export class GlideRenderer {
     this.dewInst.frustumCulled = false;
     this.scene.add(this.dewInst);
 
-    // Sculpted 7-Lobe Cumulus Squall Clouds & Lightning Strikes (1 draw call per active cloud!)
+    // Dramatic Volumetric 3D Storm Thunderhead Clouds + Internal Crackling Amber Core + Jagged Forked Lightning!
     this.cloudSlots = [];
-    const mergedCloudGeo = buildMergedCloudGeo();
-    const boltGeo = new THREE.CylinderGeometry(0.09, 0.05, 12, 6);
+    const stormCloudGeo = buildStormThunderheadGeo();
+    const boltGeo = buildForkedLightningGeo();
     const boltMat = new THREE.MeshBasicMaterial({ color: '#fef08a' });
+    const boltGlowMat = new THREE.MeshBasicMaterial({
+      color: '#38bdf8',
+      transparent: true,
+      opacity: 0.42,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const chargeCoreGeo = new THREE.SphereGeometry(0.45, 10, 8);
     for (let i = 0; i < MAX_CLOUDS; i++) {
       const cg = new THREE.Group();
-      const body = new THREE.Mesh(
-        mergedCloudGeo,
-        new THREE.MeshStandardMaterial({
-          color: '#ffffff',
-          vertexColors: true,
-          emissive: '#cfe6f7',
-          emissiveIntensity: 0.24,
-          roughness: 0.96,
-        })
-      );
+      const bodyMat = new THREE.MeshStandardMaterial({
+        color: '#94a3b8',
+        vertexColors: true,
+        emissive: '#1e1b4b',
+        emissiveIntensity: 0.35,
+        roughness: 0.90,
+      });
+      const body = new THREE.Mesh(stormCloudGeo, bodyMat);
       cg.add(body);
-      const bolt = new THREE.Mesh(boltGeo, boltMat);
-      bolt.position.y = -6.0;
-      bolt.visible = false;
-      cg.add(bolt);
-      cg.userData = { body, bolt };
+
+      const chargeMat = new THREE.MeshBasicMaterial({
+        color: '#fbbf24',
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const chargeCore = new THREE.Mesh(chargeCoreGeo, chargeMat);
+      chargeCore.position.set(0, -0.18, 0.22);
+      cg.add(chargeCore);
+
+      const boltGroup = new THREE.Group();
+      const boltCore = new THREE.Mesh(boltGeo, boltMat);
+      const boltHalo = new THREE.Mesh(boltGeo, boltGlowMat);
+      boltHalo.scale.set(2.1, 1.0, 2.1);
+      boltGroup.add(boltCore, boltHalo);
+      boltGroup.position.y = -0.35;
+      boltGroup.visible = false;
+      cg.add(boltGroup);
+
+      cg.userData = { body, bodyMat, chargeCore, chargeMat, bolt: boltGroup };
       cg.visible = false;
       this.scene.add(cg);
       this.cloudSlots.push(cg);
@@ -1763,7 +1970,7 @@ export class GlideRenderer {
         map: this.glowSpriteTex,
         color: '#fef08a',
         transparent: true,
-        opacity: 0.44,
+        opacity: 0.78,
         blending: THREE.AdditiveBlending,
         side: THREE.DoubleSide,
         depthWrite: false,
@@ -1810,8 +2017,12 @@ export class GlideRenderer {
     if (opts.skinId && opts.skinId !== this.skinId) {
       this.setSkin(opts.skinId);
     }
+    if (opts?.envMap && this.scene.environment !== opts.envMap) {
+      this.scene.environment = opts.envMap;
+      this.scene.environmentIntensity = 0.90;
+    }
 
-    const rawKey = String(stage.themeKey || stage.theme?.key || 'canyon_river').toLowerCase();
+    const rawKey = String(opts?.biomeKey || opts?.biome || stage.themeKey || stage.theme?.key || 'canyon_river').toLowerCase();
     const bKey = rawKey.includes('alpine') || rawKey.includes('snow')
       ? 'alpine_lake'
       : rawKey.includes('bayou') || rawKey.includes('sunset')
@@ -1834,7 +2045,7 @@ export class GlideRenderer {
     const scroll = Number(stage.scroll) || time * 110;
     const aspect = this.width / Math.max(1, this.height);
     const portrait = aspect < 0.85;
-    const targetFovSwell = clamp(Number(stage.fovKick) || 0, 0, 1) * 3.0;
+    const targetFovSwell = clamp(Number(stage.fovKick) || 0, 0, 1) * 7.5;
     this._fovSwellDeg += (targetFovSwell - this._fovSwellDeg) * (1 - Math.exp(-6.5 * dt));
     this._updateGlideCamMetrics(this._fovSwellDeg);
 
@@ -2075,7 +2286,35 @@ export class GlideRenderer {
       slot.rotation.z = time * 1.2 + i;
     }
 
-    // Soft Feathered Sunlit Updraft Thermals + Rising Mist Spirals (pooled InstancedMesh)
+    // Drifting Volumetric 3D Cumulus Cloud Banks across 3 Parallax Sky Layers!
+    if (this.ambientCloudInst) {
+      this.ambientCloudMat.emissive.set(pal.skyHor);
+      for (let i = 0; i < 16; i++) {
+        const layer = i % 3;
+        const cz = layer === 0 ? -8.5 : layer === 1 ? -16.5 : -26.5;
+        const spd = layer === 0 ? 0.022 : layer === 1 ? 0.014 : 0.009;
+        const span = layer === 0 ? 74 : layer === 1 ? 96 : 122;
+        const cx = ((((i * 15.7 + 7.2) - scroll * spd) % span) + span) % span - span * 0.5;
+        const cy = (layer === 0 ? 2.4 : layer === 1 ? 3.8 : 5.4) + Math.sin(i * 2.1 + time * 0.25) * 0.85;
+        const sc = (layer === 0 ? 1.15 : layer === 1 ? 1.65 : 2.35) * (0.85 + (i % 4) * 0.14);
+        dm.position.set(cx, cy, cz);
+        dm.rotation.set(0, (i % 2 === 0 ? 0.12 : -0.14), 0);
+        dm.scale.set(sc * 1.32, sc * 0.86, sc);
+        dm.updateMatrix();
+        this.ambientCloudInst.setMatrixAt(i, dm.matrix);
+      }
+      this.ambientCloudInst.count = 16;
+      this.ambientCloudInst.instanceMatrix.needsUpdate = true;
+    }
+
+    // Track directional hero shadow frustum tightly around Gateway
+    if (this.sunLight.castShadow) {
+      this.sunLight.position.set(heroX + 10, heroY + 18, 14);
+      this.sunLight.target.position.set(heroX, heroY - 1, 0);
+      this.sunLight.target.updateMatrixWorld();
+    }
+
+    // Swirling Golden Thermal Updraft Columns + Twin-Helix 3D Updraft Ribbons + Rising Sparkle Trails!
     const thermals = stage.thermals || [];
     let tsCnt = 0;
     for (let i = 0; i < MAX_THERMALS; i++) {
@@ -2086,27 +2325,34 @@ export class GlideRenderer {
       }
       const th = thermals[i];
       const wp = this._screenToWorld(th.x, this.height * 0.55, -0.5);
-      const colRad = Math.max(0.42, this._pxScale(th.w || 48, -0.5) * 0.52);
+      const colRad = Math.max(0.55, this._pxScale(th.w || 48, -0.5) * 0.56);
+      const fade = th.fade ?? 1;
       tm.visible = true;
       tm.position.set(wp.x, wp.y, -0.5);
-      tm.scale.set(Math.max(0.5, this._pxScale(th.w || 48, -0.5) * 0.85), 1, 1);
-      tm.material.color.set(pal.thermal);
-      tm.material.opacity = 0.28 * (th.fade ?? 1);
-      tm.rotation.y = 0;
+      tm.scale.set(Math.max(0.62, this._pxScale(th.w || 48, -0.5) * 0.92), 1, 1);
+      if (tm.userData?.sheetMat) {
+        tm.userData.sheetMat.color.set(pal.thermal);
+        tm.userData.sheetMat.opacity = 0.54 * fade;
+      }
+      if (tm.userData?.helix) {
+        tm.userData.helix.rotation.y = time * 3.8 + i * 1.4;
+        tm.userData.helixMat.color.set(pal.thermal);
+        tm.userData.helixMat.opacity = (0.68 + Math.sin(time * 5.2 + i) * 0.14) * fade;
+      }
 
-      // 6 rising swirling mist spiral bands per active thermal column
+      // 6 rising swirling golden sparkle bands per active thermal column
       for (let k = 0; k < 6 && tsCnt < 48; k++) {
-        const u = (time * 0.58 + k / 6 + i * 0.19) % 1;
-        const ang = u * TAU * 2.2 + time * 3.0 + k;
+        const u = (time * 0.65 + k / 6 + i * 0.19) % 1;
+        const ang = u * TAU * 2.4 + time * 3.4 + k;
         const sx = wp.x + Math.cos(ang) * colRad * (0.75 + u * 0.35);
-        const sy = seaWorldY + 0.35 + u * 8.4;
-        const sz = -0.35 + Math.sin(ang) * 0.45;
-        const fade = Math.sin(u * Math.PI) * (th.fade ?? 1);
+        const sy = seaWorldY + 0.35 + u * 8.6;
+        const sz = -0.30 + Math.sin(ang) * 0.48;
+        const sfade = Math.sin(u * Math.PI) * fade;
         dm.position.set(sx, sy, sz);
         dm.rotation.set(0, 0, Math.cos(ang) * 0.35 + 0.18);
-        dm.scale.set((0.85 + u * 0.65) * fade, (0.75 + fade * 0.45) * fade, 1);
+        dm.scale.set((0.95 + u * 0.72) * sfade, (0.85 + sfade * 0.52) * sfade, 1);
         dm.updateMatrix();
-        this._col.set(pal.thermal).lerp(this._whiteCol, 0.42);
+        this._col.set(pal.thermal).lerp(this._whiteCol, 0.45);
         this.thermalSpiralInst.setColorAt(tsCnt, this._col);
         this.thermalSpiralInst.setMatrixAt(tsCnt++, dm.matrix);
       }
@@ -2155,8 +2401,7 @@ export class GlideRenderer {
       if (this.dewInst.instanceColor) this.dewInst.instanceColor.needsUpdate = true;
     }
 
-    // Squall Clouds & Telegraph Bolts (1 merged cloud draw call per active cloud!)
-    // Storm-cloud strikes only (`mg_bg_frill_glide.webp` provides studio-painted sky clouds; ZERO lumpy 3D clay clouds!)
+    // Volumetric 3D Storm Thunderhead Clouds (`body.visible = true`!) + Telegraph Charge Core + Forked Lightning!
     const clouds = stage.clouds || [];
     for (let i = 0; i < MAX_CLOUDS; i++) {
       const slot = this.cloudSlots[i];
@@ -2165,13 +2410,34 @@ export class GlideRenderer {
         continue;
       }
       const c = clouds[i];
+      const isCharge = c.state === 'charge';
       const isStrike = c.state === 'strike';
-      slot.visible = isStrike;
-      if (slot.userData.body) slot.userData.body.visible = false;
-      if (!isStrike) continue;
       const wp = this._screenToWorld(c.x, c.y, -0.2);
+      const radScale = clamp(this._pxScale(c.rx || 58, -0.2) * 0.86, 0.72, 1.45);
+      slot.visible = true;
       slot.position.set(wp.x, wp.y, -0.2);
-      slot.userData.bolt.visible = true;
+      slot.scale.setScalar(radScale);
+      if (slot.userData.body) {
+        slot.userData.body.visible = true;
+        slot.userData.body.scale.set(1.0 + (isCharge ? Math.sin(time * 24) * 0.05 : 0), 1.0, 1.0);
+        if (slot.userData.bodyMat) {
+          slot.userData.bodyMat.emissive.set(isStrike ? '#fbbf24' : isCharge ? '#92400e' : '#1e1b4b');
+          slot.userData.bodyMat.emissiveIntensity = isStrike ? 0.95 : isCharge ? 0.55 + Math.sin(time * 22) * 0.25 : 0.32;
+        }
+      }
+      if (slot.userData.chargeCore) {
+        slot.userData.chargeCore.visible = isCharge || isStrike;
+        slot.userData.chargeMat.opacity = isStrike ? 0.92 : isCharge ? 0.45 + Math.sin(time * 26) * 0.35 : 0;
+        slot.userData.chargeCore.scale.setScalar(isStrike ? 1.55 : 0.9 + Math.sin(time * 20) * 0.25);
+      }
+      if (slot.userData.bolt) {
+        slot.userData.bolt.visible = isStrike;
+        if (isStrike) {
+          const strikeOffX = this._pxScale(c.strikeX || 0, -0.2) / Math.max(0.2, radScale);
+          slot.userData.bolt.position.x = strikeOffX;
+          slot.userData.bolt.rotation.y = (time * 32 + i) % TAU;
+        }
+      }
     }
 
     // Graceful Distant High-Altitude Coastal Seabirds (sleek 0.38x distant silhouettes, ZERO blocky foreground gulls!)
@@ -2269,14 +2535,38 @@ export class GlideRenderer {
     this.camera.position.set(sx, sy, this._glideCamZ);
     this.camera.lookAt(sx, sy, 0);
 
-    this.webgl.setRenderTarget(null);
-    this.webgl.render(this.scene, this.camera);
+    // Route cleanly through main GameRenderer's CinematicPostFX when provided, with ACES standalone fallback!
+    const postfx = opts?.postfx;
+    if (postfx && postfx.enabled && !postfx._disposed && typeof postfx.render === 'function') {
+      this.postfxActive = true;
+      postfx.render(this.scene, this.camera, {
+        biome: bKey,
+        exposure: 1.07,
+        bloomThreshold: 0.80,
+        bloomStrength: 0.34,
+        bloomRadius: 0.42,
+      });
+    } else {
+      this.postfxActive = false;
+      const prevTone = this.webgl.toneMapping;
+      const prevExp = this.webgl.toneMappingExposure;
+      try {
+        this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
+        this.webgl.toneMappingExposure = 1.07;
+        this.webgl.setRenderTarget(null);
+        this.webgl.render(this.scene, this.camera);
+      } finally {
+        this.webgl.toneMapping = prevTone;
+        this.webgl.toneMappingExposure = prevExp;
+      }
+    }
   }
 
   dispose() {
     if (this._disposed) return;
     this._disposed = true;
     this.hero?.dispose();
+    this._ownEnvRt?.dispose();
     this.skyTex?.dispose();
     this.mesaTex?.dispose();
     this.cascadeTex?.dispose();

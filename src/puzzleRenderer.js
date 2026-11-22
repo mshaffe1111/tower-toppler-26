@@ -1158,6 +1158,103 @@ function buildTideLockGeos() {
   };
 }
 
+function createSanctumSunShaftTex(size = 128) {
+  if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+    return makeSolidAlbedoTex(255, 240, 195);
+  }
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, size, size);
+  const gX = ctx.createLinearGradient(0, 0, size, 0);
+  gX.addColorStop(0.0, 'rgba(255, 244, 200, 0.0)');
+  gX.addColorStop(0.28, 'rgba(255, 244, 204, 0.34)');
+  gX.addColorStop(0.50, 'rgba(255, 250, 224, 0.56)');
+  gX.addColorStop(0.72, 'rgba(255, 244, 204, 0.34)');
+  gX.addColorStop(1.0, 'rgba(255, 244, 200, 0.0)');
+  ctx.fillStyle = gX;
+  ctx.fillRect(0, 0, size, size);
+  ctx.globalCompositeOperation = 'destination-in';
+  const gY = ctx.createLinearGradient(0, 0, 0, size);
+  gY.addColorStop(0.0, 'rgba(255,255,255,0.0)');
+  gY.addColorStop(0.18, 'rgba(255,255,255,0.85)');
+  gY.addColorStop(0.72, 'rgba(255,255,255,0.45)');
+  gY.addColorStop(1.0, 'rgba(255,255,255,0.0)');
+  ctx.fillStyle = gY;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function buildSanctumEnvMap(webgl) {
+  if (!webgl || typeof THREE.PMREMGenerator !== 'function') return null;
+  try {
+    const pmrem = new THREE.PMREMGenerator(webgl);
+    const envScene = new THREE.Scene();
+    envScene.background = new THREE.Color('#6ec8ec');
+    // Sunlit azure temple zenith + warm travertine horizon + deep turquoise pool bounce
+    const skyDome = new THREE.Mesh(
+      new THREE.SphereGeometry(22, 18, 12),
+      new THREE.MeshBasicMaterial({ color: '#7dd3fc', side: THREE.BackSide })
+    );
+    envScene.add(skyDome);
+    const sunDisc = new THREE.Mesh(
+      new THREE.CircleGeometry(5.5, 16),
+      new THREE.MeshBasicMaterial({ color: '#fff4cf' })
+    );
+    sunDisc.position.set(8, 12, 7);
+    sunDisc.lookAt(0, 0, 0);
+    envScene.add(sunDisc);
+    const poolBounce = new THREE.Mesh(
+      new THREE.PlaneGeometry(32, 32),
+      new THREE.MeshBasicMaterial({ color: '#0d7e92' })
+    );
+    poolBounce.rotation.x = -Math.PI * 0.5;
+    poolBounce.position.y = -5;
+    envScene.add(poolBounce);
+    const rt = pmrem.fromScene(envScene, 0.04);
+    skyDome.geometry.dispose();
+    skyDome.material.dispose();
+    sunDisc.geometry.dispose();
+    sunDisc.material.dispose();
+    poolBounce.geometry.dispose();
+    poolBounce.material.dispose();
+    pmrem.dispose();
+    return rt;
+  } catch {
+    return null;
+  }
+}
+
+function buildDynamicHydroStreamGeo(segs = 18) {
+  // Pre-allocated ribbon strip (2 vertices per ring, zero per-frame allocation)
+  const verts = new Float32Array((segs + 1) * 2 * 3);
+  const uvs = new Float32Array((segs + 1) * 2 * 2);
+  const idx = [];
+  for (let i = 0; i <= segs; i++) {
+    const u = i / segs;
+    uvs[i * 4 + 0] = u * 2.5;
+    uvs[i * 4 + 1] = 0;
+    uvs[i * 4 + 2] = u * 2.5;
+    uvs[i * 4 + 3] = 1;
+    if (i < segs) {
+      const a = i * 2;
+      const b = a + 1;
+      const c = a + 2;
+      const d = a + 3;
+      idx.push(a, b, c, b, d, c);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  geo.setIndex(idx);
+  geo.userData.segs = segs;
+  return geo;
+}
+
 // ------------------------------------------------------------------------------------ PuzzleRenderer
 export class PuzzleRenderer {
   constructor(webgl, opts = {}) {
@@ -1171,6 +1268,18 @@ export class PuzzleRenderer {
     this._col = new THREE.Color();
     this._heroYaw = 0;
     this._loadedTextures = [];
+    this.postfxActive = false;
+    this._envRt = null;
+    this._envBuilt = false;
+    this._lastRoom = null;
+    this._lastRenderMs = -1e9;
+    this._lastGridOx = 2;
+    this._lastGridOz = 2;
+    this._raycaster = new THREE.Raycaster();
+    this._ndc = new THREE.Vector2();
+    this._pickPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.1);
+    this._pickHit = new THREE.Vector3();
+    this._lookVec = new THREE.Vector3();
 
     // Pre-bound placeholder textures ensure prewarm() compiles final normal-mapped PBR shaders with 0 recompile hitch!
     this._flatNormalTex = makeFlatNormalTex();
@@ -1181,10 +1290,13 @@ export class PuzzleRenderer {
 
     this.causticWaterTex = createSanctumCausticTex(256);
     this.causticWaterTex.repeat.set(7, 7);
+    this.floorCausticTex = createSanctumCausticTex(256);
+    this.floorCausticTex.repeat.set(2.4, 2.4);
     this.waterNormalTex = createWaterRippleNormalTex(256);
     this.waterNormalTex.repeat.set(8, 8);
     this.waterfallTex = createWaterfallRibbonTex(128);
     this.waterfallTex.repeat.set(1, 2.4);
+    this.sunShaftTex = createSanctumSunShaftTex(128);
     this.flameTex = createTeardropFlameTex(128);
     this.emberTex = createEmberBedTex(128);
     this.moteGlowTex = createSoftGlowSpriteTex(64);
@@ -1198,6 +1310,45 @@ export class PuzzleRenderer {
 
     this._initScene();
     this._loadPbrTextures();
+    this._bindTapListener();
+  }
+
+  _bindTapListener() {
+    const el = this.webgl?.domElement;
+    if (!el || typeof el.addEventListener !== 'function') return;
+    this._onPointerDown = (e) => {
+      if (this._disposed || !this._lastRoom || !this._lastRoom.active) return;
+      if (e.target !== el) return;
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (now - this._lastRenderMs > 200) return;
+      const picked = this.pickTile(e.clientX, e.clientY);
+      if (!picked) return;
+      this._lastRoom.queueTap?.(picked.col, picked.row);
+    };
+    el.addEventListener('pointerdown', this._onPointerDown, { passive: true });
+  }
+
+  /**
+   * Raycasts screen coordinates `(clientX, clientY)` onto the 3D sanctum board plane (`y = 0.10`)
+   * and returns `{ col, row, wx, wz }` or `null` if outside the interactive board bounds.
+   */
+  pickTile(clientX, clientY) {
+    const el = this.webgl?.domElement;
+    if (!el || !this.camera || !this._lastRoom) return null;
+    const rect = el.getBoundingClientRect?.();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+    this._ndc.set(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1
+    );
+    this._raycaster.setFromCamera(this._ndc, this.camera);
+    if (!this._raycaster.ray.intersectPlane(this._pickPlane, this._pickHit)) return null;
+    const col = Math.round(this._pickHit.x + this._lastGridOx);
+    const row = Math.round(this._pickHit.z + this._lastGridOz);
+    const cols = this._lastRoom.cols || 5;
+    const rows = this._lastRoom.rows || 5;
+    if (col < -1 || col > cols || row < -1 || row > rows + 1) return null;
+    return { col, row, wx: this._pickHit.x, wz: this._pickHit.z };
   }
 
   setEra(_era) {}
@@ -1248,20 +1399,32 @@ export class PuzzleRenderer {
 
     this.camera = new THREE.PerspectiveCamera(42, this.width / Math.max(1, this.height), 0.2, 95);
 
-    // Unified Main-Game Lighting Rig: Warm Golden Sun Key + Cool Azure Hemisphere + Turquoise Basin Bounce
-    this.hemiLight = new THREE.HemisphereLight('#7cc8f0', '#28455c', 1.26);
+    // Unified Main-Game Lighting Rig: Warm Golden Sun Key (Real 1024x1024 Hero Shadows) + Cool Azure Hemisphere + Turquoise Basin Bounce
+    this.hemiLight = new THREE.HemisphereLight('#84d2f6', '#284a62', 1.28);
     this.scene.add(this.hemiLight);
 
-    this.sunLight = new THREE.DirectionalLight('#fff1d6', 2.35);
-    this.sunLight.position.set(7.5, 13.5, 8.5);
-    this.sunLight.castShadow = false;
+    this.sunLight = new THREE.DirectionalLight('#fff2d8', 2.42);
+    this.sunLight.position.set(6.5, 13.5, 7.5);
+    this.sunLight.castShadow = true;
+    if (this.sunLight.shadow) {
+      this.sunLight.shadow.mapSize.set(1024, 1024);
+      this.sunLight.shadow.camera.near = 2;
+      this.sunLight.shadow.camera.far = 30;
+      const sc = 6.5;
+      this.sunLight.shadow.camera.left = -sc;
+      this.sunLight.shadow.camera.right = sc;
+      this.sunLight.shadow.camera.top = sc;
+      this.sunLight.shadow.camera.bottom = -sc;
+      this.sunLight.shadow.bias = -0.0008;
+      this.sunLight.shadow.normalBias = 0.025;
+    }
     this.scene.add(this.sunLight);
 
-    this.waterBounce = new THREE.DirectionalLight('#22d3ee', 0.78);
+    this.waterBounce = new THREE.DirectionalLight('#22d3ee', 0.88);
     this.waterBounce.position.set(-6, 2.8, -5);
     this.scene.add(this.waterBounce);
 
-    this.solveLight = new THREE.PointLight('#5efce8', 1.35, 14);
+    this.solveLight = new THREE.PointLight('#5efce8', 1.45, 15);
     this.solveLight.position.set(0, 1.8, 0);
     this.scene.add(this.solveLight);
 
@@ -1563,8 +1726,49 @@ export class PuzzleRenderer {
 
     this.tileInst = new THREE.InstancedMesh(new THREE.BoxGeometry(0.94, 0.16, 0.94), this.tileMat, MAX_TILES);
     this.tileInst.frustumCulled = false;
+    this.tileInst.receiveShadow = true;
     this.tileInst.setColorAt(0, this._col.set('#f0e7d6'));
     this.scene.add(this.tileInst);
+    this.islandBase.receiveShadow = true;
+
+    // Lush Shimmering Floor Caustic Light Projection Veil across the travertine sanctum courtyard
+    this.floorCausticMat = new THREE.MeshBasicMaterial({
+      color: '#5efce8',
+      map: this.floorCausticTex,
+      transparent: true,
+      opacity: 0.22,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    this.floorCausticMesh = new THREE.Mesh(new THREE.PlaneGeometry(5.8, 5.8), this.floorCausticMat);
+    this.floorCausticMesh.rotation.x = -Math.PI * 0.5;
+    this.floorCausticMesh.position.y = 0.012;
+    this.scene.add(this.floorCausticMesh);
+
+    // 4 Diagonal Sunlit Golden Temple Sun-Shafts streaming into the open aqueduct courtyard
+    this.sunShaftMat = new THREE.MeshBasicMaterial({
+      color: '#fff3c4',
+      map: this.sunShaftTex,
+      transparent: true,
+      opacity: 0.22,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.sunShafts = [];
+    const shaftSpec = [
+      [-2.8, 2.7, -2.5, 1.85, 6.2, -0.32],
+      [-0.6, 3.0, -1.8, 2.20, 6.8, -0.28],
+      [1.7, 2.8, -2.2, 1.95, 6.4, -0.34],
+      [3.1, 2.6, -1.0, 1.65, 5.8, -0.30],
+    ];
+    for (const [sx, sy, sz, sw, sh, tilt] of shaftSpec) {
+      const shaft = new THREE.Mesh(new THREE.PlaneGeometry(sw, sh), this.sunShaftMat);
+      shaft.position.set(sx, sy, sz);
+      shaft.rotation.set(0.12, -0.18, tilt);
+      this.scene.add(shaft);
+      this.sunShafts.push(shaft);
+    }
 
     // 4. Sculpted Antique-Bronze Tripod Braziers + Glowing Ember Beds + Layered Soft Teardrop Flame Billboards (4 draw calls for all 6!)
     this.brazierBodyInst = new THREE.InstancedMesh(buildTripodBrazierGeo(), this.darkBronzeMat, MAX_VALVE_SCONCES);
@@ -2130,10 +2334,76 @@ export class PuzzleRenderer {
       this.tideLockSlots.push({ root, valveWheel, waterCol, waterMat, meniscus, targetRing, targetMat });
     }
 
-    // -------------------------------------------------------------------------------- Hero, Contact AO, Reward & Motes
+    // -------------------------------------------------------------------------------- Hero, Contact AO, Hydro-Stream Cast, Reward & Motes
     this.hero = new AdaptiveSanctumHero(this.skinId);
-    this.hero.group.scale.setScalar(1.36);
+    // Gateway 2.0 auto-normalizes to 1.22m world height at scale 1.0 -> 1.16 reads heroically on 1m tiles!
+    this.hero.group.scale.setScalar(1.16);
+    this.hero.group.traverse((o) => {
+      if (o.isMesh) {
+        o.castShadow = true;
+        o.receiveShadow = true;
+      }
+    });
     this.scene.add(this.hero.group);
+
+    // Arched Glowing Hydro-Stream Ribbon & Target Ripple Burst (Gateway casts water straight to tapped tiles!)
+    this.hydroStreamCoreGeo = buildDynamicHydroStreamGeo(18);
+    this.hydroStreamAuraGeo = buildDynamicHydroStreamGeo(18);
+    this.hydroStreamCoreMat = new THREE.MeshBasicMaterial({
+      color: '#e6ffff',
+      map: this.pipeFlowTex,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.hydroStreamAuraMat = new THREE.MeshBasicMaterial({
+      color: '#38f8e8',
+      map: this.pipeFlowTex,
+      transparent: true,
+      opacity: 0.56,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.hydroStreamCore = new THREE.Mesh(this.hydroStreamCoreGeo, this.hydroStreamCoreMat);
+    this.hydroStreamAura = new THREE.Mesh(this.hydroStreamAuraGeo, this.hydroStreamAuraMat);
+    this.hydroStreamCore.frustumCulled = false;
+    this.hydroStreamAura.frustumCulled = false;
+    this.hydroStreamCore.visible = false;
+    this.hydroStreamAura.visible = false;
+    this.scene.add(this.hydroStreamAura, this.hydroStreamCore);
+
+    this.hydroSplashMat = new THREE.MeshBasicMaterial({
+      color: '#5efce8',
+      map: this.soundWaveTex,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    this.hydroSplashRing = new THREE.Mesh(new THREE.PlaneGeometry(1.15, 1.15), this.hydroSplashMat);
+    this.hydroSplashRing.rotation.x = -Math.PI * 0.5;
+    this.hydroSplashRing.visible = false;
+    this.scene.add(this.hydroSplashRing);
+
+    // Bubbling Pressurized Aqueduct Flow Sparkles riding connected `pipes` channels (1 draw call!)
+    this.pipeBubbleInst = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(0.18, 0.18),
+      new THREE.MeshBasicMaterial({
+        color: '#b8ffff',
+        map: this.moteGlowTex,
+        transparent: true,
+        opacity: 0.92,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+      36
+    );
+    this.pipeBubbleInst.frustumCulled = false;
+    this.pipeBubbleInst.count = 0;
+    this.scene.add(this.pipeBubbleInst);
 
     let aoTex = null;
     if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
@@ -2429,6 +2699,25 @@ export class PuzzleRenderer {
     const rows = room.rows || 5;
     const ox = (cols - 1) * 0.5;
     const oz = (rows - 1) * 0.5;
+    this._lastRoom = room;
+    this._lastGridOx = ox;
+    this._lastGridOz = oz;
+    this._lastRenderMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+
+    // Shared PMREM Biome IBL (accepts main GameRenderer `opts.envMap`, with lazy sunlit temple fallback)
+    if (opts.envMap) {
+      if (this.scene.environment !== opts.envMap) {
+        this.scene.environment = opts.envMap;
+        this.scene.environmentIntensity = 0.88;
+      }
+    } else if (!this._envBuilt) {
+      this._envBuilt = true;
+      this._envRt = buildSanctumEnvMap(this.webgl);
+      if (this._envRt?.texture) {
+        this.scene.environment = this._envRt.texture;
+        this.scene.environmentIntensity = 0.84;
+      }
+    }
 
     // 1. Update Camera First — guarantees 100% of puzzle pieces (including `beam` side-wall emitters/receptors
     //    & outer `bells`) + stone architrave + 3D crystal clue frieze fit cleanly inside 16:9 & 412x915 Portrait!
@@ -2484,7 +2773,7 @@ export class PuzzleRenderer {
     }
     const camQ = this.camera.quaternion;
 
-    // 2. Scale Sanctum Plinth, Canal & Ornate Temple Portal Opening Animation
+    // 2. Scale Sanctum Plinth, Canal, Shimmering Floor Caustics, Sun-Shafts & Temple Portal Opening Animation
     const plW = (cols + 0.6) / 6.4;
     const plD = (rows + 0.8) / 6.4;
     this.islandBase.scale.set(plW, 1, plD);
@@ -2493,6 +2782,15 @@ export class PuzzleRenderer {
 
     const gateOpen = smooth01(room.gateOpen || 0);
     const prog = room.progressRatio || 0;
+    if (this.floorCausticMesh) {
+      this.floorCausticMesh.scale.set((cols + 0.25) / 5.8, (rows + 0.25) / 5.8, 1);
+      this.floorCausticMat.opacity = room.solved ? 0.38 + Math.sin(time * 6.5) * 0.06 : 0.16 + prog * 0.14;
+      this.floorCausticMat.color.set(room.solved ? '#a7fff0' : '#4ef8ee');
+      this.floorCausticTex.offset.set((time * 0.055) % 1, (-time * 0.042) % 1);
+    }
+    if (this.sunShaftMat) {
+      this.sunShaftMat.opacity = (room.solved ? 0.28 : 0.17) + Math.sin(time * 0.85) * 0.035;
+    }
     this.gateDoorL.position.set(-0.51 - gateOpen * 0.88, 0.04, -4.06 - gateOpen * 0.18);
     this.gateDoorL.rotation.y = gateOpen * 0.68;
     this.gateDoorR.position.set(0.51 + gateOpen * 0.88, 0.04, -4.06 - gateOpen * 0.18);
@@ -2596,6 +2894,7 @@ export class PuzzleRenderer {
     this.beamReceptor.visible = false;
     this.pipeIntake.visible = false;
     this.pipeBaseInst.count = 0;
+    let pipeBubCnt = 0;
     for (const k of ['straight', 'elbow', 'tee']) {
       this.pipeShapeInsts[k].bInst.count = 0;
       this.pipeShapeInsts[k].litInst.count = 0;
@@ -2760,7 +3059,7 @@ export class PuzzleRenderer {
         m.visible = true;
         m.position.set(t.x - ox, 0, t.y - oz);
       }
-      this.pipeFlowLitMat.emissiveIntensity = 1.35 + Math.sin(time * 7) * 0.22;
+      this.pipeFlowLitMat.emissiveIntensity = room.solved ? 2.15 + Math.sin(time * 9) * 0.28 : 1.72 + Math.sin(time * 7.5) * 0.24;
       const pipes = room.pipes;
       let pbCnt = 0;
       for (let i = 0; i < pipes.length && i < MAX_PIPES; i++) {
@@ -2776,16 +3075,40 @@ export class PuzzleRenderer {
         const shapeKey = p.shape === 'elbow' || p.shape === 'tee' ? p.shape : 'straight';
         const bucket = this.pipeShapeInsts[shapeKey];
         const rotY = -(p.angle ?? (p.rot || 0) * Math.PI * 0.5);
+        const lit = Boolean(p.pressurized);
+        // Cascading pressurized-water surge wave radiating outward tile-by-tile from intake!
+        const litAge = lit && typeof p.pressurizedAt === 'number' ? time - p.pressurizedAt : 1.0;
+        const surgeK = !lit
+          ? 1.0
+          : litAge < 0
+            ? 0.25
+            : litAge < 0.26
+              ? 0.55 + Math.sin((litAge / 0.26) * Math.PI * 0.72) * 0.62
+              : 1.0 + Math.sin(time * 8.5 - (p.flowDist || 0) * 0.9) * 0.04;
+
         dm.position.set(px, 0.18, pz);
         dm.rotation.set(0, rotY, 0);
         dm.scale.setScalar(1);
         dm.updateMatrix();
-        const lit = Boolean(p.pressurized);
-        this._col.set(lit ? '#f2c166' : '#ba8d4d');
+        this._col.set(lit ? '#f7ca6e' : '#ba8d4d');
         bucket.bInst.setColorAt(bucket.bInst.count, this._col);
         bucket.bInst.setMatrixAt(bucket.bInst.count++, dm.matrix);
         if (lit) {
+          dm.scale.set(1, surgeK, 1);
+          dm.updateMatrix();
           bucket.litInst.setMatrixAt(bucket.litInst.count++, dm.matrix);
+          // Bubbling aqua flow droplets rushing along pressurized aqueduct channels!
+          for (let s = 0; s < 3 && pipeBubCnt < 36; s++) {
+            const ph = (time * 1.45 + i * 0.37 + s * 0.33) % 1;
+            const bx = px + Math.sin(ph * TAU + i) * 0.22;
+            const by = 0.26 + Math.sin(ph * Math.PI) * 0.22;
+            const bz = pz + Math.cos(ph * TAU + s * 2.1) * 0.22;
+            dm.position.set(bx, by, bz);
+            dm.quaternion.copy(camQ);
+            dm.scale.setScalar((0.55 + Math.sin(ph * Math.PI) * 0.65) * (room.solved ? 1.25 : 1.0));
+            dm.updateMatrix();
+            this.pipeBubbleInst.setMatrixAt(pipeBubCnt++, dm.matrix);
+          }
         } else {
           bucket.offInst.setMatrixAt(bucket.offInst.count++, dm.matrix);
         }
@@ -2863,18 +3186,33 @@ export class PuzzleRenderer {
       this.socketCoreInst.instanceMatrix.needsUpdate = true;
       if (this.socketCoreInst.instanceColor) this.socketCoreInst.instanceColor.needsUpdate = true;
     }
+    if (this.pipeBubbleInst) {
+      this.pipeBubbleInst.count = pipeBubCnt;
+      if (pipeBubCnt > 0) this.pipeBubbleInst.instanceMatrix.needsUpdate = true;
+    }
 
-    // 6. Update Gateway Heroine Position, Grounded Contact Shadow, Facing & Pose
+    // 6. Update Gateway 2.0 Heroine Position, Grounded Contact Shadow, Facing, Hydro-Stream Cast & Pose
     const gw = room.gateway || room.hero || room.player;
+    const castFx = room.castFx;
+    const casting = Boolean(castFx?.active && castFx.t < (castFx.dur || 0.44));
     if (gw) {
       const hx = (gw.px ?? gw.x ?? 0) - ox;
       const hz = (gw.py ?? gw.y ?? 0) - oz;
       const hy = Math.max(0, gw.hop || 0) * 0.48;
-      const dirYaws = [Math.PI * 0.5, 0, -Math.PI * 0.5, Math.PI];
-      const targetYaw = dirYaws[(gw.facing ?? 3) & 3];
+      let targetYaw;
+      if (casting) {
+        const tx = (castFx.tx ?? 2) - ox;
+        const tz = (castFx.ty ?? 2) - oz;
+        targetYaw = Math.atan2(tx - hx, tz - hz);
+        this._lookVec.set(tx, 0.35, tz);
+      } else {
+        const dirYaws = [Math.PI * 0.5, 0, -Math.PI * 0.5, Math.PI];
+        targetYaw = dirYaws[(gw.facing ?? 3) & 3];
+        this._lookVec.set(hx + Math.sin(targetYaw) * 2.5, 0.72, hz + Math.cos(targetYaw) * 2.5);
+      }
       let dYaw = ((targetYaw - this._heroYaw + Math.PI) % TAU) - Math.PI;
       if (dYaw < -Math.PI) dYaw += TAU;
-      this._heroYaw += dYaw * Math.min(1, dt * 14);
+      this._heroYaw += dYaw * Math.min(1, dt * (casting ? 22 : 14));
 
       const vis = (gw.alpha ?? 1) > 0.05;
       this.hero.group.visible = vis;
@@ -2883,14 +3221,39 @@ export class PuzzleRenderer {
       this.heroContactAo.visible = vis;
       this.heroContactAo.position.set(hx, 0.015, hz);
       this.heroContactAo.scale.setScalar(clamp(1 - hy * 0.45, 0.55, 1.0));
+      const heroAnim = room.solved
+        ? 'HeroCelebrate'
+        : casting
+          ? 'HydroCast'
+          : hy > 0.02
+            ? 'AirRise'
+            : gw.moving
+              ? 'Walk'
+              : 'IdleCurious';
       this.hero.update(dt, {
         time,
         vx: gw.moving ? 2.6 : 0,
         vy: hy > 0.02 ? 1.5 : 0,
         onGround: hy <= 0.02,
-        anim: room.solved ? 'Celebrate' : hy > 0.02 ? 'AirRise' : gw.moving ? 'Walk' : 'IdleBreathe',
+        anim: heroAnim,
+        mood: room.solved ? 'joyful' : casting ? 'determined' : 'curious',
+        lookTarget: this._lookVec,
         victory: Boolean(room.solved),
+        castHydro: casting,
       });
+
+      // Animate Gateway's arched glowing hydro-stream ribbon shooting straight onto the tapped tile!
+      if (casting && vis) {
+        this._updateHydroCastStream(hx, hy, hz, castFx, ox, oz);
+      } else {
+        this.hydroStreamCore.visible = false;
+        this.hydroStreamAura.visible = false;
+        this.hydroSplashRing.visible = false;
+      }
+    } else {
+      this.hydroStreamCore.visible = false;
+      this.hydroStreamAura.visible = false;
+      this.hydroSplashRing.visible = false;
     }
 
     // 7. Solved Harmonic Seed Reward Orb & Crown Seal Surge
@@ -2926,31 +3289,118 @@ export class PuzzleRenderer {
     this.moteInst.count = MAX_MOTES;
     this.moteInst.instanceMatrix.needsUpdate = true;
 
-    // 9. Animated Water Caustic, Ripple Normal, Waterfall & Pipe Sight-Gauge Flow Scroll
+    // 9. Animated Water Caustic, Ripple Normal, Waterfall & Fast Pressurized Pipe Flow Scroll
     this.causticWaterTex.offset.set((time * 0.03) % 1, (time * 0.02) % 1);
     this.waterNormalTex.offset.set((-time * 0.038) % 1, (time * 0.026) % 1);
-    this.waterfallTex.offset.y = (time * 1.35) % 1;
-    this.pipeFlowTex.offset.set((-time * 0.85) % 1, (time * 0.35) % 1);
+    this.waterfallTex.offset.y = (time * 1.48) % 1;
+    this.pipeFlowTex.offset.set((-time * 1.55) % 1, (time * 0.42) % 1);
     if (this.waterWebp) {
       this.waterWebp.offset.set((time * 0.035) % 1, (time * 0.025) % 1);
     }
 
-    this.webgl.setRenderTarget(null);
-    this.webgl.render(this.scene, this.camera);
+    // 10. Shared CinematicPostFX Routing (with crisp ACES Filmic standalone fallback)
+    const postfx = opts.postfx || null;
+    const biomeKey = opts.biomeKey || opts.biome || 'coral';
+    if (postfx && postfx.enabled && !postfx._disposed && typeof postfx.render === 'function') {
+      this.postfxActive = true;
+      postfx.render(this.scene, this.camera, {
+        biome: biomeKey,
+        exposure: room.solved ? 1.18 : 1.08,
+        bloomStrength: room.solved ? 0.56 : 0.36,
+        bloomThreshold: 0.78,
+      });
+    } else {
+      this.postfxActive = false;
+      this.webgl.setRenderTarget(null);
+      const prevTM = this.webgl.toneMapping;
+      const prevExp = this.webgl.toneMappingExposure;
+      this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
+      this.webgl.toneMappingExposure = room.solved ? 1.16 : 1.06;
+      this.webgl.render(this.scene, this.camera);
+      this.webgl.toneMapping = prevTM;
+      this.webgl.toneMappingExposure = prevExp;
+    }
+  }
+
+  _updateHydroCastStream(hx, hy, hz, castFx, ox, oz) {
+    const dur = Math.max(0.12, castFx.dur || 0.44);
+    const u = clamp((castFx.t || 0) / dur, 0, 1);
+    const fade = u < 0.18 ? u / 0.18 : Math.pow(1 - (u - 0.18) / 0.82, 1.35);
+    const sx = hx + Math.sin(this._heroYaw) * 0.34;
+    const sy = hy + 0.72;
+    const sz = hz + Math.cos(this._heroYaw) * 0.34;
+    const ex = (castFx.tx ?? 2) - ox;
+    const ey = 0.24;
+    const ez = (castFx.ty ?? 2) - oz;
+    const dist = Math.hypot(ex - sx, ez - sz);
+    const arcH = 0.48 + clamp(dist * 0.26, 0.18, 0.92);
+
+    const fillRibbon = (geo, halfW) => {
+      const segs = geo.userData.segs || 18;
+      const pos = geo.attributes.position;
+      const head = clamp(u * 2.6, 0.15, 1.0);
+      const tail = clamp((u - 0.32) * 1.45, 0, 0.92);
+      for (let i = 0; i <= segs; i++) {
+        const frac = i / segs;
+        const s = lerp(tail, head, frac);
+        const px = lerp(sx, ex, s);
+        const pz = lerp(sz, ez, s);
+        const py = lerp(sy, ey, s) + Math.sin(s * Math.PI) * arcH;
+        const w = halfW * (0.35 + Math.sin(frac * Math.PI) * 0.85) * fade;
+        // Ribbon widens along perpendicular horizontal & subtle vertical lift so it reads vividly from 3/4 view
+        const dx = ex - sx;
+        const dz = ez - sz;
+        const inv = 1 / (Math.hypot(dx, dz) || 1);
+        const nx = -dz * inv * w;
+        const nz = dx * inv * w;
+        pos.setXYZ(i * 2, px - nx, py + w * 0.45, pz - nz);
+        pos.setXYZ(i * 2 + 1, px + nx, py - w * 0.45, pz + nz);
+      }
+      pos.needsUpdate = true;
+    };
+
+    fillRibbon(this.hydroStreamCoreGeo, 0.075);
+    fillRibbon(this.hydroStreamAuraGeo, 0.185);
+    this.hydroStreamCore.visible = fade > 0.02;
+    this.hydroStreamAura.visible = fade > 0.02;
+    this.hydroStreamCoreMat.opacity = 0.95 * fade;
+    this.hydroStreamAuraMat.opacity = 0.58 * fade;
+    this.hydroStreamAuraMat.color.set(castFx.color || '#38f8e8');
+
+    this.hydroSplashRing.visible = u > 0.15;
+    if (this.hydroSplashRing.visible) {
+      const sp = clamp((u - 0.15) / 0.85, 0, 1);
+      this.hydroSplashRing.position.set(ex, 0.08 + sp * 0.08, ez);
+      this.hydroSplashRing.scale.setScalar(0.45 + sp * 1.35);
+      this.hydroSplashMat.opacity = (1 - sp) * (1 - sp) * 0.92;
+      this.hydroSplashMat.color.set(castFx.color || '#5efce8');
+    }
   }
 
   dispose() {
     if (this._disposed) return;
     this._disposed = true;
+    const el = this.webgl?.domElement;
+    if (el && this._onPointerDown && typeof el.removeEventListener === 'function') {
+      el.removeEventListener('pointerdown', this._onPointerDown);
+    }
+    this._onPointerDown = null;
+    this._lastRoom = null;
     this.hero?.dispose();
+    this._envRt?.dispose();
+    this._envRt = null;
+    this.hydroStreamCoreGeo?.dispose();
+    this.hydroStreamAuraGeo?.dispose();
     this._flatNormalTex?.dispose();
     this._stonePlaceholder?.dispose();
     this._limestonePlaceholder?.dispose();
     this._basaltPlaceholder?.dispose();
     this._bronzePlaceholder?.dispose();
     this.causticWaterTex?.dispose();
+    this.floorCausticTex?.dispose();
     this.waterNormalTex?.dispose();
     this.waterfallTex?.dispose();
+    this.sunShaftTex?.dispose();
     this.flameTex?.dispose();
     this.emberTex?.dispose();
     this.moteGlowTex?.dispose();
