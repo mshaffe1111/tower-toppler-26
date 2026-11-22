@@ -365,7 +365,7 @@ export class SubStage {
     const portrait = this.width / Math.max(1, this.height) < 0.85;
     this.surfaceY = portrait ? this.height * 0.145 : this.height * 0.11;
     this.seabedY = portrait ? this.height * 0.845 : this.height * 0.895;
-    this.top = this.surfaceY + 24 * this.s;
+    this.top = Math.max(this.surfaceY + 24 * this.s, portrait ? 148 : 140);
     this.bottom = this.seabedY - 18 * this.s;
   }
 
@@ -1154,7 +1154,7 @@ export class SubStage {
     }
 
     const minX = portrait ? Math.max(swimmer.rx * 1.65, W * 0.22) : Math.max(swimmer.rx * 1.35, W * 0.14);
-    const maxX = portrait ? Math.min(W - swimmer.rx * 1.65, W * 0.80) : Math.min(W - swimmer.rx * 1.35, W * 0.86);
+    const maxX = portrait ? Math.min(W - swimmer.rx * 2.1, W * 0.72) : Math.min(W - swimmer.rx * 1.35, W * 0.86);
     if (this.phase !== 'intro') {
       if (swimmer.x < minX) {
         swimmer.x = minX;

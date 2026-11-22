@@ -1274,6 +1274,21 @@ export class PuzzleRoom {
     this._updateViewFollow(1);
   }
 
+  /** Resets the current Aqueduct Sanctum board cleanly back to its initial unsolved layout. */
+  reset() {
+    if (!this.puzzle || this.solved) return false;
+    this.start({
+      width: this.width,
+      height: this.height,
+      puzzle: this.puzzle,
+      worldIndex: this.worldIndex,
+      palette: this.palette,
+      alreadySolved: false,
+      solveBonus: this.solveBonus,
+    });
+    return true;
+  }
+
   /**
    * Illuminates the hidden outer doorway clue on the interior mural stele for `duration` seconds.
    * Called automatically on doorway entry/threshold step, or via the HUD `[PEEK CLUE]` button.

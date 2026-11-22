@@ -949,7 +949,7 @@ describe('5. Watershed Flow Perks, Hydro-Rings, Supply Crates, Floodgate Surge &
     game._initCoreDescentStage();
     expect(game.mode).toBe('core_descent');
     expect(game.coreDescent.totalDepth).toBe(360);
-    expect(game.coreDescent.duration).toBe(13.5);
+    expect(game.coreDescent.duration).toBe(16.5);
   });
 });
 

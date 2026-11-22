@@ -608,17 +608,19 @@ function createRainbowArcTex(w = 256, h = 128) {
 function createPopupTex(text, color) {
   if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
   const c = document.createElement('canvas');
-  c.width = 320;
+  c.width = 512;
   c.height = 64;
   const ctx = c.getContext('2d');
-  ctx.font = '800 24px Outfit, Orbitron, sans-serif';
+  const label = String(text || '');
+  const fontSize = label.length > 26 ? 20 : 24;
+  ctx.font = `800 ${fontSize}px Outfit, Orbitron, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.lineWidth = 6;
   ctx.strokeStyle = 'rgba(4, 24, 38, 0.92)';
-  ctx.strokeText(text, 160, 32);
+  ctx.strokeText(label, 256, 32, 476);
   ctx.fillStyle = color || '#fde047';
-  ctx.fillText(text, 160, 32);
+  ctx.fillText(label, 256, 32, 476);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
@@ -1768,9 +1770,11 @@ export class GlideRenderer {
       }
       const wp = this._screenToWorld(p.x, p.y, 0.8);
       const t = 1 - clamp(p.life / Math.max(0.01, p.maxLife || 1), 0, 1);
+      const safeX = clamp(wp.x, -wp.halfW * 0.56, wp.halfW * 0.56);
+      const maxW = Math.min(wp.halfW * 1.68, portrait ? 2.4 : 3.2);
       slot.sprite.visible = true;
-      slot.sprite.position.set(wp.x, wp.y + t * 0.45, 0.8);
-      slot.sprite.scale.set(2.2, 0.44, 1);
+      slot.sprite.position.set(safeX, wp.y + t * 0.45, 0.8);
+      slot.sprite.scale.set(maxW, maxW * 0.125 * 1.38, 1);
       slot.sprite.material.opacity = Math.max(0, 1 - t * t);
     }
 

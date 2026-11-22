@@ -494,17 +494,19 @@ function createSoftBeamTex(w = 128, h = 64) {
 function createPopupSpriteTex(text, color) {
   if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
   const c = document.createElement('canvas');
-  c.width = 320;
+  c.width = 512;
   c.height = 64;
   const ctx = c.getContext('2d');
-  ctx.font = '800 24px Outfit, Orbitron, sans-serif';
+  const label = String(text || '');
+  const fontSize = label.length > 26 ? 20 : 24;
+  ctx.font = `800 ${fontSize}px Outfit, Orbitron, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.lineWidth = 6;
   ctx.strokeStyle = 'rgba(4, 24, 38, 0.92)';
-  ctx.strokeText(text, 160, 32);
+  ctx.strokeText(label, 256, 32, 476);
   ctx.fillStyle = color || '#fde047';
-  ctx.fillText(text, 160, 32);
+  ctx.fillText(label, 256, 32, 476);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
@@ -946,25 +948,26 @@ export class SubRenderer {
       new THREE.Vector2(0.06, -0.44),
       new THREE.Vector2(0.0, -0.32),
     ];
-    const jellyGeo = new THREE.LatheGeometry(jellyProfile, 16);
+    const jellyGeo = new THREE.LatheGeometry(jellyProfile, 28);
     const jPos = jellyGeo.attributes.position;
     for (let i = 0; i < jPos.count; i++) {
       const x = jPos.getX(i), y = jPos.getY(i), z = jPos.getZ(i);
       const ang = Math.atan2(z, x);
       const rad = Math.hypot(x, z);
-      const flute = y < 0.16 && rad > 0.08 ? 1.0 + Math.sin(ang * 8.0) * (y < -0.05 ? 0.24 : 0.09) : 1.0;
+      const flute = y < 0.16 && rad > 0.08 ? 1.0 + Math.sin(ang * 8.0) * (y < -0.05 ? 0.14 : 0.05) : 1.0;
       jPos.setXYZ(i, x * flute, y, z * flute);
     }
     jellyGeo.computeVertexNormals();
     this.jellyInst = new THREE.InstancedMesh(
       jellyGeo,
       new THREE.MeshStandardMaterial({
-        color: '#fbcfe8',
-        emissive: '#d946ef',
-        emissiveIntensity: 0.72,
-        roughness: 0.14,
+        color: '#fce7f3',
+        emissive: '#e879f9',
+        emissiveIntensity: 0.68,
+        roughness: 0.12,
+        metalness: 0.04,
         transparent: true,
-        opacity: 0.56,
+        opacity: 0.62,
         side: THREE.DoubleSide,
         depthWrite: false,
       }),
@@ -1074,11 +1077,13 @@ export class SubRenderer {
     this.reefScene.add(this.grottoGroup);
 
     this.arrivalSpire = new THREE.Group();
-    const arrCol = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.8, 2.3, 14, 16),
-      new THREE.MeshStandardMaterial({ color: '#c4b89c', roughness: 0.70, metalness: 0.10 })
+    const arrFallback = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.6, 2.0, 12, 16),
+      new THREE.MeshStandardMaterial({ color: '#2b5f63', roughness: 0.85, metalness: 0.08 })
     );
-    this.arrivalSpire.add(arrCol);
+    arrFallback.visible = false;
+    this.arrivalSpire.add(arrFallback);
+    this.arrivalSpire.userData = { fallback: arrFallback, glbMounted: false };
     this.arrivalSpire.visible = false;
     this.reefScene.add(this.arrivalSpire);
 
@@ -1180,6 +1185,35 @@ export class SubRenderer {
         const cl = grottoRing.clone(true);
         cl.scale.setScalar(1.32);
         this.grottoGroup.add(cl);
+      }
+
+      // Mount sculpted Pelagian Underwater Spire Portal on `this.arrivalSpire` (obliterates bare white cylinder!)
+      const archNode = getNode('GrottoArch_Vault');
+      const colNode = getNode('SunkenColumn_A');
+      if (this.arrivalSpire && !this.arrivalSpire.userData.glbMounted && (archNode || colNode)) {
+        this.arrivalSpire.userData.glbMounted = true;
+        if (this.arrivalSpire.userData.fallback) this.arrivalSpire.userData.fallback.visible = false;
+        if (archNode) {
+          const portalArch = archNode.clone(true);
+          portalArch.position.set(0, -4.4, 0);
+          portalArch.scale.set(0.95, 1.25, 1.15);
+          this.arrivalSpire.add(portalArch);
+        }
+        if (colNode) {
+          const leftCol = colNode.clone(true);
+          leftCol.position.set(-2.2, -4.4, 0.55);
+          leftCol.scale.set(1.15, 1.35, 1.15);
+          const rightCol = colNode.clone(true);
+          rightCol.position.set(2.2, -4.4, 0.55);
+          rightCol.scale.set(1.15, 1.35, 1.15);
+          this.arrivalSpire.add(leftCol, rightCol);
+        }
+        if (grottoRing) {
+          const beaconRing = grottoRing.clone(true);
+          beaconRing.position.set(0, 0.2, 0.75);
+          beaconRing.scale.setScalar(1.75);
+          this.arrivalSpire.add(beaconRing);
+        }
       }
     }
 
@@ -1523,13 +1557,13 @@ export class SubRenderer {
       mood: (sw.stun || 0) > 0 ? 'hurt' : dashActive || sonarP > 0.3 ? 'joyful' : 'happy',
       frillFlare: 0.46 + sonarP * 0.50 + (dashActive ? 0.42 : 0),
     });
-    // `FreeSwim` already aligns Pelvis horizontally (+1.04 rad) & curves Tail1 upward; counter-pitch Tail1 aft into a sleek horizontal dolphin kick!
+    // Negative `rotateX` pulls `Tail1..Tail4` aft from FreeSwim's pitched spine into a sleek horizontal swimming trail!
     const sb = this.reefHero.bones;
     if (sb) {
-      if (sb.Tail1) sb.Tail1.rotateX(-0.42 + Math.sin(swimPhase) * 0.14);
-      if (sb.Tail2) sb.Tail2.rotateX(-0.18 + Math.sin(swimPhase - 0.65) * 0.12);
-      if (sb.Tail3) sb.Tail3.rotateX(-0.08 + Math.sin(swimPhase - 1.3) * 0.10);
-      if (sb.Tail4) sb.Tail4.rotateX(Math.sin(swimPhase - 1.9) * 0.08);
+      if (sb.Tail1) sb.Tail1.rotateX(-1.14 + Math.sin(swimPhase) * 0.14);
+      if (sb.Tail2) sb.Tail2.rotateX(-0.28 + Math.sin(swimPhase - 0.65) * 0.12);
+      if (sb.Tail3) sb.Tail3.rotateX(-0.14 + Math.sin(swimPhase - 1.3) * 0.10);
+      if (sb.Tail4) sb.Tail4.rotateX(-0.06 + Math.sin(swimPhase - 1.9) * 0.08);
     }
 
     // 6. Chunky 3D Antique-Bronze & Aqua Crystal `HydroRing_Reef` (`stage.boostRings`)
@@ -1832,11 +1866,11 @@ export class SubRenderer {
       this.grottoGroup.visible = false;
     }
 
-    if (stage.tower?.active) {
-      const twp = this._screenToWorld(stage.tower.x, this.height * 0.5, -5.0);
+    if (stage.tower?.active && this.arrivalSpire.userData?.glbMounted) {
+      const twp = this._screenToWorld(stage.tower.x, this.height * 0.5, -4.6);
       this.arrivalSpire.visible = true;
-      this.arrivalSpire.position.set(twp.x, 0, -5.0);
-      this.arrivalSpire.rotation.y = time * 0.25;
+      this.arrivalSpire.position.set(twp.x, 0, -4.6);
+      this.arrivalSpire.rotation.y = -0.22 + Math.sin(time * 0.55) * 0.05;
     } else {
       this.arrivalSpire.visible = false;
     }
@@ -1978,9 +2012,10 @@ export class SubRenderer {
         py = minAbove + t * 0.35;
       }
       py = Math.min(py, Math.min(surfWorldY + 0.15, wp.halfH * 0.66));
+      const maxW = Math.min(wp.halfW * 1.72, portrait ? 2.45 : 3.2);
       slot.sprite.visible = true;
       slot.sprite.position.set(safeX, py, 0.8);
-      slot.sprite.scale.set(portrait ? 1.85 : 2.2, portrait ? 0.37 : 0.44, 1);
+      slot.sprite.scale.set(maxW, maxW * 0.125 * 1.38, 1);
       slot.sprite.material.opacity = Math.max(0, 1 - t * t);
     }
   }

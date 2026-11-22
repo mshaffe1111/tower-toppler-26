@@ -1550,21 +1550,25 @@ export class SkimmerRenderer {
       if (slot.key !== key) {
         slot.key = key;
         const ctx = slot.ctx;
+        const label = String(p.text);
+        const fontSize = label.length > 22 ? 20 : 25;
         ctx.clearRect(0, 0, 384, 64);
-        ctx.font = '800 28px "Plus Jakarta Sans", "Outfit", sans-serif';
+        ctx.font = `800 ${fontSize}px "Plus Jakarta Sans", "Outfit", sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.lineWidth = 6;
+        ctx.lineWidth = 5;
         ctx.strokeStyle = 'rgba(4, 24, 38, 0.90)';
-        ctx.strokeText(String(p.text).slice(0, 28), 192, 32);
+        ctx.strokeText(label, 192, 32, 360);
         ctx.fillStyle = col;
-        ctx.fillText(String(p.text).slice(0, 28), 192, 32);
+        ctx.fillText(label, 192, 32, 360);
         slot.tex.needsUpdate = true;
       }
       const lifeRatio = clamp((p.life ?? 0.6) / Math.max(0.01, p.maxLife ?? 0.9), 0, 1);
+      const isPort = this.width / Math.max(1, this.height) < 0.85;
+      const spW = isPort ? 2.25 : 3.4;
       slot.sp.visible = lifeRatio > 0.02;
-      slot.sp.position.set(laneX, heroY + 2.15 + (1 - lifeRatio) * 1.15 + i * 0.45, -0.4);
-      slot.sp.scale.set(3.4, 0.56, 1);
+      slot.sp.position.set(clamp(laneX, -1.6, 1.6), heroY + 2.15 + (1 - lifeRatio) * 1.15 + i * 0.45, -0.4);
+      slot.sp.scale.set(spW, spW * 0.167, 1);
       slot.mat.opacity = Math.min(1, lifeRatio * 1.8);
     }
 

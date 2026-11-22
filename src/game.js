@@ -517,7 +517,7 @@ export class ToweringWatersGame {
       active: false,
       phase: 'idle',
       timer: 0,
-      duration: 13.5,
+      duration: 16.5,
       depth: 0,
       totalDepth: 360,
       progress: 0,
@@ -8345,7 +8345,7 @@ export class ToweringWatersGame {
       active: true,
       phase: 'dive',
       timer: 0,
-      duration: 13.5,
+      duration: 16.5,
       depth: 0,
       totalDepth: 360,
       progress: 0,
@@ -9466,7 +9466,7 @@ export class ToweringWatersGame {
         this.input?.haptic?.(18);
         if (sk.boostMult >= 4) this._tryUnlockTrophy('skimmer_pro');
       }
-      if (g.z < -0.45) sk.gates.splice(i, 1);
+      if (g.z < -7.0) sk.gates.splice(i, 1);
     }
 
     for (let i = sk.ramps.length - 1; i >= 0; i--) {
@@ -9483,7 +9483,7 @@ export class ToweringWatersGame {
         this.input?.haptic?.(20);
         this._tryUnlockTrophy('skimmer_ramp_air');
       }
-      if (r.z < -0.45) sk.ramps.splice(i, 1);
+      if (r.z < -7.0) sk.ramps.splice(i, 1);
     }
 
     for (let i = sk.gears.length - 1; i >= 0; i--) {
@@ -9509,7 +9509,7 @@ export class ToweringWatersGame {
       h.z -= dz;
       const hitHeight = h.type === 'rock' ? 1.3 : 0.82;
       if (Math.abs(h.z) < 0.85 && Math.abs(sk.laneX - h.laneX) < 0.66 && sk.y < hitHeight) {
-        if (isCalm || sk.whipTimer > 0) {
+        if (isCalm || (sk.whipTimer > 0 && h.type === 'crate')) {
           this.addScore(75);
           if (h.type === 'crate') {
             sk.cratesDestroyed = (sk.cratesDestroyed || 0) + 1;
@@ -9531,7 +9531,7 @@ export class ToweringWatersGame {
         sk.hazards.splice(i, 1);
         continue;
       }
-      if (h.z < -0.45) sk.hazards.splice(i, 1);
+      if (h.z < -7.0) sk.hazards.splice(i, 1);
     }
 
     this._syncHud();
@@ -9573,7 +9573,7 @@ export class ToweringWatersGame {
       worldIndex: actIdx,
       themeKey: glideThemesByAct[actIdx] || 'canyon_river',
       standalone: Boolean(this.standaloneMiniGame),
-      nextWorldName: nextT?.name || 'NEXT WATERSHED SPIRE',
+      nextWorldName: nextT?.name || 'WATERSHED SPIRE',
       nextGlow: nextT?.palette?.glow || '#2dd4bf',
       fromGlow: this.tower?.palette?.glow || '#fbbf24',
       healing: 1,

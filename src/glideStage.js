@@ -298,8 +298,8 @@ export class GlideStage {
     const s = this.s;
     const wide = this.width / H > 1.15;
     this.seaY = H * 0.905;
-    // Portrait reserves top 152px for `#hud` + sky bar; Landscape docks sky bar in Right Gutter so center/left sky opens up!
-    this.top = wide ? Math.max(H * 0.16, 68) : Math.max(H * 0.19, 152 * Math.min(1.18, s));
+    // Reserve top clearance below `#watershed-flow-hud` (y <= 122px desktop, <= 152px portrait) so Gateway never flies behind HUD!
+    this.top = wide ? Math.max(H * 0.175, 144) : Math.max(H * 0.19, 152 * Math.min(1.18, s));
     this.bottom = this.seaY - 20 * s;
     this.summitY = Math.max(this.top + 34 * s, H * 0.45);
     this.landY = this.seaY - 26 * s;
@@ -828,7 +828,7 @@ export class GlideStage {
     const wide = W / this.height > 1.15;
     const portrait = W / this.height < 0.85;
     const minX = portrait ? Math.max(g.rx * 1.8, W * 0.22) : Math.max(g.rx * 1.35, W * 0.14);
-    const maxX = wide ? Math.min(W * 0.68, W - g.rx * 2.6) : portrait ? Math.min(W * 0.78, W - g.rx * 1.8) : W - g.rx * 2.2;
+    const maxX = wide ? Math.min(W * 0.68, W - g.rx * 2.6) : portrait ? Math.min(W * 0.72, W - g.rx * 2.1) : W - g.rx * 2.2;
     if (g.x < minX) {
       g.x = minX;
       if (g.vx < 0) g.vx = 0;

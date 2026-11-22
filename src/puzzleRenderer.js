@@ -1604,7 +1604,7 @@ export class PuzzleRenderer {
     } else if (pType === 'beam' && room.mirrors) {
       for (let i = 0; i < room.mirrors.length; i++) {
         const m = room.mirrors[i];
-        testVol(m.x, m.y, m.x - ox, m.y - oz, 0.38, 0.0, 0.96, 0.38);
+        testVol(m.x, m.y, m.x - ox, m.y - oz, 0.38, 0.0, 1.28, 0.38);
       }
     } else if (pType === 'pipes' && room.pipes) {
       for (let i = 0; i < room.pipes.length; i++) {

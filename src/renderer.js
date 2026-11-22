@@ -867,7 +867,7 @@ export class GameRenderer {
     this.webgl.toneMapping = THREE.ACESFilmicToneMapping;
     this.webgl.toneMappingExposure = 1.08;
     this.webgl.shadowMap.enabled = true;
-    this.webgl.shadowMap.type = THREE.PCFShadowMap;
+    this.webgl.shadowMap.type = this._isIntegratedGpu ? THREE.BasicShadowMap : THREE.PCFShadowMap;
     this.webgl.shadowMap.autoUpdate = false;
     this.webgl.setPixelRatio(this.currentDpr);
 
@@ -1311,21 +1311,23 @@ export class GameRenderer {
 
   compileTowerGroups(groups = []) {
     if (!this.webgl || !this.towerScene || !this.towerCam || !Array.isArray(groups) || !groups.length) return;
-    const added = [];
+    // All towers share the exact same arch/prop PBR materials (`buildArchShaderWarmupGroup()`),
+    // so compiling 1 representative group covers 100% of shaders without mounting 6 towers (~660k tris) at once!
+    const rep = groups.find(Boolean);
+    if (!rep) return;
+    let addedRep = false;
     try {
-      for (let i = 0; i < groups.length; i++) {
-        const g = groups[i];
-        if (g && g.parent !== this.towerScene) {
-          this.towerScene.add(g);
-          added.push(g);
-        }
+      if (rep.parent !== this.towerScene) {
+        this.towerScene.add(rep);
+        addedRep = true;
       }
       this._compileAllTowerShaders();
+      this._towerSceneCompiled = true;
+      this._compiledArchVersion = this._archPropsVersion;
+      this._enemiesGlbCompiled = Boolean(this.enemyVisuals?.isReady?.());
     } finally {
-      for (let i = 0; i < added.length; i++) {
-        if (added[i].parent === this.towerScene) {
-          this.towerScene.remove(added[i]);
-        }
+      if (addedRep && rep.parent === this.towerScene) {
+        this.towerScene.remove(rep);
       }
     }
   }
@@ -1360,7 +1362,7 @@ export class GameRenderer {
     this.webgl.getScissor(prevScissor);
 
     const composerRt =
-      this.usePostFX && this.postfx && this.postfx.composer?.readBuffer
+      this.usePostFX && this.postfx && !this.postfx.isBypassed && this.postfx.composer?.readBuffer
         ? this.postfx.composer.readBuffer
         : null;
     const savedRtVp = composerRt ? composerRt.viewport.clone() : null;
@@ -4550,10 +4552,13 @@ export class GameRenderer {
       this._uploadAllReadyTextures();
     }
     const enemiesNowReady = Boolean(this.enemyVisuals?.isReady?.());
+    // Never trigger a blocking full-scene shader re-compile on frame 1 of active gameplay launch!
+    const allowBackgroundCompile = isTitleShowcase || !this._towerSceneCompiled;
     if (
-      !this._towerSceneCompiled ||
-      (!this._enemiesGlbCompiled && enemiesNowReady) ||
-      this._compiledArchVersion !== this._archPropsVersion
+      allowBackgroundCompile &&
+      (!this._towerSceneCompiled ||
+        (!this._enemiesGlbCompiled && enemiesNowReady) ||
+        this._compiledArchVersion !== this._archPropsVersion)
     ) {
       this._compileAllTowerShaders();
       this._towerSceneCompiled = true;
@@ -4562,8 +4567,8 @@ export class GameRenderer {
     }
 
     // Single-pass analytic water reflection runs inside `src/water.js` (0 extra scene render passes!)
-    // Update tight 512x512 hero-only shadow frustum on alternating frames (or every 3rd on iGPU) for locked 60fps!
-    const shadowStep = this._isIntegratedGpu ? 3 : 2;
+    // Update tight 512x512 hero-only shadow frustum on alternating frames (every 4th on iGPU) for locked 60fps!
+    const shadowStep = this._isIntegratedGpu ? 4 : 2;
     if (((this._shadowTick++ % shadowStep) === 0) || this._shadowTick <= 4) {
       this.webgl.shadowMap.needsUpdate = true;
     }

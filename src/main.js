@@ -106,6 +106,7 @@ const puzzleHudTitleEl = document.getElementById('puzzle-hud-title');
 const puzzleHudSubEl = document.getElementById('puzzle-hud-sub');
 const btnPeekClue = document.getElementById('btn-peek-clue');
 const peekClueLblEl = document.getElementById('peek-clue-lbl');
+const btnResetPuzzle = document.getElementById('btn-reset-puzzle');
 
 const bannerEl = document.getElementById('stage-banner');
 const bannerSubEl = document.getElementById('banner-sub');
@@ -1179,6 +1180,8 @@ const hudCache = {
   puzzleSub: '',
   canPeek: null,
   isPeeking: null,
+  canResetPuzzle: null,
+  gestureHintKey: '',
   promptKey: '',
   promptVisible: false,
   promptActionable: false,
@@ -1820,6 +1823,22 @@ const game = new GameEngineClass(
               if (peekClueLblEl) peekClueLblEl.textContent = isPeeking ? 'CLUE LIT' : 'PEEK CLUE';
             }
           }
+          if (btnResetPuzzle) {
+            const canReset = !pr.solved;
+            if (canReset !== hudCache.canResetPuzzle) {
+              hudCache.canResetPuzzle = canReset;
+              btnResetPuzzle.classList.toggle('hidden', !canReset);
+            }
+          }
+        }
+      }
+      if (hudCtrlHintTextEl) {
+        const nextHintKey = isSanctumMode ? 'sanctum' : 'tower';
+        if (nextHintKey !== hudCache.gestureHintKey) {
+          hudCache.gestureHintKey = nextHintKey;
+          hudCtrlHintTextEl.textContent = isSanctumMode
+            ? 'Tap Any Tile, Bell, Mirror, or Valve Directly • Swipe to Step'
+            : CTRL_GUIDE_TEXT.gesture;
         }
       }
 
@@ -2454,6 +2473,7 @@ function playStoryCutscene(kind, { previewMode = false, startPct = null, endPct 
     const towers = getTowersSafe();
     const rawT = towers[Math.min(towers.length - 1, def.towerIdx || 0)] || towers[0];
     if (rawT) {
+      game.mode = 'title';
       game.loadTower?.(buildTitlePreviewTower(rawT));
     }
     clearBanner();
@@ -2507,6 +2527,7 @@ function finishCutscene() {
 
   // Restore active biome music after non-preview Act intro cutscenes so Spires 3/5/7/9 never stay on Title menu music!
   if (!cutsceneState.previewMode && game.mode === 'tower' && game.tower) {
+    sound.setGameMode?.(game.runType || 'campaign');
     sound.setTowerTheme?.(game.tower.id, game.tower.theme);
   }
 
@@ -3570,17 +3591,18 @@ function getPrestagedStepTower(sIdx) {
 
 function prewarmAllModeSpiresSync() {
   cancelPendingModePrewarm();
-  const warmedGroups = [];
-  for (let sIdx = 0; sIdx <= 5; sIdx++) {
+  // Pre-build ONLY the active Campaign Spire 1 synchronously under the boot veil (avoids multi-second boot freeze!).
+  // Remaining 5 mode spires pre-stage incrementally in 1-tower idle slices via scheduleModeSpiresPrewarm().
+  let repGroup = null;
+  try {
+    const tw0 = getPrestagedStepTower(3);
+    const c0 = tw0 ? renderer.prewarmTowerGroup?.(tw0, false) : null;
+    if (c0?.group) repGroup = c0.group;
+  } catch (_) {}
+  if (!prestagedModeRuns.initialShadersCompiled) {
     try {
-      const tw = getPrestagedStepTower(sIdx);
-      const c = tw ? renderer.prewarmTowerGroup?.(tw, false) : null;
-      if (c?.group) warmedGroups.push(c.group);
-    } catch (_) {}
-  }
-  if (!prestagedModeRuns.initialShadersCompiled && warmedGroups.length > 0) {
-    try {
-      renderer.compileTowerGroups?.(warmedGroups);
+      if (repGroup) renderer.compileTowerGroups?.([repGroup]);
+      else renderer.prewarm?.();
       prestagedModeRuns.initialShadersCompiled = true;
     } catch (_) {}
   }
@@ -3594,7 +3616,6 @@ function scheduleModeSpiresPrewarm() {
   cancelPendingModePrewarm();
 
   let step = 0;
-  const warmedGroups = [];
 
   const runNextSlice = () => {
     prestagedModeRuns.timerId = null;
@@ -3605,31 +3626,28 @@ function scheduleModeSpiresPrewarm() {
         const tw = getPrestagedStepTower(step);
         if (tw) {
           const alreadyCached = Boolean(renderer.hasCachedTowerGroup?.(tw));
-          const c = renderer.prewarmTowerGroup?.(tw, false);
-          if (c?.group) warmedGroups.push(c.group);
+          renderer.prewarmTowerGroup?.(tw, false);
           builtNew = !alreadyCached;
         }
       } catch (_) {}
       step++;
       if (step > 5) {
         try {
-          if (warmedGroups.length > 0) {
-            renderer.compileTowerGroups?.(warmedGroups);
-            prestagedModeRuns.initialShadersCompiled = true;
-          }
+          // Shaders are already compiled via shared materials & Title idle — NEVER freeze 6 towers at once!
+          prestagedModeRuns.initialShadersCompiled = true;
           prestagedModeRuns.warmedPropVer = renderer?._archPropsVersion ?? 0;
           resetFrameClock();
         } catch (_) {}
         return;
       }
       if (builtNew) {
-        prestagedModeRuns.timerId = setTimeout(runNextSlice, 2);
+        prestagedModeRuns.timerId = setTimeout(runNextSlice, 48);
         return;
       }
     }
   };
 
-  prestagedModeRuns.timerId = setTimeout(runNextSlice, 2);
+  prestagedModeRuns.timerId = setTimeout(runNextSlice, 48);
 }
 
 renderer.onArchGlbsReady = () => {
@@ -4278,6 +4296,17 @@ btnPeekClue?.addEventListener('click', (e) => {
   e.stopPropagation();
   triggerPuzzlePeekClue();
 });
+btnResetPuzzle?.addEventListener('click', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  const pr = game.puzzleRoom;
+  if (pr && !pr.solved && typeof pr.reset === 'function') {
+    sound.unlock?.();
+    pr.reset();
+    sound.switchToggle?.();
+    input?.haptic?.(14);
+  }
+});
 
 // Audio Mute & Pause Controls
 const handleToggleMute = () => {
@@ -4322,6 +4351,7 @@ function triggerPauseToggle() {
   input.resetState?.();
   setInteractContextCached(false, '');
   hudCache.puzzleVisible = null;
+  hudCache.canResetPuzzle = null;
   hudCache.promptVisible = null;
   hudCache.promptKey = '';
   hudCache.interactPillVisible = null;
@@ -4474,8 +4504,10 @@ function prewarmStartupAssets() {
     });
     syncTitleShowcaseState();
 
-    renderer.prewarm?.();
     prewarmAllModeSpiresSync();
+    // Pre-stage remaining 5 mode spires lazily on Title idle after veil lifts
+    prestagedModeRuns.warmedPropVer = -1;
+    scheduleModeSpiresPrewarm();
     // Second V8 JIT pass on createDailyTower so Click #1 (`daily_tide`) runs TurboFan-optimized code
     if (typeof createDailyTower === 'function') {
       createDailyTower(prestagedModeRuns.dailyDate || new Date());

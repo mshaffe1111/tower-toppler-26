@@ -1204,6 +1204,7 @@ body {
 
 #app[data-game-mode="puzzle"] #stage-banner,
 #app[data-game-mode="aqueduct_sanctum"] #stage-banner,
+#app[data-game-mode="vault"] #stage-banner,
 #app[data-game-mode="core_descent"] #stage-banner {
   display: none !important;
 }
@@ -1271,7 +1272,8 @@ body {
   color: #e0f2fe;
 }
 
-#btn-peek-clue {
+#btn-peek-clue,
+#btn-reset-puzzle {
   position: relative;
   isolation: isolate;
   display: inline-flex;
@@ -1291,6 +1293,13 @@ body {
   letter-spacing: 0.1em;
   pointer-events: auto;
   cursor: pointer;
+  transition: filter 0.12s ease, transform 0.1s ease;
+}
+
+#btn-peek-clue:active,
+#btn-reset-puzzle:active {
+  transform: scale(0.95);
+  filter: brightness(1.18);
 }
 
 /* Stage Banner & Honor Toast */
@@ -1381,6 +1390,11 @@ body {
 /* Stack #trophy-toast cleanly above #stage-banner in Portrait so they NEVER overlap */
 #app:has(#crown-seals-pill:not(.hidden)) .trophy-toast {
   top: calc(108px + var(--safe-top));
+}
+
+#app:has(#watershed-flow-hud:not(.hidden)) .trophy-toast,
+#app:has(#core-descent-hud:not(.hidden)) .trophy-toast {
+  top: calc(146px + var(--safe-top));
 }
 
 #app:has(#trophy-toast:not(.hidden)) .stage-banner {
