@@ -138,10 +138,11 @@ body {
   overflow: hidden;
   background: #083350;
   touch-action: none;
-  z-index: 1;
 }
 
 #game-canvas {
+  position: relative;
+  z-index: 0;
   display: block;
   width: 100%;
   height: 100%;
@@ -1065,6 +1066,11 @@ body {
   to { transform: translateX(-50%) translateY(-3px); }
 }
 
+@keyframes promptFloatDocked {
+  from { transform: translateY(0); }
+  to { transform: translateY(-3px); }
+}
+
 /* Pelagian Ripple-Iris Mode Transition Veil (GPU-composited aquatic iris, zero input blocking!) */
 .pelagian-iris-veil {
   position: fixed;
@@ -1225,11 +1231,12 @@ body {
     top: auto !important;
     left: auto !important;
     right: calc(12px + var(--safe-right)) !important;
-    bottom: calc(98px + var(--safe-bottom)) !important;
+    bottom: calc(192px + var(--safe-bottom)) !important;
     transform: none !important;
     flex-direction: column;
     align-items: flex-end;
     max-width: min(172px, 42vw);
+    z-index: 20;
   }
   #puzzle-hud .puzzle-hud-copy {
     display: none;
@@ -1325,6 +1332,11 @@ body {
 @keyframes bannerIn {
   from { opacity: 0; transform: translate(-50%, -10px) scale(0.96); }
   to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+
+@keyframes bannerInDocked {
+  from { opacity: 0; transform: translateY(-10px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .banner-sub {
@@ -2070,6 +2082,9 @@ body[data-control-mode="tilt"] #btn-interact {
   top: calc(100% + 8px);
   right: 0;
   width: min(312px, calc(100vw - 24px));
+  max-height: calc(100dvh - 88px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   isolation: isolate;
   display: flex;
   flex-direction: column;
@@ -2519,12 +2534,20 @@ body[data-control-mode="tilt"] #btn-interact {
     display: none !important;
   }
 
-  #touch-controls .action-btn {
-    opacity: 0.18;
+  /* Hide on-screen touch controls completely on non-touch desktop until a real touch event occurs */
+  #app:not([data-touch-active="true"]) #touch-controls {
+    display: none !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+  }
+
+  #app[data-touch-active="true"] #touch-controls .action-btn {
+    opacity: 0.82;
   }
 
   #touch-controls .action-btn:hover {
-    opacity: 0.78;
+    opacity: 0.96;
   }
 
   .dock-crest-btn:hover {
@@ -3429,6 +3452,7 @@ body[data-control-mode="tilt"] #btn-interact {
 .sub-tabs-5 {
   display: flex;
   overflow-x: auto;
+  touch-action: pan-x;
   gap: 4px;
   clip-path: var(--poly-oct-sm);
   padding: 3px 4px;
@@ -4327,34 +4351,49 @@ body[data-control-mode="tilt"] #btn-interact {
    ============================================================================ */
 @media (max-width: 440px) and (orientation: portrait) {
   #hud {
-    padding: calc(7px + var(--safe-top)) calc(10px + var(--safe-right)) 10px calc(10px + var(--safe-left));
-    gap: 5px;
+    padding: calc(7px + var(--safe-top)) calc(8px + var(--safe-right)) 10px calc(8px + var(--safe-left));
+    gap: 6px;
   }
 
   .hud-label-ghost {
     display: none;
   }
 
+  .hud-label {
+    font-size: 8.5px;
+    letter-spacing: 0.09em;
+  }
+
   .hud-score {
-    font-size: clamp(14px, 3.7vw, 17px);
+    font-size: clamp(11px, 3.0vw, 13.5px);
+    letter-spacing: 0.02em;
   }
 
   .hud-score-ghost {
-    font-size: 12px;
+    font-size: 11px;
   }
 
   .life-pip {
-    width: 15px;
-    height: 17px;
+    width: 13px;
+    height: 15px;
+  }
+
+  .hud-time-cluster {
+    gap: 5px;
+  }
+
+  .hud-time-label {
+    font-size: 8.5px;
+    letter-spacing: 0.12em;
   }
 
   .hud-timer {
-    font-size: clamp(19px, 5vw, 23px);
+    font-size: clamp(17px, 4.4vw, 20px);
   }
 
   .timer-ring-wrap {
-    width: 38px;
-    height: 38px;
+    width: 34px;
+    height: 34px;
   }
 
   .hud-utility-row {
@@ -4375,17 +4414,33 @@ body[data-control-mode="tilt"] #btn-interact {
   }
 
   .hud-icon-btn {
-    min-width: 24px;
-    width: 24px;
-    height: 24px;
+    position: relative;
+    overflow: visible;
+    min-width: 28px;
+    width: 28px;
+    height: 28px;
     padding: 0;
   }
 
+  .hud-icon-btn::after {
+    content: '';
+    position: absolute;
+    inset: -7px;
+  }
+
   #btn-pause {
-    min-width: 26px;
-    min-height: 24px;
-    width: 26px;
-    height: 24px;
+    position: relative;
+    overflow: visible;
+    min-width: 30px;
+    min-height: 28px;
+    width: 30px;
+    height: 28px;
+  }
+
+  #btn-pause::after {
+    content: '';
+    position: absolute;
+    inset: -7px;
   }
 
   #btn-pause .ico-svg {
@@ -4395,6 +4450,14 @@ body[data-control-mode="tilt"] #btn-interact {
 
   #app:has(#crown-seals-pill:not(.hidden)) .stage-banner {
     top: calc(114px + var(--safe-top));
+  }
+
+  #app:has(#mission-status-pill:not(.hidden)) .stage-banner {
+    top: calc(114px + var(--safe-top));
+  }
+
+  #app:has(#crown-seals-pill:not(.hidden)):has(#mission-status-pill:not(.hidden)) .stage-banner {
+    top: calc(150px + var(--safe-top));
   }
 
   #app:has(#crown-seals-pill:not(.hidden)) .trophy-toast {
@@ -4441,12 +4504,12 @@ body[data-control-mode="tilt"] #btn-interact {
   }
 
   .gateway-mood-badge {
-    width: 44px;
-    height: 44px;
+    width: 36px;
+    height: 36px;
   }
 
   .hud-hero-row {
-    gap: 5px;
+    gap: 4px;
   }
 
   .hud-perk-strip {
@@ -4479,10 +4542,14 @@ body[data-control-mode="tilt"] #btn-interact {
     height: 66px;
   }
 
+  /* Lift action prompt cleanly above both the floating stick & bottom-right action cluster (zero overlap!) */
   .action-prompt {
-    bottom: calc(80px + var(--safe-bottom));
-    font-size: 10px;
-    padding: 6px 14px;
+    bottom: calc(192px + var(--safe-bottom));
+    font-size: 9.5px;
+    letter-spacing: 0.08em;
+    padding: 5px 13px;
+    min-height: 30px;
+    max-width: calc(100vw - 28px);
   }
 
   .crown-seals-pill {
@@ -4602,7 +4669,8 @@ body[data-control-mode="tilt"] #btn-interact {
     left: calc(14px + var(--safe-left));
     right: auto;
     transform: none;
-    max-width: min(296px, 30vw);
+    animation: bannerInDocked 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+    max-width: min(320px, 34vw);
     padding: 9px 18px;
     text-align: left;
   }
@@ -4630,16 +4698,18 @@ body[data-control-mode="tilt"] #btn-interact {
     right: calc(14px + var(--safe-right));
     left: auto;
     transform: none;
+    animation: bannerInDocked 0.3s cubic-bezier(0.22, 1, 0.36, 1);
     max-width: min(256px, 27vw);
   }
 
   .action-prompt {
     position: fixed;
-    left: auto;
-    right: calc(28px + var(--safe-right));
-    bottom: calc(96px + var(--safe-bottom));
-    transform: none;
-    max-width: min(248px, 26vw);
+    left: 50%;
+    right: auto;
+    bottom: calc(22px + var(--safe-bottom));
+    transform: translateX(-50%);
+    animation: promptFloat 0.9s ease-in-out infinite alternate;
+    max-width: min(360px, calc(100vw - 380px));
   }
 
   /* Widescreen Title Command Bar */

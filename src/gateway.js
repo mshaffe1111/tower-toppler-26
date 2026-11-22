@@ -449,6 +449,17 @@ const FACIAL_BONE_NAMES = [
   'BrowL', 'BrowR', 'Jaw', 'MouthSmile',
 ];
 
+// Hard bind-relative Euler clamp limits for all 6 coral ear-frill bones so frills fan
+// outward/slightly back and NEVER fold forward (+Z / +rx) across Gateway's face or eyes!
+const FRILL_BONE_CLAMPS = [
+  ['FrillL1',   -0.38, 0.24, 0.14, 0.16],
+  ['FrillL2',   -0.42, 0.24, 0.14, 0.16],
+  ['FrillBotL', -0.34, 0.22, 0.14, 0.16],
+  ['FrillR1',   -0.38, 0.24, 0.14, 0.16],
+  ['FrillR2',   -0.42, 0.24, 0.14, 0.16],
+  ['FrillBotR', -0.34, 0.22, 0.14, 0.16],
+];
+
 let _sharedGatewayGlbPromise = null;
 const _skinAtlasCache = new Map();
 
@@ -525,6 +536,9 @@ function loadSharedGatewayGlb() {
             if (obj.geometry) {
               obj.geometry.userData = obj.geometry.userData || {};
               obj.geometry.userData.shared = true;
+              if (obj.geometry.attributes?.uv && !obj.geometry.attributes?.uv1) {
+                obj.geometry.setAttribute('uv1', obj.geometry.attributes.uv);
+              }
             }
             if (obj.isMesh && obj.material) {
               const mat = Array.isArray(obj.material) ? obj.material[0] : obj.material;
@@ -958,6 +972,9 @@ export class GatewayRig {
     this._titleWaveTimer = 0;
     this._titleHopTimer = 0;
     this._titleHopDuration = 0.62;
+    this._prevTitleWaveFlag = false;
+    this._prevTitleHopFlag = false;
+    this._frillBind = {};
     this._wetShakeTimer = 0;
     this._somersaultTimer = 0;
 
@@ -1038,20 +1055,18 @@ export class GatewayRig {
 
   triggerTitleWave(duration = 1.65) {
     this._titleWaveTimer = Math.max(this._titleWaveTimer, Number(duration) || 1.65);
-    if (this.actions.IdleCurious) {
-      this._activeClipName = null;
-      this.playAction('IdleCurious', 0.12, 1.0);
+    if (this.actions.IdleCurious && this._activeClipName !== 'IdleCurious') {
+      this.playAction('IdleCurious', 0.14, 1.0);
     }
   }
 
   triggerTitleHop(duration = 0.62) {
     this._titleHopDuration = Math.max(0.35, Number(duration) || 0.62);
     this._titleHopTimer = this._titleHopDuration;
-    this._frillVel += 4.2;
-    this._scarfPitchVel += 5.5;
-    this._tailPitchVel += 6.0;
+    this._frillVel = THREE.MathUtils.clamp(this._frillVel + 1.8, -3.5, 3.5);
+    this._scarfPitchVel = THREE.MathUtils.clamp(this._scarfPitchVel + 4.5, -8.0, 8.0);
+    this._tailPitchVel = THREE.MathUtils.clamp(this._tailPitchVel + 5.0, -8.0, 8.0);
     if (this.actions.Celebrate) {
-      this._activeClipName = null;
       this.playAction('Celebrate', 0.08, 1.35);
     }
   }
@@ -1251,6 +1266,17 @@ export class GatewayRig {
         this._faceBind[fn] = {
           pos: bone.position.clone(),
           quat: bone.quaternion.clone(),
+        };
+      }
+    }
+    this._frillBind = {};
+    for (let i = 0; i < FRILL_BONE_CLAMPS.length; i++) {
+      const bn = FRILL_BONE_CLAMPS[i][0];
+      const bone = this.bones[bn];
+      if (bone) {
+        this._frillBind[bn] = {
+          quat: bone.quaternion.clone(),
+          invQuat: bone.quaternion.clone().invert(),
         };
       }
     }
@@ -1508,6 +1534,8 @@ export class GatewayRig {
       this.mainMat.normalScale.set(0.76, 0.76);
       this.mainMat.roughnessMap = this._baseGlbMaps.roughness || null;
       this.mainMat.metalnessMap = this._baseGlbMaps.metalness || null;
+      this.mainMat.aoMap = this._baseGlbMaps.ao || this._baseGlbMaps.roughness || null;
+      this.mainMat.aoMapIntensity = 0.78;
       this.mainMat.roughness = this._baseGlbMaps.roughness ? 1.0 : 0.34;
       this.mainMat.metalness = this._baseGlbMaps.metalness ? Math.max(0.85, metalBase) : metalBase;
       this.mainMat.emissiveMap = skinMaps ? skinMaps.emissive : this._baseGlbMaps.emissive || null;
@@ -1897,9 +1925,13 @@ export class GatewayRig {
     const pushingBox = THREE.MathUtils.clamp(Number(ps.pushingBox) || 0, 0, 1);
     this._pushBlend = damp(this._pushBlend, onGround ? pushingBox : 0, 14, safeDt);
 
-    // Handle Title Screen trigger hints from state object
-    if (ps.titleWave) this.triggerTitleWave(1.65);
-    if (ps.titleHop) this.triggerTitleHop(0.62);
+    // Handle Title Screen trigger hints on rising edge only (prevents resetting clips / exploding spring vel every frame!)
+    const wantTitleWave = Boolean(ps.titleWave);
+    const wantTitleHop = Boolean(ps.titleHop);
+    if (wantTitleWave && !this._prevTitleWaveFlag) this.triggerTitleWave(1.65);
+    if (wantTitleHop && !this._prevTitleHopFlag) this.triggerTitleHop(0.62);
+    this._prevTitleWaveFlag = wantTitleWave;
+    this._prevTitleHopFlag = wantTitleHop;
     if (ps.pointerGaze && typeof ps.pointerGaze === 'object') {
       this._pointerGazeX = THREE.MathUtils.clamp(Number(ps.pointerGaze.x) || 0, -1, 1);
       this._pointerGazeY = THREE.MathUtils.clamp(Number(ps.pointerGaze.y) || 0, -1, 1);
@@ -2284,13 +2316,15 @@ export class GatewayRig {
       }
     }
 
+    const legRxSign = this._glbApplied ? -1 : 1;
+
     if (landComp > 0.015) {
-      this._addBoneLocalEuler(b.ThighL, -0.52 * landComp, 0, -0.08 * landComp);
-      this._addBoneLocalEuler(b.ThighR, -0.52 * landComp, 0, 0.08 * landComp);
-      this._addBoneLocalEuler(b.ShinL, 0.88 * landComp, 0, 0);
-      this._addBoneLocalEuler(b.ShinR, 0.88 * landComp, 0, 0);
-      this._addBoneLocalEuler(b.AnkleL, -0.34 * landComp, 0, 0);
-      this._addBoneLocalEuler(b.AnkleR, -0.34 * landComp, 0, 0);
+      this._addBoneLocalEuler(b.ThighL, -0.52 * landComp * legRxSign, 0, -0.08 * landComp);
+      this._addBoneLocalEuler(b.ThighR, -0.52 * landComp * legRxSign, 0, 0.08 * landComp);
+      this._addBoneLocalEuler(b.ShinL, 0.88 * landComp * legRxSign, 0, 0);
+      this._addBoneLocalEuler(b.ShinR, 0.88 * landComp * legRxSign, 0, 0);
+      this._addBoneLocalEuler(b.AnkleL, -0.34 * landComp * legRxSign, 0, 0);
+      this._addBoneLocalEuler(b.AnkleR, -0.34 * landComp * legRxSign, 0, 0);
       this._addBoneLocalEuler(b.UpperArmL, 0.18 * landComp, 0, 0.28 * landComp);
       this._addBoneLocalEuler(b.UpperArmR, 0.18 * landComp, 0, -0.28 * landComp);
     }
@@ -2303,11 +2337,11 @@ export class GatewayRig {
       const leadAnkle = leadL ? b.AnkleL : b.AnkleR;
       const trailThigh = leadL ? b.ThighR : b.ThighL;
       const trailShin = leadL ? b.ShinR : b.ShinL;
-      this._addBoneLocalEuler(leadThigh, -0.42 * sb, 0, 0);
-      this._addBoneLocalEuler(leadShin, -0.14 * sb, 0, 0);
-      this._addBoneLocalEuler(leadAnkle, 0.24 * sb, 0, 0);
-      this._addBoneLocalEuler(trailThigh, 0.32 * sb, 0, 0);
-      this._addBoneLocalEuler(trailShin, 0.48 * sb, 0, 0);
+      this._addBoneLocalEuler(leadThigh, -0.42 * sb * legRxSign, 0, 0);
+      this._addBoneLocalEuler(leadShin, -0.14 * sb * legRxSign, 0, 0);
+      this._addBoneLocalEuler(leadAnkle, 0.24 * sb * legRxSign, 0, 0);
+      this._addBoneLocalEuler(trailThigh, 0.32 * sb * legRxSign, 0, 0);
+      this._addBoneLocalEuler(trailShin, 0.48 * sb * legRxSign, 0, 0);
       this._addBoneLocalEuler(b.UpperArmL, -0.26 * sb * this._skidDir, 0, 0.24 * sb);
       this._addBoneLocalEuler(b.UpperArmR, 0.26 * sb * this._skidDir, 0, -0.24 * sb);
     }
@@ -2322,23 +2356,23 @@ export class GatewayRig {
       const rLift = Math.max(0, -lCycle) * (0.45 + bobBoost);
 
       if (ascending) {
-        this._addBoneLocalEuler(b.ThighL, -0.58 * lLift, 0, 0);
-        this._addBoneLocalEuler(b.ShinL, 0.86 * lLift, 0, 0);
-        this._addBoneLocalEuler(b.AnkleL, -0.24 * lLift + lCycle * 0.16, 0, 0);
-        this._addBoneLocalEuler(b.FootL, -lCycle * 0.14, 0, 0);
-        this._addBoneLocalEuler(b.ThighR, -0.58 * rLift, 0, 0);
-        this._addBoneLocalEuler(b.ShinR, 0.86 * rLift, 0, 0);
-        this._addBoneLocalEuler(b.AnkleR, -0.24 * rLift - lCycle * 0.16, 0, 0);
-        this._addBoneLocalEuler(b.FootR, lCycle * 0.14, 0, 0);
+        this._addBoneLocalEuler(b.ThighL, -0.58 * lLift * legRxSign, 0, 0);
+        this._addBoneLocalEuler(b.ShinL, 0.86 * lLift * legRxSign, 0, 0);
+        this._addBoneLocalEuler(b.AnkleL, (-0.24 * lLift + lCycle * 0.16) * legRxSign, 0, 0);
+        this._addBoneLocalEuler(b.FootL, -lCycle * 0.14 * legRxSign, 0, 0);
+        this._addBoneLocalEuler(b.ThighR, -0.58 * rLift * legRxSign, 0, 0);
+        this._addBoneLocalEuler(b.ShinR, 0.86 * rLift * legRxSign, 0, 0);
+        this._addBoneLocalEuler(b.AnkleR, (-0.24 * rLift - lCycle * 0.16) * legRxSign, 0, 0);
+        this._addBoneLocalEuler(b.FootR, lCycle * 0.14 * legRxSign, 0, 0);
       } else {
-        this._addBoneLocalEuler(b.ThighL, -0.24 * lLift, 0, 0);
-        this._addBoneLocalEuler(b.ShinL, 0.52 * (0.35 + lLift), 0, 0);
-        this._addBoneLocalEuler(b.AnkleL, lCycle * 0.16 * slopeSign, 0, 0);
-        this._addBoneLocalEuler(b.FootL, -lCycle * 0.14 * slopeSign, 0, 0);
-        this._addBoneLocalEuler(b.ThighR, -0.24 * rLift, 0, 0);
-        this._addBoneLocalEuler(b.ShinR, 0.52 * (0.35 + rLift), 0, 0);
-        this._addBoneLocalEuler(b.AnkleR, -lCycle * 0.16 * slopeSign, 0, 0);
-        this._addBoneLocalEuler(b.FootR, lCycle * 0.14 * slopeSign, 0, 0);
+        this._addBoneLocalEuler(b.ThighL, -0.24 * lLift * legRxSign, 0, 0);
+        this._addBoneLocalEuler(b.ShinL, 0.52 * (0.35 + lLift) * legRxSign, 0, 0);
+        this._addBoneLocalEuler(b.AnkleL, lCycle * 0.16 * slopeSign * legRxSign, 0, 0);
+        this._addBoneLocalEuler(b.FootL, -lCycle * 0.14 * slopeSign * legRxSign, 0, 0);
+        this._addBoneLocalEuler(b.ThighR, -0.24 * rLift * legRxSign, 0, 0);
+        this._addBoneLocalEuler(b.ShinR, 0.52 * (0.35 + rLift) * legRxSign, 0, 0);
+        this._addBoneLocalEuler(b.AnkleR, -lCycle * 0.16 * slopeSign * legRxSign, 0, 0);
+        this._addBoneLocalEuler(b.FootR, lCycle * 0.14 * slopeSign * legRxSign, 0, 0);
       }
     }
 
@@ -2427,8 +2461,15 @@ export class GatewayRig {
     const eyeR = applyBindReset('EyeR');
     const eyeYawClamped = THREE.MathUtils.clamp(this._eyeLookYaw * 0.45, -0.28, 0.28);
     const eyePitchClamped = THREE.MathUtils.clamp(this._eyeLookPitch * 0.38, -0.22, 0.22);
-    this._addBoneLocalEuler(eyeL, eyePitchClamped, eyeYawClamped, 0);
-    this._addBoneLocalEuler(eyeR, eyePitchClamped, eyeYawClamped, 0);
+    if (this._glbApplied) {
+      // gateway.glb EyeL/EyeR bones have local +Y = pupil forward, +Z = up, +X = right-inverted:
+      // yaw rotates around local Z, pitch rotates around local -X so pupils truly track horizontally & vertically!
+      this._addBoneLocalEuler(eyeL, -eyePitchClamped, 0, eyeYawClamped);
+      this._addBoneLocalEuler(eyeR, -eyePitchClamped, 0, eyeYawClamped);
+    } else {
+      this._addBoneLocalEuler(eyeL, eyePitchClamped, eyeYawClamped, 0);
+      this._addBoneLocalEuler(eyeR, eyePitchClamped, eyeYawClamped, 0);
+    }
 
     const uLidL = applyBindReset('EyelidL');
     const uLidR = applyBindReset('EyelidR');
@@ -2464,31 +2505,57 @@ export class GatewayRig {
     }
 
     // 6. 2nd-Order Spring-Damped 6-Frill Coral Ear-Frill Physics (`FrillL1/L2/FrillBotL`, `FrillR1/R2/FrillBotR`)!
-    const extFlare = Number(ps.frillFlare) || 0;
-    const targetFrill = Math.max(
-      extFlare,
-      isGliding
-        ? 0.58
-        : !onGround
-          ? 0.14 + THREE.MathUtils.clamp(-vy * 0.018, 0, 0.20)
-          : muzzleFlash > 0.01 || whipTimer > 0.01
-            ? 0.42
-            : this._skidBlend * 0.28 + fs.frill * 0.55
+    // Substep-stabilized spring + strict bind-relative clamp guarantees frills fan outward/slightly back
+    // and NEVER fold forward (+Z) across Gateway's face/eyes in ANY animation or FPS step!
+    const extFlare = THREE.MathUtils.clamp(Number(ps.frillFlare) || 0, -0.35, 0.55);
+    const targetFrill = THREE.MathUtils.clamp(
+      Math.max(
+        extFlare * 0.45,
+        isGliding
+          ? 0.24
+          : !onGround
+            ? 0.08 + THREE.MathUtils.clamp(-vy * 0.012, 0, 0.14)
+            : muzzleFlash > 0.01 || whipTimer > 0.01
+              ? 0.22
+              : this._skidBlend * 0.18 + fs.frill * 0.28
+      ),
+      -0.28,
+      0.32
     );
-    const frillAcc = (targetFrill - this._frillFlare) * 110.0 - this._frillVel * 11.5;
-    this._frillVel += frillAcc * safeDt;
-    this._frillFlare = THREE.MathUtils.clamp(this._frillFlare + this._frillVel * safeDt, -0.45, 0.85);
-    const frillAero =
-      (isGliding ? Math.sin(time * 24) * 0.065 : !onGround ? Math.sin(time * 18) * 0.030 : Math.sin(time * 3.8) * 0.022) +
-      this._frillFlare -
-      landComp * 0.36;
+    const springDt = Math.min(safeDt, 0.025);
+    const frillAcc = (targetFrill - this._frillFlare) * 95.0 - this._frillVel * 13.5;
+    this._frillVel = THREE.MathUtils.clamp(this._frillVel + frillAcc * springDt, -3.5, 3.5);
+    this._frillFlare = THREE.MathUtils.clamp(this._frillFlare + this._frillVel * springDt, -0.28, 0.34);
+    const frillAero = THREE.MathUtils.clamp(
+      (isGliding ? Math.sin(time * 24) * 0.048 : !onGround ? Math.sin(time * 18) * 0.024 : Math.sin(time * 3.8) * 0.018) +
+        this._frillFlare -
+        landComp * 0.22,
+      -0.30,
+      0.32
+    );
     if (Math.abs(frillAero) > 0.004) {
-      this._addBoneLocalEuler(b.FrillL1, frillAero * 0.52, 0, 0);
-      this._addBoneLocalEuler(b.FrillL2, frillAero * 0.74, 0, 0);
-      this._addBoneLocalEuler(b.FrillBotL, frillAero * 0.44, 0, 0);
-      this._addBoneLocalEuler(b.FrillR1, frillAero * 0.52, 0, 0);
-      this._addBoneLocalEuler(b.FrillR2, frillAero * 0.74, 0, 0);
-      this._addBoneLocalEuler(b.FrillBotR, frillAero * 0.44, 0, 0);
+      this._addBoneLocalEuler(b.FrillL1, frillAero * 0.34, 0, 0);
+      this._addBoneLocalEuler(b.FrillL2, frillAero * 0.42, 0, 0);
+      this._addBoneLocalEuler(b.FrillBotL, frillAero * 0.36, 0, 0);
+      this._addBoneLocalEuler(b.FrillR1, frillAero * 0.34, 0, 0);
+      this._addBoneLocalEuler(b.FrillR2, frillAero * 0.42, 0, 0);
+      this._addBoneLocalEuler(b.FrillBotR, frillAero * 0.36, 0, 0);
+    }
+
+    // Strict bind-relative clamp on ALL 6 Frill* bones after mixer + spring pass!
+    for (let fi = 0; fi < FRILL_BONE_CLAMPS.length; fi++) {
+      const [bn, minRx, maxRx, maxRy, maxRz] = FRILL_BONE_CLAMPS[fi];
+      const bone = b[bn];
+      const bind = this._frillBind?.[bn];
+      if (!bone || !bind) continue;
+      this._qScratchA.multiplyQuaternions(bind.invQuat, bone.quaternion).normalize();
+      this._eScratch.setFromQuaternion(this._qScratchA, 'XYZ');
+      const cx = THREE.MathUtils.clamp(this._eScratch.x, minRx, maxRx);
+      const cy = THREE.MathUtils.clamp(this._eScratch.y, -maxRy, maxRy);
+      const cz = THREE.MathUtils.clamp(this._eScratch.z, -maxRz, maxRz);
+      this._eScratch.set(cx, cy, cz, 'XYZ');
+      this._qScratchB.setFromEuler(this._eScratch);
+      bone.quaternion.multiplyQuaternions(bind.quat, this._qScratchB);
     }
 
     // 7. 2nd-Order Spring-Damped 4-Bone Flowing Sea-Silk Scarf Physics (`ScarfL1/L2`, `ScarfR1/R2`)!

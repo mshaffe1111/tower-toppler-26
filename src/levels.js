@@ -533,13 +533,13 @@ export function isCanonicalStairStep(ledges, elevators = [], col, floor, dir) {
 }
 
 const ARCHETYPE_ENEMY_SPEEDS = Object.freeze({
-  snap_crab: 0.88,
+  snap_crab: 0.62,
   gulp_hopper: 0.0,
-  volt_eel: 1.15,
-  rail_skater: 2.35,
+  volt_eel: 0.82,
+  rail_skater: 1.65,
   barnacle_mortar: 0.0,
-  vent_stalker: 0.78,
-  siphon_warden: 2.05
+  vent_stalker: 0.56,
+  siphon_warden: 1.40
 });
 
 function normalizeEnemy(en, idx = 0) {
@@ -552,9 +552,11 @@ function normalizeEnemy(en, idx = 0) {
       : canonical === 'siphon_warden'
       ? 0.55
       : 0.22;
+  const rawWardenSpd = Number(en.speed ?? ARCHETYPE_ENEMY_SPEEDS.siphon_warden);
+  const scaledWardenSpd = rawWardenSpd > 1.65 ? rawWardenSpd * 0.68 : rawWardenSpd;
   const resolvedSpeed =
     canonical === 'siphon_warden'
-      ? Math.max(1.85, Math.min(2.35, Number(en.speed ?? ARCHETYPE_ENEMY_SPEEDS.siphon_warden)))
+      ? Math.max(1.25, Math.min(1.55, Number(scaledWardenSpd.toFixed(2))))
       : ARCHETYPE_ENEMY_SPEEDS[canonical];
   return {
     type: canonical,
@@ -580,7 +582,7 @@ function normalizeEnemy(en, idx = 0) {
   };
 }
 
-function computeLedgeSpanAt(ledges, col, floor) {
+function computeLedgeSpanAt(ledges, col, floor, excludeHazards = false) {
   let walkMask = 0;
   let blockMask = 0;
   for (let i = 0; i < ledges.length; i++) {
@@ -589,7 +591,11 @@ function computeLedgeSpanAt(ledges, col, floor) {
     if (t === 'box' || t === 'pillar' || t === 'laserGate') {
       const hit = l.h ? l.floor < floor + 1.2 && l.floor + l.h > floor + 0.15 : Math.abs(l.floor - floor) < 0.5;
       if (hit) blockMask |= 1 << wrapCol(l.col);
-    } else if (t !== 'phaseBlock' && Math.abs(l.floor - floor) < 0.25) {
+    } else if (
+      t !== 'phaseBlock' &&
+      (!excludeHazards || (t !== 'steamVent' && t !== 'piston' && t !== 'crumble')) &&
+      Math.abs(l.floor - floor) < 0.25
+    ) {
       walkMask |= 1 << wrapCol(l.col);
     }
   }
@@ -697,7 +703,7 @@ function sanitizeEnemySpawns(enemies, doors, elevators, spawn, ledges, totalFloo
       const fRound = Math.round(en.floor);
       const minSafeDist = 1.65;
       const rel = relevantForFloor(fRound);
-      const spHere = computeLedgeSpanAt(ledges, en.col, fRound);
+      const spHere = computeLedgeSpanAt(ledges, en.col, fRound, true);
       const curDist = rel.reduce((m, a) => Math.min(m, Math.abs(floatColDist(en.col, a.col))), Infinity);
 
       if (spHere.onRealTile && (en.type !== 'rail_skater' || spHere.length >= 2) && curDist >= minSafeDist) {
@@ -706,7 +712,7 @@ function sanitizeEnemySpawns(enemies, doors, elevators, spawn, ledges, totalFloo
         return en;
       }
 
-      // Search real walkable tiles on fRound first, then nearby floors if needed, NEVER placing in mid-air!
+      // Search real non-hazard walkable tiles on fRound first (never steamVent/piston/crumble, never narrow tunnel exit balconies!)
       let bestPick = null;
       for (const df of [0, 1, -1, 2, -2, 3, -3]) {
         const tf = fRound + df;
@@ -715,10 +721,12 @@ function sanitizeEnemySpawns(enemies, doors, elevators, spawn, ledges, totalFloo
         for (let step = 0; step < COLS; step++) {
           const tileCol = wrapCol(Math.floor(wrapFloatCol(en.col)) + step);
           const cand = tileCol + 0.5;
-          const sp = computeLedgeSpanAt(ledges, cand, tf);
+          const sp = computeLedgeSpanAt(ledges, cand, tf, true);
           if (!sp.onRealTile) continue;
           if ((en.type === 'rail_skater' || en.type === 'snap_crab') && sp.length < 2 && df !== 0) continue;
           const dMin = relTf.reduce((m, a) => Math.min(m, Math.abs(floatColDist(cand, a.col))), Infinity);
+          // When shifting off authored floor, avoid camping cramped tunnel/door exit balconies (dMin < 2.2)
+          if (df !== 0 && dMin < 2.2 && sp.length <= 4) continue;
           if (!bestPick || dMin > bestPick.minDist + 1e-6) {
             bestPick = { col: cand, floor: tf, minDist: dMin };
             if (df === 0 && dMin >= 2.2) break;
@@ -748,6 +756,20 @@ function sanitizeEnemySpawns(enemies, doors, elevators, spawn, ledges, totalFloo
       return true;
     };
 
+    // Keep flying/vertical enemies (volt_eel, vent_stalker) anchored near real walkable decks rather than empty off-route void!
+    const walkableLedges = ledges.filter(
+      (l) => !isBarrierLedgeType(l.type) && l.type !== 'phaseBlock'
+    );
+    const isNearRealDeck = (testCol, testFloor) => {
+      for (let i = 0; i < walkableLedges.length; i++) {
+        const wl = walkableLedges[i];
+        if (Math.abs(wl.floor - testFloor) <= 2.4 && Math.abs(floatColDist(testCol, wrapCol(wl.col) + 0.5)) <= 2.6) {
+          return true;
+        }
+      }
+      return false;
+    };
+
     const bestColForFloor = (testFloor) => {
       const rel = relevantForFloor(testFloor);
       const curClear = isClearOfBarriers(en.col, testFloor);
@@ -755,21 +777,26 @@ function sanitizeEnemySpawns(enemies, doors, elevators, spawn, ledges, totalFloo
       const curMin = curClear
         ? rel.reduce((m, a) => Math.min(m, Math.abs(colDist(en.col, a.col))), Infinity)
         : -1;
-      if (curClear && curMin >= 3.2) return { col: en.col, minDist: curMin };
+      if (curClear && curMin >= 2.2) return { col: en.col, minDist: curMin };
 
-      let bestCol = en.col;
-      let bestMin = curMin;
+      let bestNear = null;
+      let bestAny = { col: en.col, minDist: curMin };
       for (let step = 0; step < 40; step++) {
-        const cand = (((en.col + 4 + step * 0.5) % COLS) + COLS) % COLS;
+        const delta = (step % 2 === 0 ? 1 : -1) * Math.ceil((step + 1) / 2) * 0.5;
+        const cand = (((en.col + delta) % COLS) + COLS) % COLS;
         if (!isClearOfBarriers(cand, testFloor)) continue;
         const dMin = rel.length === 0 ? Infinity : rel.reduce((m, a) => Math.min(m, Math.abs(colDist(cand, a.col))), Infinity);
-        if (dMin > bestMin + 1e-6) {
-          bestMin = dMin;
-          bestCol = cand;
-          if (bestMin === Infinity) break;
+        if (dMin > bestAny.minDist + 1e-6) {
+          bestAny = { col: cand, minDist: dMin };
+        }
+        if (dMin >= 2.0 && isNearRealDeck(cand, testFloor)) {
+          if (!bestNear || dMin > bestNear.minDist + 1e-6) {
+            bestNear = { col: cand, minDist: dMin };
+            if (dMin >= 3.2) break;
+          }
         }
       }
-      return { col: bestCol, minDist: bestMin };
+      return bestNear || bestAny;
     };
 
     let pick = bestColForFloor(en.floor);
@@ -845,12 +872,13 @@ export function deriveRuneDoorClue({
   const df = Math.round(Number(floor) || 0);
 
   if (type === 'lights') {
-    const n = d < 0.45 ? 3 : 4;
+    // 1:1 synced with `genLights()` in `src/puzzleRoom.js` (always crisp 3x3 mosaic, 3..5 presses, lit 3..6)
+    const n = 3;
     const N = n * n;
-    const k = Math.max(2, Math.min(N - 2, 2 + Math.round(d * 5)));
+    const k = Math.max(3, Math.min(5, 3 + Math.round(d * 2)));
     let target = new Array(N).fill(0);
     let presses = [];
-    for (let attempt = 0; attempt < 200; attempt++) {
+    for (let attempt = 0; attempt < 240; attempt++) {
       target = new Array(N).fill(0);
       for (let y = 0; y < n; y++) {
         for (let x = 0; x < Math.ceil(n / 2); x++) {
@@ -860,7 +888,7 @@ export function deriveRuneDoorClue({
         }
       }
       const litCount = target.reduce((a, b) => a + b, 0);
-      if (litCount < Math.ceil(N * 0.3) || litCount > Math.floor(N * 0.65)) continue;
+      if (litCount < 3 || litCount > 6) continue;
       const cells = shuffleWithRng(rng, [...Array(N).keys()]);
       presses = cells.slice(0, k).sort((a, b) => a - b);
       const start = target.slice();
@@ -887,10 +915,11 @@ export function deriveRuneDoorClue({
   }
 
   if (type === 'bells') {
-    const count = Math.max(3, Math.min(5, 3 + Math.round(d * 2.2)));
+    // 1:1 synced with `genBells()` in `src/puzzleRoom.js` (3..5 bells, extra note only if d > 0.78 && order.length < 5)
+    const count = Math.max(3, Math.min(5, 3 + Math.round(d * 2)));
     const bellColors = shuffleWithRng(rng, [0, 1, 2, 3, 4]).slice(0, count);
     const order = shuffleWithRng(rng, [...Array(count).keys()]);
-    if (d > 0.65) {
+    if (d > 0.78 && order.length < 5) {
       let extra;
       do extra = Math.floor(rng() * count);
       while (extra === order[order.length - 1]);
@@ -1656,7 +1685,8 @@ export function createCampaignTowers() {
       { id: 's2_crown', col: 2, floor: 17, isExit: true }
     ],
     switches: [
-      { id: 's2_flood1', col: 6, floor: 2, group: 'flood', mode: 'floodValve', targetWaterFloor: 2.35 },
+      // Offset s2_flood1 cleanly to col 8 (away from mandatory Crab at 5.5) and cap water below f=2 deck (1.55) so Gateway never drowns!
+      { id: 's2_flood1', col: 8, floor: 2, group: 'flood', mode: 'floodValve', targetWaterFloor: 1.55 },
       { id: 's2_pipe1', col: 14, floor: 3, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
       { id: 's2_pipe2', col: 8, floor: 5, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
       { id: 's2_seal2_sluice', col: 16, floor: 17, group: 'seal_2', mode: 'sluiceSeal', sealId: 'seal_2', requiresLockKeeper: true }
@@ -1850,9 +1880,9 @@ export function createCampaignTowers() {
   tile(s4Ledges, 17, 14, 'ice');
   tile(s4Ledges, 0, 14, 'pillar', { h: 3 });            // Bulkhead forces +10 Upward Cross-Tower Tunnel (19,14 -> 9,15)!
   span(s4Ledges, 15, 8, 3, 'solid');                    // Opposite side [8,9,10] at f=15 (3F clear above f=12 -> ZERO bypass!)
-  // Counterweight Lift s4_lift2 at col 7 (f=15..19) -> Act II Boss Crown Arena [8..14] at f=19!
-  span(s4Ledges, 19, 8, 7, 'solid');                    // [8,9,10,11,12,13,14] at f=19
-  span(s4Ledges, 20, 15, 2, 'solid');                   // Bonus perch [15,16] at f=20
+  // Counterweight Lift s4_lift2 at col 7 (f=15..19) -> Widened 9-col Act II Boss Crown Arena [8..16] at f=19!
+  span(s4Ledges, 19, 8, 9, 'solid');                    // [8,9,10,11,12,13,14,15,16] at f=19
+  span(s4Ledges, 20, 17, 2, 'solid');                   // Bonus perch [17,18] at f=20
 
   const t4 = finalizeTower({
     id: 4,
@@ -1892,7 +1922,7 @@ export function createCampaignTowers() {
       { id: 's4_t1b', col: 9, floor: 15, targetId: 's4_t1a', tunnelStyle: 'stone' },
       { id: 's4_sanctum', col: 18, floor: 10, isRune: true, puzzleType: 'beam', puzzleSeed: 44044, puzzleDifficulty: 0.42, sealId: 'seal_2' },
       { id: 's4_vault', col: 0, floor: 10, isVault: true },
-      { id: 's4_crown', col: 13, floor: 19, isExit: true }
+      { id: 's4_crown', col: 15, floor: 19, isExit: true }
     ],
     switches: [
       { id: 's4_pipe1', col: 14, floor: 4, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
@@ -1929,10 +1959,10 @@ export function createCampaignTowers() {
       { id: 's4_g4', col: 18, floor: 14, type: 'gear' },
       { id: 's4_g5', col: 11, floor: 19, type: 'gear' },
       { id: 's4_log', col: 19, floor: 10, type: 'relic', relicId: 'relic_t4' },
-      { id: 's4_seed', col: 15, floor: 20, type: 'starCore' },
+      { id: 's4_seed', col: 17, floor: 20, type: 'starCore' },
       { id: 's4_cr1', col: 15, floor: 4, type: 'critter_pod', critterId: 'critter_s4_1', species: 'Alpine Newt', biome: 'alpine_lake' },
       { id: 's4_cr2', col: 1, floor: 10, type: 'critter_pod', critterId: 'critter_s4_2', species: 'Alpine Newt', biome: 'alpine_lake' },
-      { id: 's4_cr3', col: 16, floor: 20, type: 'critter_pod', critterId: 'critter_s4_3', species: 'Alpine Newt', biome: 'alpine_lake' }
+      { id: 's4_cr3', col: 18, floor: 20, type: 'critter_pod', critterId: 'critter_s4_3', species: 'Alpine Newt', biome: 'alpine_lake' }
     ],
     enemies: [
       { type: 'snap_crab', col: 6.5, floor: 3, dir: 1, speed: 1.55 },
@@ -2121,7 +2151,8 @@ export function createCampaignTowers() {
     ],
     switches: [
       { id: 's6_pipe1', col: 6, floor: 3, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
-      { id: 's6_drain1', col: 8, floor: 3, group: 'drain', mode: 'drainValve' },
+      // Offset s6_drain1 to col 9 (away from mandatory Crab at 7.0) so whipping Drain 1 never punts the springboard crab!
+      { id: 's6_drain1', col: 9, floor: 3, group: 'drain', mode: 'drainValve' },
       { id: 's6_pipe2', col: 9, floor: 6, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
       { id: 's6_drain2', col: 16, floor: 10, group: 'drain', mode: 'drainValve' },
       { id: 's6_drain3', col: 13, floor: 15, group: 'drain', mode: 'drainValve' },
@@ -2156,7 +2187,7 @@ export function createCampaignTowers() {
       { id: 's6_cr3', col: 1, floor: 21, type: 'critter_pod', critterId: 'critter_s6_3', species: 'Bayou Axolotl', biome: 'mist_bayou' }
     ],
     enemies: [
-      { type: 'snap_crab', col: 7.5, floor: 3, dir: 1, speed: 1.6 },
+      { type: 'snap_crab', col: 7.0, floor: 3, dir: 1, speed: 1.6 },
       { type: 'barnacle_mortar', col: 14.5, floor: 10, dir: -1, firePeriod: 3.1 },
       { type: 'volt_eel', col: 4.5, floor: 12.4, dir: 1, speed: 1.9, amp: 0.35 },
       { type: 'gulp_hopper', col: 14.0, floor: 15, dir: -1, speed: 1.85 },
@@ -2173,11 +2204,13 @@ export function createCampaignTowers() {
   const s7Ledges = [];
   span(s7Ledges, 0, 18, 4, 'solid');
   stairFlight(s7Ledges, 0, 2, 2, 1, 2, 'solid');        // 2F rise -> [4,5] at f=2
-  // Stacked Vertical Lagoon Geyser Slingshot Chain (f=3 -> f=6 -> f=9!)
+  // Stacked Vertical Lagoon Geyser Slingshot Chain (f=3 -> f=6 -> f=9) + scenic mid-tier overlook perches!
   span(s7Ledges, 3, 6, 3, 'solid');                     // [6,7,8] at f=3 (Pipe-Valve 1 at 6, Geyser 1 at 8)
   tile(s7Ledges, 8, 3, 'steamVent', { phasePeriod: 3.0, phaseOffset: 0.0 });
+  span(s7Ledges, 4, 4, 2, 'solid');                     // Inhabited side sightline perch [4,5] at f=4 (+2F clear above f=2!)
   span(s7Ledges, 6, 9, 4, 'solid');                     // [9,10,11,12] at f=6 (Snap-Crab 10, Geyser 2 at 12)
   tile(s7Ledges, 12, 6, 'steamVent', { phasePeriod: 3.0, phaseOffset: 0.45 });
+  span(s7Ledges, 7, 14, 2, 'solid');                    // Scenic coral overlook perch [14,15] at f=7 (+2F clear below f=9!)
   span(s7Ledges, 9, 13, 4, 'solid');                    // [13,14,15,16] at f=9 (Hydro-Magnet Crate 14, Pipe-Valve 2 at 15)
   tile(s7Ledges, 14, 9, 'box', { powerUp: 'hydro_magnet' });
   span(s7Ledges, 9, 17, 2, 'piston', { phasePeriod: 3.2, phaseOffset: 0.0 }); // Timed Coral Pistons [17,18] at f=9!
@@ -2420,9 +2453,9 @@ export function createCampaignTowers() {
   span(s9Ledges, 18, 17, 3, 'solid');                   // [17,18,19] at f=18 (ice at 18, Turbo Crate at 17!)
   tile(s9Ledges, 18, 18, 'ice');
   tile(s9Ledges, 17, 18, 'box', { powerUp: 'turbo_current' });
-  // Glacier Gecko Tier #2 at col 0 (f=18..22) -> Crown Aurora Arena [1..7] at f=22!
-  span(s9Ledges, 22, 1, 7, 'solid');                    // [1,2,3,4,5,6,7] at f=22
-  span(s9Ledges, 23, 8, 2, 'solid');                    // Bonus perch [8,9] at f=23
+  // Glacier Gecko Tier #2 at col 0 (f=18..22) -> Widened 9-col Crown Aurora Arena [1..9] at f=22!
+  span(s9Ledges, 22, 1, 9, 'solid');                    // [1,2,3,4,5,6,7,8,9] at f=22
+  span(s9Ledges, 23, 10, 2, 'solid');                   // Bonus perch [10,11] at f=23
 
   const t9 = finalizeTower({
     id: 9,
@@ -2463,7 +2496,7 @@ export function createCampaignTowers() {
       { id: 's9_t1a', col: 0, floor: 13, targetId: 's9_t1b', tunnelStyle: 'stone' },
       { id: 's9_t1b', col: 10, floor: 13, targetId: 's9_t1a', tunnelStyle: 'stone' },
       { id: 's9_sanctum', col: 19, floor: 13, isRune: true, puzzleType: 'beam', puzzleSeed: 99099, puzzleDifficulty: 0.62, sealId: 'seal_2' },
-      { id: 's9_crown', col: 6, floor: 22, isExit: true }
+      { id: 's9_crown', col: 8, floor: 22, isExit: true }
     ],
     switches: [
       { id: 's9_pipe1', col: 10, floor: 4, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
@@ -2500,10 +2533,10 @@ export function createCampaignTowers() {
       { id: 's9_g4', col: 19, floor: 18, type: 'gear' },
       { id: 's9_g5', col: 4, floor: 22, type: 'gear' },
       { id: 's9_log', col: 18, floor: 13, type: 'relic', relicId: 'relic_t9' },
-      { id: 's9_seed', col: 8, floor: 23, type: 'starCore' },
+      { id: 's9_seed', col: 10, floor: 23, type: 'starCore' },
       { id: 's9_cr1', col: 16, floor: 8, type: 'critter_pod', critterId: 'critter_s9_1', species: 'Polar Puffin', biome: 'storm_ocean' },
       { id: 's9_cr2', col: 18, floor: 18, type: 'critter_pod', critterId: 'critter_s9_2', species: 'Polar Puffin', biome: 'storm_ocean' },
-      { id: 's9_cr3', col: 9, floor: 23, type: 'critter_pod', critterId: 'critter_s9_3', species: 'Polar Puffin', biome: 'storm_ocean' }
+      { id: 's9_cr3', col: 11, floor: 23, type: 'critter_pod', critterId: 'critter_s9_3', species: 'Polar Puffin', biome: 'storm_ocean' }
     ],
     enemies: [
       { type: 'snap_crab', col: 15.5, floor: 8, dir: 1, speed: 1.9 },
@@ -2522,10 +2555,10 @@ export function createCampaignTowers() {
   const s10Ledges = [];
   span(s10Ledges, 0, 18, 4, 'solid');
   stairFlight(s10Ledges, 0, 2, 2, 1, 2, 'solid');        // Act 1 Launchway -> [4,5] at f=2
-  span(s10Ledges, 3, 7, 1, 'crumble');                  // Gale jump over col 6 -> crumble [7] at f=3
-  span(s10Ledges, 4, 8, 6, 'solid');                    // [8,9,10,11,12,13] at f=4 (Valve 1 at 8, Drain 1 at 10, Crab 11.5)
-  span(s10Ledges, 7, 10, 4, 'solid');                   // High Valve Loft [10,11,12,13] at f=7 (open [10,11,13] above Crab 11.5!)
-  tile(s10Ledges, 12, 7, 'box', { powerUp: 'turbo_current' }); // Supply Crate #1: Turbo Current!
+  span(s10Ledges, 3, 7, 2, 'solid');                     // Fair 2-col solid gale landing stone [7,8] at f=3 (clearable in headwind!)
+  span(s10Ledges, 4, 9, 5, 'solid');                     // [9,10,11,12,13] at f=4 (Valve 1 at 9, Drain 1 at 10, Crab 12.0)
+  span(s10Ledges, 7, 10, 4, 'solid');                    // High Valve Loft [10,11,12,13] at f=7 (open [11,12,13] directly above Crab 12.0!)
+  tile(s10Ledges, 10, 7, 'box', { powerUp: 'turbo_current' }); // Supply Crate #1: Turbo Current (off crab col 12!)
   // Pipe-powered Lift s10_lift1 at col 14 (f=4..10) -> Act 2 Citadel Plaza [15..0] at f=10
   span(s10Ledges, 10, 15, 6, 'solid');                  // [15,16,17,18,19,0] at f=10 (Grand Tide-Locks 18, Drain 2 at 19)
   // Mid-Spire Siphon Barrier (Seal 2) -> Sanctum-Powered Lift s10_lift_mid at col 3 (f=11..14)!
@@ -2598,7 +2631,8 @@ export function createCampaignTowers() {
       { id: 's10_crown', col: 6, floor: 25, isExit: true }
     ],
     switches: [
-      { id: 's10_pipe1', col: 8, floor: 4, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      { id: 's10_pipe1', col: 9, floor: 4, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
+      // Offset s10_drain1 at col 10 (2.0 cols away from mandatory Crab at 12.0!)
       { id: 's10_drain1', col: 10, floor: 4, group: 'drain', mode: 'drainValve' },
       { id: 's10_pipe2', col: 13, floor: 7, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve', sealId: 'seal_1' },
       { id: 's10_drain2', col: 19, floor: 10, group: 'drain', mode: 'drainValve' },
@@ -2642,7 +2676,7 @@ export function createCampaignTowers() {
       { id: 's10_cr3', col: 9, floor: 26, type: 'critter_pod', critterId: 'critter_s10_3', species: 'Polar Puffin', biome: 'storm_ocean' }
     ],
     enemies: [
-      { type: 'snap_crab', col: 11.5, floor: 4, dir: 1, speed: 1.85 },
+      { type: 'snap_crab', col: 12.0, floor: 4, dir: 1, speed: 1.85 },
       { type: 'gulp_hopper', col: 16.5, floor: 10, dir: -1, speed: 1.95 },
       { type: 'volt_eel', col: 8.5, floor: 19.6, dir: 1, speed: 2.1, amp: 0.36 },
       { type: 'barnacle_mortar', col: 13.5, floor: 21, dir: -1, firePeriod: 2.85 },
@@ -4979,7 +5013,7 @@ export function createSanctumTowers(count = 15) {
       id: 3, key: 'sanctum_3', theme: 'canyon_river', floors: 14,
       name: 'REDWOOD FLOODGATE BASIN', subtitle: 'SANCTUM TRIAL 03 • FLOODGATE SLUICE',
       ledges: L,
-      switches: [{ id: 'st3_flood', col: 6, floor: 2, group: 'flood', mode: 'floodValve', targetWaterFloor: 2.35 }],
+      switches: [{ id: 'st3_flood', col: 6, floor: 2, group: 'flood', mode: 'floodValve', targetWaterFloor: 1.55 }],
       grappleRings: [{ id: 'st3_ring1', col: 10.5, floor: 4.1 }],
       doors: [
         { id: 'st3_rune', col: 2, floor: 7, isRune: true, puzzleType: 'bells', puzzleSeed: 70303, puzzleDifficulty: 0.3 },
@@ -5073,9 +5107,9 @@ export function createSanctumTowers(count = 15) {
       ledges: L,
       elevators: [{ id: 'st6_liftA', col: 16, minFloor: 3, maxFloor: 8, startFloor: 3, speed: 1.9, pipeGroup: 'pipeA', powered: false }],
       switches: [
-        { id: 'st6_flood1', col: 6, floor: 2, group: 'flood', mode: 'floodValve', targetWaterFloor: 2.3 },
+        { id: 'st6_flood1', col: 6, floor: 2, group: 'flood', mode: 'floodValve', targetWaterFloor: 1.55 },
         { id: 'st6_pipeA', col: 14, floor: 3, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve' },
-        { id: 'st6_flood2', col: 19, floor: 8, group: 'flood', mode: 'floodValve', targetWaterFloor: 8.3 }
+        { id: 'st6_flood2', col: 19, floor: 8, group: 'flood', mode: 'floodValve', targetWaterFloor: 7.55 }
       ],
       doors: [
         { id: 'st6_vault', col: 18, floor: 8, isVault: true },
@@ -5390,7 +5424,7 @@ export function createSanctumTowers(count = 15) {
       wallStrips: [{ id: 'st15_ws1', col: 11, minFloor: 14, maxFloor: 18 }],
       grappleRings: [{ id: 'st15_r1', col: 9.0, floor: 4.1 }],
       switches: [
-        { id: 'st15_flood', col: 6, floor: 2, group: 'flood', mode: 'floodValve', targetWaterFloor: 2.35 },
+        { id: 'st15_flood', col: 6, floor: 2, group: 'flood', mode: 'floodValve', targetWaterFloor: 1.55 },
         { id: 'st15_pA', col: 13, floor: 3, group: 'pipeA', pipeGroup: 'pipeA', mode: 'pipeValve' },
         { id: 'st15_red', col: 18, floor: 8, group: 'red', mode: 'toggle' },
         { id: 'st15_pB', col: 4, floor: 9, group: 'pipeB', pipeGroup: 'pipeB', mode: 'pipeValve' }

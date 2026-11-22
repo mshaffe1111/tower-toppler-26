@@ -370,10 +370,10 @@ const CTRL_SHORT_CODES = {
 };
 
 const CTRL_GUIDE_TEXT = {
-  joystick: 'Floating Left Stick: Walk/Run • Right Radial Arc: Hold Jump, Hydro-Pulse & Tail-Whip',
-  dpad: 'Classic 4-Way D-Pad: Move • Right Radial Arc: Hold Jump, Hydro-Pulse & Tail-Whip',
-  gesture: 'Drag: Walk/Run • Flick Up: Jump • Flick Down or 2-Finger Tap: Tail-Whip • Tap: Hydro-Pulse',
-  tilt: 'Tilt: Walk/Run • Hold Right Half: Variable Jump • Left Tap: Hydro-Pulse • Wrist-Flick: Tail-Whip',
+  joystick: 'Floating Left Stick: Walk/Run • Door: ↑/E • Lift: ↑/↓ • Gecko Wall: Jump→Wall • Arc: Jump, Pulse & Whip',
+  dpad: 'Classic 4-Way D-Pad: Move • Door: ↑/E • Lift: ↑/↓ • Gecko Wall: Jump→Wall • Arc: Jump, Pulse & Whip',
+  gesture: 'Drag: Walk/Run • Flick Up: Jump • Flick Down / 2-Finger: Tail-Whip • Tap Center: Door/Lift • Tap: Pulse',
+  tilt: 'Tilt: Walk/Run • Right Hold: Jump • Left Tap: Pulse • Swipe Sideways / Wrist-Flick: Tail-Whip',
 };
 
 const DIR_CHEVRON_SVGS = {
@@ -409,7 +409,7 @@ const STORY_CUTSCENES = {
       },
       {
         speaker: 'warden',
-        name: 'WARDEN VEX • SIPHON SYNDICATE',
+        name: 'ARCH-DREDGER VANE • SIPHON SYNDICATE',
         text: 'UNREGISTERED PELAGIAN BIO-SIGNATURE DETECTED. GORGE TURBINES AT FULL EXTRACTION. EARTH’S HYDROSPHERE BELONGS TO THE SYNDICATE.',
       },
       {
@@ -427,7 +427,7 @@ const STORY_CUTSCENES = {
     beats: [
       {
         speaker: 'guardian',
-        name: 'ELDER TALON • ALPINE WATER KEEPER',
+        name: 'SPIRIT LUMI • ALPINE WATER KEEPER',
         text: 'Traveler with the sea-glass frills—the canyon rapids sing again, yet our snow-fed Alpine Mirror Lakes are trapped behind high-altitude Siphon Viaducts!',
       },
       {
@@ -438,7 +438,7 @@ const STORY_CUTSCENES = {
       {
         speaker: 'gateway',
         name: 'GATEWAY • PELAGIAN HYDRO-ENVOY',
-        text: 'Crisp mountain air and wet crystal walls—perfect for a gecko-scamper. Hold fast, Elder; the snowmelt will shine like glass before dusk.',
+        text: 'Crisp mountain air and wet crystal walls—perfect for a gecko-scamper. Hold fast, Lumi; the snowmelt will shine like glass before dusk.',
       },
     ],
   },
@@ -455,13 +455,13 @@ const STORY_CUTSCENES = {
       },
       {
         speaker: 'warden',
-        name: 'WARDEN MIRE • DELTA OVERSEER',
+        name: 'ARCH-DREDGER VANE • DELTA OVERSEER',
         text: 'FLOODGATE LOCKS SEALED. VOLT-EELS AND BARNACLE MORTARS DEPLOYED TO ALL STAIRWAYS. NO DROP ESCAPES THE DELTA.',
       },
       {
         speaker: 'gateway',
         name: 'GATEWAY • PELAGIAN HYDRO-ENVOY',
-        text: 'Your mortar bubbles bounce right off my tail, Overseer. Let us open the floodgates and let the lotus lanterns bloom again!',
+        text: 'Your mortar bubbles bounce right off my tail, Vane. Sage Mossback’s firefly channels will bloom with lotus lanterns again!',
       },
     ],
   },
@@ -473,13 +473,13 @@ const STORY_CUTSCENES = {
     beats: [
       {
         speaker: 'guardian',
-        name: 'KORU • CORAL REEF GUARDIAN',
+        name: 'MATRIARCH AURELIA • CORAL REEF GUARDIAN',
         text: 'Envoy Gateway! Two limestone mega-spires are draining our turquoise atoll—reef shelves are bleaching in the noon sun and our sea turtles are locked in Siphon cages!',
       },
       {
         speaker: 'gateway',
         name: 'GATEWAY • PELAGIAN HYDRO-ENVOY',
-        text: 'These warm coral currents remind me of Pelagia’s home lagoons. Point me to the Crown Valve, Koru—we free the reef wildlife and shatter their siphon core together.',
+        text: 'These warm coral currents remind me of Pelagia’s home lagoons. Point me to the Crown Valve, Matriarch Aurelia—we free the reef wildlife and shatter their siphon core together.',
       },
     ],
   },
@@ -491,7 +491,7 @@ const STORY_CUTSCENES = {
     beats: [
       {
         speaker: 'warden',
-        name: 'HIGH OVERLORD KRAKEN-01 • MOTHER SIPHON',
+        name: 'MOTHER SIPHON PRIME • APEX CORE',
         text: 'FOUR WATERSHEDS LOST, YET THE POLAR MAELSTROM REMAINS IMPREGNABLE. ORBITAL EXTRACTION BEAM AT 94% CAPACITY!',
       },
       {
@@ -538,7 +538,7 @@ const STORY_CUTSCENES = {
     beats: [
       {
         speaker: 'guardian',
-        name: 'ELDER TALON • ALPINE WATER KEEPER',
+        name: 'SPIRIT LUMI • ALPINE WATER KEEPER',
         text: 'The glacial locks have shattered! Pure turquoise snowmelt is cascading through the stone aqueducts and filling the mirror basin!',
       },
       {
@@ -580,7 +580,7 @@ const STORY_CUTSCENES = {
     beats: [
       {
         speaker: 'guardian',
-        name: 'KORU • CORAL REEF GUARDIAN',
+        name: 'MATRIARCH AURELIA • CORAL REEF GUARDIAN',
         text: 'Our reefs are glowing with living color! Manta rays and sea turtles are gliding freely beneath the sunlit atoll arches once again!',
       },
       {
@@ -988,18 +988,19 @@ function resolveActionPromptSpec(rawText, hudMode, hudInteractKind = '') {
   }
 
   // 4. Interactive Pipe-Valve, Sluice Lever, Grapple Ring, Station & Powered Elevator Ride
+  // Keep interactKind strictly 'whip' for valves/levers/grapples so tapping Interact NEVER fires a stray Hydro-Pulse & breaks Pacifist!
   if (upper.includes('SLUICE') || upper.includes('LEVER')) {
     return {
-      html: `${PROMPT_ICONS.craft}<span>TAP WHIP / PULSE • PULL SLUICE</span>`,
-      interactKind: 'fire',
+      html: `${PROMPT_ICONS.craft}<span>TAP WHIP • PULL SLUICE</span>`,
+      interactKind: 'whip',
       triggerAction: 'whip',
       subtype: 'valve',
     };
   }
   if (upper.includes('VALVE') || upper.includes('PIPE')) {
     return {
-      html: `${PROMPT_ICONS.craft}<span>TAP WHIP / PULSE • SPIN VALVE</span>`,
-      interactKind: 'fire',
+      html: `${PROMPT_ICONS.craft}<span>TAP WHIP • SPIN VALVE</span>`,
+      interactKind: 'whip',
       triggerAction: 'whip',
       subtype: 'valve',
     };
@@ -1007,7 +1008,7 @@ function resolveActionPromptSpec(rawText, hudMode, hudInteractKind = '') {
   if (upper.includes('GRAPPLE') || upper.includes('SWING')) {
     return {
       html: `${PROMPT_ICONS.bolt}<span>TAP WHIP • TAIL-GRAPPLE</span>`,
-      interactKind: 'fire',
+      interactKind: 'whip',
       triggerAction: 'whip',
       subtype: 'grapple',
     };
@@ -1738,6 +1739,25 @@ const game = new GameEngineClass(
       }
       hudCache.floodgateSurgeActive = surgeNow;
 
+      // 6F. Explorer Sense Bio-Skill: #critter-sonar-pill live proximity telemetry
+      if (critterSonarPillEl) {
+        const cs = hud.critterSonar;
+        const showSonar = Boolean(cs && cs.active && hud.mode === 'tower' && !titleOpen && !cutsceneState.active);
+        if (showSonar !== hudCache.critterSonarVisible) {
+          hudCache.critterSonarVisible = showSonar;
+          critterSonarPillEl.classList.toggle('hidden', !showSonar);
+        }
+        if (showSonar) {
+          const distStr = Number.isFinite(cs.distanceFloors) ? `${Math.max(0, Math.round(cs.distanceFloors))}F` : '';
+          const dirTxt = cs.dirHint ? ` ${String(cs.dirHint).toUpperCase()}` : '';
+          const label = `SONAR • ${(cs.species || cs.critterName || 'CRITTER').toUpperCase()}${dirTxt}${distStr ? ` (${distStr})` : ''}`;
+          if (label !== hudCache.critterSonarText) {
+            hudCache.critterSonarText = label;
+            critterSonarPillEl.textContent = label;
+          }
+        }
+      }
+
       // 7. Aqueduct Sanctum Clue HUD (dirty-checked)
       const isSanctumMode = hud.mode === 'puzzle' || hud.mode === 'aqueduct_sanctum';
       const showPuzzleHud = isSanctumMode && !titleOpen && Boolean(game.puzzleRoom);
@@ -1906,8 +1926,18 @@ const game = new GameEngineClass(
     },
 
     onSpirePurified(info = {}, onDone = null) {
+      const spireId = Number(info?.towerId ?? game?.tower?.id ?? 0);
+      const rType = String(game?.runType || lastLaunch.mode || 'campaign').toLowerCase();
+      // Play full Watershed Act Purification cutscene ONLY on Act Boss Spires 2, 4, 6, 8
+      // (odd mid-Act Spires 1,3,5,7,9 advance cleanly; Spire 10 flows straight into Epilogue with zero double finale!)
+      const isActBossPurify = rType === 'campaign' && spireId >= 2 && spireId <= 8 && spireId % 2 === 0;
+      if (!isActBossPurify) {
+        onDone?.();
+        return;
+      }
       const theme = String(info?.theme || info?.biome || game?.tower?.theme || 'canyon_river').toLowerCase();
       const cutKey = STORY_CUTSCENES[`purify_${theme}`] ? `purify_${theme}` : 'purify_canyon_river';
+      markCutsceneSeen(cutKey);
       playStoryCutscene(cutKey, {
         previewMode: false,
         startPct: info?.watershedBefore,
@@ -1975,7 +2005,7 @@ const game = new GameEngineClass(
       if (goStars) {
         if (summary?.stars) {
           goStars.innerHTML = starsToSvgHtml(summary.stars);
-        } else if (game.tower?.id) {
+        } else if (rType === 'campaign' && game.tower?.id) {
           goStars.innerHTML = starsToSvgHtml(getTowerStarsSafe(game.tower.id));
         } else {
           goStars.innerHTML = starsToSvgHtml({ clear: victory, vault: victory, speed: victory });
@@ -2208,7 +2238,7 @@ function syncAudioButtons() {
     hudCache.gearsText = gStr;
     gearsEl.textContent = gStr;
   }
-  if (hiScoreEl) {
+  if (hiScoreEl && (game.mode === 'title' || game.runType === 'campaign')) {
     const hiStr = formatScore(progression.getHighScore?.('reboot') ?? 0);
     hudCache.hiScoreText = hiStr;
     hiScoreEl.textContent = hiStr;
@@ -2271,11 +2301,15 @@ try {
 } catch (_) {}
 
 function hasSeenCutscene(kind) {
+  if (typeof progression.hasSeenCutscene === 'function' && progression.hasSeenCutscene(kind)) {
+    return true;
+  }
   return seenCutscenesMem.has(kind);
 }
 
 function markCutsceneSeen(kind) {
   seenCutscenesMem.add(kind);
+  progression.markCutsceneSeen?.(kind);
   try {
     localStorage.setItem(CUTSCENE_STORAGE_KEY, JSON.stringify([...seenCutscenesMem]));
   } catch (_) {}
@@ -2442,7 +2476,12 @@ function playStoryCutscene(kind, { previewMode = false, startPct = null, endPct 
 
   game.purificationProgress = def.isPurification ? 0.1 : 0;
   game.cutsceneCam = { active: true, phase: 0, kind, isPurification: Boolean(def.isPurification) };
+  sound.setMiniGameMode?.(null);
   if (def.isPurification) {
+    if (kind === 'epilogue') {
+      sound.setMusicActive?.(true);
+      sound.playMenuMusic?.();
+    }
     sound.spirePurify?.();
   } else {
     sound.playMenuMusic?.();
@@ -2469,6 +2508,11 @@ function finishCutscene() {
   const cb = cutsceneState.onComplete;
   cutsceneState.onComplete = null;
   cb?.();
+
+  // Restore active biome music after non-preview Act intro cutscenes so Spires 3/5/7/9 never stay on Title menu music!
+  if (!cutsceneState.previewMode && game.mode === 'tower' && game.tower) {
+    sound.setTowerTheme?.(game.tower.id, game.tower.theme);
+  }
 
   if (
     game.mode === 'title' &&
@@ -2557,6 +2601,8 @@ function loadTitlePreviewTower(overrideSpireIdx = null) {
       ? Math.max(0, Math.min(Math.max(0, towers.length - 1), overrideSpireIdx))
       : Math.max(0, Math.min(Math.max(0, towers.length - 1), Number(startTowerSelect?.value) || 0));
   updateSelectedTowerRibbon();
+  // Set title mode BEFORE loadTower so title preview never clobbers menu music, boss state, or telemetry!
+  game.mode = 'title';
   const rawTower = towers[idx];
   if (rawTower) {
     game.loadTower?.(buildTitlePreviewTower(rawTower));
@@ -2612,7 +2658,7 @@ function refreshTitleMeta() {
     metaModeSanctumEl.textContent = 'ZERO TIMER • VALVE LOGIC';
   }
   if (metaModeExpeditionEl) {
-    const eBest = progression.getBestEndlessDepth?.() ?? 0;
+    const eBest = progression.getBestExpeditionDepth?.() ?? 0;
     metaModeExpeditionEl.textContent = eBest > 0 ? `BEST: ${eBest} SPIRES` : '3-CARD BIO-MUTATIONS';
   }
   if (metaModeDailyEl && typeof getDailySeed === 'function') {
@@ -2919,7 +2965,7 @@ function renderSkillTreePanel() {
   const branches = [
     { key: 'agility', title: 'PELAGIAN AGILITY' },
     { key: 'combat', title: 'HYDRO-COMBAT' },
-    { key: 'watershed', title: 'WATERSHED MASTERY' },
+    { key: 'explorer', title: 'EXPLORER SENSE' },
   ];
 
   skillTreeGridEl.innerHTML = '';
@@ -2967,7 +3013,11 @@ function renderSkillTreePanel() {
         if (maxed) return;
         const res = progression.upgradeSkill?.(sk.id);
         if (res && res.upgraded !== false && res !== false) {
-          sound.collectStar?.();
+          if (typeof sound.skillUnlock === 'function') sound.skillUnlock(res.rank || 1);
+          else sound.collectStar?.();
+          if (Array.isArray(res.newlyUnlockedTrophies)) {
+            res.newlyUnlockedTrophies.forEach(enqueueTrophyToast);
+          }
           renderWardrobeModal();
           refreshTitleMeta();
         } else {
@@ -3124,6 +3174,9 @@ function renderWardrobeModal() {
             const hero = game.gateway || game.player;
             if (hero) hero.skinId = skin.id;
             sound.collectStar?.();
+            if (Array.isArray(res.newlyUnlockedTrophies)) {
+              res.newlyUnlockedTrophies.forEach(enqueueTrophyToast);
+            }
             renderWardrobeModal();
             refreshTitleMeta();
           } else {
@@ -3185,6 +3238,9 @@ function renderWardrobeModal() {
           if (res === true || res?.unlocked) {
             applyFx(fx.id);
             sound.collectStar?.();
+            if (Array.isArray(res?.newlyUnlockedTrophies)) {
+              res.newlyUnlockedTrophies.forEach(enqueueTrophyToast);
+            }
             renderWardrobeModal();
             refreshTitleMeta();
           } else {
@@ -3362,7 +3418,20 @@ function renderWorldsModal() {
     },
     onPlayCutscene: (cutKey) => {
       sound.unlock?.();
-      if (!STORY_CUTSCENES[cutKey]) return;
+      const def = STORY_CUTSCENES[cutKey];
+      if (!def) return;
+      // Block spoiling locked Act II–V / Purification / Epilogue cutscenes before unlocking their spire!
+      const reqTower = towers[def.towerIdx || 0];
+      const cutUnlocked =
+        cutKey === 'prologue' ||
+        hasSeenCutscene(cutKey) ||
+        (def.isPurification
+          ? Boolean(reqTower && getTowerStarsSafe(reqTower.id)?.clear)
+          : Boolean(reqTower && isSpireUnlocked(reqTower.id)));
+      if (!cutUnlocked) {
+        sound.vaultFail?.();
+        return;
+      }
       overlayWorlds?.classList.add('hidden');
       markCutsceneSeen(cutKey);
       playStoryCutscene(cutKey, {
@@ -3548,7 +3617,7 @@ function scheduleModeSpiresPrewarm() {
       step++;
       if (step > 5) {
         try {
-          if (!prestagedModeRuns.initialShadersCompiled && warmedGroups.length > 0) {
+          if (warmedGroups.length > 0) {
             renderer.compileTowerGroups?.(warmedGroups);
             prestagedModeRuns.initialShadersCompiled = true;
           }
@@ -3577,10 +3646,13 @@ function launchGameMode(modeId = 'campaign', extraOpts = {}) {
   const s = progression.getSettings?.() || {};
   const zenMode = Boolean(toggleZenInput ? toggleZenInput.checked : s.zenMode);
   const towers = getTowersSafe();
+  // Only inherit Campaign's startTowerSelect for Campaign mode; non-Campaign modes always start cleanly at 0 unless explicitly passed!
   let towerIdx =
     extraOpts.startTowerIdx != null
       ? extraOpts.startTowerIdx
-      : Math.max(0, Math.min(Math.max(0, towers.length - 1), Number(startTowerSelect?.value) || 0));
+      : mode === 'campaign'
+        ? Math.max(0, Math.min(Math.max(0, towers.length - 1), Number(startTowerSelect?.value) || 0))
+        : 0;
 
   if (mode === 'campaign') {
     while (towerIdx > 0 && !isSpireUnlocked(towers[towerIdx]?.id)) {
@@ -3661,7 +3733,11 @@ function relaunchLastMode() {
   if (lastLaunch.mode === 'minigame') {
     launchMiniGameRun(lastLaunch.miniGame);
   } else {
-    launchGameMode(lastLaunch.mode, { startTowerIdx: lastLaunch.towerIdx });
+    const retryIdx =
+      lastLaunch.mode === 'campaign' && Number.isFinite(game.towerIndex)
+        ? Math.max(0, game.towerIndex)
+        : lastLaunch.towerIdx;
+    launchGameMode(lastLaunch.mode, { startTowerIdx: retryIdx });
   }
 }
 
@@ -3673,16 +3749,18 @@ function returnToTitle() {
   resetHudVisibilityCache();
   currentPromptAction = null;
   sound.setMiniGameMode?.(null);
-  sound.playMenuMusic?.();
   actionPromptEl?.classList.add('hidden');
   puzzleHudEl?.classList.add('hidden');
   crownSealsPillEl?.classList.add('hidden');
   missionStatusPillEl?.classList.add('hidden');
   altMeterEl?.classList.add('hidden');
   coreDescentHudEl?.classList.add('hidden');
+  critterSonarPillEl?.classList.add('hidden');
 
   refreshTitleMeta();
   loadTitlePreviewTower();
+  // Call playMenuMusic AFTER loadTitlePreviewTower so title preview never overwrites menu theme!
+  sound.playMenuMusic?.();
   overlayTitle?.classList.remove('hidden');
   syncTitleShowcaseState();
   renderer.triggerTitleHeroWave?.();
@@ -3730,24 +3808,16 @@ function triggerTailWhipPulse() {
   }
 }
 
-btnWhip?.addEventListener('pointerdown', (e) => {
-  if (input.controlMode === 'gesture' || input.controlMode === 'tilt') return;
-  e.preventDefault();
-  btnWhip.classList.add('active');
-  triggerTailWhipPulse();
-});
-btnWhip?.addEventListener('pointerup', () => btnWhip.classList.remove('active'));
-btnWhip?.addEventListener('pointercancel', () => btnWhip.classList.remove('active'));
-
-btnInteract?.addEventListener('pointerdown', (e) => {
-  if (input.controlMode === 'gesture' || input.controlMode === 'tilt') return;
-  e.preventDefault();
-  e.stopPropagation();
-  btnInteract.classList.add('active');
-  triggerCurrentPromptInteract();
-});
-btnInteract?.addEventListener('pointerup', () => btnInteract.classList.remove('active'));
-btnInteract?.addEventListener('pointercancel', () => btnInteract.classList.remove('active'));
+// #btn-whip & #btn-interact are handled in InputController's capture-phase pointerdown (single source of truth -> zero double-fire!)
+// Wire Gamepad Start -> Pause & A/B -> Cutscene Advance/Skip cleanly
+input._onGamepadPause = () => {
+  triggerPauseToggle();
+};
+input._onGamepadCutscene = (isSkip) => {
+  if (!cutsceneState.active) return;
+  if (isSkip) finishCutscene();
+  else advanceCutsceneStep();
+};
 
 let lastActionPromptPointerTs = -1000;
 function triggerCurrentPromptInteract() {
@@ -4254,7 +4324,11 @@ function triggerPauseToggle() {
   sound.unlock?.();
   const paused = game.togglePause?.();
   input.resetState?.();
-  input.setInteractContext?.(false, '');
+  setInteractContextCached(false, '');
+  hudCache.puzzleVisible = null;
+  hudCache.promptVisible = null;
+  hudCache.promptKey = '';
+  hudCache.interactPillVisible = null;
   if (paused) {
     actionPromptEl?.classList.add('hidden');
     puzzleHudEl?.classList.add('hidden');
@@ -4414,10 +4488,11 @@ function prewarmStartupAssets() {
     game.render();
   } catch (_) {}
 
-  // 3. Dismiss transition veil once images decode + GLBs & all 6 mode spires warm + >= 2 WebGL frames (capped at 850ms)
+  // 3. Dismiss transition veil once images + Gateway 2.0 GLB decode & all 6 mode spires warm (capped at 1450ms)
   let decodedReady = false;
   const isAllModeWarmReady = () =>
     decodedReady &&
+    Boolean(renderer?.gatewayRig?._glbApplied) &&
     startupWarmupFrames >= 2 &&
     prestagedModeRuns.warmedPropVer === (renderer?._archPropsVersion ?? 0);
 
@@ -4429,12 +4504,15 @@ function prewarmStartupAssets() {
       setTimeout(pollReady, 25);
     }
   };
+  if (renderer?.gatewayRig?.readyPromise) {
+    decodeJobs.push(renderer.gatewayRig.readyPromise.catch(() => {}));
+  }
   Promise.all(decodeJobs).then(() => {
     decodedReady = true;
     pollReady();
   });
   setTimeout(pollReady, 30);
-  setTimeout(dismissStartupTransitionVeil, 850);
+  setTimeout(dismissStartupTransitionVeil, 2600);
 }
 
 applyControlMode(initSettings.controlMode || 'joystick', false);
@@ -4568,7 +4646,11 @@ function loop(ts) {
 
   if (!startupVeilDismissed) {
     startupWarmupFrames++;
-    if (startupWarmupFrames >= 2 && _prewarmedImages.every((im) => im.complete)) {
+    if (
+      startupWarmupFrames >= 2 &&
+      Boolean(renderer?.gatewayRig?._glbApplied) &&
+      _prewarmedImages.every((im) => im.complete)
+    ) {
       dismissStartupTransitionVeil();
     }
   }
@@ -4586,5 +4668,27 @@ const bootSanctuaryAudioOnce = () => {
 };
 window.addEventListener('pointerdown', bootSanctuaryAudioOnce, { once: true, passive: true });
 window.addEventListener('keydown', bootSanctuaryAudioOnce, { once: true });
+
+// Keep on-screen touch controls hidden on non-touch fine-pointer desktop until a real touch occurs
+if (appEl) {
+  const isCoarseDefault =
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(pointer: coarse)').matches;
+  appEl.dataset.touchActive = isCoarseDefault ? 'true' : 'false';
+  const markTouchActive = () => {
+    if (appEl && appEl.dataset.touchActive !== 'true') {
+      appEl.dataset.touchActive = 'true';
+    }
+  };
+  window.addEventListener('touchstart', markTouchActive, { passive: true });
+  window.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (e && e.pointerType === 'touch') markTouchActive();
+    },
+    { passive: true }
+  );
+}
 
 requestAnimationFrame(loop);

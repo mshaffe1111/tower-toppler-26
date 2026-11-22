@@ -730,50 +730,70 @@ function createPopupTexture(text, color) {
 }
 
 /**
- * Generates a sky-and-ground tinted HDR PMREM IBL cubemap for a given Earth Water Biome
- * so wet stone staircases, brass elevators, glass conduits & Gateway's scales reflect natural sunlight!
+ * Prewarms ALL 5 Earth Water Biome HDR PMREM IBL cubemaps ONCE at startup using a single shared
+ * `PMREMGenerator` and reusable environment rig -> 0.00ms biome switching & zero mode-launch stalls!
  */
-function buildBiomePmremTexture(webgl, rigSpec) {
+function buildAllBiomePmremTextures(webgl, biomeRigs) {
+  const map = new Map();
+  if (!webgl || !biomeRigs) return map;
+  let pmrem = null;
+  let skyGeo = null;
+  let groundGeo = null;
+  let sunGeo = null;
+  let waterGeo = null;
+  let skyMat = null;
+  let groundMat = null;
+  let sunMat = null;
+  let waterMat = null;
   try {
-    const pmrem = new THREE.PMREMGenerator(webgl);
+    pmrem = new THREE.PMREMGenerator(webgl);
+    pmrem.compileEquirectangularShader?.();
     const envScene = new THREE.Scene();
-    envScene.background = new THREE.Color(rigSpec.bg);
+    envScene.background = new THREE.Color('#489cd6');
 
-    const skyDome = new THREE.Mesh(
-      new THREE.SphereGeometry(18, 20, 12, 0, TWO_PI, 0, Math.PI * 0.5),
-      new THREE.MeshBasicMaterial({ color: rigSpec.hemiSky, side: THREE.BackSide })
-    );
-    const groundBowl = new THREE.Mesh(
-      new THREE.SphereGeometry(18, 20, 12, 0, TWO_PI, Math.PI * 0.5, Math.PI * 0.5),
-      new THREE.MeshBasicMaterial({ color: rigSpec.hemiGround, side: THREE.BackSide })
-    );
-    const sunCard = new THREE.Mesh(
-      new THREE.SphereGeometry(2.6, 12, 10),
-      new THREE.MeshBasicMaterial({ color: rigSpec.sunCol })
-    );
-    sunCard.position.set(rigSpec.sunPos[0], rigSpec.sunPos[1], rigSpec.sunPos[2]);
-    const waterCard = new THREE.Mesh(
-      new THREE.RingGeometry(4, 16, 20),
-      new THREE.MeshBasicMaterial({ color: rigSpec.fillCol, side: THREE.DoubleSide })
-    );
+    skyGeo = new THREE.SphereGeometry(18, 16, 10, 0, TWO_PI, 0, Math.PI * 0.5);
+    groundGeo = new THREE.SphereGeometry(18, 16, 10, 0, TWO_PI, Math.PI * 0.5, Math.PI * 0.5);
+    sunGeo = new THREE.SphereGeometry(2.6, 10, 8);
+    waterGeo = new THREE.RingGeometry(4, 16, 16);
+
+    skyMat = new THREE.MeshBasicMaterial({ color: '#cbeafe', side: THREE.BackSide });
+    groundMat = new THREE.MeshBasicMaterial({ color: '#a85238', side: THREE.BackSide });
+    sunMat = new THREE.MeshBasicMaterial({ color: '#fff3d1' });
+    waterMat = new THREE.MeshBasicMaterial({ color: '#2dd4bf', side: THREE.DoubleSide });
+
+    const skyDome = new THREE.Mesh(skyGeo, skyMat);
+    const groundBowl = new THREE.Mesh(groundGeo, groundMat);
+    const sunCard = new THREE.Mesh(sunGeo, sunMat);
+    const waterCard = new THREE.Mesh(waterGeo, waterMat);
     waterCard.rotation.x = -Math.PI * 0.5;
     waterCard.position.y = -3.0;
-
     envScene.add(skyDome, groundBowl, sunCard, waterCard);
-    const tex = pmrem.fromScene(envScene, 0.035).texture;
-    skyDome.geometry.dispose();
-    skyDome.material.dispose();
-    groundBowl.geometry.dispose();
-    groundBowl.material.dispose();
-    sunCard.geometry.dispose();
-    sunCard.material.dispose();
-    waterCard.geometry.dispose();
-    waterCard.material.dispose();
-    pmrem.dispose();
-    return tex;
+
+    for (const [biomeKey, rigSpec] of Object.entries(biomeRigs)) {
+      if (!rigSpec) continue;
+      envScene.background.set(rigSpec.bg);
+      skyMat.color.set(rigSpec.hemiSky);
+      groundMat.color.set(rigSpec.hemiGround);
+      sunMat.color.set(rigSpec.sunCol);
+      sunCard.position.set(rigSpec.sunPos[0], rigSpec.sunPos[1], rigSpec.sunPos[2]);
+      waterMat.color.set(rigSpec.fillCol);
+      const tex = pmrem.fromScene(envScene, 0.035).texture;
+      if (tex) map.set(biomeKey, tex);
+    }
   } catch {
-    return null;
+    // Fallback to empty map on headless mocks
+  } finally {
+    skyGeo?.dispose();
+    groundGeo?.dispose();
+    sunGeo?.dispose();
+    waterGeo?.dispose();
+    skyMat?.dispose();
+    groundMat?.dispose();
+    sunMat?.dispose();
+    waterMat?.dispose();
+    pmrem?.dispose();
   }
+  return map;
 }
 
 export class GameRenderer {
@@ -931,18 +951,20 @@ export class GameRenderer {
     if (this._biomeEnvMaps.has(resolved)) {
       return this._biomeEnvMaps.get(resolved);
     }
-    const rig = BIOME_LIGHT_RIGS[resolved] || BIOME_LIGHT_RIGS.canyon_river;
-    const tex = buildBiomePmremTexture(this.webgl, rig);
-    if (tex) {
-      this._biomeEnvMaps.set(resolved, tex);
-      if (!this._sharedEnvTex) this._sharedEnvTex = tex;
-      return tex;
-    }
     return this._sharedEnvTex || null;
   }
 
   _initEnvironment() {
-    this.envTex = this._getBiomeEnvMap('canyon_river');
+    // Prewarm ALL 5 biome PMREM textures once with a single shared PMREMGenerator -> 0.00ms biome switches!
+    const baked = buildAllBiomePmremTextures(this.webgl, BIOME_LIGHT_RIGS);
+    for (const [k, tex] of baked.entries()) {
+      this._biomeEnvMaps.set(k, tex);
+    }
+    this._sharedEnvTex =
+      this._biomeEnvMaps.get('canyon_river') ||
+      this._biomeEnvMaps.values().next().value ||
+      null;
+    this.envTex = this._sharedEnvTex;
   }
 
   _ensureSubRenderer() {
@@ -1221,18 +1243,28 @@ export class GameRenderer {
       }
     }
     const skyTexList = this.stormSky?._ownedTextures;
+    let uploadedSky = 0;
     if (Array.isArray(skyTexList)) {
       for (let i = 0; i < skyTexList.length; i++) {
         const t = skyTexList[i];
-        if (t && !t.userData?._gpuUploaded && (t.image || t.source?.data)) {
+        if (!t) continue;
+        if (t.userData?._gpuUploaded) {
+          uploadedSky++;
+          continue;
+        }
+        const img = t.image || t.source?.data;
+        const imgReady = img && (img.complete !== false) && ((img.naturalWidth || img.width || 0) > 0);
+        if (imgReady) {
           t.userData = t.userData || {};
           t.userData._gpuUploaded = true;
+          uploadedSky++;
           try {
             this.webgl.initTexture(t);
           } catch {}
         }
       }
     }
+    this._skyTexUploadedCount = uploadedSky;
     this._lastUploadedWebpVer = getBakedArchWebpVersion();
   }
 
@@ -1431,6 +1463,9 @@ export class GameRenderer {
       if (obj.geometry) {
         obj.geometry.userData = obj.geometry.userData || {};
         obj.geometry.userData.shared = true;
+        if (obj.geometry.attributes?.uv && !obj.geometry.attributes?.uv1) {
+          obj.geometry.setAttribute('uv1', obj.geometry.attributes.uv);
+        }
       }
       if (!obj.isMesh || !obj.material) return;
       const convert = (m) => {
@@ -1445,20 +1480,27 @@ export class GameRenderer {
             normalScale: m.normalScale ? m.normalScale.clone() : new THREE.Vector2(1, 1),
             roughnessMap: m.roughnessMap || null,
             metalnessMap: m.metalnessMap || null,
-            aoMap: m.aoMap || null,
-            aoMapIntensity: m.aoMapIntensity ?? 1.0,
+            aoMap: m.aoMap || m.roughnessMap || null,
+            aoMapIntensity: m.aoMapIntensity ?? 0.80,
             emissive: m.emissive ? m.emissive.clone() : new THREE.Color('#000000'),
             emissiveMap: m.emissiveMap || null,
             emissiveIntensity: Math.min(1.85, m.emissiveIntensity ?? 1.0),
             roughness: typeof m.roughness === 'number' ? m.roughness : 0.4,
             metalness: typeof m.metalness === 'number' ? m.metalness : 0.2,
+            vertexColors: Boolean(m.vertexColors),
             transparent: Boolean(m.transparent),
             opacity: typeof m.opacity === 'number' ? m.opacity : 1.0,
             side: m.side,
           });
           m.dispose();
-        } else if (typeof out.emissiveIntensity === 'number' && out.emissiveIntensity > 1.85) {
-          out.emissiveIntensity = 1.85;
+        } else {
+          if (!out.aoMap && out.roughnessMap) {
+            out.aoMap = out.roughnessMap;
+            out.aoMapIntensity = out.aoMapIntensity ?? 0.80;
+          }
+          if (typeof out.emissiveIntensity === 'number' && out.emissiveIntensity > 1.85) {
+            out.emissiveIntensity = 1.85;
+          }
         }
         out.userData = out.userData || {};
         out.userData.shared = true;
@@ -1494,6 +1536,7 @@ export class GameRenderer {
       if (settled >= specs.length) {
         for (const entry of this.towerCache.values()) {
           entry?.applyGlbUpgrade?.(this.glbModels);
+          this._trimTowerShadows(entry?.group);
         }
         this._archPropsVersion++;
         this._archGlbsSettled = true;
@@ -1516,6 +1559,21 @@ export class GameRenderer {
         }
       );
     }
+
+    // Background-preload sculpted Blender Core Reactor kit (`env_core_reactor.glb`) without blocking startup!
+    loader.load(
+      'assets/models/env_core_reactor.glb',
+      (gltf) => {
+        if (gltf && gltf.scene) {
+          this.glbModels.env_core_reactor = this._prepareGlbScene(gltf.scene);
+          if (this._coreDescentCtx && !this._coreDescentCtx.glbMounted) {
+            this._mountCoreReactorGlb(this._coreDescentCtx, this.glbModels.env_core_reactor);
+          }
+        }
+      },
+      undefined,
+      () => {}
+    );
   }
 
   _initPostProcessing() {
@@ -1524,9 +1582,19 @@ export class GameRenderer {
     try {
       this.postfx = new CinematicPostFX(this.webgl, this.width, this.height, this.currentDpr, { enabled: true });
       this.postfx.setBiome(this.biome, this.purificationProgress);
+      this._applyHalfResBloom(this.width, this.height, this.currentDpr);
     } catch {
       this.postfx = null;
     }
+  }
+
+  _applyHalfResBloom(w, h, dpr) {
+    if (!this.postfx?.bloomPass) return;
+    const physW = Math.max(64, Math.round(w * dpr * 0.5));
+    const physH = Math.max(64, Math.round(h * dpr * 0.5));
+    try {
+      this.postfx.bloomPass.setSize(physW, physH);
+    } catch {}
   }
 
   _renderWithComposer(scene, camera, opts) {
@@ -1623,6 +1691,7 @@ export class GameRenderer {
     this.webgl.setSize(this.width, this.height, false);
     if (this.postfx) {
       this.postfx.resize(this.width, this.height, dpr);
+      this._applyHalfResBloom(this.width, this.height, dpr);
     }
     if (this.ocean) {
       this.ocean.setSize(this.width, this.height, dpr);
@@ -1662,8 +1731,8 @@ export class GameRenderer {
     this.height = Math.max(1, h);
     const pxArea = this.width * this.height;
     // Integrated AMD Radeon / Intel UHD GPUs are fill-rate bound at full 1080p (2.07M px):
-    // scale smoothly to 0.78 DPR at >= 1.2M px (~1498x842 w/ MSAA) while keeping portrait 412x915 at 1.0!
-    const dprCap = this._isIntegratedGpu ? (pxArea >= 1200000 ? 0.78 : 1.0) : 1.25;
+    // scale smoothly to 0.68 DPR at >= 1.5M px (~1306x734 w/ MSAA) while keeping portrait 412x915 at 1.0!
+    const dprCap = this._isIntegratedGpu ? (pxArea >= 1500000 ? 0.68 : pxArea >= 1000000 ? 0.78 : 1.0) : 1.25;
     this.maxDpr = Math.min(dpr, dprCap);
     this.currentDpr = this.maxDpr;
     this._slowFrameCount = 0;
@@ -1727,42 +1796,35 @@ export class GameRenderer {
 
     this.towerCam = new THREE.PerspectiveCamera(50, 390 / 844, 0.15, 280);
 
-    // 5-Biome Daylight / Alpenglow / Twilight / Lagoon / Aurora Rig + Smart 1024x1024 PCFShadowMap (tight 8m x 8m hero frustum!)
-    this.hemiLight = new THREE.HemisphereLight('#cbeafe', '#a85238', 0.96);
+    // 5-Biome Daylight / Alpenglow / Twilight / Lagoon / Aurora Rig + Smart 512x512 PCFShadowMap (tight 8.8m hero frustum!)
+    this.hemiLight = new THREE.HemisphereLight('#cbeafe', '#a85238', 0.98);
     this.towerScene.add(this.hemiLight);
 
-    this.keyLight = new THREE.DirectionalLight('#fff3d1', 2.52);
+    this.keyLight = new THREE.DirectionalLight('#fff3d1', 2.58);
     this.keyLight.position.set(11.2, 14.5, 11.4);
     this.keyLight.castShadow = true;
-    this.keyLight.shadow.mapSize.set(1024, 1024);
+    this.keyLight.shadow.mapSize.set(512, 512);
     this.keyLight.shadow.camera.near = 3.0;
-    this.keyLight.shadow.camera.far = 28.0;
-    this.keyLight.shadow.camera.left = -5.2;
-    this.keyLight.shadow.camera.right = 5.2;
-    this.keyLight.shadow.camera.top = 5.2;
-    this.keyLight.shadow.camera.bottom = -5.2;
-    this.keyLight.shadow.bias = -0.00055;
-    this.keyLight.shadow.normalBias = 0.022;
+    this.keyLight.shadow.camera.far = 26.0;
+    this.keyLight.shadow.camera.left = -4.4;
+    this.keyLight.shadow.camera.right = 4.4;
+    this.keyLight.shadow.camera.top = 4.4;
+    this.keyLight.shadow.camera.bottom = -4.4;
+    this.keyLight.shadow.bias = -0.00075;
+    this.keyLight.shadow.normalBias = 0.028;
     this.towerScene.add(this.keyLight);
     this.towerScene.add(this.keyLight.target);
 
-    this.fillLight = new THREE.DirectionalLight('#2dd4bf', 0.62);
+    this.fillLight = new THREE.DirectionalLight('#2dd4bf', 0.64);
     this.fillLight.position.set(-10.0, 3.5, 10.5);
     this.towerScene.add(this.fillLight);
 
-    this.rimLight = new THREE.DirectionalLight('#fde68a', 1.04);
-    this.rimLight.position.set(-11.0, 9.0, -9.8);
+    this.rimLight = new THREE.DirectionalLight('#fde68a', 1.28);
+    this.rimLight.position.set(-8.5, 10.2, -11.5);
     this.towerScene.add(this.rimLight);
 
-    this.sunGlintLight = new THREE.DirectionalLight('#fef08a', 1.28);
-    this.sunGlintLight.position.set(4.5, 11.0, -16.0);
-    this.towerScene.add(this.sunGlintLight);
-
-    this.heroLight = new THREE.PointLight('#5efce8', 0.48, 7.5);
+    this.heroLight = new THREE.PointLight('#5efce8', 0.52, 8.2);
     this.towerScene.add(this.heroLight);
-
-    this.archAccentLight = new THREE.PointLight('#ffaa2b', 0, 8.5, 1.7);
-    this.towerScene.add(this.archAccentLight);
 
     // 5-Biome Atmospheric Sky, Canyon Cliffs / Snow Peaks / Cypress Arches / Coral Reefs (`src/stormSky.js`)
     this.stormSky = new StormAtmosphere(this.towerScene, {
@@ -1775,7 +1837,7 @@ export class GameRenderer {
       towerRadius: TOWER_RADIUS,
       preset: 'canyon_river',
       size: 240,
-      segments: 36,
+      segments: 28,
       waterY: -0.55 * FLOOR_HEIGHT,
     });
     this.ocean.setSize(this.width, this.height, this.currentDpr);
@@ -1875,6 +1937,10 @@ export class GameRenderer {
 
     this.hydroRingGroup = new THREE.Group();
     this.hydroRingPool = [];
+    // Pre-seed 1 Hydro-Ring node so `_compileAllTowerShaders()` precompiles its materials at boot!
+    const seedRing = this._buildHydroRingNode();
+    this.hydroRingGroup.add(seedRing);
+    this.hydroRingPool.push(seedRing);
     this.towerScene.add(this.hydroRingGroup);
 
     this.floodgateSurgeGroup = this._buildFloodgateSurge();
@@ -1885,42 +1951,35 @@ export class GameRenderer {
   }
 
   _buildTitlePedestal() {
+    // Clean, whisper-thin flush inlaid bronze-and-aqua medallion sitting strictly within the timber/stone
+    // quay deck (radius <= 0.40m, ZERO bulky plinth cylinder, NEVER intersects handrails!).
     const g = new THREE.Group();
     g.visible = false;
-    const stoneMat = new THREE.MeshStandardMaterial({
-      color: '#d4a373',
-      roughness: 0.52,
-      metalness: 0.14,
-    });
-    const goldMat = new THREE.MeshStandardMaterial({
-      color: '#f5b83d',
-      emissive: '#78440e',
-      emissiveIntensity: 0.24,
-      roughness: 0.26,
-      metalness: 0.84,
+    const bronzeMat = new THREE.MeshStandardMaterial({
+      color: '#c88c32',
+      emissive: '#4d2b06',
+      emissiveIntensity: 0.22,
+      roughness: 0.34,
+      metalness: 0.78,
     });
     const inlayMat = new THREE.MeshBasicMaterial({
       color: '#5efce8',
       transparent: true,
-      opacity: 0.72,
+      opacity: 0.44,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
 
-    const plinth = new THREE.Mesh(new THREE.CylinderGeometry(0.86, 1.02, 0.22, 24), stoneMat);
-    plinth.position.y = -0.11;
-    plinth.receiveShadow = true;
+    const bronzeRing = new THREE.Mesh(new THREE.RingGeometry(0.35, 0.41, 32), bronzeMat);
+    bronzeRing.rotation.x = -Math.PI * 0.5;
+    bronzeRing.position.y = 0.006;
 
-    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.87, 0.036, 10, 32), goldMat);
-    rim.rotation.x = Math.PI * 0.5;
-    rim.position.y = -0.015;
-
-    const glowRing = new THREE.Mesh(new THREE.RingGeometry(0.56, 0.78, 32), inlayMat);
+    const glowRing = new THREE.Mesh(new THREE.RingGeometry(0.24, 0.34, 32), inlayMat);
     glowRing.rotation.x = -Math.PI * 0.5;
-    glowRing.position.y = 0.008;
+    glowRing.position.y = 0.009;
 
     const hopBurstRing = new THREE.Mesh(
-      new THREE.TorusGeometry(0.62, 0.04, 10, 28),
+      new THREE.TorusGeometry(0.46, 0.028, 8, 28),
       new THREE.MeshBasicMaterial({
         color: '#fde047',
         transparent: true,
@@ -1930,20 +1989,22 @@ export class GameRenderer {
       })
     );
     hopBurstRing.rotation.x = Math.PI * 0.5;
-    hopBurstRing.position.y = 0.22;
+    hopBurstRing.position.y = 0.16;
 
-    g.add(plinth, rim, glowRing, hopBurstRing);
+    g.add(bronzeRing, glowRing, hopBurstRing);
     g.userData = { glowRing, hopBurstRing };
     return g;
   }
 
   _buildOverchargeAura() {
+    // Subtle, translucent horizontal low-waist hydro-aura halo + 8 sparkling water motes orbiting
+    // cleanly around Gateway's waist/feet — NEVER flips vertical or obscures her adorable face!
     const g = new THREE.Group();
     g.visible = false;
     const matA = new THREE.MeshBasicMaterial({
       color: '#22f5e6',
       transparent: true,
-      opacity: 0.62,
+      opacity: 0.28,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
       depthWrite: false,
@@ -1951,17 +2012,32 @@ export class GameRenderer {
     const matB = new THREE.MeshBasicMaterial({
       color: '#fde047',
       transparent: true,
-      opacity: 0.48,
+      opacity: 0.22,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
-    const ringA = new THREE.Mesh(new THREE.TorusGeometry(0.66, 0.032, 8, 28), matA);
-    ringA.rotation.x = Math.PI * 0.42;
-    const ringB = new THREE.Mesh(new THREE.TorusGeometry(0.54, 0.024, 8, 24), matB);
-    ringB.rotation.x = -Math.PI * 0.36;
-    g.add(ringA, ringB);
-    g.userData = { ringA, ringB, matA, matB };
+    const ringA = new THREE.Mesh(new THREE.TorusGeometry(0.56, 0.018, 8, 32), matA);
+    ringA.rotation.x = Math.PI * 0.5;
+    const ringB = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.012, 8, 28), matB);
+    ringB.rotation.x = Math.PI * 0.5;
+    ringB.position.y = 0.06;
+
+    const moteCount = 8;
+    const moteGeo = new THREE.OctahedronGeometry(0.036, 0);
+    const moteMat = new THREE.MeshBasicMaterial({
+      color: '#88fff5',
+      transparent: true,
+      opacity: 0.72,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const motes = new THREE.InstancedMesh(moteGeo, moteMat, moteCount);
+    motes.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    const moteDummy = new THREE.Object3D();
+
+    g.add(ringA, ringB, motes);
+    g.userData = { ringA, ringB, matA, matB, motes, moteCount, moteDummy };
     return g;
   }
 
@@ -3174,6 +3250,17 @@ export class GameRenderer {
     return this.towerCache.has(this._computeTowerCacheKey(tower).cacheKey);
   }
 
+  _trimTowerShadows(group) {
+    if (!group) return;
+    // Tower masonry & fixtures already carry rich baked AO; disable directional castShadow on static
+    // architecture while preserving receiveShadow so Gateway 2.0 casts crisp soft shadows at 60fps!
+    group.traverse((o) => {
+      if (o.isMesh && o.castShadow) {
+        o.castShadow = false;
+      }
+    });
+  }
+
   _getOrBuildTowerGroup(tower) {
     const MAX_TOWER_CACHE = 16;
     const { basePrefix, towerSuffix, cacheKey } = this._computeTowerCacheKey(tower);
@@ -3215,6 +3302,7 @@ export class GameRenderer {
       useOceanVfx: true,
       _skipInternalGlbLoad: true,
     });
+    this._trimTowerShadows(cached?.group);
     this.towerCache.set(cacheKey, cached);
     return cached;
   }
@@ -3613,7 +3701,7 @@ export class GameRenderer {
       : isCutscene
       ? pBaseCol + csOrbitCols
       : isTitleShowcase
-      ? pBaseCol + Math.sin(time * 0.30) * (0.42 - landBlend * 0.12)
+      ? pBaseCol + Math.sin(time * 0.30) * (aspect < 1.0 ? 0.08 : (0.42 - landBlend * 0.12))
       : camCol;
 
     // Smooth Title Screen pointer gaze, boot greeting wave, and tap-to-hop celebratory bounce timers
@@ -3691,13 +3779,13 @@ export class GameRenderer {
       this.towerCam.position.set(0, wardY, wardZ);
       this.towerCam.lookAt(0, wardLookY, TOWER_RADIUS + LEDGE_STAND_OFFSET);
     } else if (isTitleShowcase) {
-      // Interactive Title Screen Star Showcase: Gateway 2.0 proudly fills ~39–43% of viewport height
-      // on BOTH 1920x1080 desktop AND 412x915 portrait, centered cleanly between Title Crest & Play Medallion!
+      // Interactive Title Screen Star Showcase: Gateway 2.0 proudly fills ~39–42% of viewport height
+      // on BOTH 1920x1080 desktop AND 412x915 portrait, centered with generous ear-frill margin!
       const pFloorY = (hero?.floor || 0) * fh;
-      const starDist = isPortrait ? 4.52 : 4.28;
+      const starDist = isPortrait ? 4.78 : 4.48;
       const showcaseZ = TOWER_RADIUS + LEDGE_STAND_OFFSET + starDist;
-      const showcaseX = Math.sin(time * 0.36) * 0.22 + gaze.x * 0.18;
-      const lookY = pFloorY + (isPortrait ? 0.56 : 0.62);
+      const showcaseX = Math.sin(time * 0.36) * (isPortrait ? 0.08 : 0.22) + gaze.x * (isPortrait ? 0.08 : 0.18);
+      const lookY = pFloorY + (isPortrait ? 0.56 : 0.60);
       camY = lookY + 0.16 + Math.sin(time * 0.65) * 0.03 - gaze.y * 0.08;
       camZ = showcaseZ;
       this.towerCam.position.set(showcaseX, camY, showcaseZ);
@@ -3773,9 +3861,7 @@ export class GameRenderer {
     this.fillLight.color.set(skyPreset?.fillColor || rigSpec.fillCol);
     this.fillLight.intensity = (skyPreset?.fillIntensity ?? rigSpec.fillInt) * lightMult;
     this.rimLight.color.set(skyPreset?.rimColor || rigSpec.rimCol);
-    this.rimLight.intensity = (skyPreset?.rimIntensity ?? rigSpec.rimInt) * lightMult;
-    this.sunGlintLight.color.set(rigSpec.glintCol);
-    this.sunGlintLight.intensity = rigSpec.glintInt * lightMult;
+    this.rimLight.intensity = ((skyPreset?.rimIntensity ?? rigSpec.rimInt) + (rigSpec.glintInt || 0) * 0.22) * lightMult;
 
     let showcaseState = state;
     if (isTitleShowcase && !state.titleShowcase) {
@@ -3807,7 +3893,9 @@ export class GameRenderer {
       if (this.currentTowerGroup) this.towerScene.remove(this.currentTowerGroup);
       this.currentTowerGroup = cached.group;
       this.towerScene.add(this.currentTowerGroup);
-      if (this.oceanVfx) {
+      const ovKey = `${tower?.key || tower?.id || 't'}:${tower?.floors || 0}:${tower?.theme || ''}`;
+      if (this.oceanVfx && this._lastOceanVfxKey !== ovKey) {
+        this._lastOceanVfxKey = ovKey;
         this.oceanVfx.rebuildForTower(tower, fh, TOWER_RADIUS);
       }
       if (this.postfx) {
@@ -4002,11 +4090,27 @@ export class GameRenderer {
       );
       if (this.overchargeAuraGroup && heroVisible && overchargeOn && !isTitleShowcase && !isWardrobe) {
         this.overchargeAuraGroup.visible = true;
-        this.overchargeAuraGroup.position.set(px, py + 0.58, pz);
-        this.overchargeAuraGroup.userData.ringA.rotation.y = time * 3.8;
-        this.overchargeAuraGroup.userData.ringA.rotation.z = time * 2.1;
-        this.overchargeAuraGroup.userData.ringB.rotation.y = -time * 4.4;
-        this.overchargeAuraGroup.userData.ringB.rotation.z = -time * 1.9;
+        this.overchargeAuraGroup.position.set(px, py + 0.14, pz);
+        const ud = this.overchargeAuraGroup.userData;
+        ud.ringA.rotation.set(Math.PI * 0.5 + Math.sin(time * 2.4) * 0.05, 0, time * 2.2);
+        ud.ringB.rotation.set(Math.PI * 0.5 + Math.cos(time * 2.8) * 0.05, 0, -time * 2.9);
+        const pulseA = 0.22 + Math.sin(time * 4.5) * 0.05;
+        ud.matA.opacity = pulseA;
+        ud.matB.opacity = 0.18 + Math.cos(time * 5.2) * 0.04;
+        if (ud.motes && ud.moteDummy) {
+          const dm = ud.moteDummy;
+          for (let mi = 0; mi < ud.moteCount; mi++) {
+            const ang = time * 2.8 + (mi / ud.moteCount) * TWO_PI;
+            const rad = 0.48 + (mi % 2) * 0.12 + Math.sin(time * 3.6 + mi) * 0.04;
+            const my = 0.03 + ((Math.sin(time * 3.2 + mi * 1.7) * 0.5 + 0.5) * 0.28);
+            dm.position.set(Math.cos(ang) * rad, my, Math.sin(ang) * rad);
+            dm.rotation.set(time * 2.5 + mi, ang, mi);
+            dm.scale.setScalar(0.65 + Math.sin(time * 5.0 + mi * 2.1) * 0.28);
+            dm.updateMatrix();
+            ud.motes.setMatrixAt(mi, dm.matrix);
+          }
+          ud.motes.instanceMatrix.needsUpdate = true;
+        }
       }
 
       // Carved Sun-Stone Balcony Pedestal underneath Gateway 2.0 on the Title Screen Star Showcase!
@@ -4038,11 +4142,11 @@ export class GameRenderer {
       }
 
       if (heroVisible) {
-        // Gateway 2.0 (#611): auto-normalized internally to 1.22m when scale === 1.0 (0.97 Wardrobe, 1.12 Title Showcase).
-        // Legacy fallback before Gateway 2.0 merges: 1.04 gameplay (1.232m), 1.00 Wardrobe, 1.15 Title Showcase.
+        // Gateway 2.0 (#611): auto-normalized internally to 1.22m when scale === 1.0 (0.97 Wardrobe, 1.04 Title Showcase).
+        // Legacy fallback before Gateway 2.0 merges: 1.04 gameplay (1.232m), 1.00 Wardrobe, 1.06 Title Showcase.
         const heroScale = isGatewayV2
-          ? (isWardrobe ? 0.97 : isTitleShowcase ? 1.12 : 1.0)
-          : (isWardrobe ? 1.0 : isTitleShowcase ? 1.15 : 1.04);
+          ? (isWardrobe ? 0.97 : isTitleShowcase ? 1.04 : 1.0)
+          : (isWardrobe ? 1.0 : isTitleShowcase ? 1.06 : 1.04);
         this.gatewayRig.group.scale.setScalar(heroScale);
         this.gatewayRig.group.position.set(px, py, pz);
 
@@ -4331,49 +4435,10 @@ export class GameRenderer {
       topple.active ? tg.position.y : 0
     );
 
-    // Front-Hemisphere Architectural Accent PointLight (Sanctum Doors & Elevator Cabs)
-    if (!isWardrobe) {
-      const toppleOffY = topple.active ? tg.position.y : 0;
-      let bestDist = 999;
-      let poolX = 0;
-      let poolY = 0;
-      let poolZ = 0;
-      let poolHex = '#5efce8';
-
-      const doors = tower.doors;
-      if (doors) {
-        for (let i = 0; i < doors.length; i++) {
-          const d = doors[i];
-          const isSanctum = Boolean(d.isSanctum || d.isRune || d.rune);
-          const isVault = Boolean(d.isVault || d.vault);
-          if (!d.isExit && !isSanctum && !isVault) continue;
-          const dTheta = wrapAngle((d.col + 0.5 - effCamCol) * COL_ANGLE);
-          if (Math.abs(dTheta) > 1.35) continue;
-          const dy = d.floor * fh + 0.72 + toppleOffY;
-          const dist = Math.abs(dy - shadowFocusY) + Math.abs(dTheta) * 1.6;
-          if (dist < bestDist) {
-            bestDist = dist;
-            const lr = TOWER_RADIUS + 0.85;
-            poolX = lr * Math.sin(dTheta);
-            poolY = dy;
-            poolZ = lr * Math.cos(dTheta);
-            poolHex = isSanctum ? '#2efce0' : isVault ? '#fde047' : '#38bdf8';
-          }
-        }
-      }
-      if (surgeEnv > 0.04) {
-        this.archAccentLight.color.set('#5efce8');
-        this.archAccentLight.intensity = (2.4 + surgeEnv * 3.2) * lightMult;
-        this.archAccentLight.position.set(0, Math.max(0.8, resolvedCamFloor * fh + surgeEnv * 4.5), TOWER_RADIUS + 1.4);
-      } else if (bestDist < 12.0) {
-        this.archAccentLight.color.set(poolHex);
-        this.archAccentLight.intensity = 1.65 * lightMult;
-        this.archAccentLight.position.set(poolX, poolY, poolZ);
-      } else {
-        this.archAccentLight.intensity = 0;
-      }
-    } else {
-      this.archAccentLight.intensity = 0;
+    // Fold Floodgate Water-Surge luminance cleanly into heroLight (zero 2nd PointLight overhead!)
+    if (surgeEnv > 0.04 && this.heroLight) {
+      this.heroLight.color.set('#5efce8');
+      this.heroLight.intensity = Math.max(this.heroLight.intensity, (1.4 + surgeEnv * 2.2) * lightMult);
     }
 
     // Update Hydro-Pulse Projectiles (`state.snowballs || state.pulses || state.projectiles`)
@@ -4476,8 +4541,12 @@ export class GameRenderer {
     }
 
     // Pre-compile all exact live shaders ONCE after collectibles, enemies, oceanVfx & arch GLBs are attached,
-    // and incrementally re-warm once when async Arch or Enemy GLBs finish loading -> ZERO mid-climb freezes!
-    if (this._lastUploadedWebpVer !== getBakedArchWebpVersion() || isTitleShowcase) {
+    // and upload newly-decoded biome sky/arch WebPs as soon as ready -> ZERO cold-biome launch stalls!
+    const totalSkyTex = Array.isArray(this.stormSky?._ownedTextures) ? this.stormSky._ownedTextures.length : 0;
+    if (
+      this._lastUploadedWebpVer !== getBakedArchWebpVersion() ||
+      (totalSkyTex > 0 && (this._skyTexUploadedCount || 0) < totalSkyTex)
+    ) {
       this._uploadAllReadyTextures();
     }
     const enemiesNowReady = Boolean(this.enemyVisuals?.isReady?.());
@@ -4493,8 +4562,9 @@ export class GameRenderer {
     }
 
     // Single-pass analytic water reflection runs inside `src/water.js` (0 extra scene render passes!)
-    // Update tight 512x512 hero shadow frustum on alternating frames (30Hz shadows = 2x faster GPU, visually identical!)
-    if (((this._shadowTick++ & 1) === 0) || this._shadowTick <= 4) {
+    // Update tight 512x512 hero-only shadow frustum on alternating frames (or every 3rd on iGPU) for locked 60fps!
+    const shadowStep = this._isIntegratedGpu ? 3 : 2;
+    if (((this._shadowTick++ % shadowStep) === 0) || this._shadowTick <= 4) {
       this.webgl.shadowMap.needsUpdate = true;
     }
     this._renderWithComposer(this.towerScene, this.towerCam, {
@@ -4508,245 +4578,182 @@ export class GameRenderer {
   _ensureCoreDescentScene() {
     if (this._coreDescentCtx) return this._coreDescentCtx;
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#0c3858');
-    scene.fog = new THREE.Fog('#0e4469', 14, 74);
-    const env = this._getBiomeEnvMap(this.biome);
+    scene.background = new THREE.Color('#05212f');
+    // Rich deep oceanic exponential depth fog for monumental chiaroscuro reactor depth!
+    scene.fog = new THREE.FogExp2('#05212f', 0.031);
+    const env = this._getBiomeEnvMap('coral_sea') || this._getBiomeEnvMap(this.biome);
     if (env) {
       scene.environment = env;
-      scene.environmentIntensity = 0.95;
+      scene.environmentIntensity = 0.90;
     }
 
     const aspect = Math.max(0.38, this.width / Math.max(1, this.height));
-    const camera = new THREE.PerspectiveCamera(56, aspect, 0.12, 110);
-    camera.position.set(0, 0.35, 5.2);
-    camera.lookAt(0, 0, -18);
+    const camera = new THREE.PerspectiveCamera(58, aspect, 0.14, 120);
+    camera.position.set(0, 0.42, 5.4);
+    camera.lookAt(0, 0, -22);
 
-    // Brilliantly Lit 3-Zone Lighting Rig (ZERO pitch-black tunnel!)
-    const hemi = new THREE.HemisphereLight('#7dd3fc', '#c26d2a', 1.38);
-    const sunIntake = new THREE.DirectionalLight('#fff3c4', 2.25);
-    sunIntake.position.set(4.5, 6.5, 10.5);
-    const rimBronze = new THREE.DirectionalLight('#38bdf8', 1.45);
-    rimBronze.position.set(-6.0, -4.0, 4.0);
-    const heroKey = new THREE.PointLight('#5efce8', 2.6, 12.0, 1.4);
+    // Lean 60fps Chiaroscuro Lighting Rig (1 Hemi + 2 Dir + 1 Hero PointLight, ZERO shadow pass!)
+    // Warm sunlit golden intake + electric turquoise-gold rim light carving Gateway 2.0 & riveted bronze!
+    const hemi = new THREE.HemisphereLight('#6ee7f0', '#071f2e', 0.96);
+    const sunIntake = new THREE.DirectionalLight('#ffefc2', 2.45);
+    sunIntake.position.set(3.8, 5.8, 11.5);
+    const rimAqua = new THREE.DirectionalLight('#38f5e6', 1.72);
+    rimAqua.position.set(-5.8, -4.6, -5.0);
+    const heroKey = new THREE.PointLight('#ffe8a8', 3.1, 11.5, 1.35);
     heroKey.position.set(0, 1.1, 2.2);
-    const bedrockGlow = new THREE.PointLight('#fde047', 1.8, 34.0, 1.3);
-    bedrockGlow.position.set(0, 0, -26);
-    scene.add(hemi, sunIntake, rimBronze, heroKey, bedrockGlow);
+    scene.add(hemi, sunIntake, rimAqua, heroKey);
 
-    const SHAFT_R = 4.55;
+    const SHAFT_SCALE = 0.62; // Inner buttress radius = 8.30 * 0.62 = 5.15m; tile height = 12.0 * 0.62 = 7.44m
+    const SHAFT_TILE_LEN = 12.0 * SHAFT_SCALE;
 
-    // 1. Ribbed Mechanical Hydro-Shaft Wall (Open cylinder + glowing copper rings + 8 thick bioluminescent conduits)
+    // 1. Sculpted Pelagian Hydro-Reactor Shaft Container (8 seamlessly tiled `ShaftRing_Main` GLB segments -> 96% fogged by -52m!)
     const shaftGroup = new THREE.Group();
-    const wallMat = new THREE.MeshStandardMaterial({
-      color: '#1b5d7a',
-      emissive: '#0c3b59',
-      emissiveIntensity: 0.45,
-      roughness: 0.38,
-      metalness: 0.56,
-      side: THREE.BackSide,
-    });
-    const wallCyl = new THREE.Mesh(new THREE.CylinderGeometry(SHAFT_R, SHAFT_R, 96, 28, 1, true), wallMat);
-    wallCyl.rotation.x = Math.PI * 0.5;
-    wallCyl.position.z = -36;
-    shaftGroup.add(wallCyl);
-
-    const bronzeRingMat = new THREE.MeshStandardMaterial({
-      color: '#d99a45',
-      emissive: '#6e3b10',
-      emissiveIntensity: 0.32,
-      roughness: 0.28,
-      metalness: 0.84,
-    });
-    const conduitGlowMat = new THREE.MeshStandardMaterial({
-      color: '#5efce8',
-      emissive: '#22f5e6',
-      emissiveIntensity: 1.65,
-      roughness: 0.14,
-      metalness: 0.25,
-    });
-    const hexArchMat = new THREE.MeshStandardMaterial({
-      color: '#38bdf8',
-      emissive: '#0ea5e9',
-      emissiveIntensity: 0.95,
-      roughness: 0.22,
-      metalness: 0.65,
-    });
-
-    const shaftRings = [];
-    const ringGeo = new THREE.TorusGeometry(SHAFT_R - 0.18, 0.18, 10, 28);
-    const hexGeo = new THREE.TorusGeometry(SHAFT_R - 0.38, 0.08, 6, 6);
-    for (let i = 0; i < 16; i++) {
-      const rg = new THREE.Group();
-      const mainR = new THREE.Mesh(ringGeo, bronzeRingMat);
-      const innerHex = new THREE.Mesh(hexGeo, hexArchMat);
-      innerHex.rotation.z = (i % 2) * (Math.PI / 6);
-      rg.add(mainR, innerHex);
-      rg.position.z = 8 - i * 5.6;
-      shaftGroup.add(rg);
-      shaftRings.push(rg);
+    const shaftRingSlots = [];
+    for (let i = 0; i < 8; i++) {
+      const slot = new THREE.Group();
+      slot.position.z = SHAFT_TILE_LEN - i * SHAFT_TILE_LEN;
+      shaftGroup.add(slot);
+      shaftRingSlots.push(slot);
     }
 
-    // 8 Thick Bioluminescent Energy Conduits running full length of the hydro-shaft
-    const conduitGeo = new THREE.CylinderGeometry(0.11, 0.11, 96, 10);
-    conduitGeo.rotateX(Math.PI * 0.5);
-    const conduits = [];
-    for (let c = 0; c < 8; c++) {
-      const ang = (c / 8) * TWO_PI;
-      const pipe = new THREE.Mesh(conduitGeo, conduitGlowMat);
-      pipe.position.set(Math.cos(ang) * (SHAFT_R - 0.26), Math.sin(ang) * (SHAFT_R - 0.26), -36);
-      shaftGroup.add(pipe);
-      conduits.push(pipe);
+    // Subtle Volumetric Cascading Water-Curtain Ribbons hugging the sculpted masonry shaft walls
+    const curtainGroup = new THREE.Group();
+    const curtainMat = new THREE.MeshBasicMaterial({
+      map: this.hydroWakeTex,
+      color: '#7af7f0',
+      transparent: true,
+      opacity: 0.20,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const curtainGeo = new THREE.PlaneGeometry(1.45, SHAFT_TILE_LEN * 1.15);
+    const waterCurtains = [];
+    for (let c = 0; c < 12; c++) {
+      const ang = (c / 12) * TWO_PI + 0.14;
+      const tier = c % 3;
+      const cm = new THREE.Mesh(curtainGeo, curtainMat);
+      const rad = 4.92;
+      cm.position.set(Math.cos(ang) * rad, Math.sin(ang) * rad, -tier * 18.5);
+      cm.rotation.order = 'ZYX';
+      cm.rotation.z = ang + Math.PI * 0.5;
+      cm.rotation.x = Math.PI * 0.5;
+      curtainGroup.add(cm);
+      waterCurtains.push({ mesh: cm, ang, rad, offset: (c * 5.2) % 56 });
     }
+    shaftGroup.add(curtainGroup);
 
-    // Zone 1 Upper Sunlit Intake God-Ray Beams streaming down from breached Crown Valve!
+    // Zone 1 Upper Sunlit Intake Volumetric God-Ray Cones pouring down from breached Crown Valve
     const intakeBeams = new THREE.Group();
     const beamMat = new THREE.MeshBasicMaterial({
       map: this.glowDotTex,
-      color: '#bae6fd',
+      color: '#c8f5ff',
       transparent: true,
-      opacity: 0.38,
+      opacity: 0.30,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
     for (let b = 0; b < 5; b++) {
-      const bAng = (b / 5) * TWO_PI + 0.3;
-      const bm = new THREE.Mesh(new THREE.PlaneGeometry(1.85, 22), beamMat);
-      bm.position.set(Math.cos(bAng) * 1.9, Math.sin(bAng) * 1.9, -4);
+      const bAng = (b / 5) * TWO_PI + 0.35;
+      const bm = new THREE.Mesh(new THREE.PlaneGeometry(1.9, 24), beamMat);
+      bm.position.set(Math.cos(bAng) * 2.1, Math.sin(bAng) * 2.1, -5);
       bm.rotation.set(Math.PI * 0.44, 0, bAng);
       intakeBeams.add(bm);
     }
     shaftGroup.add(intakeBeams);
     scene.add(shaftGroup);
 
-    // 2. Pooled Spinning 5-Blade Copper-Bronze Hydro-Turbines (7 slots)
+    // 2. Pooled Spinning Riveted-Bronze Hydro-Turbines (8 slots mounted with `Turbine_Blades` GLB!)
     const turbineGroup = new THREE.Group();
     const turbinePool = [];
-    const bladeGeo = new THREE.BoxGeometry(3.45, 0.44, 0.28);
-    bladeGeo.translate(1.85, 0, 0);
-    const hubGeo = new THREE.CylinderGeometry(0.55, 0.65, 0.65, 16);
-    hubGeo.rotateX(Math.PI * 0.5);
-    const turbineMat = new THREE.MeshStandardMaterial({
-      color: '#e2a346',
-      emissive: '#78350f',
-      emissiveIntensity: 0.36,
-      roughness: 0.24,
-      metalness: 0.86,
-    });
-    const bladeTipMat = new THREE.MeshBasicMaterial({
-      color: '#fb7185',
-      transparent: true,
-      opacity: 0.85,
-    });
-    const tipGeo = new THREE.BoxGeometry(0.45, 0.48, 0.32);
-    tipGeo.translate(3.42, 0, 0);
-
     for (let i = 0; i < 8; i++) {
       const tg = new THREE.Group();
       tg.visible = false;
-      const hub = new THREE.Mesh(hubGeo, turbineMat);
-      tg.add(hub);
-      for (let b = 0; b < 5; b++) {
-        const bg = new THREE.Group();
-        bg.rotation.z = (b / 5) * TWO_PI;
-        const blade = new THREE.Mesh(bladeGeo, turbineMat);
-        blade.rotation.x = 0.24;
-        const tip = new THREE.Mesh(tipGeo, bladeTipMat);
-        tip.rotation.x = 0.24;
-        bg.add(blade, tip);
-        tg.add(bg);
-      }
       turbineGroup.add(tg);
       turbinePool.push(tg);
     }
     scene.add(turbineGroup);
 
-    // 3. Pooled Siphon Crystal Locks (Coral-Magenta & Sunlit-Gold Faceted Cores + Warning Halos)
+    // 3. Pooled Ornate Astrolabe-Caged Hydro-Crystal Locks (6 slots mounted with `PowerCore_Crystal` GLB!)
     const crystalGroup = new THREE.Group();
     const crystalPool = [];
-    const crystalGeo = new THREE.OctahedronGeometry(0.76, 0);
-    crystalGeo.scale(0.88, 1.48, 0.88);
-    const crystalHaloGeo = new THREE.TorusGeometry(1.12, 0.06, 10, 28);
+    const crystalGlowMat = new THREE.SpriteMaterial({
+      map: this.glowDotTex,
+      color: '#5efce8',
+      transparent: true,
+      opacity: 0.46,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
     for (let i = 0; i < 6; i++) {
       const cg = new THREE.Group();
       cg.visible = false;
-      const cMat = new THREE.MeshStandardMaterial({
-        color: i % 2 === 0 ? '#f472b6' : '#fbbf24',
-        emissive: i % 2 === 0 ? '#ec4899' : '#f59e0b',
-        emissiveIntensity: 1.45,
-        roughness: 0.12,
-        metalness: 0.32,
-        flatShading: true,
-      });
-      const coreMesh = new THREE.Mesh(crystalGeo, cMat);
-      const haloMesh = new THREE.Mesh(
-        crystalHaloGeo,
-        new THREE.MeshBasicMaterial({
-          color: i % 2 === 0 ? '#fbcfe8' : '#fef08a',
-          transparent: true,
-          opacity: 0.78,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-        })
-      );
-      cg.add(coreMesh, haloMesh);
+      const corePivot = new THREE.Group();
+      const glowSprite = new THREE.Sprite(crystalGlowMat);
+      glowSprite.scale.set(2.9, 2.9, 1);
+      cg.add(corePivot, glowSprite);
       crystalGroup.add(cg);
-      crystalPool.push({ group: cg, coreMesh, haloMesh, cMat });
+      crystalPool.push({ group: cg, corePivot, glowSprite });
     }
     scene.add(crystalGroup);
 
     // 4. Exploding Crystal Shatter Quartz Shards & Expanding Harmonic Shockwave Rings
     const shatterGroup = new THREE.Group();
     const shockwavePool = [];
-    const shockGeo = new THREE.TorusGeometry(1.0, 0.11, 10, 32);
+    const shockGeo = new THREE.RingGeometry(0.84, 1.04, 32);
+    const shardGeo = new THREE.TetrahedronGeometry(0.18, 0);
     for (let s = 0; s < 4; s++) {
       const swMat = new THREE.MeshBasicMaterial({
         color: '#5efce8',
         transparent: true,
         opacity: 0,
         blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
         depthWrite: false,
       });
       const sw = new THREE.Mesh(shockGeo, swMat);
       sw.visible = false;
       const shards = [];
-      for (let k = 0; k < 16; k++) {
-        const ang = (k / 16) * TWO_PI;
+      for (let k = 0; k < 14; k++) {
+        const ang = (k / 14) * TWO_PI;
         const sh = new THREE.Mesh(
-          new THREE.OctahedronGeometry(0.16, 0),
-          new THREE.MeshBasicMaterial({ color: k % 2 === 0 ? '#f472b6' : '#fde047', transparent: true, opacity: 0 })
+          shardGeo,
+          new THREE.MeshBasicMaterial({
+            color: k % 2 === 0 ? '#5efce8' : '#fde047',
+            transparent: true,
+            opacity: 0,
+          })
         );
         sh.visible = false;
         shatterGroup.add(sh);
-        shards.push({ mesh: sh, vx: Math.cos(ang) * (2.6 + (k % 3) * 0.95), vy: Math.sin(ang) * (2.6 + (k % 3) * 0.95), vz: (k % 4 - 1.5) * 1.6 });
+        shards.push({
+          mesh: sh,
+          vx: Math.cos(ang) * (2.6 + (k % 3) * 0.95),
+          vy: Math.sin(ang) * (2.6 + (k % 3) * 0.95),
+          vz: ((k % 4) - 1.5) * 1.6,
+        });
       }
       shatterGroup.add(sw);
       shockwavePool.push({ sw, swMat, shards });
     }
     scene.add(shatterGroup);
 
-    // 5. Pooled Bioluminescent Hydro-Speed Rings (12 slots) & Downward Hydro-Pulses (12 slots)
+    // 5. Pooled Carved Pelagian Bronze Speed-Gate Rings (12 slots mounted with `BoostRing_Bronze` GLB!)
     const ringGroup = new THREE.Group();
     const ringPool = [];
-    const speedRingGeo = new THREE.TorusGeometry(0.86, 0.085, 10, 26);
-    const speedRingMat = new THREE.MeshStandardMaterial({
-      color: '#5efce8',
-      emissive: '#06b6d4',
-      emissiveIntensity: 1.35,
-      roughness: 0.16,
-      metalness: 0.55,
-    });
     for (let r = 0; r < 12; r++) {
-      const rm = new THREE.Mesh(speedRingGeo, speedRingMat);
-      rm.visible = false;
-      ringGroup.add(rm);
-      ringPool.push(rm);
+      const rg = new THREE.Group();
+      rg.visible = false;
+      ringGroup.add(rg);
+      ringPool.push(rg);
     }
     scene.add(ringGroup);
 
+    // Pooled Downward Hydro-Pulses (12 slots)
     const pulseGroup = new THREE.Group();
     const pulsePool = [];
-    const pulseGeo = new THREE.SphereGeometry(0.24, 12, 10);
+    const pulseGeo = new THREE.IcosahedronGeometry(0.24, 1);
     const pulseMat = new THREE.MeshBasicMaterial({ color: '#7dd3fc' });
     for (let p = 0; p < 12; p++) {
       const pm = new THREE.Mesh(pulseGeo, pulseMat);
@@ -4756,35 +4763,10 @@ export class GameRenderer {
     }
     scene.add(pulseGroup);
 
-    // 6. Zone 3 Bedrock Glowing Harmonic Lotus Chamber (rises into view & erupts into purification wave!)
-    const lotusGroup = new THREE.Group();
-    const lotusCoreMat = new THREE.MeshStandardMaterial({
-      color: '#fef08a',
-      emissive: '#22f5e6',
-      emissiveIntensity: 1.85,
-      roughness: 0.12,
-      metalness: 0.45,
-    });
-    const lotusCore = new THREE.Mesh(new THREE.IcosahedronGeometry(1.55, 1), lotusCoreMat);
-    lotusGroup.add(lotusCore);
-    const petalGeo = new THREE.ConeGeometry(0.95, 2.8, 5);
-    const petalMat = new THREE.MeshStandardMaterial({
-      color: '#34d399',
-      emissive: '#f59e0b',
-      emissiveIntensity: 0.92,
-      roughness: 0.22,
-      metalness: 0.62,
-    });
-    const lotusPetals = [];
-    for (let p = 0; p < 8; p++) {
-      const ang = (p / 8) * TWO_PI;
-      const pet = new THREE.Mesh(petalGeo, petalMat);
-      pet.position.set(Math.cos(ang) * 2.1, Math.sin(ang) * 2.1, 0.35);
-      pet.rotation.z = ang - Math.PI * 0.5;
-      pet.rotation.x = 0.58;
-      lotusGroup.add(pet);
-      lotusPetals.push(pet);
-    }
+    // 6. Distant Glowing Bedrock Sanctuary Dome (`Shaft_BottomSanctuary` GLB + Purification Wave!)
+    const sanctuaryGroup = new THREE.Group();
+    const sanctuaryMount = new THREE.Group();
+    sanctuaryGroup.add(sanctuaryMount);
     const purifySphereMat = new THREE.MeshBasicMaterial({
       color: '#5efce8',
       transparent: true,
@@ -4793,36 +4775,43 @@ export class GameRenderer {
       side: THREE.DoubleSide,
       depthWrite: false,
     });
-    const purifySphere = new THREE.Mesh(new THREE.SphereGeometry(1.0, 24, 18), purifySphereMat);
-    lotusGroup.add(purifySphere);
-    scene.add(lotusGroup);
+    const purifySphere = new THREE.Mesh(new THREE.SphereGeometry(1.0, 22, 16), purifySphereMat);
+    sanctuaryGroup.add(purifySphere);
+    scene.add(sanctuaryGroup);
 
-    // 7. Radial Speed-Streak Lines (dynamic opacity on boost / corkscrew drill-spin!)
-    const streakGroup = new THREE.Group();
+    // 7. Subtle Slipstream Wind-Mist Streaks (InstancedMesh = 1 draw call!)
+    const streakCount = 24;
     const streakMat = new THREE.MeshBasicMaterial({
-      color: '#e0f7ff',
+      color: '#d8f9ff',
       transparent: true,
-      opacity: 0.25,
+      opacity: 0.22,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
-    const streakGeo = new THREE.CylinderGeometry(0.015, 0.032, 3.8, 6);
+    const streakGeo = new THREE.PlaneGeometry(0.055, 3.6);
     streakGeo.rotateX(Math.PI * 0.5);
-    const streaks = [];
-    for (let st = 0; st < 28; st++) {
-      const ang = (st / 28) * TWO_PI + (st % 3) * 0.12;
-      const rad = 2.4 + (st % 4) * 0.45;
-      const sm = new THREE.Mesh(streakGeo, streakMat);
-      sm.position.set(Math.cos(ang) * rad, Math.sin(ang) * rad, -((st * 3.7) % 34));
-      streakGroup.add(sm);
-      streaks.push({ mesh: sm, ang, rad, offset: (st * 3.7) % 34 });
+    const streakInst = new THREE.InstancedMesh(streakGeo, streakMat, streakCount);
+    streakInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    const streakMeta = [];
+    const streakDummy = new THREE.Object3D();
+    for (let st = 0; st < streakCount; st++) {
+      const ang = (st / streakCount) * TWO_PI + (st % 3) * 0.12;
+      const rad = 2.6 + (st % 4) * 0.48;
+      streakMeta.push({ ang, rad, offset: (st * 3.9) % 38 });
     }
-    scene.add(streakGroup);
+    scene.add(streakInst);
 
-    // 8. Hero-Lit Gateway 2.0 Dive Rig + Aqua Corkscrew Drill-Vortex Cone
+    // 8. Hero-Lit Gateway 2.0 Head-First Skydiving Rig + Aqua Corkscrew Drill-Vortex Cone
+    // Note: `CoreDive` clip pitches Pelvis +1.32 rad head-first toward +Z; `diveAlignGroup.rotation.y = Math.PI`
+    // directs her head straight DOWN into the -Z shaft while trailing her scarf, frills & tail heroically toward camera!
     const gatewayRig = new GatewayRig(this.skinId);
+    const diveAlignGroup = new THREE.Group();
+    diveAlignGroup.rotation.y = Math.PI;
+    diveAlignGroup.position.set(0, -0.32, 0.34);
+    diveAlignGroup.add(gatewayRig.group);
+
     const heroMount = new THREE.Group();
-    heroMount.add(gatewayRig.group);
+    heroMount.add(diveAlignGroup);
     const drillMat = new THREE.MeshBasicMaterial({
       map: this.hydroWakeTex,
       color: '#5efce8',
@@ -4838,43 +4827,239 @@ export class GameRenderer {
     heroMount.add(drillCone);
     scene.add(heroMount);
 
+    // Warm luminous turquoise sanctuary vanishing-point halo far down the shaft
+    const depthMistHalo = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: this.glowDotTex,
+        color: '#2dd4bf',
+        transparent: true,
+        opacity: 0.38,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    depthMistHalo.position.set(0, 0, -48);
+    depthMistHalo.scale.set(16, 16, 1);
+    scene.add(depthMistHalo);
+
     this._coreDescentCtx = {
       scene,
       camera,
       hemi,
       sunIntake,
+      rimAqua,
       heroKey,
-      bedrockGlow,
-      wallMat,
-      bronzeRingMat,
-      conduitGlowMat,
+      shaftScale: SHAFT_SCALE,
+      shaftTileLen: SHAFT_TILE_LEN,
+      shaftRingSlots,
+      waterCurtains,
+      curtainMat,
       intakeBeams,
       beamMat,
-      shaftRings,
       turbinePool,
       crystalPool,
+      crystalGlowMat,
       shockwavePool,
       ringPool,
       pulsePool,
-      lotusGroup,
-      lotusCore,
-      lotusPetals,
+      sanctuaryGroup,
+      sanctuaryMount,
       purifySphere,
       purifySphereMat,
-      streaks,
+      streakInst,
+      streakMeta,
+      streakDummy,
       streakMat,
       gatewayRig,
       heroMount,
       drillCone,
       drillMat,
-      smoothFov: 56,
+      wallConduitMats: [],
+      glbMounted: false,
+      smoothFov: 58,
       lastTime: 0,
-      zoneBgA: new THREE.Color('#0e4a73'), // Zone 1: Sunlit Intake Cerulean
-      zoneBgB: new THREE.Color('#0c3658'), // Zone 2: Bioluminescent Copper Depth
-      zoneBgC: new THREE.Color('#0d5866'), // Zone 3: Golden-Turquoise Bedrock Lotus
+      zoneFogA: new THREE.Color('#083142'), // Zone 1: Deep sunlit intake turquoise-teal
+      zoneFogB: new THREE.Color('#062634'), // Zone 2: Deep atmospheric Pelagian marine shaft
+      zoneFogC: new THREE.Color('#0a424d'), // Zone 3: Luminous sunlit turquoise bedrock sanctuary
       tmpCol: new THREE.Color(),
     };
+
+    if (this.glbModels?.env_core_reactor) {
+      this._mountCoreReactorGlb(this._coreDescentCtx, this.glbModels.env_core_reactor);
+    } else {
+      // Ensure GLB loads even if `_ensureCoreDescentScene` was invoked before `_loadBlenderAssets` settled
+      try {
+        const loader = new GLTFLoader();
+        loader.load(
+          'assets/models/env_core_reactor.glb',
+          (gltf) => {
+            if (gltf?.scene) {
+              this.glbModels.env_core_reactor = this._prepareGlbScene(gltf.scene);
+              if (this._coreDescentCtx && !this._coreDescentCtx.glbMounted) {
+                this._mountCoreReactorGlb(this._coreDescentCtx, this.glbModels.env_core_reactor);
+              }
+            }
+          },
+          undefined,
+          () => {}
+        );
+      } catch {}
+    }
+
     return this._coreDescentCtx;
+  }
+
+  /**
+   * Mounts all 5 Blender-sculpted sub-assets from `assets/models/env_core_reactor.glb`
+   * (`ShaftRing_Main`, `Turbine_Blades`, `PowerCore_Crystal`, `BoostRing_Bronze`, `Shaft_BottomSanctuary`)
+   * with Art-Director chiaroscuro material separation: moody stone walls + radiant foreground bronze/crystals!
+   */
+  _mountCoreReactorGlb(ctx, glbRoot) {
+    if (!ctx || !glbRoot || ctx.glbMounted) return;
+    const findPart = (name) => glbRoot.getObjectByName(name) || null;
+    const shaftSrc = findPart('ShaftRing_Main');
+    const turbineSrc = findPart('Turbine_Blades');
+    const crystalSrc = findPart('PowerCore_Crystal');
+    const boostSrc = findPart('BoostRing_Bronze');
+    const sanctuarySrc = findPart('Shaft_BottomSanctuary');
+    if (!shaftSrc) return;
+
+    const SHAFT_SCALE = ctx.shaftScale || 0.62;
+    const wallMatCache = new Map();
+    const fgMatCache = new Map();
+    ctx.wallConduitMats = [];
+
+    const cloneTunedMat = (mat, role) => {
+      if (!mat) return mat;
+      const cache = role === 'wall' ? wallMatCache : fgMatCache;
+      const cacheKey = `${role}:${mat.name || mat.uuid}`;
+      if (cache.has(cacheKey)) return cache.get(cacheKey);
+      const m = mat.clone();
+      const mn = String(m.name || '').toLowerCase();
+      if (role === 'wall') {
+        if (mn.includes('conduit') || mn.includes('aqua')) {
+          m.emissiveIntensity = 0.44;
+          m.envMapIntensity = 0.55;
+          ctx.wallConduitMats.push(m);
+        } else if (mn.includes('bronze')) {
+          m.color.multiplyScalar(0.74);
+          m.envMapIntensity = 0.68;
+        } else {
+          // Carved basalt/sandstone shaft walls deeply atmospheric & non-metallic (clamp ORM B-channel chrome!)
+          m.color.multiplyScalar(0.68);
+          m.envMapIntensity = 0.48;
+          if (mn.includes('basalt') || mn.includes('stone') || mn.includes('rock')) {
+            m.metalness = 0.06;
+            m.roughness = Math.max(m.roughness ?? 0.72, 0.76);
+          }
+        }
+      } else if (role === 'sanctuary') {
+        if (mn.includes('pool') || mn.includes('conduit') || mn.includes('aqua')) {
+          m.emissiveIntensity = 1.38;
+          m.envMapIntensity = 1.25;
+        } else if (mn.includes('bronze') || mn.includes('amber')) {
+          m.emissiveIntensity = Math.min(1.85, (m.emissiveIntensity || 0.6) * 1.15);
+          m.envMapIntensity = 1.25;
+        } else {
+          m.envMapIntensity = 0.85;
+          if (mn.includes('basalt') || mn.includes('stone')) {
+            m.metalness = 0.06;
+            m.roughness = Math.max(m.roughness ?? 0.72, 0.74);
+          }
+        }
+      } else {
+        // High-contrast foreground gameplay readability (Turbine_Blades, PowerCore_Crystal, BoostRing_Bronze)
+        if (mn.includes('amber') || mn.includes('hazard')) {
+          m.emissiveIntensity = 2.05;
+          m.envMapIntensity = 1.1;
+        } else if (mn.includes('aqua') || mn.includes('conduit')) {
+          m.emissiveIntensity = 1.85;
+          m.envMapIntensity = 1.2;
+        } else if (mn.includes('bronze')) {
+          m.color.multiplyScalar(1.12);
+          m.envMapIntensity = 1.42;
+        }
+      }
+      m.userData = { ...(m.userData || {}), shared: true };
+      cache.set(cacheKey, m);
+      return m;
+    };
+
+    const prepareClone = (src, role) => {
+      const c = src.clone(true);
+      c.position.set(0, 0, 0);
+      c.rotation.set(0, 0, 0);
+      c.scale.set(1, 1, 1);
+      c.traverse((obj) => {
+        if (!obj.isMesh) return;
+        obj.castShadow = false;
+        obj.receiveShadow = false;
+        if (Array.isArray(obj.material)) {
+          obj.material = obj.material.map((mm) => cloneTunedMat(mm, role));
+        } else {
+          obj.material = cloneTunedMat(obj.material, role);
+        }
+      });
+      return c;
+    };
+
+    // 1. Mount 10 tiled `ShaftRing_Main` sculpted stone/bronze reactor shaft segments
+    for (let i = 0; i < ctx.shaftRingSlots.length; i++) {
+      const slot = ctx.shaftRingSlots[i];
+      slot.clear();
+      const seg = prepareClone(shaftSrc, 'wall');
+      seg.rotation.x = Math.PI * 0.5;
+      seg.scale.setScalar(SHAFT_SCALE);
+      // Alternate 30° twist every other segment for organic monumental architectural continuity
+      if (i % 2 === 1) seg.rotation.y = Math.PI / 6;
+      slot.add(seg);
+    }
+
+    // 2. Mount 8 pooled `Turbine_Blades` riveted antique-bronze hydrofoil rotors
+    if (turbineSrc) {
+      for (let i = 0; i < ctx.turbinePool.length; i++) {
+        const slot = ctx.turbinePool[i];
+        slot.clear();
+        const rotor = prepareClone(turbineSrc, 'fg');
+        rotor.rotation.x = Math.PI * 0.5;
+        rotor.scale.setScalar(0.64);
+        slot.add(rotor);
+      }
+    }
+
+    // 3. Mount 6 pooled `PowerCore_Crystal` ornate astrolabe-caged faceted crystal clusters
+    if (crystalSrc) {
+      for (let i = 0; i < ctx.crystalPool.length; i++) {
+        const slot = ctx.crystalPool[i];
+        slot.corePivot.clear();
+        const crys = prepareClone(crystalSrc, 'fg');
+        crys.scale.setScalar(1.04);
+        slot.corePivot.add(crys);
+      }
+    }
+
+    // 4. Mount 12 pooled `BoostRing_Bronze` carved Pelagian bronze & crystal speed-gate rings
+    if (boostSrc) {
+      for (let i = 0; i < ctx.ringPool.length; i++) {
+        const slot = ctx.ringPool[i];
+        slot.clear();
+        const br = prepareClone(boostSrc, 'fg');
+        br.rotation.x = Math.PI * 0.5;
+        br.scale.setScalar(0.54);
+        slot.add(br);
+      }
+    }
+
+    // 5. Mount `Shaft_BottomSanctuary` submerged bronze dome & glowing bedrock hydro-pool
+    if (sanctuarySrc) {
+      ctx.sanctuaryMount.clear();
+      const sanc = prepareClone(sanctuarySrc, 'sanctuary');
+      sanc.rotation.x = Math.PI * 0.5;
+      sanc.scale.setScalar(SHAFT_SCALE);
+      ctx.sanctuaryMount.add(sanc);
+    }
+
+    ctx.glbMounted = true;
   }
 
   renderCoreDescentScene(state) {
@@ -4885,6 +5070,10 @@ export class GameRenderer {
     const ctx = this._ensureCoreDescentScene();
     if (!ctx) return;
 
+    if (!ctx.glbMounted && this.glbModels?.env_core_reactor) {
+      this._mountCoreReactorGlb(ctx, this.glbModels.env_core_reactor);
+    }
+
     const time = state?.time ?? cd?.timer ?? 0;
     const dt = Math.min(0.05, Math.max(0.001, time - (ctx.lastTime || 0) || 0.016));
     ctx.lastTime = time;
@@ -4893,13 +5082,12 @@ export class GameRenderer {
     const progress = clamp(Number(cd?.progress) || 0, 0, 1);
     const depth = Number(cd?.depth) || 0;
     const totalDepth = Math.max(100, Number(cd?.totalDepth) || 360);
-    const speed = Number(cd?.speed) || 22;
     const isBoost = (cd?.boostTimer || 0) > 0.02;
     const isSpin = (cd?.spinTimer || 0) > 0.02 || (cd?.whipTimer || 0) > 0.02;
 
-    // Update camera aspect & dynamic FOV speed-rush (56° cruising -> 68° boost / corkscrew drill-spin!)
+    // Dynamic FOV rush (58° cruising -> 68° boost / corkscrew drill-spin!)
     const aspect = Math.max(0.38, this.width / Math.max(1, this.height));
-    const targetFov = 56 + (isBoost ? 7.5 : 0) + (isSpin ? 4.5 : 0) + progress * 2.5;
+    const targetFov = 58 + (isBoost ? 7.0 : 0) + (isSpin ? 4.2 : 0) + progress * 2.4;
     ctx.smoothFov += (targetFov - ctx.smoothFov) * Math.min(1, dt * 8.0);
     if (Math.abs(ctx.camera.fov - ctx.smoothFov) > 0.04 || Math.abs(ctx.camera.aspect - aspect) > 0.002) {
       ctx.camera.fov = ctx.smoothFov;
@@ -4907,47 +5095,60 @@ export class GameRenderer {
       ctx.camera.updateProjectionMatrix();
     }
 
-    // 3-Zone Architectural Color & Lighting Morph (0-35% Sunlit Intake -> 35-75% Biolume Copper -> 75-100% Bedrock Lotus)
-    if (progress < 0.4) {
-      const t = progress / 0.4;
-      ctx.tmpCol.copy(ctx.zoneBgA).lerp(ctx.zoneBgB, t);
+    // Deep atmospheric exponential depth fog morph (`#062634` -> sunlit turquoise bedrock highlight)
+    if (progress < 0.45) {
+      ctx.tmpCol.copy(ctx.zoneFogA).lerp(ctx.zoneFogB, progress / 0.45);
     } else {
-      const t = clamp((progress - 0.4) / 0.6, 0, 1);
-      ctx.tmpCol.copy(ctx.zoneBgB).lerp(ctx.zoneBgC, t);
+      ctx.tmpCol.copy(ctx.zoneFogB).lerp(ctx.zoneFogC, clamp((progress - 0.45) / 0.55, 0, 1));
     }
     ctx.scene.background.copy(ctx.tmpCol);
     ctx.scene.fog.color.copy(ctx.tmpCol);
-    const env = this._getBiomeEnvMap(this.biome);
+    ctx.scene.fog.density = 0.0315 - progress * 0.0065;
+
+    const env = this._getBiomeEnvMap('coral_sea') || this._getBiomeEnvMap(this.biome);
     if (env && ctx.scene.environment !== env) ctx.scene.environment = env;
 
-    // Zone 1 sunlit intake rays fade smoothly as Gateway plunges past 42% depth
-    const intakeAlpha = clamp(1 - progress / 0.45, 0, 1);
+    // Zone 1 sunlit intake rays fade smoothly as Gateway dives past 48% depth
+    const intakeAlpha = clamp(1 - progress / 0.48, 0, 1);
     ctx.intakeBeams.visible = intakeAlpha > 0.02;
-    ctx.beamMat.opacity = intakeAlpha * 0.42;
-    ctx.intakeBeams.rotation.z = time * 0.22;
-    ctx.sunIntake.intensity = 1.65 + intakeAlpha * 1.1;
-    ctx.conduitGlowMat.emissiveIntensity = 1.35 + Math.sin(time * 5.2) * 0.35 + (isBoost ? 0.55 : 0);
+    ctx.beamMat.opacity = intakeAlpha * 0.30;
+    ctx.intakeBeams.rotation.z = time * 0.18;
+    ctx.sunIntake.intensity = 2.15 + intakeAlpha * 0.75;
 
-    // Scroll shaft copper rings smoothly with dive depth
-    const ringSpacing = 5.6;
-    const scrollZ = (depth * 0.85) % ringSpacing;
-    for (let i = 0; i < ctx.shaftRings.length; i++) {
-      const rg = ctx.shaftRings[i];
-      rg.position.z = 8 + scrollZ - i * ringSpacing;
-      rg.rotation.z = (i % 2 === 0 ? 1 : -1) * time * 0.14;
+    // Gentle breathing pulse on lower-key shaft wall aqua conduits
+    if (ctx.wallConduitMats?.length) {
+      const cPulse = 0.42 + Math.sin(time * 4.2) * 0.08 + (isBoost ? 0.20 : 0);
+      for (let m = 0; m < ctx.wallConduitMats.length; m++) {
+        ctx.wallConduitMats[m].emissiveIntensity = cPulse;
+      }
     }
 
-    // Hero-Lit Gateway 2.0 at center tube coordinates
+    // Scroll 10 seamless Blender `ShaftRing_Main` segments continuously at exact dive speed (`depth * 0.72`)
+    const tileLen = ctx.shaftTileLen || 7.44;
+    const scrollZ = ((depth * 0.72) % tileLen + tileLen) % tileLen;
+    for (let i = 0; i < ctx.shaftRingSlots.length; i++) {
+      const slot = ctx.shaftRingSlots[i];
+      slot.position.z = tileLen + scrollZ - i * tileLen;
+    }
+
+    // Scroll subtle volumetric cascading water-curtain ribbons down the stone walls
+    ctx.curtainMat.opacity = isBoost ? 0.28 : 0.20;
+    for (let c = 0; c < ctx.waterCurtains.length; c++) {
+      const wc = ctx.waterCurtains[c];
+      const wz = 8 - (((wc.offset - depth * 0.92 - time * 5.0) % 56) + 56) % 56;
+      wc.mesh.position.z = wz;
+    }
+
+    // Heroic Golden-Aqua Rim-Lit Gateway 2.0 Skydiving Head-First Down the Reactor Shaft!
     const tubeScale = 2.75;
     const gx = (cd?.x || 0) * tubeScale;
     const gy = -(cd?.y || 0) * tubeScale;
     const isV2 = typeof ctx.gatewayRig?.setTargetHeight === 'function';
-    ctx.gatewayRig.group.scale.setScalar(isV2 ? 1.05 : 1.08);
-    ctx.heroMount.position.set(gx, gy, -0.4);
-    // Heroic dynamic skydiver bank-and-tuck (nose pointed boldly down the illuminated reactor shaft!)
+    ctx.gatewayRig.group.scale.setScalar(isV2 ? 1.12 : 1.10);
+    ctx.heroMount.position.set(gx, gy, -0.45);
     const spinRoll = isSpin ? time * 24 : 0;
-    const bankZ = clamp(-(cd?.vx || 0) * 0.26, -0.58, 0.58) + spinRoll;
-    const pitchX = -Math.PI * 0.42 + clamp((cd?.vy || 0) * 0.14, -0.32, 0.32);
+    const bankZ = clamp(-(cd?.vx || 0) * 0.36, -0.65, 0.65) + spinRoll;
+    const pitchX = 0.14 + clamp((cd?.vy || 0) * 0.18, -0.28, 0.28);
     ctx.heroMount.rotation.set(pitchX, 0, bankZ);
 
     ctx.gatewayRig.update(dt, {
@@ -4958,27 +5159,27 @@ export class GameRenderer {
       onGround: false,
       coreDive: true,
       tailWhipTimer: cd?.spinTimer || cd?.whipTimer || 0,
-      frillFlare: isBoost ? 0.85 : 0.42,
+      frillFlare: isBoost ? 0.45 : 0.24,
       mood: isSpin ? 'determined' : isBoost ? 'joyful' : 'determined',
       anim: 'CoreDive',
       invuln: cd?.invuln || 0,
     });
 
-    // Aqua Corkscrew Hydro-Drill Vortex Cone during spin-attack!
+    // Aqua Corkscrew Hydro-Drill Vortex Cone during spin-attack / boost!
     ctx.drillCone.visible = isSpin || isBoost;
-    ctx.drillMat.opacity = isSpin ? 0.72 : isBoost ? 0.32 : 0;
+    ctx.drillMat.opacity = isSpin ? 0.68 : isBoost ? 0.28 : 0;
     ctx.drillCone.rotation.y = time * 16;
-    ctx.heroKey.position.set(gx * 0.65, gy * 0.65 + 0.9, 2.2);
-    ctx.heroKey.intensity = isSpin ? 3.8 : 2.6;
+    ctx.heroKey.position.set(gx * 0.68 + 0.45, gy * 0.68 + 1.35, 1.9);
+    ctx.heroKey.intensity = isSpin ? 4.4 : 3.4;
 
-    // Camera gently follows Gateway's tube coordinates with micro-shake
+    // Camera glides behind diving Gateway with crisp perspective down the vaulted shaft
     const shake = writeShakeOffset(state?.shake, time, this._shakeVec);
-    ctx.camera.position.set(gx * 0.36 + shake.x * 0.45, gy * 0.36 + 0.35 + shake.y * 0.45, 5.2);
-    ctx.camera.lookAt(gx * 0.68, gy * 0.68, -16);
+    ctx.camera.position.set(gx * 0.36 + shake.x * 0.42, gy * 0.36 + 0.42 + shake.y * 0.42, 5.4);
+    ctx.camera.lookAt(gx * 0.68, gy * 0.68, -20);
 
-    const depthToZ = (targetDepth) => -0.4 - (targetDepth - depth) * 0.72;
+    const depthToZ = (targetDepth) => -0.45 - (targetDepth - depth) * 0.72;
 
-    // Sync Spinning 5-Blade Copper Hydro-Turbines
+    // Sync Spinning Riveted-Bronze `Turbine_Blades` (cull cleanly behind Gateway at z > 0.35 so hub NEVER blocks camera!)
     const turbines = cd?.turbines || [];
     for (let i = 0; i < ctx.turbinePool.length; i++) {
       const tg = ctx.turbinePool[i];
@@ -4988,7 +5189,7 @@ export class GameRenderer {
       }
       const tb = turbines[i];
       const tz = depthToZ(tb.depth);
-      if (tz > 4.5 || tz < -68) {
+      if (tz > 0.35 || tz < -54) {
         tg.visible = false;
         continue;
       }
@@ -4997,7 +5198,7 @@ export class GameRenderer {
       tg.rotation.z = -(tb.rotAngle || 0);
     }
 
-    // Sync Faceted Glowing Siphon Crystal Locks + Shatter Shards & Expanding Shockwave Rings!
+    // Sync Ornate Astrolabe-Caged `PowerCore_Crystal` Locks + Shatter Shards & Shockwaves!
     const crystals = cd?.crystalLocks || [];
     let shockIdx = 0;
     for (let i = 0; i < ctx.crystalPool.length; i++) {
@@ -5019,7 +5220,7 @@ export class GameRenderer {
           pool.sw.position.set(sx, sy, Math.max(-24, cz));
           const swScale = 0.8 + sProg * 5.2;
           pool.sw.scale.set(swScale, swScale, 1);
-          pool.swMat.opacity = (1 - sProg) * 0.92;
+          pool.swMat.opacity = (1 - sProg) * 0.90;
           for (let k = 0; k < pool.shards.length; k++) {
             const sh = pool.shards[k];
             sh.mesh.visible = true;
@@ -5030,15 +5231,14 @@ export class GameRenderer {
         }
         continue;
       }
-      if (cz > 4.5 || cz < -68) {
+      if (cz > 0.65 || cz < -54) {
         slot.group.visible = false;
         continue;
       }
       slot.group.visible = true;
       slot.group.position.set((cl.x || 0) * tubeScale, -(cl.y || 0) * tubeScale, cz);
-      slot.coreMesh.rotation.set(time * 1.8 + i, time * 2.4, 0);
-      slot.haloMesh.rotation.z = -time * 3.2;
-      const pulse = 1.0 + Math.sin(time * 7 + i) * 0.1;
+      slot.corePivot.rotation.set(time * 1.45 + i, time * 2.05, Math.sin(time * 1.8 + i) * 0.4);
+      const pulse = 1.0 + Math.sin(time * 6.5 + i) * 0.07;
       slot.group.scale.setScalar(pulse);
     }
     for (let s = shockIdx; s < ctx.shockwavePool.length; s++) {
@@ -5048,7 +5248,7 @@ export class GameRenderer {
       }
     }
 
-    // Sync Bioluminescent Hydro-Speed Rings
+    // Sync Carved `BoostRing_Bronze` Pelagian Speed-Gate Rings
     const rings = cd?.rings || [];
     for (let i = 0; i < ctx.ringPool.length; i++) {
       const rm = ctx.ringPool[i];
@@ -5058,13 +5258,13 @@ export class GameRenderer {
       }
       const rg = rings[i];
       const rz = depthToZ(rg.depth);
-      if (rz > 4.5 || rz < -66) {
+      if (rz > 0.65 || rz < -54) {
         rm.visible = false;
         continue;
       }
       rm.visible = true;
       rm.position.set((rg.x || 0) * tubeScale, -(rg.y || 0) * tubeScale, rz);
-      rm.rotation.z = time * 2.4 + i;
+      rm.rotation.z = time * 1.35 + i * 0.7;
     }
 
     // Sync Downward Hydro-Pulses
@@ -5077,7 +5277,7 @@ export class GameRenderer {
       }
       const pl = pulses[i];
       const pz = depthToZ(pl.depth);
-      if (pz > 4.5 || pz < -68) {
+      if (pz > 0.65 || pz < -54) {
         pm.visible = false;
         continue;
       }
@@ -5085,15 +5285,11 @@ export class GameRenderer {
       pm.position.set((pl.x || 0) * tubeScale, -(pl.y || 0) * tubeScale, pz);
     }
 
-    // Zone 3 Bedrock Harmonic Lotus Chamber & Explosive Purification Wave
-    const lotusZ = Math.max(-52, depthToZ(totalDepth));
-    ctx.lotusGroup.visible = progress > 0.42 || cd?.phase === 'seed_plant';
-    ctx.lotusGroup.position.set(0, 0, lotusZ);
-    ctx.lotusGroup.rotation.z = time * 0.55;
-    const bloomOpen = clamp((progress - 0.55) / 0.45, 0, 1);
-    for (let p = 0; p < ctx.lotusPetals.length; p++) {
-      ctx.lotusPetals[p].rotation.x = 0.35 + bloomOpen * 0.72;
-    }
+    // Distant Glowing `Shaft_BottomSanctuary` Submerged Bronze Dome & Bedrock Hydro-Pool
+    const sancZ = Math.max(-58, depthToZ(totalDepth));
+    ctx.sanctuaryGroup.visible = true;
+    ctx.sanctuaryGroup.position.set(0, 0, sancZ);
+    ctx.sanctuaryMount.rotation.z = time * 0.16;
     const pWave = Number(cd?.purificationWave) || 0;
     if (pWave > 0.005) {
       ctx.purifySphere.visible = true;
@@ -5102,26 +5298,37 @@ export class GameRenderer {
     } else {
       ctx.purifySphere.visible = false;
     }
-    ctx.bedrockGlow.position.set(0, 0, Math.min(-6, lotusZ + 4));
-    ctx.bedrockGlow.intensity = 1.6 + bloomOpen * 4.5 + pWave * 6.0;
 
-    // Radial Speed Streaks streaming past camera
-    ctx.streakMat.opacity = isSpin ? 0.58 : isBoost ? 0.46 : 0.22;
-    for (let st = 0; st < ctx.streaks.length; st++) {
-      const s = ctx.streaks[st];
-      const zPos = 6 - ((s.offset - depth * (isBoost ? 1.45 : 1.05)) % 34 + 34) % 34;
-      s.mesh.position.set(Math.cos(s.ang) * s.rad, Math.sin(s.ang) * s.rad, zPos);
-      s.mesh.scale.z = isBoost || isSpin ? 1.65 : 1.0;
+    // Instanced Slipstream Mist Streaks streaming past Gateway (1 draw call!)
+    ctx.streakMat.opacity = isSpin ? 0.48 : isBoost ? 0.36 : 0.18;
+    const sd = ctx.streakDummy;
+    const streakZScale = isBoost || isSpin ? 1.55 : 1.0;
+    for (let st = 0; st < ctx.streakMeta.length; st++) {
+      const s = ctx.streakMeta[st];
+      const zPos = 6 - (((s.offset - depth * (isBoost ? 1.4 : 1.0)) % 38) + 38) % 38;
+      sd.position.set(Math.cos(s.ang) * s.rad, Math.sin(s.ang) * s.rad, zPos);
+      sd.rotation.set(0, 0, s.ang);
+      sd.scale.set(1, 1, streakZScale);
+      sd.updateMatrix();
+      ctx.streakInst.setMatrixAt(st, sd.matrix);
     }
+    ctx.streakInst.instanceMatrix.needsUpdate = true;
 
-    this._renderWithComposer(ctx.scene, ctx.camera, {
-      biome: 'storm_ocean',
-      purification: Math.max(this.purificationProgress, pWave),
-      bloomThreshold: 0.68,
-      bloomStrength: isSpin ? 0.56 : 0.42,
-      flash: pWave * 0.85,
-      exposure: 1.14,
-    });
+    // Render with zero shadow-pass overhead for locked 55–60 fps D3D11!
+    const prevShadow = this.webgl.shadowMap.enabled;
+    this.webgl.shadowMap.enabled = false;
+    try {
+      this._renderWithComposer(ctx.scene, ctx.camera, {
+        biome: 'storm_ocean',
+        purification: Math.max(this.purificationProgress, pWave),
+        bloomThreshold: 0.78,
+        bloomStrength: isSpin ? 0.42 : 0.30,
+        flash: pWave * 0.75,
+        exposure: 1.12,
+      });
+    } finally {
+      this.webgl.shadowMap.enabled = prevShadow;
+    }
   }
 
   renderSubmarineScene(state) {
@@ -5179,6 +5386,9 @@ export class GameRenderer {
     sr.render(state, {
       time,
       dt,
+      particles: state.particles,
+      popups: state.popups,
+      shake: state.shake,
       postfx: this.usePostFX ? this.postfx : null,
       envMap,
       biomeKey,
