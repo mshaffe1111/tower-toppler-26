@@ -1389,23 +1389,23 @@ const NODE_COORDS_10 = [
   { x: 108, y: 424, actIdx: 1, routeNext: 'frill_glide', routeLbl: 'GLIDE' },
   { x: 108, y: 324, actIdx: 2, routeNext: 'rapids_surf', routeLbl: 'SURF' },
   { x: 294, y: 308, actIdx: 2, routeNext: 'reef_swim', routeLbl: 'DIVE' },
-  { x: 294, y: 208, actIdx: 3, routeNext: 'rapids_surf', routeLbl: 'SURF' },
+  { x: 294, y: 208, actIdx: 3, routeNext: 'reef_swim', routeLbl: 'DIVE' },
   { x: 108, y: 192, actIdx: 3, routeNext: 'frill_glide', routeLbl: 'GLIDE' },
-  { x: 108, y: 92, actIdx: 4, routeNext: 'reef_swim', routeLbl: 'DIVE' },
+  { x: 108, y: 92, actIdx: 4, routeNext: 'rapids_surf', routeLbl: 'SURF' },
   { x: 294, y: 78, actIdx: 4, routeNext: null, routeLbl: '' },
 ];
 
 const DEFAULT_SPIRE_BRIEFS = [
-  'Redwood Canyon Gorge. Route copper river-valves to power real mechanical lifts and awaken waterfall rapids.',
-  'Grand Timber Dam Spire. Spin hydro-turbines with Gateway’s Tail-Whip and plunge down the Reactor Core.',
-  'Snow-Capped Mirror Basin. Ascend carved granite staircases and align crystal aqueduct prisms.',
-  'Alpenglow Glacial Viaduct. Scamper up wet crystal wall strips and free the frozen mountain headwaters.',
-  'Sunken Cypress Sanctum. Ride warm firefly lanterns across mossy stone decks and floodgate locks.',
-  'Bioluminescent Delta Root-Spire. Defeat the Bayou Siphon Warden to restore emerald lotus channels.',
-  'Turquoise Atoll Lagoon. Leap between mother-of-pearl terraces above shallow sunlit coral reefs.',
-  'Tidal Sea-Glass Citadel. Flip Snap-Claw Dredgers onto their backs to vault into the Crown Sanctum.',
-  'Aurora Iceberg Trench. Brave howling polar crosswinds and grapple across glacial chasm rings.',
-  'The Mother Siphon Leviathan. Shatter the master offshore siphon core to heal Earth’s global hydrosphere!',
+  'Sunlit Gorge Sluice. Turn the copper pipe-valve to power mechanical lifts, ride carved staircases, and purge the canyon dam core.',
+  'Redwood Cataract Dam. Vault off Snap-Crabs, swing across gorge grapple rings, and defeat the Redwood Siphon Warden.',
+  'Mirror Tarn Aqueduct. Carve across glacial ice ledges, Gecko-scamper up wet crystal wall strips, and align alpine pipe-valves.',
+  'Alpenglow Spillway Spire. Brave fierce mountain crosswinds, chain four alpine grapple rings, and shatter the Glacier Siphon Warden.',
+  'Firefly Cypress Reliquary. Flip emerald-amber phase bridges, scale mossy wall strips, and unlock the twilight bayou sanctum.',
+  'Sunken Lotus Floodgate. Outclimb rising bayou floodwaters with emergency drain-valves and defeat the Bayou Siphon Warden.',
+  'Mother-of-Pearl Atoll Spire. Ride soaring sea-geyser vents and scamper coral wall strips above sunlit turquoise reefs.',
+  'Pelagic Reef Conduit. Reverse hydro-conveyor tides, route triple brass lifts, and unseat the Coral Siphon Warden.',
+  'Aurora Iceberg Bastion. Endure polar storm gusts and lightning while climbing twin crystal wall strips to confront the Polar Lock-Keeper.',
+  'The Mother Siphon Citadel. Survive storm gales, lightning, and rising swells to shatter Mother Siphon Prime and heal Earth’s oceans!',
 ];
 
 function normalizeStars(raw) {
@@ -1578,9 +1578,9 @@ export function renderWatershedWorldMap(container, opts = {}) {
             ${unlocked ? starPips : ''}
             ${
               cutKey
-                ? `<g class="sea-cutscene-badge ${cutReady ? 'unlocked' : 'locked'}" data-cutscene-key="${cutKey}" data-cutscene-idx="${idx}" transform="translate(0, -35)">
+                ? `<g class="sea-cutscene-badge ${cutReady ? 'unlocked' : 'locked'}" data-cutscene-key="${cutKey}" data-cutscene-idx="${idx}" data-cutscene-ready="${cutReady ? '1' : '0'}" aria-disabled="${cutReady ? 'false' : 'true'}" style="cursor:${cutReady ? 'pointer' : 'default'};" transform="translate(0, -35)">
                     <rect x="-31" y="-7.5" width="62" height="15" rx="7.5" fill="${cutReady ? '#0c3b59' : '#1e293b'}" stroke="${cutReady ? '#fde047' : '#475569'}" stroke-width="1"/>
-                    <text x="0" y="2.8" text-anchor="middle" font-family="'Outfit', sans-serif" font-size="6.8" font-weight="800" fill="${cutReady ? '#fef08a' : '#94a3b8'}">▶ ${idx === totalSpires - 1 && stars.clear ? 'EPILOGUE' : band.cutLabel}</text>
+                    <text x="0" y="2.8" text-anchor="middle" font-family="'Outfit', sans-serif" font-size="6.8" font-weight="800" fill="${cutReady ? '#fef08a' : '#94a3b8'}">${cutReady ? '▶' : '🔒'} ${idx === totalSpires - 1 && stars.clear ? 'EPILOGUE' : band.cutLabel}</text>
                   </g>`
                 : ''
             }
@@ -1702,6 +1702,9 @@ export function renderWatershedWorldMap(container, opts = {}) {
     container.querySelectorAll('.sea-cutscene-badge').forEach((badgeEl) => {
       badgeEl.addEventListener('click', (ev) => {
         ev.stopPropagation();
+        if (badgeEl.classList.contains('locked') || badgeEl.getAttribute('data-cutscene-ready') === '0') {
+          return;
+        }
         const cutKey = badgeEl.getAttribute('data-cutscene-key');
         const cutIdx = Number(badgeEl.getAttribute('data-cutscene-idx')) || 0;
         if (cutKey) onPlayCutscene?.(cutKey, cutIdx, towers[cutIdx]);

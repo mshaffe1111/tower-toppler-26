@@ -176,12 +176,28 @@ export function getTowerStepHeight(tower, _eraCompat = false, overrideFh = null)
 // automatically in browser contexts even if `glbAssets` is omitted or not yet populated
 const INTERNAL_GLB_CACHE = {
   started: false,
+  loading: new Set(),
   real_staircase: null,
   mech_elevator: null,
   hydro_turbine: null,
   pipe_valve: null,
   listeners: new Set(),
 };
+
+function seedInternalGlbCache(glbAssets) {
+  if (!glbAssets || typeof glbAssets !== 'object') return;
+  const pairs = [
+    ['real_staircase', glbAssets.real_staircase || glbAssets.realStaircase],
+    ['mech_elevator', glbAssets.mech_elevator || glbAssets.mechElevator],
+    ['hydro_turbine', glbAssets.hydro_turbine || glbAssets.hydroTurbine],
+    ['pipe_valve', glbAssets.pipe_valve || glbAssets.pipeValve],
+  ];
+  for (const [key, scene] of pairs) {
+    if (scene && !INTERNAL_GLB_CACHE[key]) {
+      INTERNAL_GLB_CACHE[key] = markSharedSubtree(scene);
+    }
+  }
+}
 
 function markSharedSubtree(rootObj) {
   if (!rootObj || rootObj.userData?._markedShared) return rootObj;
@@ -240,13 +256,27 @@ function markSharedSubtree(rootObj) {
 }
 
 function ensureInternalGlbLoad() {
-  if (INTERNAL_GLB_CACHE.started) return;
   if (
     typeof window === 'undefined' ||
     typeof document === 'undefined' ||
     !window.location?.href ||
     typeof fetch !== 'function'
   ) {
+    return;
+  }
+
+  const specs = [
+    ['real_staircase', 'assets/models/real_staircase.glb'],
+    ['mech_elevator', 'assets/models/mech_elevator.glb'],
+    ['hydro_turbine', 'assets/models/hydro_turbine.glb'],
+    ['pipe_valve', 'assets/models/pipe_valve.glb'],
+  ];
+
+  const pendingSpecs = specs.filter(
+    ([key]) => !INTERNAL_GLB_CACHE[key] && !INTERNAL_GLB_CACHE.loading.has(key)
+  );
+  if (pendingSpecs.length === 0) {
+    INTERNAL_GLB_CACHE.started = true;
     return;
   }
   INTERNAL_GLB_CACHE.started = true;
@@ -258,20 +288,17 @@ function ensureInternalGlbLoad() {
     return;
   }
 
-  const specs = [
-    ['real_staircase', 'assets/models/real_staircase.glb'],
-    ['mech_elevator', 'assets/models/mech_elevator.glb'],
-    ['hydro_turbine', 'assets/models/hydro_turbine.glb'],
-    ['pipe_valve', 'assets/models/pipe_valve.glb'],
-  ];
-
-  for (const [key, url] of specs) {
+  for (const [key, url] of pendingSpecs) {
+    INTERNAL_GLB_CACHE.loading.add(key);
     try {
       loader.load(
         url,
         (gltf) => {
+          INTERNAL_GLB_CACHE.loading.delete(key);
           if (!gltf?.scene) return;
-          INTERNAL_GLB_CACHE[key] = markSharedSubtree(gltf.scene);
+          if (!INTERNAL_GLB_CACHE[key]) {
+            INTERNAL_GLB_CACHE[key] = markSharedSubtree(gltf.scene);
+          }
           for (const fn of INTERNAL_GLB_CACHE.listeners) {
             try {
               fn(key, INTERNAL_GLB_CACHE[key]);
@@ -282,10 +309,12 @@ function ensureInternalGlbLoad() {
         },
         undefined,
         () => {
+          INTERNAL_GLB_CACHE.loading.delete(key);
           // Procedural twin geometry remains active if offline fetch fails
         }
       );
     } catch {
+      INTERNAL_GLB_CACHE.loading.delete(key);
       // Ignore relative URL errors in non-browser headless environments
     }
   }
@@ -6003,6 +6032,7 @@ export function buildTreasureChestMesh() {
 // ============================================================================
 
 export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets = {}) {
+  seedInternalGlbCache(glbAssets);
   if (!glbAssets?._skipInternalGlbLoad) {
     ensureInternalGlbLoad();
   }
@@ -6679,12 +6709,15 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
         // Clone small indicator materials per-cab so each elevator shows its own live direction/power state!
         if (mName === 'mat_chevron_up') {
           upMat = o.material.clone();
+          upMat.userData = { ...(upMat.userData || {}), shared: false };
           o.material = upMat;
         } else if (mName === 'mat_chevron_down') {
           dnMat = o.material.clone();
+          dnMat.userData = { ...(dnMat.userData || {}), shared: false };
           o.material = dnMat;
         } else if (mName === 'mat_lift_deck_glow') {
           deckGlowMat = o.material.clone();
+          deckGlowMat.userData = { ...(deckGlowMat.userData || {}), shared: false };
           o.material = deckGlowMat;
         }
       });
@@ -7738,13 +7771,16 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     group.add(treasureChestProp);
   }
 
-  // Seamless hot-swap listener if internal GLB loader completes after initial frame-0 tower build!
+  // Seamless hot-swap listener if internal or external GLB loader completes after initial frame-0 tower build!
   const onGlbReady = (key, glbScene) => {
-    if (key === 'real_staircase' && glbScene) {
+    if (!glbScene) return;
+    if (key === 'real_staircase') {
       const swapGeo = (instArr, nodeName) => {
         const g = findNamedMeshGeo(glbScene, nodeName);
         if (!g) return;
-        for (const inst of instArr) inst.geometry = g;
+        for (const inst of instArr) {
+          if (inst.geometry !== g) inst.geometry = g;
+        }
       };
       swapGeo(instTerraceStone, 'terrace_deck_stone');
       swapGeo(instTerraceMetal, 'terrace_deck_metal');
@@ -7752,7 +7788,7 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
       swapGeo(instFlightRMetal, 'stair_flight_R_metal');
       swapGeo(instFlightLStone, 'stair_flight_L_stone');
       swapGeo(instFlightLMetal, 'stair_flight_L_metal');
-    } else if (key === 'hydro_turbine' && glbScene) {
+    } else if (key === 'hydro_turbine') {
       for (const tr of bodyInfo.turbineRotors) {
         if (!tr.isProcedural) continue;
         while (tr.holder.children.length > 1) {
@@ -7769,6 +7805,154 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
         tr.wheel = findNamedObject(cloned, 'turbine_wheel');
         tr.holder.add(cloned);
         tr.isProcedural = false;
+      }
+    } else if (key === 'mech_elevator') {
+      const glbWinchSrc = findNamedObject(glbScene, 'winch_housing');
+      const glbSheaveSrc = findNamedObject(glbScene, 'sheave_wheel');
+      const glbCwtSrc = findNamedObject(glbScene, 'counterweight');
+      const glbCabSrc = findNamedObject(glbScene, 'elevator_cab');
+      if (!glbCabSrc && !glbWinchSrc && !glbCwtSrc) return;
+
+      for (const pod of elevatorPods) {
+        const pUd = pod?.userData;
+        if (!pUd || pUd.usedGlb) continue;
+
+        if (glbWinchSrc && glbSheaveSrc && pUd.winchGroup) {
+          pUd.winchGroup.clear();
+          const whClone = glbWinchSrc.clone(true);
+          markSharedSubtree(whClone);
+          whClone.traverse((o) => {
+            if (o.isMesh) {
+              o.castShadow = false;
+              o.receiveShadow = true;
+            }
+          });
+          pUd.winchGroup.add(whClone);
+
+          // Mutate sheaveWheels in place so syncMechanicalRig's closed-over array spins the GLB sheaves!
+          if (Array.isArray(pUd.sheaveWheels)) {
+            pUd.sheaveWheels.length = 0;
+            const wheelRot = pod.position.y * 4.35;
+            for (const sx of [-0.24, 0.24]) {
+              const shClone = glbSheaveSrc.clone(true);
+              markSharedSubtree(shClone);
+              shClone.position.set(sx, 0.14, -0.1);
+              shClone.rotation.x = wheelRot;
+              pUd.winchGroup.add(shClone);
+              pUd.sheaveWheels.push(shClone);
+            }
+          }
+        }
+
+        if (glbCwtSrc && pUd.cwtNode) {
+          pUd.cwtNode.clear();
+          const cClone = glbCwtSrc.clone(true);
+          markSharedSubtree(cClone);
+          pUd.cwtNode.add(cClone);
+        }
+
+        if (glbCabSrc) {
+          if (pUd.upMat && !pUd.upMat.userData?.shared) pUd.upMat.dispose();
+          if (pUd.dnMat && !pUd.dnMat.userData?.shared) pUd.dnMat.dispose();
+          if (pUd.deckGlowMat && !pUd.deckGlowMat.userData?.shared) pUd.deckGlowMat.dispose();
+          pod.clear();
+
+          let upMat = null;
+          let dnMat = null;
+          let deckGlowMat = null;
+          const cabClone = glbCabSrc.clone(true);
+          markSharedSubtree(cabClone);
+          cabClone.traverse((o) => {
+            if (!o.isMesh) return;
+            const mName = String(o.material?.name || '').toLowerCase();
+            const isGlass =
+              mName.includes('glass') ||
+              Boolean(o.material?.transparent && !mName.includes('glow') && !mName.includes('chevron'));
+            if (isGlass) {
+              o.visible = false;
+              return;
+            }
+            o.castShadow = false;
+            o.receiveShadow = true;
+            if (mName === 'mat_chevron_up') {
+              upMat = o.material.clone();
+              upMat.userData = { ...(upMat.userData || {}), shared: false };
+              o.material = upMat;
+            } else if (mName === 'mat_chevron_down') {
+              dnMat = o.material.clone();
+              dnMat.userData = { ...(dnMat.userData || {}), shared: false };
+              o.material = dnMat;
+            } else if (mName === 'mat_lift_deck_glow') {
+              deckGlowMat = o.material.clone();
+              deckGlowMat.userData = { ...(deckGlowMat.userData || {}), shared: false };
+              o.material = deckGlowMat;
+            }
+          });
+          const safetyGate = findNamedObject(cabClone, 'safety_gate');
+          const chevUp = findNamedObject(cabClone, 'chevron_up');
+          const chevDn = findNamedObject(cabClone, 'chevron_down');
+          if (safetyGate) {
+            safetyGate.rotation.z = pUd.gateAngle ?? 1.15;
+          }
+          pod.add(cabClone);
+          pUd.safetyGate = safetyGate;
+          pUd.chevUp = chevUp;
+          pUd.chevDn = chevDn;
+          pUd.upMat = upMat;
+          pUd.dnMat = dnMat;
+          pUd.deckGlowMat = deckGlowMat;
+          pUd.usedGlb = true;
+        }
+      }
+    } else if (key === 'pipe_valve') {
+      markSharedSubtree(glbScene);
+      for (const sm of switchNodes) {
+        const u = sm?.userData;
+        if (!u || !u.isValve || u.usedGlb) continue;
+        const sightMat = u.orbMat;
+        const orb = u.orb;
+        const prevWheelRotZ = u.wheel?.rotation?.z || 0;
+
+        // Cleanly dispose procedural fallback geometries & materials (preserving shared geometry, orb & sightMat)
+        const disposedGeos = new Set();
+        const disposedMats = new Set();
+        sm.traverse((child) => {
+          if (child === sm || child === orb) return;
+          if (child.geometry && !child.geometry.userData?.shared && !disposedGeos.has(child.geometry)) {
+            disposedGeos.add(child.geometry);
+            child.geometry.dispose();
+          }
+          const rawMat = child.material;
+          if (!rawMat) return;
+          const mats = Array.isArray(rawMat) ? rawMat : [rawMat];
+          for (const m of mats) {
+            if (!m || m === sightMat || m.userData?.shared || disposedMats.has(m)) continue;
+            disposedMats.add(m);
+            m.dispose();
+          }
+        });
+        sm.clear();
+
+        let wheel = null;
+        const cloned = glbScene.clone(true);
+        cloned.traverse((o) => {
+          if (o.name === 'valve_wheel' && !wheel) wheel = o;
+          if (o.isMesh) {
+            o.castShadow = false;
+            o.receiveShadow = true;
+            if (o.name === 'valve_sight_core' || o.parent?.name === 'valve_sight_core') {
+              o.material = sightMat;
+            }
+          }
+        });
+        if (wheel) wheel.rotation.z = prevWheelRotZ;
+        sm.add(cloned);
+        if (orb) {
+          orb.visible = false;
+          sm.add(orb);
+        }
+        u.wheel = wheel;
+        u.usedGlb = true;
       }
     }
   };
@@ -7901,11 +8085,16 @@ export function buildDetailedTowerGroup(tower, _eraCompat = 'reboot', glbAssets 
     _createSiphonBarrierRing: createSiphonBarrierRing,
     applyGlbUpgrade(extGlb) {
       if (!extGlb) return;
-      if (extGlb.real_staircase) {
-        onGlbReady('real_staircase', markSharedSubtree(extGlb.real_staircase));
-      }
-      if (extGlb.hydro_turbine) {
-        onGlbReady('hydro_turbine', markSharedSubtree(extGlb.hydro_turbine));
+      seedInternalGlbCache(extGlb);
+      const pairs = [
+        ['real_staircase', extGlb.real_staircase || extGlb.realStaircase || INTERNAL_GLB_CACHE.real_staircase],
+        ['hydro_turbine', extGlb.hydro_turbine || extGlb.hydroTurbine || INTERNAL_GLB_CACHE.hydro_turbine],
+        ['mech_elevator', extGlb.mech_elevator || extGlb.mechElevator || INTERNAL_GLB_CACHE.mech_elevator],
+        ['pipe_valve', extGlb.pipe_valve || extGlb.pipeValve || INTERNAL_GLB_CACHE.pipe_valve],
+      ];
+      for (const [key, scene] of pairs) {
+        if (!scene) continue;
+        onGlbReady(key, markSharedSubtree(scene));
       }
     },
     runeDoors,
