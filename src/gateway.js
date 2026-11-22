@@ -1280,6 +1280,40 @@ export class GatewayRig {
         };
       }
     }
+    // Lock #1: Capture bind pose for ALL skeleton bones so per-frame additive Euler offsets can NEVER accumulate!
+    this._allBoneBind = [];
+    const seen = new Set();
+    for (const bone of Object.values(this.bones || {})) {
+      if (!bone || !bone.isBone || seen.has(bone)) continue;
+      seen.add(bone);
+      this._allBoneBind.push({
+        bone,
+        pos: bone.position.clone(),
+        quat: bone.quaternion.clone(),
+        scale: bone.scale.clone(),
+      });
+    }
+    this._headNeckBind = {};
+    for (const bn of ['Neck', 'Head']) {
+      const bone = this.bones[bn];
+      if (bone) {
+        this._headNeckBind[bn] = {
+          quat: bone.quaternion.clone(),
+          invQuat: bone.quaternion.clone().invert(),
+        };
+      }
+    }
+  }
+
+  _resetAllBonesToBindPose() {
+    const list = this._allBoneBind;
+    if (!list) return;
+    for (let i = 0; i < list.length; i++) {
+      const entry = list[i];
+      entry.bone.position.copy(entry.pos);
+      entry.bone.quaternion.copy(entry.quat);
+      entry.bone.scale.copy(entry.scale);
+    }
   }
 
   _initFallbackClipsAndMixer(mixerRoot) {
@@ -1478,6 +1512,25 @@ export class GatewayRig {
 
     for (let i = 0; i < glbData.animations.length; i++) {
       const clip = glbData.animations[i];
+      // Lock #2a: Enforce same-hemisphere quaternion continuity on every track to eliminate antipodal 360° flips!
+      if (!clip._hemisphereSanitized && Array.isArray(clip.tracks)) {
+        for (let ti = 0; ti < clip.tracks.length; ti++) {
+          const tr = clip.tracks[ti];
+          if (tr?.ValueTypeName === 'quaternion' && tr.values && tr.values.length >= 8) {
+            const v = tr.values;
+            for (let k = 4; k < v.length; k += 4) {
+              const dot = v[k - 4] * v[k] + v[k - 3] * v[k + 1] + v[k - 2] * v[k + 2] + v[k - 1] * v[k + 3];
+              if (dot < 0) {
+                v[k] = -v[k];
+                v[k + 1] = -v[k + 1];
+                v[k + 2] = -v[k + 2];
+                v[k + 3] = -v[k + 3];
+              }
+            }
+          }
+        }
+        clip._hemisphereSanitized = true;
+      }
       const act = this.mixer.clipAction(clip);
       if (ONE_SHOT_CLIPS.has(clip.name)) {
         act.setLoop(THREE.LoopOnce, 1);
@@ -1568,18 +1621,38 @@ export class GatewayRig {
 
     nextAct.timeScale = timeScale;
     if (this._activeClipName === resolved) {
-      if (ONE_SHOT_CLIPS.has(resolved) && !nextAct.isRunning()) {
-        nextAct.reset().play();
+      // Lock #2b: Never allow a stale fadeOut interpolant to drive active clip weight to 0!
+      if (!nextAct.enabled || nextAct.getEffectiveWeight() < 0.05) {
+        nextAct.stopFading();
+        nextAct.enabled = true;
+        nextAct.paused = false;
+        nextAct.setEffectiveWeight(1);
+        nextAct.play();
+      } else if (ONE_SHOT_CLIPS.has(resolved) && !nextAct.isRunning()) {
+        nextAct.stopFading();
+        nextAct.reset().setEffectiveWeight(1).play();
       }
       return;
     }
 
+    const fade = Math.max(0.02, Number(fadeDuration) || 0.12);
     const prevAct = this._activeClipName ? this.actions[this._activeClipName] : null;
+    for (const act of Object.values(this.actions)) {
+      if (!act || act === nextAct || act === prevAct) continue;
+      if (act.isRunning() || act.getEffectiveWeight() > 0.001) {
+        act.stopFading();
+        act.stop();
+      }
+    }
+    nextAct.stopFading();
+    nextAct.stopWarping();
     nextAct.enabled = true;
-    nextAct.setEffectiveWeight(1);
-    nextAct.reset().play();
+    nextAct.paused = false;
+    nextAct.reset().setEffectiveWeight(1).play();
     if (prevAct && prevAct !== nextAct) {
-      prevAct.crossFadeTo(nextAct, fadeDuration, false);
+      prevAct.stopFading();
+      prevAct.enabled = true;
+      prevAct.crossFadeTo(nextAct, fade, false);
     }
     this._activeClipName = resolved;
   }
@@ -2146,6 +2219,8 @@ export class GatewayRig {
       timeScale = 0.92;
     }
 
+    // Lock #1: Always reset every skeleton bone to bind pose BEFORE mixer evaluation -> 0 frame-over-frame accumulation!
+    this._resetAllBonesToBindPose();
     this.playAction(wantClip, fadeDur, timeScale);
     if (this.mixer) {
       this.mixer.update(safeDt);
@@ -2446,6 +2521,23 @@ export class GatewayRig {
       -this._bankRoll * 0.32
     );
 
+    // Lock #3: Bind-relative safety clamp on Neck & Head so no clip/gaze combo ever folds or spins the head!
+    const clampHeadNeck = (bn, maxRx, maxRy, maxRz) => {
+      const bone = b[bn];
+      const bind = this._headNeckBind?.[bn];
+      if (!bone || !bind) return;
+      this._qScratchA.multiplyQuaternions(bind.invQuat, bone.quaternion).normalize();
+      this._eScratch.setFromQuaternion(this._qScratchA, 'XYZ');
+      const cx = THREE.MathUtils.clamp(this._eScratch.x, -maxRx, maxRx);
+      const cy = THREE.MathUtils.clamp(this._eScratch.y, -maxRy, maxRy);
+      const cz = THREE.MathUtils.clamp(this._eScratch.z, -maxRz, maxRz);
+      this._eScratch.set(cx, cy, cz, 'XYZ');
+      this._qScratchB.setFromEuler(this._eScratch);
+      bone.quaternion.multiplyQuaternions(bind.quat, this._qScratchB);
+    };
+    clampHeadNeck('Neck', 0.44, 0.48, 0.34);
+    clampHeadNeck('Head', 0.62, 0.68, 0.38);
+
     // Reset facial bones cleanly to bind rest pose before applying crisp 6-mood expression + blink + eye-look!
     const blinkVal = this._updateOrganicBlink(safeDt);
     const applyBindReset = (name) => {
@@ -2562,9 +2654,9 @@ export class GatewayRig {
     const scarfSpringK = 78.0;
     const scarfDamp = 8.4;
     const scarfPitchTarget = THREE.MathUtils.clamp(
-      speedNorm * 0.44 - vy * 0.042 + (isGliding ? 0.50 : 0) - landComp * 0.32,
+      speedNorm * 0.54 - vy * 0.042 + (isGliding ? 0.52 : 0) - landComp * 0.32,
       -0.65,
-      0.78
+      0.82
     );
     const scarfYawTarget = THREE.MathUtils.clamp(
       yawVel * 0.048 + skidLean * 0.44 + (whipTimer > 0 ? 0.55 : 0),
@@ -2577,7 +2669,7 @@ export class GatewayRig {
     this._scarfYawLag = THREE.MathUtils.clamp(this._scarfYawLag + this._scarfYawVel * safeDt, -0.82, 0.82);
 
     const breezeFreq = 4.6 + speedNorm * 6.5 + (isGliding ? 5.0 : 0);
-    const breezeAmp = 0.055 + speedNorm * 0.085 + (isGliding ? 0.08 : 0);
+    const breezeAmp = 0.045 + speedNorm * 0.055 + (isGliding ? 0.065 : 0);
     const flutterL1 = Math.sin(time * breezeFreq) * breezeAmp;
     const flutterL2 = Math.sin(time * breezeFreq - 0.95) * breezeAmp * 1.45;
     const flutterR1 = Math.sin(time * breezeFreq + 0.75) * breezeAmp;

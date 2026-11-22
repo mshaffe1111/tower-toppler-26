@@ -4159,8 +4159,8 @@ export class GameRenderer {
           this._wardrobeYawSmooth += (targetYaw - this._wardrobeYawSmooth) * Math.min(1, dt * 14);
           this.gatewayRig.group.rotation.y = pTheta + this._wardrobeYawSmooth;
         } else if (isTitleShowcase) {
-          const hopSpin = hopU > 0 ? hopU * TWO_PI : 0;
-          this.gatewayRig.group.rotation.y = pTheta + gaze.x * 0.34 + Math.sin(time * 0.75) * 0.14 + hopSpin;
+          // Single joyful 360° hop spin is already driven by `gatewayRig` (`titleHopSpin`) — never double-spin 720°!
+          this.gatewayRig.group.rotation.y = pTheta + gaze.x * 0.34 + Math.sin(time * 0.75) * 0.14;
         } else {
           this.gatewayRig.group.rotation.y = pTheta;
         }

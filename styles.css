@@ -4876,3 +4876,1081 @@ body[data-control-mode="tilt"] #btn-interact {
   background: rgba(94, 252, 232, 0.45);
   border-radius: 999px;
 }
+
+/* ============================================================================
+   8. SLEEK BORDERLESS TITLE-MATCHED UI & HIGH-READABILITY TYPOGRAPHY
+      Eliminates nested "boxes within boxes" across every menu, overlay & story
+      cutscene while lifting all copy to effortless console/mobile legibility.
+   ============================================================================ */
+
+/* Full-bleed atmospheric backdrop veil (sleek open canvas, zero cramped modal boxes!) */
+.overlay:not(#overlay-title):not(#overlay-wardrobe):not(#overlay-cutscene) {
+  background: linear-gradient(
+    180deg,
+    rgba(3, 15, 28, 0.84) 0%,
+    rgba(3, 14, 26, 0.90) 52%,
+    rgba(2, 10, 20, 0.95) 100%
+  );
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: calc(24px + var(--safe-top)) calc(24px + var(--safe-right)) calc(24px + var(--safe-bottom)) calc(24px + var(--safe-left));
+}
+
+/* Remove outer octagonal modal box frame on ALL menus so content breathes full-bleed */
+.modal-card {
+  max-width: min(92vw, 560px);
+  max-height: calc(100dvh - 48px - var(--safe-top) - var(--safe-bottom));
+  padding: 8px 6px 12px;
+  background: transparent !important;
+  clip-path: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+  border: none !important;
+  border-radius: 0;
+}
+
+.modal-wide,
+.modes-hub-modal,
+#overlay-minigames .modal-card,
+#overlay-trophies .modal-card,
+#overlay-mutation .modal-card {
+  max-width: min(92vw, 1060px);
+  text-align: left;
+}
+
+#overlay-worlds .modal-card {
+  max-width: min(94vw, 1140px);
+  max-height: calc(100dvh - 40px - var(--safe-top) - var(--safe-bottom));
+  padding: 8px 6px 12px;
+}
+
+.modal-header-row {
+  padding-bottom: 14px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid rgba(165, 243, 252, 0.16);
+}
+
+.retro-pill {
+  padding: 0;
+  margin-bottom: 5px;
+  clip-path: none;
+  background: transparent;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  color: var(--bronze-gleam);
+}
+
+.modal-heading {
+  font-size: clamp(22px, 3.2vw, 32px);
+  letter-spacing: 0.08em;
+}
+
+.modal-sub {
+  font-size: 16px;
+  margin: 6px 0 18px;
+  color: #bae6fd;
+}
+
+.stars-pill {
+  padding: 6px 14px;
+  clip-path: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: none;
+  border: 1px solid rgba(246, 196, 83, 0.34);
+  font-size: 13px;
+}
+
+.btn-icon-close {
+  width: 40px;
+  height: 40px;
+  clip-path: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: none;
+  border: 1px solid rgba(165, 243, 252, 0.24);
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+
+.btn-icon-close:hover {
+  background: rgba(94, 252, 232, 0.16);
+  border-color: var(--aqua-glow);
+}
+
+.btn-primary {
+  font-size: 15px;
+  padding: 14px 26px;
+  letter-spacing: 0.14em;
+}
+
+.btn-secondary {
+  clip-path: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: none;
+  border: 1px solid rgba(165, 243, 252, 0.28);
+  padding: 12px 20px;
+  font-size: 13.5px;
+  letter-spacing: 0.11em;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.btn-secondary:hover {
+  background: rgba(94, 252, 232, 0.14);
+  border-color: var(--aqua-glow);
+}
+
+/* ---- STORY CUTSCENE THEATER: FULL-BLEED CINEMA + LARGE, EFFORTLESS SUBTITLES ---- */
+.cutscene-overlay {
+  background: radial-gradient(ellipse at 50% 42%, rgba(4, 18, 32, 0.62) 0%, rgba(2, 10, 20, 0.92) 100%);
+}
+
+.cinema-bar {
+  background: transparent;
+}
+
+.cinema-bar-top {
+  background: linear-gradient(180deg, rgba(2, 11, 22, 0.92) 0%, rgba(2, 11, 22, 0.44) 72%, transparent 100%);
+  border-bottom: none;
+  padding: calc(18px + var(--safe-top)) calc(28px + var(--safe-right)) 20px calc(28px + var(--safe-left));
+}
+
+.cinema-act-pill {
+  font-size: 12.5px;
+  letter-spacing: 0.18em;
+}
+
+.cinema-scene-title {
+  font-size: clamp(20px, 2.8vw, 30px);
+  letter-spacing: 0.08em;
+  text-shadow: 0 3px 16px rgba(0, 0, 0, 0.85);
+}
+
+.cinema-restoration-wrap {
+  max-width: 300px;
+  padding: 4px 0;
+  clip-path: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.cr-head {
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+
+.btn-cinema-skip {
+  padding: 9px 18px;
+  clip-path: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+  border: 1px solid rgba(165, 243, 252, 0.34);
+  font-size: 12.5px;
+  letter-spacing: 0.14em;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.btn-cinema-skip:hover {
+  background: rgba(94, 252, 232, 0.18);
+  border-color: var(--aqua-glow);
+}
+
+.cinema-stage-window {
+  background: transparent;
+  padding: 8px calc(24px + var(--safe-right)) 8px calc(24px + var(--safe-left));
+}
+
+.cinema-keyframe-card {
+  width: min(86vw, 960px);
+  max-height: 58dvh;
+  clip-path: none !important;
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+  filter: none;
+  overflow: visible;
+}
+
+.cinema-keyframe-img {
+  border-radius: 16px;
+  max-height: 53dvh;
+  box-shadow: 0 28px 72px rgba(0, 0, 0, 0.78);
+}
+
+.cinema-keyframe-caption {
+  padding: 12px 4px 2px;
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  border-top: none;
+  background: transparent !important;
+  color: rgba(246, 196, 83, 0.94);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.95);
+}
+
+.cinema-bar-bottom {
+  background: linear-gradient(0deg, rgba(2, 10, 20, 0.97) 0%, rgba(3, 14, 26, 0.88) 68%, transparent 100%);
+  border-top: none;
+  padding: 26px calc(28px + var(--safe-right)) calc(24px + var(--safe-bottom)) calc(28px + var(--safe-left));
+}
+
+.cinema-comms-card {
+  max-width: 920px;
+  align-items: center;
+  gap: 20px;
+  padding: 6px 0 6px 20px;
+  clip-path: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-left: 3px solid var(--aqua-glow);
+}
+
+.cinema-comms-card[data-speaker="gateway"] { border-left-color: #2dd4bf; }
+.cinema-comms-card[data-speaker="naiad"] { border-left-color: #38bdf8; }
+.cinema-comms-card[data-speaker="guardian"] { border-left-color: #fde047; }
+.cinema-comms-card[data-speaker="warden"] { border-left-color: #fb7185; }
+
+.cinema-portrait {
+  width: 82px;
+  height: 82px;
+  clip-path: none;
+  border-radius: 50%;
+  border: 2px solid rgba(94, 252, 232, 0.45);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.65);
+}
+
+.cinema-dialogue-col {
+  gap: 8px;
+}
+
+.cinema-speaker-name {
+  font-size: 14px;
+  letter-spacing: 0.15em;
+}
+
+.cinema-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transform: none;
+}
+
+.cinema-dialogue-text {
+  min-height: 58px;
+  font-size: clamp(17.5px, 1.75vw, 22px);
+  font-weight: 500;
+  line-height: 1.52;
+  color: #f4fcff;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9);
+}
+
+.btn-cinema-next {
+  margin-top: 4px;
+  padding: 10px 24px;
+  clip-path: none;
+  border-radius: 999px;
+  background: rgba(94, 252, 232, 0.16);
+  box-shadow: none;
+  border: 1px solid var(--aqua-glow);
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  transition: background 0.15s ease, transform 0.12s ease;
+}
+
+.btn-cinema-next:hover {
+  background: rgba(94, 252, 232, 0.28);
+  transform: translateX(2px);
+}
+
+/* ---- GAME MODES HUB: OPEN EDITORIAL 2-COLUMN ROWS (ZERO CARDS-IN-BOXES) ---- */
+.modes-hub-grid {
+  gap: 6px 32px;
+  max-height: 74dvh;
+  padding-right: 6px;
+}
+
+.mode-hub-card,
+.mode-hub-card-wide {
+  gap: 16px;
+  min-height: 112px;
+  padding: 16px 14px;
+  clip-path: none !important;
+  background: transparent;
+  box-shadow: none !important;
+  border: none;
+  border-bottom: 1px solid rgba(165, 243, 252, 0.13);
+  border-left: 3px solid transparent;
+  border-radius: 4px;
+  transition: background 0.16s ease, border-left-color 0.16s ease, transform 0.14s ease;
+}
+
+.mode-hub-card:hover,
+.mode-hub-card:active {
+  transform: translateX(4px);
+  background: linear-gradient(90deg, rgba(94, 252, 232, 0.11) 0%, transparent 92%);
+  border-left-color: var(--aqua-glow);
+  box-shadow: none !important;
+}
+
+.mode-hub-art {
+  width: 82px;
+  min-height: 92px;
+  clip-path: none;
+  border-radius: 10px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+}
+
+.mode-hub-body {
+  gap: 5px;
+  justify-content: center;
+}
+
+.mode-hub-badge {
+  padding: 0;
+  border-radius: 0;
+  background: transparent !important;
+  font-size: 11.5px;
+  letter-spacing: 0.12em;
+}
+
+.mode-hub-title {
+  font-size: clamp(16px, 2vw, 19px);
+  letter-spacing: 0.05em;
+}
+
+.mode-hub-desc {
+  font-size: 14px;
+  line-height: 1.44;
+  color: rgba(224, 242, 254, 0.88);
+}
+
+.mode-hub-meta {
+  font-size: 12px;
+  letter-spacing: 0.11em;
+  margin-top: 2px;
+}
+
+/* ---- MINI-GAMES HUB: CLEAN OPEN ROWS (ZERO DOUBLE-BORDER PORTAL BOXES) ---- */
+.minigames-list {
+  gap: 4px;
+  max-height: 76dvh;
+}
+
+.arcade-portal-card {
+  gap: 18px;
+  min-height: 98px;
+  padding: 16px 16px;
+  clip-path: none !important;
+  background: transparent !important;
+  border: none;
+  border-bottom: 1px solid rgba(165, 243, 252, 0.13);
+  border-left: 3px solid transparent;
+  border-radius: 4px;
+  transition: background 0.16s ease, border-left-color 0.16s ease, transform 0.14s ease;
+}
+
+.arcade-portal-card::before,
+.arcade-portal-card::after {
+  display: none !important;
+}
+
+.arcade-portal-card .portal-art-bg {
+  opacity: 0.09;
+  mask-image: radial-gradient(ellipse 56% 95% at 72% 50%, rgba(0, 0, 0, 0.72) 0%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 56% 95% at 72% 50%, rgba(0, 0, 0, 0.72) 0%, transparent 100%);
+}
+
+.arcade-portal-card:hover,
+.arcade-portal-card:active {
+  transform: translateX(4px);
+  background: linear-gradient(90deg, rgba(94, 252, 232, 0.11) 0%, transparent 92%) !important;
+  border-left-color: var(--bronze-gleam);
+}
+
+.portal-kicker {
+  font-size: 11.5px;
+  letter-spacing: 0.14em;
+}
+
+.mg-title {
+  font-size: clamp(16.5px, 2.2vw, 20px);
+  margin-top: 2px;
+}
+
+.mg-desc {
+  font-size: 14px;
+  line-height: 1.44;
+  max-width: 660px;
+  color: rgba(224, 242, 254, 0.88);
+  margin-top: 4px;
+}
+
+.portal-play-crest {
+  padding: 9px 18px;
+  clip-path: none;
+  border-radius: 999px;
+  background: rgba(94, 252, 232, 0.12);
+  box-shadow: none;
+  border: 1px solid rgba(94, 252, 232, 0.45);
+  font-size: 12.5px;
+  letter-spacing: 0.14em;
+}
+
+/* ---- WORLD WATERSHED MAP: OPEN FULL-BLEED ATLAS ---- */
+.watershed-global-banner {
+  padding: 4px 0 12px;
+  clip-path: none;
+  background: transparent;
+  box-shadow: none;
+  border-bottom: 1px solid rgba(165, 243, 252, 0.14);
+}
+
+.wg-top-row {
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.wg-track {
+  height: 7px;
+}
+
+.sea-chart-frame {
+  clip-path: none !important;
+  border-radius: 0;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0;
+}
+
+.sea-chart-svg {
+  width: 100%;
+  max-width: 490px;
+  height: auto;
+  max-height: 66dvh;
+  display: block;
+  margin: 0 auto;
+}
+
+.spyglass-plaque {
+  padding: 8px 0 8px 20px;
+  gap: 10px;
+  clip-path: none;
+  background: transparent;
+  box-shadow: none;
+  border-left: 2px solid rgba(94, 252, 232, 0.32);
+}
+
+.spyglass-kicker {
+  font-size: 12.5px;
+  letter-spacing: 0.14em;
+}
+
+.spyglass-title {
+  font-size: clamp(18px, 2.5vw, 24px);
+}
+
+.spyglass-desc {
+  font-size: 15px;
+  line-height: 1.5;
+  color: rgba(224, 242, 254, 0.92);
+}
+
+.spyglass-meta-row {
+  font-size: 13px;
+  gap: 12px;
+}
+
+.spyglass-cinema-btn {
+  padding: 7px 14px;
+  clip-path: none;
+  border-radius: 999px;
+  background: rgba(246, 196, 83, 0.12);
+  box-shadow: none;
+  border: 1px solid rgba(246, 196, 83, 0.45);
+  font-size: 12px;
+}
+
+.spyglass-deploy-btn {
+  padding: 13px 22px;
+  font-size: 14px;
+}
+
+/* ---- PELAGIAN SANCTUARY: FULL-BLEED 3D STAGE + BORDERLESS BOTTOM SHELF ---- */
+#overlay-wardrobe {
+  background: linear-gradient(
+    180deg,
+    rgba(4, 20, 36, 0.24) 0%,
+    rgba(4, 20, 36, 0.00) 14%,
+    rgba(4, 20, 36, 0.00) 50%,
+    rgba(3, 15, 28, 0.78) 64%,
+    rgba(2, 11, 22, 0.96) 100%
+  ) !important;
+}
+
+#overlay-wardrobe .modal-card {
+  max-width: min(96vw, 1120px);
+  max-height: 42dvh;
+  padding: 6px 10px 10px;
+}
+
+#overlay-wardrobe[data-sanctuary-tab="skills"] .modal-card,
+#overlay-wardrobe[data-sanctuary-tab="critters"] .modal-card {
+  max-height: 60dvh;
+}
+
+.turntable-hint-pill {
+  padding: 5px 12px;
+  clip-path: none;
+  border-radius: 999px;
+  background: rgba(4, 18, 32, 0.56);
+  box-shadow: none;
+  font-size: 11.5px;
+}
+
+.turntable-cam-btn {
+  min-width: 38px;
+  height: 34px;
+  clip-path: none;
+  border-radius: 999px;
+  background: rgba(4, 18, 32, 0.62);
+  box-shadow: none;
+  border: 1px solid rgba(165, 243, 252, 0.28);
+  font-size: 13px;
+}
+
+.anim-studio-pill {
+  padding: 6px 13px;
+  clip-path: none;
+  border-radius: 999px;
+  background: rgba(4, 18, 32, 0.56);
+  box-shadow: none;
+  border: 1px solid transparent;
+  font-size: 12px;
+}
+
+.anim-studio-pill.active {
+  background: rgba(94, 252, 232, 0.16);
+  box-shadow: none;
+  border-color: var(--bronze-gleam);
+}
+
+/* Clean underlined borderless tab bar (no pill container box!) */
+.sub-tabs-row,
+.sub-tabs-5 {
+  clip-path: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-bottom: 1px solid rgba(165, 243, 252, 0.16);
+  padding: 0 0 2px;
+  margin-bottom: 12px;
+  gap: 8px;
+}
+
+.sub-tab-btn,
+.sub-tabs-5 .sub-tab-btn {
+  clip-path: none;
+  border-radius: 0;
+  padding: 8px 14px;
+  font-size: 12.5px;
+  letter-spacing: 0.08em;
+  border-bottom: 2px solid transparent;
+  color: rgba(203, 227, 255, 0.72);
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.sub-tab-btn.active,
+.sub-tabs-5 .sub-tab-btn.active {
+  background: transparent;
+  color: #ffffff;
+  border-bottom-color: var(--aqua-glow);
+}
+
+.wardrobe-grid {
+  gap: 0;
+  padding-right: 36px;
+  mask-image: linear-gradient(90deg, #000 0%, #000 91%, transparent 100%);
+  -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 91%, transparent 100%);
+}
+
+.skin-card {
+  flex: 0 0 clamp(220px, 26vw, 258px);
+  padding: 12px 18px;
+  gap: 7px;
+  clip-path: none !important;
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+  border: none;
+  border-right: 1px solid rgba(165, 243, 252, 0.14);
+  border-top: 2px solid transparent;
+  transition: background 0.16s ease, border-top-color 0.16s ease;
+}
+
+.skin-card:last-child {
+  border-right: none;
+}
+
+.skin-card:hover {
+  background: linear-gradient(180deg, rgba(94, 252, 232, 0.11) 0%, transparent 100%) !important;
+  border-top-color: rgba(94, 252, 232, 0.55);
+}
+
+.skin-card.equipped {
+  box-shadow: none !important;
+  border-top-color: var(--emerald-heal);
+  background: linear-gradient(180deg, rgba(52, 211, 153, 0.16) 0%, transparent 100%) !important;
+}
+
+#overlay-wardrobe .gears-pill {
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(94, 252, 232, 0.34);
+  filter: none;
+  font-size: 12.5px;
+}
+
+#overlay-wardrobe .gears-pill::before,
+#overlay-wardrobe .gears-pill::after {
+  display: none !important;
+}
+
+.skin-swatch {
+  width: 30px;
+  height: 30px;
+  clip-path: none;
+  border-radius: 50%;
+}
+
+.skin-name {
+  font-size: 14.5px;
+}
+
+.skin-desc {
+  font-size: 13px;
+  line-height: 1.38;
+  color: rgba(224, 242, 254, 0.85);
+}
+
+.skin-action-tag {
+  padding: 0;
+  clip-path: none;
+  background: transparent !important;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+}
+
+/* Bio-Skills, Bestiary & Critters — borderless hairline layout + larger text */
+.skill-tree-notice {
+  font-size: 13.5px;
+  padding: 6px 0 6px 12px;
+  clip-path: none;
+  background: transparent;
+}
+
+.skill-branch-head {
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.skill-branch-nodes {
+  gap: 8px 24px;
+}
+
+.skill-node-card {
+  padding: 12px 12px;
+  gap: 6px;
+  clip-path: none;
+  background: transparent;
+  box-shadow: none !important;
+  border: none;
+  border-bottom: 1px solid rgba(165, 243, 252, 0.13);
+  border-left: 3px solid rgba(165, 243, 252, 0.22);
+}
+
+.skill-node-card.maxed { border-left-color: var(--emerald-heal); }
+.skill-node-card.affordable:not(.maxed) { border-left-color: var(--bronze-gleam); }
+
+.skill-node-name { font-size: 15px; }
+.skill-node-desc { font-size: 13.5px; line-height: 1.4; }
+.skill-node-foot { font-size: 12px; }
+
+.bestiary-detail-strip {
+  padding: 6px 0 8px 12px;
+  clip-path: none;
+  background: transparent;
+  box-shadow: none;
+  border-left: 2px solid var(--bronze-gleam);
+  font-size: 14px;
+  line-height: 1.44;
+}
+
+.critter-biome-group {
+  padding: 10px 0;
+  clip-path: none;
+  background: transparent;
+  box-shadow: none;
+  border-bottom: 1px solid rgba(165, 243, 252, 0.13);
+}
+
+.critter-biome-head { font-size: 14px; margin-bottom: 8px; }
+.critter-chip {
+  padding: 7px 10px;
+  clip-path: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: none;
+  font-size: 12.5px;
+}
+
+/* ---- ARCHIVES, HONORS, FIELD LOGS & BIO-MUTATIONS ---- */
+.trophy-score-banner {
+  padding: 6px 0 14px;
+  clip-path: none;
+  background: transparent;
+  box-shadow: none;
+  border-bottom: 1px solid rgba(165, 243, 252, 0.14);
+  margin-bottom: 12px;
+}
+
+.ts-rank { font-size: 13px; }
+.ts-pts { font-size: 14px; }
+
+.tier-pill {
+  padding: 6px 14px;
+  clip-path: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+}
+
+.trophies-grid {
+  gap: 8px 28px;
+  max-height: 54dvh;
+}
+
+.trophy-card {
+  padding: 12px 8px;
+  gap: 12px;
+  clip-path: none;
+  background: transparent;
+  box-shadow: none;
+  border-bottom: 1px solid rgba(165, 243, 252, 0.12);
+}
+
+.trophy-title { font-size: 14.5px; }
+.trophy-pts-tag { font-size: 11.5px; padding: 2px 7px; }
+.trophy-desc { font-size: 13.5px; line-height: 1.4; margin-top: 4px; }
+
+.relic-codex-list {
+  gap: 6px;
+  max-height: 56dvh;
+}
+
+.relic-card {
+  padding: 14px 10px;
+  gap: 14px;
+  clip-path: none;
+  background: transparent;
+  box-shadow: none;
+  border-bottom: 1px solid rgba(165, 243, 252, 0.12);
+}
+
+.relic-icon-box {
+  width: 38px;
+  height: 38px;
+  clip-path: none;
+  border-radius: 50%;
+}
+
+.relic-meta { font-size: 11.5px; }
+.relic-title { font-size: 16px; margin-top: 2px; }
+.relic-lore { font-size: 14.5px; line-height: 1.5; margin-top: 4px; }
+
+/* Bio-Mutation Draft — Sleek Open Borderless Columns */
+.mutation-sub-copy { font-size: 15.5px; margin-bottom: 18px; }
+.mutation-cards-grid { gap: 0; }
+.mutation-card {
+  padding: 20px 22px;
+  gap: 10px;
+  clip-path: none !important;
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+  border: none;
+  border-right: 1px solid rgba(165, 243, 252, 0.14);
+  border-top: 2px solid transparent;
+  transition: background 0.16s ease, border-top-color 0.16s ease, transform 0.14s ease;
+}
+.mutation-card:last-child { border-right: none; }
+.mutation-card:hover {
+  box-shadow: none !important;
+  border-top-color: var(--bronze-gleam);
+  background: linear-gradient(180deg, rgba(246, 196, 83, 0.13) 0%, transparent 100%) !important;
+}
+.mutation-title { font-size: 18px; }
+.mutation-desc { font-size: 14.5px; line-height: 1.46; }
+.mutation-pick-tag { font-size: 12px; clip-path: none; border-radius: 999px; padding: 7px 18px; }
+
+/* ---- PAUSE, GAME OVER, VICTORY & SETTINGS DRAWER ---- */
+.pause-settings-box,
+.audio-mixer-box,
+.ctrl-guide-copy {
+  padding: 10px 0;
+  clip-path: none;
+  background: transparent;
+  box-shadow: none;
+  border: none;
+  border-top: 1px solid rgba(165, 243, 252, 0.14);
+}
+
+.config-lbl,
+.popover-section-lbl { font-size: 12px; letter-spacing: 0.15em; }
+.mixer-row { grid-template-columns: 62px 1fr 44px; gap: 10px; }
+.mixer-lbl { font-size: 12px; }
+.mixer-val { font-size: 12.5px; }
+.ctrl-guide-copy { font-size: 13px; line-height: 1.48; color: #dbeafe; }
+
+.ctrl-pill-btn,
+.ctrl-scheme-pill,
+.zen-pill-btn {
+  font-size: 12px;
+  padding: 8px 12px;
+  border-radius: 999px;
+}
+
+.ctrl-pill-btn::before,
+.ctrl-pill-btn::after,
+.ctrl-scheme-pill::before,
+.ctrl-scheme-pill::after,
+.zen-pill-btn::before,
+.zen-pill-btn::after {
+  clip-path: none;
+  border-radius: 999px;
+}
+
+.final-stats { gap: 16px; margin: 18px 0 22px; }
+.stat-box {
+  padding: 12px 10px;
+  clip-path: none;
+  background: transparent;
+  box-shadow: none;
+  border-top: 1px solid rgba(165, 243, 252, 0.16);
+  border-bottom: 1px solid rgba(165, 243, 252, 0.16);
+}
+.stat-lbl { font-size: 11.5px; }
+.stat-val { font-size: 22px; }
+
+/* Sleek borderless floating Title Settings Popover */
+.title-settings-drawer {
+  width: min(92vw, 370px);
+  padding: 16px 18px;
+  clip-path: none !important;
+  border-radius: 16px;
+  background: rgba(4, 18, 32, 0.90) !important;
+  box-shadow: 0 22px 54px rgba(0, 0, 0, 0.72) !important;
+  border: 1px solid rgba(165, 243, 252, 0.18);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+/* Lift tiny Title & In-Game HUD label typography + Strip Heavy Hex/Octagon Boxes from Live Gameplay HUD */
+#hero-play-kicker { font-size: 10.5px; }
+#hero-play-label { font-size: clamp(14px, 3.4vw, 16.5px); }
+.hero-sector-ribbon { font-size: 11px; }
+.dock-crest-btn { font-size: clamp(9.5px, 2.1vw, 11.5px); }
+.dock-crest-badge { font-size: 9.5px; }
+.hud-label { font-size: 10.5px; }
+
+/* Sleek Floating Editorial Biome Arrival Banner (Zero giant dark hexagon box!) */
+.stage-banner {
+  width: min(92vw, 560px);
+  padding: 12px 18px;
+  background: radial-gradient(ellipse at center, rgba(2, 12, 24, 0.72) 0%, rgba(2, 12, 24, 0.26) 58%, transparent 82%);
+  filter: none;
+  border: none;
+}
+.stage-banner::before,
+.stage-banner::after {
+  display: none !important;
+}
+.banner-sub {
+  font-size: clamp(11px, 2.6vw, 13px);
+  letter-spacing: 0.24em;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.92);
+}
+.banner-title {
+  font-size: clamp(19px, 4.8vw, 28px);
+  letter-spacing: 0.11em;
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(246, 196, 83, 0.42);
+  text-shadow: 0 3px 18px rgba(0, 0, 0, 0.95);
+}
+
+/* Sleek Borderless Crown Seals Objective Strip (Zero outer octagon box wrapping inner pills!) */
+.crown-seals-pill,
+.crown-seals-pill.is-unsealed {
+  clip-path: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  filter: none;
+  padding: 2px 4px;
+  gap: 4px;
+}
+.crown-seals-count {
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.96);
+}
+.crown-seal-chip {
+  padding: 4px 10px;
+  font-size: 10.5px;
+  background: rgba(3, 16, 28, 0.68);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(165, 243, 252, 0.26);
+}
+.crown-seal-chip.is-next {
+  background: rgba(8, 36, 56, 0.76);
+  border-color: rgba(246, 196, 83, 0.65);
+}
+
+/* Clean Frosted Glass In-Game Toasts, Flow Meters & Prompts (No spiky clip-path boxes) */
+.trophy-toast {
+  clip-path: none;
+  border-radius: 999px;
+  padding: 9px 20px;
+  background: rgba(4, 18, 32, 0.86);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(246, 196, 83, 0.45);
+  filter: none;
+}
+.trophy-toast-lbl { font-size: 10.5px; }
+.trophy-toast-title { font-size: 14px; }
+
+.core-descent-hud,
+.watershed-flow-hud,
+.puzzle-hud-copy {
+  clip-path: none;
+  border-radius: 12px;
+  background: rgba(3, 16, 28, 0.74);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: none;
+  border: 1px solid rgba(165, 243, 252, 0.22);
+  filter: none;
+}
+.core-hud-title, .wf-title, .puzzle-hud-title { font-size: 11px; }
+.core-hud-locks, .wf-pct, .puzzle-hud-sub { font-size: 11.5px; }
+.core-hud-sub, .wf-sub { font-size: 10px; }
+
+.action-prompt {
+  font-size: 12.5px;
+  padding: 9px 20px;
+  border-radius: 999px;
+  background: rgba(4, 22, 38, 0.82);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(94, 252, 232, 0.55);
+  filter: none;
+}
+.action-prompt::before,
+.action-prompt::after {
+  display: none !important;
+}
+.action-prompt.is-locked {
+  background: rgba(42, 16, 26, 0.84);
+  border-color: rgba(251, 191, 36, 0.58);
+}
+
+.mission-status-pill,
+.critter-sonar-pill {
+  clip-path: none;
+  border-radius: 999px;
+  background: rgba(4, 20, 36, 0.78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: none;
+  border: 1px solid rgba(94, 252, 232, 0.36);
+  font-size: 11px;
+  filter: none;
+}
+
+/* Portrait Mobile Refinements for Sleek Cutscenes & Menus */
+@media (max-width: 600px) and (orientation: portrait) {
+  .overlay:not(#overlay-title):not(#overlay-wardrobe):not(#overlay-cutscene) {
+    padding: calc(14px + var(--safe-top)) calc(14px + var(--safe-right)) calc(14px + var(--safe-bottom)) calc(14px + var(--safe-left));
+  }
+
+  .cinema-bar-top {
+    padding: calc(12px + var(--safe-top)) calc(16px + var(--safe-right)) 12px calc(16px + var(--safe-left));
+  }
+
+  .cinema-keyframe-card {
+    width: 94vw;
+    max-height: 40dvh;
+    border-radius: 12px;
+  }
+
+  .cinema-keyframe-img {
+    border-radius: 12px;
+    max-height: 34dvh;
+  }
+
+  .cinema-bar-bottom {
+    padding: 18px calc(16px + var(--safe-right)) calc(18px + var(--safe-bottom)) calc(16px + var(--safe-left));
+  }
+
+  .cinema-comms-card {
+    gap: 12px;
+    padding: 4px 0 4px 12px;
+    align-items: flex-start;
+  }
+
+  .cinema-portrait {
+    width: 58px;
+    height: 58px;
+  }
+
+  .cinema-dialogue-text {
+    font-size: 16.5px;
+    line-height: 1.48;
+  }
+
+  .mode-hub-art {
+    width: 68px;
+    min-height: 76px;
+  }
+
+  .mode-hub-title { font-size: 15.5px; }
+  .mode-hub-desc { font-size: 13px; }
+  .mg-title { font-size: 15.5px; }
+  .mg-desc { font-size: 13px; }
+  .spyglass-plaque { padding: 8px 0 8px 12px; }
+  .sub-tabs-5 .sub-tab-btn { font-size: 11.5px; padding: 7px 10px; }
+}
+
+@media (orientation: landscape) and (max-height: 560px) {
+  .cinema-keyframe-card {
+    width: min(46vw, 380px);
+    max-height: 44dvh;
+  }
+
+  .cinema-keyframe-img {
+    max-height: 38dvh;
+  }
+
+  .cinema-dialogue-text {
+    font-size: 15px;
+    line-height: 1.38;
+  }
+
+  .cinema-portrait {
+    width: 52px;
+    height: 52px;
+  }
+}

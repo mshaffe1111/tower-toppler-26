@@ -1488,21 +1488,20 @@ export function renderWatershedWorldMap(container, opts = {}) {
 
       return `
         <g class="watershed-biome-band" data-act="${b.actIdx}">
-          <rect x="6" y="${b.yTop}" width="408" height="${h}" fill="${landCol}"/>
+          <rect x="0" y="${b.yTop}" width="420" height="${h}" fill="${landCol}" fill-opacity="${fmt(0.32 + pct * 0.28)}"/>
           <!-- Winding Watershed River / Lagoon Channel Across Band -->
-          <path d="M 6 ${b.yTop + h * 0.58} Q 110 ${b.yTop + h * 0.28} 210 ${b.yTop + h * 0.54} T 414 ${b.yTop + h * 0.44}"
-                fill="none" stroke="${waterCol}" stroke-width="${12 + pct * 10}" stroke-linecap="round" opacity="0.72"/>
+          <path d="M 0 ${b.yTop + h * 0.58} Q 110 ${b.yTop + h * 0.28} 210 ${b.yTop + h * 0.54} T 420 ${b.yTop + h * 0.44}"
+                fill="none" stroke="${waterCol}" stroke-width="${12 + pct * 10}" stroke-linecap="round" opacity="${fmt(0.54 + pct * 0.32)}"/>
           ${
             pct > 0.05
-              ? `<path class="watershed-live-current" d="M 10 ${b.yTop + h * 0.58} Q 110 ${b.yTop + h * 0.28} 210 ${b.yTop + h * 0.54} T 410 ${b.yTop + h * 0.44}"
+              ? `<path class="watershed-live-current" d="M 4 ${b.yTop + h * 0.58} Q 110 ${b.yTop + h * 0.28} 210 ${b.yTop + h * 0.54} T 416 ${b.yTop + h * 0.44}"
                        fill="none" stroke="#e0f2fe" stroke-width="2" stroke-dasharray="10 8" opacity="${bloomOpacity}"/>`
-              : `<path d="M 38 ${b.yTop + 20} L 54 ${b.yTop + 34} L 46 ${b.yTop + 48} M 348 ${b.yTop + 24} L 364 ${b.yTop + 38}"
-                       fill="none" stroke="#292524" stroke-width="1.3" opacity="${cracksOpacity}"/>`
+              : `<path d="M 38 ${b.yTop + 24} L 54 ${b.yTop + 38} L 46 ${b.yTop + 52} M 348 ${b.yTop + 26} L 364 ${b.yTop + 40}"
+                       fill="none" stroke="#1c1917" stroke-width="1.3" opacity="${cracksOpacity}"/>`
           }
-          <line x1="6" y1="${b.yTop}" x2="414" y2="${b.yTop}" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
-          <text x="18" y="${b.yTop + 16}" font-family="'Cinzel', 'Orbitron', sans-serif" font-size="7.6" font-weight="800" letter-spacing="1.4" fill="#f8fafc" opacity="0.92">${b.code}</text>
-          <rect x="322" y="${b.yTop + 6}" width="82" height="14" rx="7" fill="rgba(4,16,28,0.72)" stroke="${badgeCol}" stroke-width="0.9"/>
-          <text x="363" y="${b.yTop + 15.5}" text-anchor="middle" font-family="'Outfit', 'Rajdhani', sans-serif" font-size="7.6" font-weight="800" letter-spacing="0.7" fill="${badgeCol}">${statusTxt}</text>
+          <line x1="0" y1="${b.yTop}" x2="420" y2="${b.yTop}" stroke="rgba(165,243,252,0.16)" stroke-width="1"/>
+          <text x="12" y="${b.yTop + 18}" font-family="'Cinzel', 'Orbitron', sans-serif" font-size="9.6" font-weight="800" letter-spacing="1.1" fill="#f8fafc" opacity="0.96">${b.code}</text>
+          <text x="408" y="${b.yTop + 18}" text-anchor="end" font-family="'Outfit', 'Rajdhani', sans-serif" font-size="9.2" font-weight="800" letter-spacing="0.8" fill="${badgeCol}">${statusTxt}</text>
         </g>
       `;
     }).join('');
@@ -1518,15 +1517,15 @@ export function renderWatershedWorldMap(container, opts = {}) {
         const my = isVerticalHop ? nd.y - 34 : (nd.y + nx.y) * 0.5 - 4;
         const ctrlX = isVerticalHop ? (nd.x > 200 ? 378 : 26) : mx;
         const ctrlY = isVerticalHop ? (nd.y + nx.y) * 0.5 : my;
-        const strokeCol = routeActive ? '#5efce8' : 'rgba(214,211,209,0.34)';
+        const strokeCol = routeActive ? '#5efce8' : 'rgba(203,227,255,0.34)';
         return `
           <g class="sea-route-group ${routeActive ? 'unlocked' : 'locked'}">
             <path d="M ${nd.x} ${nd.y} Q ${fmt(ctrlX)} ${fmt(ctrlY)} ${nx.x} ${nx.y}" fill="none" stroke="${strokeCol}" stroke-width="${routeActive ? '2.8' : '1.6'}" stroke-dasharray="${routeActive ? 'none' : '5 5'}" stroke-linecap="round"/>
             ${
               nd.routeNext
                 ? `<g class="sea-route-pill ${routeActive ? 'unlocked' : 'locked'}" data-route-idx="${idx}" transform="translate(${fmt(mx)}, ${fmt(my)})" style="cursor:pointer;">
-                    <rect x="-24" y="-8" width="48" height="16" rx="8" fill="#062236" stroke="${strokeCol}" stroke-width="1.1"/>
-                    <text x="0" y="3" text-anchor="middle" font-family="'Outfit', sans-serif" font-size="7.4" font-weight="800" letter-spacing="0.8" fill="${routeActive ? '#ccfbf1' : '#94a3b8'}">${nd.routeLbl}</text>
+                    <rect x="-27" y="-9.5" width="54" height="19" rx="9.5" fill="rgba(4,18,32,0.82)" stroke="${strokeCol}" stroke-width="1"/>
+                    <text x="0" y="3.4" text-anchor="middle" font-family="'Outfit', sans-serif" font-size="9" font-weight="800" letter-spacing="0.8" fill="${routeActive ? '#ccfbf1' : '#cbd5e1'}">${nd.routeLbl}</text>
                   </g>`
                 : ''
             }
@@ -1547,8 +1546,8 @@ export function renderWatershedWorldMap(container, opts = {}) {
 
         const starPips = [stars.clear, stars.vault, stars.speed]
           .map((on, sIdx) => {
-            const sx = (sIdx - 1) * 9.5;
-            const p = buildStarBurstPath(sx, 23, 3.8, 1.6, 5, 0);
+            const sx = (sIdx - 1) * 10.5;
+            const p = buildStarBurstPath(sx, 25, 4.2, 1.8, 5, 0);
             return `<path d="${p}" fill="${on ? '#fde047' : '#082032'}" stroke="${on ? '#ffffff' : '#64748b'}" stroke-width="0.7"/>`;
           })
           .join('');
@@ -1565,22 +1564,22 @@ export function renderWatershedWorldMap(container, opts = {}) {
           <g class="sea-spire-node ${isSelected ? 'selected active' : ''} ${stars.clear ? 'cleared' : ''} ${unlocked ? 'unlocked' : 'locked'}"
              data-tower-idx="${idx}" transform="translate(${nd.x}, ${nd.y})" role="button" tabindex="0"
              aria-label="Spire ${idx + 1}: ${escapeHtml(t.name)}" style="cursor:pointer;">
-            <ellipse cx="0" cy="9" rx="24" ry="8.5" fill="${stars.clear ? '#0d9488' : '#1c2b3a'}" stroke="${unlocked ? band.accent : '#57534e'}" stroke-width="1.1"/>
+            <ellipse cx="0" cy="9" rx="25" ry="9" fill="${stars.clear ? '#0d9488' : '#122638'}" stroke="${unlocked ? band.accent : '#64748b'}" stroke-width="1.2"/>
             ${
               isSelected
-                ? `<circle class="spire-beacon-ring" cx="0" cy="-2" r="28" fill="rgba(94,252,232,0.16)" stroke="#5efce8" stroke-width="1.8" stroke-dasharray="7 4"/>`
+                ? `<circle class="spire-beacon-ring" cx="0" cy="-2" r="29" fill="rgba(94,252,232,0.16)" stroke="#5efce8" stroke-width="1.8" stroke-dasharray="7 4"/>`
                 : ''
             }
             <polygon points="-11,9 -7,-19 0,-26 7,-19 11,9" fill="${spireCol}" stroke="#ffffff" stroke-width="${isSelected ? '1.5' : '0.9'}"/>
             <line x1="0" y1="-20" x2="0" y2="6" stroke="${stars.clear ? '#fef08a' : '#bae6fd'}" stroke-width="1.8"/>
-            <rect x="-14" y="3" width="28" height="12" rx="4" fill="${isSelected ? '#fde047' : '#062032'}" stroke="${unlocked ? '#ffffff' : '#64748b'}" stroke-width="1"/>
-            <text x="0" y="11.8" text-anchor="middle" font-family="'Outfit', sans-serif" font-size="8.4" font-weight="900" fill="${isSelected ? '#041828' : '#ffffff'}">S${idx + 1}</text>
+            <rect x="-16" y="2.5" width="32" height="14" rx="7" fill="${isSelected ? '#fde047' : '#062032'}" stroke="${unlocked ? '#ffffff' : '#64748b'}" stroke-width="1"/>
+            <text x="0" y="12.5" text-anchor="middle" font-family="'Outfit', sans-serif" font-size="9.6" font-weight="900" fill="${isSelected ? '#041828' : '#ffffff'}">S${idx + 1}</text>
             ${unlocked ? starPips : ''}
             ${
               cutKey
-                ? `<g class="sea-cutscene-badge ${cutReady ? 'unlocked' : 'locked'}" data-cutscene-key="${cutKey}" data-cutscene-idx="${idx}" data-cutscene-ready="${cutReady ? '1' : '0'}" aria-disabled="${cutReady ? 'false' : 'true'}" style="cursor:${cutReady ? 'pointer' : 'default'};" transform="translate(0, -35)">
-                    <rect x="-31" y="-7.5" width="62" height="15" rx="7.5" fill="${cutReady ? '#0c3b59' : '#1e293b'}" stroke="${cutReady ? '#fde047' : '#475569'}" stroke-width="1"/>
-                    <text x="0" y="2.8" text-anchor="middle" font-family="'Outfit', sans-serif" font-size="6.8" font-weight="800" fill="${cutReady ? '#fef08a' : '#94a3b8'}">${cutReady ? '▶' : '🔒'} ${idx === totalSpires - 1 && stars.clear ? 'EPILOGUE' : band.cutLabel}</text>
+                ? `<g class="sea-cutscene-badge ${cutReady ? 'unlocked' : 'locked'}" data-cutscene-key="${cutKey}" data-cutscene-idx="${idx}" data-cutscene-ready="${cutReady ? '1' : '0'}" aria-disabled="${cutReady ? 'false' : 'true'}" style="cursor:${cutReady ? 'pointer' : 'default'};" transform="translate(0, -36)">
+                    <rect x="-38" y="-9" width="76" height="18" rx="9" fill="${cutReady ? 'rgba(12,59,89,0.92)' : 'rgba(15,28,44,0.78)'}" stroke="${cutReady ? '#fde047' : 'rgba(148,163,184,0.38)'}" stroke-width="1"/>
+                    <text x="0" y="3.2" text-anchor="middle" font-family="'Outfit', sans-serif" font-size="8.4" font-weight="800" fill="${cutReady ? '#fef08a' : '#cbd5e1'}">${cutReady ? '▶' : '🔒'} ${idx === totalSpires - 1 && stars.clear ? 'EPILOGUE' : band.cutLabel}</text>
                   </g>`
                 : ''
             }
@@ -1612,7 +1611,7 @@ export function renderWatershedWorldMap(container, opts = {}) {
     ]
       .map(
         (st) => `
-        <span class="spyglass-star-chip ${st.on ? 'on' : 'off'}" style="display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:800;color:${st.on ? '#fde047' : '#94a3b8'};">
+        <span class="spyglass-star-chip ${st.on ? 'on' : 'off'}" style="display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:800;color:${st.on ? '#fde047' : '#cbd5e1'};">
           <span>${st.on ? '★' : '☆'}</span><span>${st.lbl}</span>
         </span>`
       )
@@ -1635,7 +1634,7 @@ export function renderWatershedWorldMap(container, opts = {}) {
           <svg class="sea-chart-svg" viewBox="0 0 420 592" xmlns="http://www.w3.org/2000/svg" role="region" aria-label="Earth Living Watershed Restoration Map">
             <defs>
               <clipPath id="${uid}-clip">
-                <rect x="6" y="6" width="408" height="580" rx="10"/>
+                <rect x="0" y="6" width="420" height="580" rx="12"/>
               </clipPath>
             </defs>
             <g clip-path="url(#${uid}-clip)">
@@ -1643,7 +1642,6 @@ export function renderWatershedWorldMap(container, opts = {}) {
               ${routesSvg}
               ${nodesSvg}
             </g>
-            <rect x="6" y="6" width="408" height="580" rx="10" fill="none" stroke="#eab308" stroke-width="1.8" opacity="0.82"/>
           </svg>
         </div>
 
@@ -1665,8 +1663,8 @@ export function renderWatershedWorldMap(container, opts = {}) {
           <p class="spyglass-desc">${escapeHtml(briefCopy)}</p>
 
           <div class="spyglass-meta-row" style="justify-content:space-between;">
-            <div class="spyglass-stars" style="display:inline-flex;align-items:center;gap:9px;">${starChipsHtml}</div>
-            <span class="spyglass-relic ${selLog ? 'found' : 'missing'}" style="font-size:10.5px;font-weight:800;color:${selLog ? '#5efce8' : '#94a3b8'};">
+            <div class="spyglass-stars" style="display:inline-flex;align-items:center;gap:12px;">${starChipsHtml}</div>
+            <span class="spyglass-relic ${selLog ? 'found' : 'missing'}" style="font-size:13px;font-weight:800;color:${selLog ? '#5efce8' : '#cbd5e1'};">
               ${selLog ? '◆ FIELD LOG RECOVERED' : '◇ FIELD LOG HIDDEN'}
             </span>
           </div>
