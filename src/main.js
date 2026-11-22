@@ -2294,25 +2294,21 @@ function updateSelectedTowerRibbon() {
 
 // ================= CUTSCENE & PURIFICATION THEATER ENGINE =================
 const CUTSCENE_STORAGE_KEY = 'towering_waters_cutscenes_v1';
-const seenCutscenesMem = new Set();
 try {
+  // One-time migration from legacy cutscene key into canonical progression store, then drop legacy key so Reset Save replays cutscenes cleanly!
   const rawSeen = localStorage.getItem(CUTSCENE_STORAGE_KEY);
-  if (rawSeen) JSON.parse(rawSeen).forEach((k) => seenCutscenesMem.add(k));
+  if (rawSeen) {
+    JSON.parse(rawSeen).forEach((k) => progression.markCutsceneSeen?.(k));
+    localStorage.removeItem(CUTSCENE_STORAGE_KEY);
+  }
 } catch (_) {}
 
 function hasSeenCutscene(kind) {
-  if (typeof progression.hasSeenCutscene === 'function' && progression.hasSeenCutscene(kind)) {
-    return true;
-  }
-  return seenCutscenesMem.has(kind);
+  return Boolean(typeof progression.hasSeenCutscene === 'function' && progression.hasSeenCutscene(kind));
 }
 
 function markCutsceneSeen(kind) {
-  seenCutscenesMem.add(kind);
   progression.markCutsceneSeen?.(kind);
-  try {
-    localStorage.setItem(CUTSCENE_STORAGE_KEY, JSON.stringify([...seenCutscenesMem]));
-  } catch (_) {}
 }
 
 const cutsceneState = {

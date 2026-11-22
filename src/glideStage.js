@@ -544,7 +544,7 @@ export class GlideStage {
     }
     const arriveSub = this.standalone
       ? 'DESTINATION REACHED'
-      : `ACT ${Math.min(5, this.worldIndex + 1)} LANDFALL`;
+      : `ACT ${Math.min(5, this.worldIndex + 2)} LANDFALL`;
     fx.banner?.(arriveSub, `ARRIVING: ${this.nextWorldName}`);
   }
 

@@ -2995,12 +2995,12 @@ export class InputController {
     const vw = typeof window !== 'undefined' && window.innerWidth ? window.innerWidth : 412;
     const inCenterDoorTap =
       this._canInteract && this._isInCenterInteractZone(x, y);
-    // Repaired 'tilt' mode (#603): touching & holding right zone (x >= 0.56w, outside center door interact) gives TRUE HOLDABLE VARIABLE JUMP,
-    // leaving [0.36..0.56] cleanly free for slash-whip & center interact without forcing a jump first!
+    // Repaired 'tilt' mode (#603/#681): far-right zone (x >= 0.62w, outside center interact) gives instant holdable variable Jump,
+    // leaving [0.36..0.62] generously jump-free for sideways slash-whips & center door interacts!
     const rightHalfJump =
       entryType === 'tiltTouch' &&
       this._activeGameMode() === 'tower' &&
-      x >= vw * 0.56 &&
+      x >= vw * 0.62 &&
       !inCenterDoorTap;
     return {
       type: entryType,
@@ -3587,17 +3587,8 @@ export class InputController {
       // Never intercept modal overlays or puzzle HUD widgets
       if (target.closest('.overlay:not(.hidden), #puzzle-hud')) return;
 
-      // Tappable #action-prompt badge: trigger frame-1 interact AND let main.js listener run cleanly
+      // Tappable #action-prompt badge: main.js listener is single source of truth (zero double-fire!)
       if (target.closest('#action-prompt')) {
-        if (this._canInteract) {
-          this.triggerInteract(
-            this._interactKind === 'whip'
-              ? 'whip'
-              : this._interactKind === 'fire'
-              ? 'fire'
-              : 'up'
-          );
-        }
         return;
       }
 

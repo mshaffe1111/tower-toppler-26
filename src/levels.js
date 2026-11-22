@@ -331,8 +331,8 @@ export const DAILY_TIDE_MODIFIERS = [
   {
     id: 'golden_eddy',
     name: 'Gilded Tide Eddy',
-    badge: '2X HYDRO-GEARS',
-    description: 'Harmonic currents wash double golden Hydro-Gears onto spire terraces.',
+    badge: '2X WATER PEARLS',
+    description: 'Harmonic currents wash double shimmering Water Pearls onto spire terraces.',
     mechanicsPatch: { doubleGears: true }
   },
   {
@@ -633,10 +633,8 @@ function enemyVertEnvelope(en) {
 function sanitizeEnemySpawns(enemies, doors, elevators, spawn, ledges, totalFloors) {
   const anchors = [{ col: wrapCol(spawn.col) + 0.5, floor: spawn.floor }];
   for (const d of doors) {
-    // Allow Act Bosses (`siphon_warden`) to orbit near the upper tiers while keeping spawn & mid doors safe
-    if (!d.isExit) {
-      anchors.push({ col: wrapCol(d.col) + 0.5, floor: d.floor });
-    }
+    // Include exit doors in non-boss anchor protection (`siphon_warden` returns early below) so normal enemies never camp Crown Shrines!
+    anchors.push({ col: wrapCol(d.col) + 0.5, floor: d.floor });
   }
   for (const el of elevators) {
     const ec = wrapCol(el.col) + 0.5;
@@ -2420,8 +2418,8 @@ export function createCampaignTowers() {
     enemies: [
       { type: 'rail_skater', col: 12.5, floor: 5, dir: 1, speed: 1.9, axis: 'h' },
       { type: 'snap_crab', col: 17.0, floor: 11, dir: -1, speed: 1.85 },
-      { type: 'vent_stalker', col: 1.5, floor: 18.2, dir: 1, speed: 2.0, axis: 'v', minFloor: 17.0, maxFloor: 19.4 },
-      { type: 'barnacle_mortar', col: 9.5, floor: 19, dir: -1, firePeriod: 3.0 },
+      { type: 'vent_stalker', col: 5.5, floor: 18.2, dir: 1, speed: 2.0, axis: 'v', minFloor: 17.0, maxFloor: 19.4 },
+      { type: 'barnacle_mortar', col: 4.5, floor: 17, dir: -1, firePeriod: 3.0 },
       { type: 'siphon_warden', col: 15.5, floor: 22.3, dir: 1, speed: 2.2, hp: 3, maxHp: 3, act: 4, isLockKeeper: true, bossTitle: 'CORAL SIPHON WARDEN', sealId: 'seal_3' }
     ]
   });
@@ -3424,7 +3422,7 @@ export function generateProceduralTower({
       ? `SANCTUM TRIAL ${depth} • ${missionType.replace('_', ' ').toUpperCase()}`
       : isExpedition
       ? `WATERSHED EXPEDITION • SPIRE ${depth}`
-      : `WATERSHED SECTOR ${depth}`);
+      : `WATERSHED SPIRE ${depth}`);
   const key = keyOverride || `${modeHint}_${depth}_${cleanSeed}`;
 
   const useRuneSecret = isSanctum ? true : rng() < 0.6;
@@ -5024,7 +5022,7 @@ export function createSanctumTowers(count = 15) {
         { id: 'st3_curio', col: 1, floor: 7, type: 'curio', curioId: 'curio_nautilus' },
         { id: 'st3_seed', col: 12, floor: 11, type: 'starCore' }
       ],
-      casualMission: { type: 'puzzle_architect', title: 'FLOODGATE BASIN', subtitle: 'Open Spring Floodgate • Swim or Grapple Basin • Solve Bells Sanctum', targetCount: 1, requiresRune: true }
+      casualMission: { type: 'puzzle_architect', title: 'FLOODGATE BASIN', subtitle: 'Open Spring Floodgate • Grapple the Basin • Solve Bells Sanctum', targetCount: 1, requiresRune: true }
     });
   }
 

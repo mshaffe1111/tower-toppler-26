@@ -1597,9 +1597,11 @@ export class ToweringWatersGame {
     };
     const actNum = e.act ?? this.tower?.act ?? Math.ceil((this.tower?.id || 1) / 2);
     const actSig = e.type === 'siphon_warden' ? this._resolveActSignature(actNum) : null;
+    const rawWardenSpd = Number(e.speed ?? 1.40);
+    const scaledWardenSpd = rawWardenSpd > 1.60 ? rawWardenSpd * 0.68 : rawWardenSpd;
     const baseSpd =
       e.type === 'siphon_warden'
-        ? Math.max(1.25, Math.min(1.55, Number(e.speed ?? 2.0) * 0.68))
+        ? Math.max(1.25, Math.min(1.55, scaledWardenSpd))
         : defaultSpeedByType[e.type] ?? 0.62;
 
     return {
@@ -2503,10 +2505,13 @@ export class ToweringWatersGame {
       this.watershedFlow.grottosFound = (this.watershedFlow.grottosFound || 0) + 1;
     }
     if (o.critter) {
+      const cObj = typeof o.critter === 'string' ? { species: o.critter } : o.critter;
+      const sp = String(cObj.species || 'otter').toLowerCase();
+      const defaultName = sp === 'turtle' ? 'Sea Turtle' : sp === 'otter' ? 'River Otter' : sp;
       const entry = {
-        species: String(o.critter.species || 'otter'),
-        color: String(o.critter.color || '#5efce8'),
-        name: String(o.critter.name || o.critter.species || 'Water Critter'),
+        species: sp,
+        color: String(cObj.color || '#5efce8'),
+        name: String(cObj.name || defaultName || 'Water Critter'),
       };
       this.watershedFlow.rescuedThisStage.push(entry);
       this.rescuedCritterEscorts.push(entry);
@@ -3287,6 +3292,7 @@ export class ToweringWatersGame {
 
       if (b.type === 'laserGate' && p.invuln <= 0) {
         this._applyHazardHit(b.col + 0.5);
+        if (this.gateway !== p || this.mode !== 'tower') return true;
       }
 
       // Stage 1: Eject cleanly to nearest unblocked immediate side (strictly outside 0.52 horizontal collider)
@@ -4912,6 +4918,7 @@ export class ToweringWatersGame {
         p.vx = 0;
         if (blockingBarrier.type === 'laserGate' && p.invuln <= 0) {
           this._applyHazardHit(blockingBarrier.col + 0.5);
+          if (this.gateway !== p || this.mode !== 'tower') return;
         } else if (blockingBarrier.type === 'box' && p.onGround && !p.onElevator && !p.isSwimming) {
           const pushDir = Math.sign(colDist(p.col, blockingBarrier.col + 0.5)) || p.facing;
           if (Math.abs(moveIntent) > 0.12 && Math.sign(moveIntent) === pushDir) {
@@ -5792,6 +5799,7 @@ export class ToweringWatersGame {
 
     // Guaranteed Anti-Wedging & Horizontal Depenetration Solver (ZERO stuck-between-walls frames!)
     this._resolveWallDepenetration(p);
+    if (this.gateway !== p || this.mode !== 'tower') return;
 
     // Altitude & Flood-Rush meter tracking
     const curWholeFloor = Math.floor(p.floor + 0.01);

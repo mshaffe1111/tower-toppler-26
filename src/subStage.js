@@ -776,7 +776,7 @@ export class SubStage {
     const mult = this._comboHit();
     const pts = CAGE_RESCUE_POINTS * mult;
     this._score(fx, pts);
-    this._addFlow(fx, 18, { reason: 'CRITTER RESCUE', combo: true, critter: cg.animal });
+    this._addFlow(fx, 18, { reason: 'CRITTER RESCUE', combo: true });
     fx.onCritterRescued?.({ species: cg.animal, x: cg.x, y: cg.y });
 
     // Joyous freed companion joins Gateway's active reef escort formation!

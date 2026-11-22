@@ -558,7 +558,7 @@ export const SKILL_TREE = [
     maxRank: 3,
     costs: [25, 55, 90],
     perRankPct: [1.5, 3.0, 4.5],
-    shortDesc: 'Collecting Hydro-Gears, Seeds & Critters adds +1.5s / +3.0s / +4.5s to the Siphon Clock.',
+    shortDesc: 'Collecting Water Pearls, Seeds & Critters adds +1.5s / +3.0s / +4.5s to the Siphon Clock.',
     description: 'Siphons stolen kinetic energy back from water pickups to stall Syndicate drainage timers.'
   },
   {
